@@ -705,6 +705,9 @@ export class GatewayManager extends EventEmitter {
     await unloadLaunchctlGatewayService();
     this.processExitCode = null;
 
+    // Per-process dedup map for stderr lines — resets on each new spawn.
+    const stderrDedup = new Map<string, number>();
+
     const { child, lastSpawnSummary } = await launchGatewayProcess({
       port: this.status.port,
       launchContext,
@@ -715,6 +718,18 @@ export class GatewayManager extends EventEmitter {
         recordGatewayStartupStderrLine(this.recentStartupStderrLines, line);
         const classified = classifyGatewayStderrMessage(line);
         if (classified.level === 'drop') return;
+
+        // Dedup: suppress identical stderr lines after the first occurrence.
+        const count = (stderrDedup.get(classified.normalized) ?? 0) + 1;
+        stderrDedup.set(classified.normalized, count);
+        if (count > 1) {
+          // Log a summary every 50 duplicates to stay visible without flooding.
+          if (count % 50 === 0) {
+            logger.debug(`[Gateway stderr] (suppressed ${count} repeats) ${classified.normalized}`);
+          }
+          return;
+        }
+
         if (classified.level === 'debug') {
           logger.debug(`[Gateway stderr] ${classified.normalized}`);
           return;
@@ -772,14 +787,7 @@ export class GatewayManager extends EventEmitter {
           port,
           connectedAt: Date.now(),
         });
-        // On Windows, skip WebSocket heartbeat ping to avoid cascading failures:
-        // heartbeat timeout → terminate socket → reconnect → port conflict
-        // (old process holds port due to TCP TIME_WAIT) → ~2 min downtime.
-        // Gateway is a local child process; actual crashes are caught by the
-        // process exit handler, and graceful restarts use code=1012 close frames.
-        if (process.platform !== 'win32') {
-          this.startPing();
-        }
+        this.startPing();
       },
       onMessage: (message) => {
         this.handleMessage(message);
@@ -884,6 +892,14 @@ export class GatewayManager extends EventEmitter {
           ws.terminate();
         } catch (error) {
           logger.warn('Failed to terminate stale Gateway socket after heartbeat timeout:', error);
+        }
+
+        // On Windows, onCloseAfterHandshake intentionally skips scheduleReconnect()
+        // to avoid double-reconnect races with the process exit handler.  However,
+        // a heartbeat timeout means the socket is stale while the process may still
+        // be alive (no exit event), so we must explicitly trigger reconnect here.
+        if (process.platform === 'win32') {
+          this.scheduleReconnect();
         }
       },
     });
