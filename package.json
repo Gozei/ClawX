@@ -1,6 +1,6 @@
 {
-    "name": "clawx",
-    "version": "0.3.3-beta.0",
+    "name": "Deep AI Work",
+    "version": "0.3.3-deepdata-beta",
     "pnpm": {
         "onlyBuiltDependencies": [
             "@discordjs/opus",
@@ -26,7 +26,7 @@
             ]
         }
     },
-    "description": "ClawX - Graphical AI Assistant based on OpenClaw",
+    "description": "Deep AI Worker - Graphical AI Assistant based on OpenClaw",
     "main": "dist-electron/main/index.js",
     "author": "ClawX Team",
     "license": "MIT",

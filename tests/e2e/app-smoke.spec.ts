@@ -1,10 +1,11 @@
 import { expect, test } from './fixtures/electron';
 
-test.describe('ClawX Electron smoke flows', () => {
+test.describe('Deep AI Worker Electron smoke flows', () => {
   test('shows the setup wizard on a fresh profile', async ({ page }) => {
     await expect(page.getByTestId('setup-page')).toBeVisible();
     await expect(page.getByTestId('setup-welcome-step')).toBeVisible();
     await expect(page.getByTestId('setup-skip-button')).toBeVisible();
+    await expect(page.getByText('Welcome to Deep AI Worker')).toBeVisible();
   });
 
   test('can skip setup and navigate to the models page', async ({ page }) => {
@@ -12,6 +13,7 @@ test.describe('ClawX Electron smoke flows', () => {
     await page.getByTestId('setup-skip-button').click();
 
     await expect(page.getByTestId('main-layout')).toBeVisible();
+    await expect(page.getByText('Deep AI Worker')).toBeVisible();
     await page.getByTestId('sidebar-nav-models').click();
 
     await expect(page.getByTestId('models-page')).toBeVisible();
