@@ -57,7 +57,7 @@ export function createTray(mainWindow: BrowserWindow): Tray {
   tray = new Tray(icon);
   
   // Set tooltip
-  tray.setToolTip('ClawX - AI Assistant');
+  tray.setToolTip('Deep AI Worker - AI Assistant');
   
   const showWindow = () => {
     if (mainWindow.isDestroyed()) return;
@@ -68,7 +68,7 @@ export function createTray(mainWindow: BrowserWindow): Tray {
   // Create context menu
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Show ClawX',
+      label: 'Show Deep AI Worker',
       click: showWindow,
     },
     {
@@ -122,7 +122,7 @@ export function createTray(mainWindow: BrowserWindow): Tray {
       type: 'separator',
     },
     {
-      label: 'Quit ClawX',
+      label: 'Quit Deep AI Worker',
       click: () => {
         app.quit();
       },
@@ -157,7 +157,7 @@ export function createTray(mainWindow: BrowserWindow): Tray {
  */
 export function updateTrayStatus(status: string): void {
   if (tray) {
-    tray.setToolTip(`ClawX - ${status}`);
+    tray.setToolTip(`Deep AI Worker - ${status}`);
   }
 }
 

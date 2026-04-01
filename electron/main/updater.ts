@@ -174,6 +174,13 @@ export class AppUpdater extends EventEmitter {
    * final status so the UI never gets stuck in 'checking'.
    */
   async checkForUpdates(): Promise<UpdateInfo | null> {
+    // Temporary local override: this fork does not have a configured upstream
+    // update feed yet, so we short-circuit the check and report "up to date"
+    // to the renderer without making any network requests.
+    this.updateStatus({ status: 'not-available', info: undefined, progress: undefined, error: undefined });
+    return null;
+
+    /*
     try {
       const result = await autoUpdater.checkForUpdates();
 
@@ -199,6 +206,7 @@ export class AppUpdater extends EventEmitter {
       this.updateStatus({ status: 'error', error: (error as Error).message || String(error) });
       throw error;
     }
+    */
   }
 
   /**

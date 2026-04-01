@@ -84,12 +84,22 @@ async function setupTarget(id) {
 
 const downloadAll = argv.all;
 const platform = argv.platform;
+const targetId = argv.target;
 
 if (downloadAll) {
   echo(chalk.cyan`🌐 Downloading Node.js binaries for all Windows targets...`);
   for (const id of Object.keys(TARGETS)) {
     await setupTarget(id);
   }
+} else if (targetId) {
+  if (!TARGETS[targetId]) {
+    echo(chalk.red`❌ Unknown target: ${targetId}`);
+    echo(`Supported targets: ${Object.keys(TARGETS).join(', ')}`);
+    process.exit(1);
+  }
+
+  echo(chalk.cyan`🎯 Downloading Node.js binary for target: ${targetId}`);
+  await setupTarget(targetId);
 } else if (platform) {
   const targets = PLATFORM_GROUPS[platform];
   if (!targets) {

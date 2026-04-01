@@ -6,6 +6,8 @@ const ROOT_DIR = path.resolve(__dirname, '..');
 const UV_VERSION = '0.10.0';
 const BASE_URL = `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}`;
 const OUTPUT_BASE = path.join(ROOT_DIR, 'resources', 'bin');
+const DOWNLOAD_ATTEMPTS = 3;
+const DOWNLOAD_TIMEOUT_MS = 30_000;
 
 // Mapping Node platforms/archs to uv release naming
 const TARGETS = {
@@ -42,6 +44,40 @@ const PLATFORM_GROUPS = {
   'linux': ['linux-x64', 'linux-arm64']
 };
 
+async function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function downloadWithRetry(downloadUrl) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt += 1) {
+    try {
+      echo`⬇️ Downloading: ${downloadUrl} (attempt ${attempt}/${DOWNLOAD_ATTEMPTS})`;
+      const response = await fetch(downloadUrl, {
+        signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to download: ${response.status} ${response.statusText}`);
+      }
+
+      return await response.arrayBuffer();
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      echo(chalk.yellow`⚠️ Download attempt ${attempt} failed: ${message}`);
+
+      if (attempt < DOWNLOAD_ATTEMPTS) {
+        const backoffMs = attempt * 2_000;
+        echo(chalk.yellow`   Retrying in ${backoffMs / 1000}s...`);
+        await sleep(backoffMs);
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 async function setupTarget(id) {
   const target = TARGETS[id];
   if (!target) {
@@ -64,10 +100,7 @@ async function setupTarget(id) {
 
   try {
     // Download
-    echo`⬇️ Downloading: ${downloadUrl}`;
-    const response = await fetch(downloadUrl);
-    if (!response.ok) throw new Error(`Failed to download: ${response.statusText}`);
-    const buffer = await response.arrayBuffer();
+    const buffer = await downloadWithRetry(downloadUrl);
     await fs.writeFile(archivePath, Buffer.from(buffer));
 
     // Extract
@@ -118,6 +151,7 @@ async function setupTarget(id) {
 // Main logic
 const downloadAll = argv.all;
 const platform = argv.platform;
+const targetId = argv.target;
 
 if (downloadAll) {
   // Download for all platforms
@@ -125,6 +159,15 @@ if (downloadAll) {
   for (const id of Object.keys(TARGETS)) {
     await setupTarget(id);
   }
+} else if (targetId) {
+  if (!TARGETS[targetId]) {
+    echo(chalk.red`❌ Unknown target: ${targetId}`);
+    echo(`Supported targets: ${Object.keys(TARGETS).join(', ')}`);
+    process.exit(1);
+  }
+
+  echo(chalk.cyan`🎯 Downloading uv binary for target: ${targetId}`);
+  await setupTarget(targetId);
 } else if (platform) {
   // Download for a specific platform (e.g., --platform=mac)
   const targets = PLATFORM_GROUPS[platform];

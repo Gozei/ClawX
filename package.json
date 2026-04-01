@@ -1,5 +1,5 @@
 {
-    "name": "Deep AI Work",
+    "name": "deep-ai-work",
     "version": "0.3.3-deepdata-beta",
     "pnpm": {
         "onlyBuiltDependencies": [
@@ -50,15 +50,19 @@
         "uv:download": "zx scripts/download-bundled-uv.mjs",
         "uv:download:mac": "zx scripts/download-bundled-uv.mjs --platform=mac",
         "uv:download:win": "zx scripts/download-bundled-uv.mjs --platform=win",
+        "uv:download:win:x64": "zx scripts/download-bundled-uv.mjs --target=win32-x64",
         "uv:download:linux": "zx scripts/download-bundled-uv.mjs --platform=linux",
         "uv:download:all": "zx scripts/download-bundled-uv.mjs --all",
         "node:download:win": "zx scripts/download-bundled-node.mjs --platform=win",
+        "node:download:win:x64": "zx scripts/download-bundled-node.mjs --target=win32-x64",
         "prep:win-binaries": "pnpm run uv:download:win && pnpm run node:download:win",
+        "prep:win-binaries:x64": "pnpm run uv:download:win:x64 && pnpm run node:download:win:x64",
         "icons": "zx scripts/generate-icons.mjs",
         "package": "vite build && zx scripts/bundle-openclaw.mjs && zx scripts/bundle-openclaw-plugins.mjs && zx scripts/bundle-preinstalled-skills.mjs",
         "package:mac": "pnpm run package && electron-builder --mac --publish never",
         "package:mac:local": "SKIP_PREINSTALLED_SKILLS=1 pnpm run package && electron-builder --mac --publish never",
         "package:win": "pnpm run prep:win-binaries && pnpm run package && electron-builder --win --publish never",
+        "package:win:x64": "pnpm run prep:win-binaries:x64 && pnpm run package && electron-builder --win --x64 --publish never",
         "package:linux": "pnpm run package && electron-builder --linux --publish never",
         "release": "pnpm run uv:download && pnpm run package && electron-builder --publish always",
         "version:patch": "pnpm version patch",
