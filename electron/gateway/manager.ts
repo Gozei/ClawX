@@ -235,8 +235,13 @@ export class GatewayManager extends EventEmitter {
         assertLifecycle: (phase) => {
           this.lifecycleController.assert(startEpoch, phase);
         },
-        findExistingGateway: async (port, ownedPid) => {
-          return await findExistingGatewayProcess({ port, ownedPid });
+        findExistingGateway: async (port) => {
+          // Always read the current process pid dynamically so that retries
+          // don't treat a just-spawned gateway as an orphan.  The ownedPid
+          // snapshot captured at start() entry is stale after startProcess()
+          // replaces this.process — leading to the just-started pid being
+          // immediately killed as a false orphan on the next retry iteration.
+          return await findExistingGatewayProcess({ port, ownedPid: this.process?.pid });
         },
         connect: async (port, externalToken) => {
           await this.connect(port, externalToken);
@@ -335,9 +340,14 @@ export class GatewayManager extends EventEmitter {
       }
     }
 
-    // Close WebSocket
+    // Close WebSocket — use terminate() to force-close the TCP connection
+    // immediately without waiting for the WebSocket close handshake.
+    // ws.close() sends a close frame and waits for the server to respond;
+    // if the gateway process is being killed concurrently, the handshake
+    // never completes and the connection stays ESTABLISHED indefinitely,
+    // accumulating leaked connections on every restart cycle.
     if (this.ws) {
-      this.ws.close(1000, 'Gateway stopped by user');
+      try { this.ws.terminate(); } catch { /* ignore */ }
       this.ws = null;
     }
 
@@ -792,7 +802,7 @@ export class GatewayManager extends EventEmitter {
       onMessage: (message) => {
         this.handleMessage(message);
       },
-      onCloseAfterHandshake: () => {
+      onCloseAfterHandshake: (closeCode) => {
         this.connectionMonitor.clear();
         if (this.status.state === 'running') {
           this.setStatus({ state: 'stopped' });
@@ -801,7 +811,11 @@ export class GatewayManager extends EventEmitter {
           // handler (`onExit`) which calls scheduleReconnect().  Triggering
           // reconnect from WS close as well races with the exit handler and can
           // cause double start() attempts or port conflicts during TCP TIME_WAIT.
-          if (process.platform !== 'win32') {
+          //
+          // Exception: code=1012 means the Gateway is performing an in-process
+          // restart (e.g. config reload).  The UtilityProcess stays alive, so
+          // `onExit` will never fire — we MUST reconnect from the WS close path.
+          if (process.platform !== 'win32' || closeCode === 1012) {
             this.scheduleReconnect();
           }
         }
