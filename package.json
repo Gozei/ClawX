@@ -1,5 +1,5 @@
 {
-    "name": "deep-ai-work",
+    "name": "deep-ai-worker",
     "version": "0.3.4-deepdata-beta",
     "pnpm": {
         "onlyBuiltDependencies": [

@@ -1,6 +1,7 @@
 import anthropic from './anthropic.svg';
 import openai from './openai.svg';
 import google from './google.svg';
+import bigmodel from './bigmodel.svg';
 import openrouter from './openrouter.svg';
 import ark from './ark.svg';
 import moonshot from './moonshot.svg';
@@ -14,6 +15,7 @@ export const providerIcons: Record<string, string> = {
     anthropic,
     openai,
     google,
+    bigmodel,
     openrouter,
     ark,
     moonshot,
