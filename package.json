@@ -1,6 +1,6 @@
 {
     "name": "Deep AI Work",
-    "version": "0.3.3-deepdata-beta",
+    "version": "0.3.4-deepdata-beta",
     "pnpm": {
         "onlyBuiltDependencies": [
             "@discordjs/opus",
