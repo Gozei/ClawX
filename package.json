@@ -64,6 +64,7 @@
         "package:win": "pnpm run prep:win-binaries && pnpm run package && electron-builder --win --publish never",
         "package:win:x64": "pnpm run prep:win-binaries:x64 && pnpm run package && electron-builder --win --x64 --publish never",
         "package:linux": "pnpm run package && electron-builder --linux --publish never",
+        "package:linux:deb:x64": "pnpm run package && electron-builder --linux deb --x64 --publish never",
         "release": "pnpm run uv:download && pnpm run package && electron-builder --publish always",
         "version:patch": "pnpm version patch",
         "version:minor": "pnpm version minor",
