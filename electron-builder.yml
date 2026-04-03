@@ -2,7 +2,7 @@ appId: app.clawx.desktop
 productName: Deep AI Worker
 copyright: Copyright © 2026 ClawX
 compression: maximum
-artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+artifactName: Deep-AI-Worker-${version}-${os}-${arch}.${ext}
 
 directories:
   output: release
@@ -51,15 +51,11 @@ asarUnpack:
 npmRebuild: false
 
 # Auto-update configuration
-# Primary: Alibaba Cloud OSS (fast for Chinese users, used for auto-update)
-# Fallback: GitHub Releases (backup, used when OSS is unavailable)
+# Primary: Tencent COS bucket (used for auto-update)
 publish:
   - provider: generic
-    url: https://oss.intelli-spectrum.com/latest
+    url: https://deep-ai-worker-1253696187.cos.ap-guangzhou.myqcloud.com/latest
     useMultipleRangeRequest: false
-  - provider: github
-    owner: ValueCell-ai
-    repo: ClawX
 
 # macOS Configuration
 mac:
