@@ -113,6 +113,10 @@ export function Settings() {
     timedOut?: boolean;
     error?: string;
   } | null>(null);
+  const visibleLanguages = useMemo(
+    () => SUPPORTED_LANGUAGES.filter((lang) => lang.code !== 'ja'),
+    []
+  );
 
   const handleShowLogs = async () => {
     try {
@@ -527,12 +531,17 @@ export function Settings() {
               </div>
               <div className="space-y-3">
                 <Label className="text-[15px] font-medium text-foreground/80">{t('appearance.language')}</Label>
-                <div className="flex flex-wrap gap-2">
-                  {SUPPORTED_LANGUAGES.map((lang) => (
+                <div className="flex flex-wrap gap-3">
+                  {visibleLanguages.map((lang) => (
                     <Button
                       key={lang.code}
                       variant={language === lang.code ? 'secondary' : 'outline'}
-                      className={cn("rounded-full px-5 h-10 border-black/10 dark:border-white/10", language === lang.code ? "bg-black/5 dark:bg-white/10 text-foreground" : "bg-transparent text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5")}
+                      className={cn(
+                        "h-10 min-w-[96px] rounded-full border-black/10 px-6 dark:border-white/10",
+                        language === lang.code
+                          ? "bg-black/5 text-foreground dark:bg-white/10"
+                          : "bg-transparent text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5"
+                      )}
                       onClick={() => setLanguage(lang.code)}
                     >
                       {lang.label}
