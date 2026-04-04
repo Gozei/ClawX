@@ -100,7 +100,10 @@ async function setupTarget(id) {
 
   try {
     // Download
-    const buffer = await downloadWithRetry(downloadUrl);
+    echo`⬇️ Downloading: ${downloadUrl}`;
+    const response = await fetch(downloadUrl);
+    if (!response.ok) throw new Error(`Failed to download: ${response.statusText}`);
+    const buffer = await response.arrayBuffer();
     await fs.writeFile(archivePath, Buffer.from(buffer));
 
     // Extract

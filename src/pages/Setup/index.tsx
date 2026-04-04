@@ -322,12 +322,11 @@ export function Setup() {
 function WelcomeContent() {
   const { t } = useTranslation(['setup', 'settings']);
   const { language, setLanguage } = useSettingsStore();
-  const welcomeLanguages = SUPPORTED_LANGUAGES.filter((lang) => lang.code !== 'ja');
 
   return (
     <div data-testid="setup-welcome-step" className="text-center space-y-4">
       <div className="mb-4 flex justify-center">
-        <img src={clawxIcon} alt="Deep AI Worker" className="h-16 w-16" />
+        <img src={clawxIcon} alt="ClawX" className="h-16 w-16" />
       </div>
       <h2 className="text-xl font-semibold">{t('welcome.title')}</h2>
       <p className="text-muted-foreground">
@@ -335,20 +334,18 @@ function WelcomeContent() {
       </p>
 
       {/* Language Selector */}
-      <div className="flex justify-center py-2">
-        <div className="inline-flex items-center gap-1 rounded-full bg-muted/60 p-1">
-          {welcomeLanguages.map((lang) => (
-            <Button
-              key={lang.code}
-              variant={language === lang.code ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => setLanguage(lang.code)}
-              className="h-8 min-w-20 rounded-full px-4 text-xs"
-            >
-              {lang.label}
-            </Button>
-          ))}
-        </div>
+      <div className="flex justify-center gap-2 py-2">
+        {SUPPORTED_LANGUAGES.map((lang) => (
+          <Button
+            key={lang.code}
+            variant={language === lang.code ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => setLanguage(lang.code)}
+            className="h-7 text-xs"
+          >
+            {lang.label}
+          </Button>
+        ))}
       </div>
 
       <ul className="text-left space-y-2 text-muted-foreground pt-2">
