@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   PROVIDER_TYPES,
   PROVIDER_TYPE_INFO,
+  type ProviderAccount,
+  type ProviderVendorInfo,
   getProviderDocsUrl,
   resolveProviderApiKeyForSave,
   resolveProviderModelForSave,
   shouldShowProviderModelId,
 } from '@/lib/providers';
+import { buildProviderListItems } from '@/lib/provider-accounts';
 import {
   BUILTIN_PROVIDER_TYPES,
   getProviderConfig,
@@ -176,5 +179,90 @@ describe('provider metadata', () => {
     expect(resolveProviderApiKeyForSave('ollama', 'real-key')).toBe('real-key');
     expect(resolveProviderApiKeyForSave('openai', '')).toBeUndefined();
     expect(resolveProviderApiKeyForSave('openai', ' sk-test ')).toBe('sk-test');
+  });
+
+  it('merges duplicate compatible providers into one display item with a friendly name', () => {
+    const accounts: ProviderAccount[] = [
+      {
+        id: 'zai',
+        vendorId: 'custom',
+        label: 'Zai',
+        authMode: 'api_key',
+        baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+        model: 'zai/glm-5',
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-04T00:00:00.000Z',
+        updatedAt: '2026-04-04T00:00:00.000Z',
+      },
+      {
+        id: 'custom-zai',
+        vendorId: 'custom',
+        label: 'Custom-zai',
+        authMode: 'api_key',
+        baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+        enabled: true,
+        isDefault: false,
+        createdAt: '2026-04-04T00:00:00.000Z',
+        updatedAt: '2026-04-04T00:00:00.000Z',
+      },
+      {
+        id: 'custom-customfb',
+        vendorId: 'custom',
+        label: 'Custom-customfb',
+        authMode: 'api_key',
+        baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        enabled: true,
+        isDefault: false,
+        createdAt: '2026-04-04T00:00:00.000Z',
+        updatedAt: '2026-04-04T00:00:00.000Z',
+      },
+    ];
+    const statuses = [
+      {
+        id: 'zai',
+        name: 'Zai',
+        type: 'custom',
+        enabled: true,
+        createdAt: '2026-04-04T00:00:00.000Z',
+        updatedAt: '2026-04-04T00:00:00.000Z',
+        hasKey: true,
+        keyMasked: '****',
+        model: 'zai/glm-5',
+      },
+      {
+        id: 'custom-customfb',
+        name: 'Custom-customfb',
+        type: 'custom',
+        enabled: true,
+        createdAt: '2026-04-04T00:00:00.000Z',
+        updatedAt: '2026-04-04T00:00:00.000Z',
+        hasKey: true,
+        keyMasked: '****',
+        model: 'qwen3.5-plus',
+      },
+    ];
+    const vendors: ProviderVendorInfo[] = [
+      {
+        ...(PROVIDER_TYPE_INFO.find((provider) => provider.id === 'custom') as ProviderVendorInfo),
+        category: 'custom',
+        supportedAuthModes: ['api_key'],
+        defaultAuthMode: 'api_key',
+        supportsMultipleAccounts: true,
+      },
+    ];
+
+    const items = buildProviderListItems(accounts, statuses, vendors, 'zai');
+
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      displayName: '智谱 Z.ai',
+      resolvedModel: 'zai/glm-5',
+    });
+    expect(items[0].aliases).toHaveLength(2);
+    expect(items[1]).toMatchObject({
+      displayName: '阿里百炼 / Qwen',
+      resolvedModel: 'qwen3.5-plus',
+    });
   });
 });

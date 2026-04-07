@@ -33,6 +33,7 @@ import { hostApiFetch } from '@/lib/host-api';
 import { useCronStore } from '@/stores/cron';
 import { useGatewayStore } from '@/stores/gateway';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { formatRelativeTime, cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { CronJob, CronJobCreateInput, ScheduleType } from '@/types/cron';
@@ -901,42 +902,37 @@ export function Cron() {
   return (
     <div className="flex flex-col -m-6 dark:bg-background h-[calc(100vh-2.5rem)] overflow-hidden">
       <div className="w-full max-w-5xl mx-auto flex flex-col h-full p-10 pt-16">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-start justify-between mb-12 shrink-0 gap-4">
-          <div>
-            <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-3 font-normal tracking-tight" style={{ fontFamily: 'Georgia, Cambria, "Times New Roman", Times, serif' }}>
-              {t('title')}
-            </h1>
-            <p className="text-[17px] text-foreground/70 font-medium">
-              {t('subtitle')}
-            </p>
-          </div>
-          <div className="flex items-center gap-3 md:mt-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                void fetchJobs();
-                void fetchConfiguredChannels();
-              }}
-              disabled={!isGatewayRunning}
-              className="h-9 text-[13px] font-medium rounded-full px-4 border-black/10 dark:border-white/10 bg-transparent hover:bg-black/5 dark:hover:bg-white/5 shadow-none text-foreground/80 hover:text-foreground transition-colors"
-            >
-              <RefreshCw className="h-3.5 w-3.5 mr-2" />
-              {t('refresh')}
-            </Button>
-            <Button
-              onClick={() => {
-                setEditingJob(undefined);
-                setShowDialog(true);
-              }}
-              disabled={!isGatewayRunning}
-              className="h-9 text-[13px] font-medium rounded-full px-4 shadow-none"
-            >
-              <Plus className="h-3.5 w-3.5 mr-2" />
-              {t('newTask')}
-            </Button>
-          </div>
-        </div>
+        <PageHeader
+          title={t('title')}
+          subtitle={t('subtitle')}
+          actions={(
+            <>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  void fetchJobs();
+                  void fetchConfiguredChannels();
+                }}
+                disabled={!isGatewayRunning}
+                className="h-10 rounded-full px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white/82 dark:hover:bg-white/6"
+              >
+                <RefreshCw className="h-3.5 w-3.5 mr-2" />
+                {t('refresh')}
+              </Button>
+              <Button
+                onClick={() => {
+                  setEditingJob(undefined);
+                  setShowDialog(true);
+                }}
+                disabled={!isGatewayRunning}
+                className="h-10 rounded-full px-4 text-[13px] font-medium shadow-none"
+              >
+                <Plus className="h-3.5 w-3.5 mr-2" />
+                {t('newTask')}
+              </Button>
+            </>
+          )}
+        />
 
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto pr-2 pb-10 min-h-0 -mr-2">

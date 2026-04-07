@@ -20,6 +20,7 @@
  */
 
 const { cpSync, existsSync, readdirSync, rmSync, statSync, mkdirSync, realpathSync } = require('fs');
+const { execFileSync } = require('child_process');
 const { join, dirname, basename, relative } = require('path');
 
 // On Windows, paths in pnpm's virtual store can exceed the default MAX_PATH
@@ -531,6 +532,10 @@ exports.default = async function afterPack(context) {
   const appOutDir = context.appOutDir;
   const platform = context.electronPlatformName; // 'win32' | 'darwin' | 'linux'
   const arch = resolveArch(context.arch);
+  const appName = context.packager.appInfo.productFilename;
+  const appBundlePath = platform === 'darwin'
+    ? join(appOutDir, `${appName}.app`)
+    : null;
 
   console.log(`[after-pack] Target: ${platform}/${arch}`);
 
@@ -538,7 +543,6 @@ exports.default = async function afterPack(context) {
 
   let resourcesDir;
   if (platform === 'darwin') {
-    const appName = context.packager.appInfo.productFilename;
     resourcesDir = join(appOutDir, `${appName}.app`, 'Contents', 'Resources');
   } else {
     resourcesDir = join(appOutDir, 'resources');
@@ -797,6 +801,15 @@ exports.default = async function afterPack(context) {
       } else if (original.includes('ClawX-patched')) {
         console.log('[after-pack] ⚡ extractAppPackage.nsh already patched (idempotent skip).');
       }
+    }
+  }
+
+  if (platform === 'darwin' && appBundlePath && existsSync(appBundlePath)) {
+    try {
+      execFileSync('xattr', ['-cr', appBundlePath], { stdio: 'ignore' });
+      console.log(`[after-pack] 🧼 Cleared macOS extended attributes for ${appBundlePath}`);
+    } catch (error) {
+      console.warn(`[after-pack] Failed to clear extended attributes for ${appBundlePath}: ${error.message}`);
     }
   }
 };

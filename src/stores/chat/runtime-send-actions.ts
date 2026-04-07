@@ -1,4 +1,5 @@
 import { invokeIpc } from '@/lib/api-client';
+import { buildAgentExecutionMetadata } from '@/lib/agent-execution-context';
 import { useAgentsStore } from '@/stores/agents';
 import {
   clearErrorRecoveryTimer,
@@ -37,6 +38,20 @@ function ensureSessionEntry(sessions: ChatSession[], sessionKey: string): ChatSe
     return sessions;
   }
   return [...sessions, { key: sessionKey, displayName: sessionKey }];
+}
+
+function buildAgentExecutionMetadataForSession(sessionKey: string): string | null {
+  const agentId = getAgentIdFromSessionKey(sessionKey);
+  const agent = useAgentsStore.getState().agents.find((item) => item.id === agentId);
+  if (!agent) return null;
+  return buildAgentExecutionMetadata(agent);
+}
+
+function injectAgentExecutionMetadata(message: string, sessionKey: string, isFirstUserMessage: boolean): string {
+  if (!isFirstUserMessage) return message;
+  const metadata = buildAgentExecutionMetadataForSession(sessionKey);
+  if (!metadata) return message;
+  return message ? `${metadata}${message}` : metadata;
 }
 
 export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<RuntimeActions, 'sendMessage' | 'abortRun'> {
@@ -80,12 +95,16 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
       }
 
       const currentSessionKey = targetSessionKey;
+      const existingMessages = get().messages;
+      const isFirstUserMessage = !existingMessages.some((message) => message.role === 'user');
+      const baseMessage = trimmed || (attachments?.length ? 'Process the attached file(s).' : '');
+      const messageForGateway = injectAgentExecutionMetadata(baseMessage, currentSessionKey, isFirstUserMessage);
 
       // Add user message optimistically (with local file metadata for UI display)
       const nowMs = Date.now();
       const userMsg: RawMessage = {
         role: 'user',
-        content: trimmed || (attachments?.length ? '(file attached)' : ''),
+        content: messageForGateway || (attachments?.length ? '(file attached)' : ''),
         timestamp: nowMs / 1000,
         id: crypto.randomUUID(),
         _attachedFiles: attachments?.map(a => ({
@@ -193,7 +212,7 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
             'chat:sendWithMedia',
             {
               sessionKey: currentSessionKey,
-              message: trimmed || 'Process the attached file(s).',
+              message: messageForGateway || 'Process the attached file(s).',
               deliver: false,
               idempotencyKey,
               media: attachments.map((a) => ({
@@ -209,7 +228,7 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
             'chat.send',
             {
               sessionKey: currentSessionKey,
-              message: trimmed,
+              message: messageForGateway,
               deliver: false,
               idempotencyKey,
             },

@@ -85,8 +85,8 @@ i18n
     .use(initReactI18next)
     .init({
         resources,
-        lng: resolveSupportedLanguage(typeof navigator !== 'undefined' ? navigator.language : undefined),
-        fallbackLng: 'en',
+        lng: resolveSupportedLanguage('zh'),
+        fallbackLng: 'zh',
         supportedLngs: [...SUPPORTED_LANGUAGE_CODES],
         defaultNS: 'common',
         ns: ['common', 'settings', 'dashboard', 'chat', 'channels', 'agents', 'skills', 'cron', 'setup'],

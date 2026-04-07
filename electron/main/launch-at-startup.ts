@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { getResolvedBranding } from '../utils/branding';
 import { logger } from '../utils/logger';
 import { getSetting } from '../utils/store';
 
@@ -25,13 +26,14 @@ function getLinuxExecCommand(): string {
   return cmdParts.join(' ');
 }
 
-function getLinuxDesktopEntry(): string {
+async function getLinuxDesktopEntry(): Promise<string> {
+  const branding = await getResolvedBranding();
   return [
     '[Desktop Entry]',
     'Type=Application',
     'Version=1.0',
-    'Name=Deep AI Worker',
-    'Comment=Deep AI Worker, LET IT WORK',
+    `Name=${branding.productName}`,
+    `Comment=${branding.productName} - ${branding.slogan}`,
     `Exec=${getLinuxExecCommand()}`,
     'Terminal=false',
     'Categories=Utility;',
@@ -44,7 +46,7 @@ async function applyLinuxLaunchAtStartup(enabled: boolean): Promise<void> {
   const targetPath = join(app.getPath('home'), LINUX_AUTOSTART_FILE);
   if (enabled) {
     await mkdir(dirname(targetPath), { recursive: true });
-    await writeFile(targetPath, getLinuxDesktopEntry(), 'utf8');
+    await writeFile(targetPath, await getLinuxDesktopEntry(), 'utf8');
     logger.info(`Launch-at-startup enabled via desktop entry: ${targetPath}`);
     return;
   }

@@ -1,6 +1,6 @@
 import { closeElectronApp, expect, getStableWindow, test } from './fixtures/electron';
 
-test.describe('ClawX main navigation without setup flow', () => {
+test.describe('Deep AI Worker main navigation without setup flow', () => {
   test('navigates between core pages with setup bypassed', async ({ launchElectronApp }) => {
     const app = await launchElectronApp({ skipSetup: true });
 
@@ -18,6 +18,10 @@ test.describe('ClawX main navigation without setup flow', () => {
 
       await page.getByTestId('sidebar-nav-channels').click();
       await expect(page.getByTestId('channels-page')).toBeVisible();
+
+      await page.getByTestId('sidebar-nav-skills').click();
+      await expect(page.getByTestId('skills-page')).toBeVisible();
+      await expect(page.getByTestId('skills-search-input')).toBeVisible();
     } finally {
       await closeElectronApp(app);
     }

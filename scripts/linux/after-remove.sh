@@ -1,11 +1,12 @@
 #!/bin/bash
 
-# Post-removal script for ClawX on Linux
+# Post-removal script for Deep AI Worker on Linux
 
 set -e
 
 # Remove symbolic links
 rm -f /usr/local/bin/clawx 2>/dev/null || true
+rm -f /usr/local/bin/deep-ai-worker 2>/dev/null || true
 rm -f /usr/local/bin/openclaw 2>/dev/null || true
 
 # Update desktop database
@@ -24,4 +25,4 @@ if [ -f "$APPARMOR_PROFILE_TARGET" ]; then
     rm -f "$APPARMOR_PROFILE_TARGET"
 fi
 
-echo "ClawX has been removed."
+echo "Deep AI Worker has been removed."

@@ -15,8 +15,77 @@ import {
   setErrorRecoveryTimer,
   upsertToolStatuses,
 } from './helpers';
-import type { AttachedFileMeta, RawMessage } from './types';
+import type { AttachedFileMeta, RawMessage, ToolStatus } from './types';
 import type { ChatGet, ChatSet } from './store-api';
+
+let pendingDeltaMessage: RawMessage | null = null;
+let pendingDeltaUpdates: ToolStatus[] = [];
+let pendingDeltaClearError = false;
+let pendingDeltaFlushHandle: ReturnType<typeof setTimeout> | null = null;
+
+function cancelPendingDeltaFlush(): void {
+  if (pendingDeltaFlushHandle) {
+    clearTimeout(pendingDeltaFlushHandle);
+    pendingDeltaFlushHandle = null;
+  }
+}
+
+function resetPendingDeltaState(): void {
+  pendingDeltaMessage = null;
+  pendingDeltaUpdates = [];
+  pendingDeltaClearError = false;
+}
+
+function flushPendingDelta(set: ChatSet): void {
+  if (!pendingDeltaMessage && pendingDeltaUpdates.length === 0 && !pendingDeltaClearError) {
+    return;
+  }
+
+  const nextMessage = pendingDeltaMessage;
+  const nextUpdates = pendingDeltaUpdates;
+  const shouldClearError = pendingDeltaClearError;
+
+  cancelPendingDeltaFlush();
+  resetPendingDeltaState();
+
+  set((s) => ({
+    error: shouldClearError ? null : s.error,
+    streamingMessage: (() => {
+      if (nextMessage && typeof nextMessage === 'object') {
+        const msgRole = nextMessage.role;
+        if (isToolResultRole(msgRole)) return s.streamingMessage;
+        const msgObj = nextMessage;
+        if (s.streamingMessage && msgObj.content === undefined) {
+          return s.streamingMessage;
+        }
+      }
+      return nextMessage ?? s.streamingMessage;
+    })(),
+    streamingTools: nextUpdates.length > 0 ? upsertToolStatuses(s.streamingTools, nextUpdates) : s.streamingTools,
+  }));
+}
+
+function scheduleDeltaFlush(set: ChatSet): void {
+  if (pendingDeltaFlushHandle) return;
+  pendingDeltaFlushHandle = setTimeout(() => {
+    flushPendingDelta(set);
+  }, 16);
+}
+
+function mergePendingDeltaUpdates(updates: ToolStatus[]): void {
+  if (updates.length === 0) return;
+  const merged = new Map<string, ToolStatus>();
+
+  for (const update of pendingDeltaUpdates) {
+    merged.set(update.toolCallId || update.id || update.name, update);
+  }
+
+  for (const update of updates) {
+    merged.set(update.toolCallId || update.id || update.name, update);
+  }
+
+  pendingDeltaUpdates = Array.from(merged.values());
+}
 
 export function handleRuntimeEventState(
   set: ChatSet,
@@ -40,38 +109,18 @@ export function handleRuntimeEventState(
           // stale error banner so the user sees the live stream again.
           if (hasErrorRecoveryTimer()) {
             clearErrorRecoveryTimer();
-            set({ error: null });
+            pendingDeltaClearError = true;
           }
           const updates = collectToolUpdates(event.message, resolvedState);
-          set((s) => ({
-            streamingMessage: (() => {
-              if (event.message && typeof event.message === 'object') {
-                const msgRole = (event.message as RawMessage).role;
-                if (isToolResultRole(msgRole)) return s.streamingMessage;
-                // During multi-model fallback the Gateway may emit a delta with an
-                // empty or role-only message (e.g. `{}` or `{ role: 'assistant' }`)
-                // to signal a model switch.  Accepting such a value would silently
-                // discard all content accumulated so far in streamingMessage.
-                // Only replace when the incoming message carries actual payload.
-                const msgObj = event.message as RawMessage;
-                // During multi-model fallback the Gateway may emit an empty or
-                // role-only delta (e.g. `{}` or `{ role: 'assistant' }`) to signal
-                // a model switch.  If we already have accumulated streaming content,
-                // accepting such a message would silently discard it.  Only guard
-                // when there IS existing content to protect; when streamingMessage
-                // is still null, let any delta through so the UI can start showing
-                // the typing indicator immediately.
-                if (s.streamingMessage && msgObj.content === undefined) {
-                  return s.streamingMessage;
-                }
-              }
-              return event.message ?? s.streamingMessage;
-            })(),
-            streamingTools: updates.length > 0 ? upsertToolStatuses(s.streamingTools, updates) : s.streamingTools,
-          }));
+          if (event.message && typeof event.message === 'object') {
+            pendingDeltaMessage = event.message as unknown as RawMessage;
+          }
+          mergePendingDeltaUpdates(updates);
+          scheduleDeltaFlush(set);
           break;
         }
         case 'final': {
+          flushPendingDelta(set);
           clearErrorRecoveryTimer();
           if (get().error) set({ error: null });
           // Message complete - add to history and clear streaming
@@ -212,6 +261,7 @@ export function handleRuntimeEventState(
           break;
         }
         case 'error': {
+          flushPendingDelta(set);
           const errorMsg = String(event.errorMessage || 'An error occurred');
           const wasSending = get().sending;
 
@@ -269,6 +319,7 @@ export function handleRuntimeEventState(
           break;
         }
         case 'aborted': {
+          flushPendingDelta(set);
           clearHistoryPoll();
           clearErrorRecoveryTimer();
           set({
@@ -284,6 +335,7 @@ export function handleRuntimeEventState(
           break;
         }
         default: {
+          flushPendingDelta(set);
           // Unknown or empty state — if we're currently sending and receive an event
           // with a message, attempt to process it as streaming data. This handles
           // edge cases where the Gateway sends events without a state field.

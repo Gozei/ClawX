@@ -108,7 +108,7 @@ async function closeElectronApp(app: ElectronApplication, timeoutMs = 5_000): Pr
   }
 }
 
-async function launchClawXElectron(
+async function launchDeepAiWorkerElectron(
   homeDir: string,
   userDataDir: string,
   options: LaunchElectronOptions = {},
@@ -160,7 +160,7 @@ export const test = base.extend<ElectronFixtures>({
   },
 
   launchElectronApp: async ({ homeDir, userDataDir }, provideLauncher) => {
-    await provideLauncher(async (options?: LaunchElectronOptions) => await launchClawXElectron(homeDir, userDataDir, options));
+    await provideLauncher(async (options?: LaunchElectronOptions) => await launchDeepAiWorkerElectron(homeDir, userDataDir, options));
   },
 
   electronApp: async ({ launchElectronApp }, provideElectronApp) => {

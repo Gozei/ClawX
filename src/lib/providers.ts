@@ -105,6 +105,11 @@ export interface ProviderVendorInfo extends ProviderTypeInfo {
   supportsMultipleAccounts: boolean;
 }
 
+export interface ProviderModelOption {
+  value: string;
+  label: string;
+}
+
 export interface ProviderAccount {
   id: string;
   vendorId: ProviderType;
@@ -123,6 +128,7 @@ export interface ProviderAccount {
     email?: string;
     resourceUrl?: string;
     customModels?: string[];
+    modelUsageTags?: Record<string, string[]>;
   };
   createdAt: string;
   updatedAt: string;
@@ -206,6 +212,116 @@ export const PROVIDER_TYPE_INFO: ProviderTypeInfo[] = [
     docsUrlZh: 'https://icnnp7d0dymg.feishu.cn/wiki/BmiLwGBcEiloZDkdYnGc8RWnn6d#IWQCdfe5fobGU3xf3UGcgbLynGh',
   },
 ];
+
+const PROVIDER_MODEL_OPTIONS: Record<string, ProviderModelOption[]> = {
+  anthropic: [
+    { value: 'claude-opus-4.6', label: 'Claude Opus 4.6' },
+    { value: 'claude-sonnet-4.5', label: 'Claude Sonnet 4.5' },
+  ],
+  openai: [
+    { value: 'gpt-5.4', label: 'GPT-5.4' },
+    { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+    { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+  ],
+  google: [
+    { value: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview' },
+    { value: 'gemini-3-flash', label: 'Gemini 3 Flash' },
+  ],
+  openrouter: [
+    { value: 'openai/gpt-5.4', label: 'OpenAI / GPT-5.4' },
+    { value: 'anthropic/claude-opus-4.6', label: 'Anthropic / Claude Opus 4.6' },
+    { value: 'google/gemini-3-pro-preview', label: 'Google / Gemini 3 Pro Preview' },
+  ],
+  minimax: [
+    { value: 'MiniMax-M2.7', label: 'MiniMax M2.7' },
+  ],
+  moonshot: [
+    { value: 'kimi-k2.5', label: 'Kimi K2.5' },
+    { value: 'kimi-k2-turbo-preview', label: 'Kimi K2 Turbo Preview' },
+  ],
+  siliconflow: [
+    { value: 'deepseek-ai/DeepSeek-V3', label: 'DeepSeek V3' },
+    { value: 'Qwen/Qwen3-Coder-480B-A35B-Instruct', label: 'Qwen3 Coder 480B' },
+  ],
+  qwen: [
+    { value: 'qwen3.5-plus', label: 'Qwen 3.5 Plus' },
+    { value: 'qwen-plus', label: 'Qwen Plus' },
+    { value: 'qwen-max', label: 'Qwen Max' },
+    { value: 'qwen-turbo', label: 'Qwen Turbo' },
+  ],
+  zai: [
+    { value: 'glm-5', label: 'GLM-5' },
+    { value: 'glm-4.5', label: 'GLM-4.5' },
+    { value: 'glm-4.5-air', label: 'GLM-4.5 Air' },
+  ],
+  deepseek: [
+    { value: 'deepseek-chat', label: 'DeepSeek Chat' },
+    { value: 'deepseek-reasoner', label: 'DeepSeek Reasoner' },
+  ],
+  ark: [
+    { value: 'ark-code-latest', label: 'Ark Code Latest' },
+  ],
+  ollama: [
+    { value: 'qwen3:latest', label: 'Qwen3 Latest' },
+    { value: 'deepseek-r1:latest', label: 'DeepSeek R1 Latest' },
+    { value: 'llama3.3:latest', label: 'Llama 3.3 Latest' },
+  ],
+};
+
+function inferModelCatalogKey(
+  providerType: ProviderType | string,
+  options?: {
+    baseUrl?: string;
+    apiProtocol?: 'openai-completions' | 'openai-responses' | 'anthropic-messages';
+  },
+): string {
+  const rawBaseUrl = (options?.baseUrl || '').toLowerCase();
+
+  if (providerType === 'minimax-portal' || providerType === 'minimax-portal-cn') {
+    return 'minimax';
+  }
+  if (providerType === 'modelstudio') {
+    return 'qwen';
+  }
+  if (providerType === 'custom') {
+    if (rawBaseUrl.includes('dashscope.aliyuncs.com') || rawBaseUrl.includes('qwen.ai')) {
+      return 'qwen';
+    }
+    if (rawBaseUrl.includes('bigmodel.cn') || rawBaseUrl.includes('open.bigmodel.cn') || rawBaseUrl.includes('z.ai')) {
+      return 'zai';
+    }
+    if (rawBaseUrl.includes('deepseek.com')) {
+      return 'deepseek';
+    }
+    if (rawBaseUrl.includes('moonshot.cn')) {
+      return 'moonshot';
+    }
+    if (rawBaseUrl.includes('siliconflow.cn')) {
+      return 'siliconflow';
+    }
+    if (rawBaseUrl.includes('openrouter.ai')) {
+      return 'openrouter';
+    }
+    if (rawBaseUrl.includes('api.openai.com') || options?.apiProtocol === 'openai-responses') {
+      return 'openai';
+    }
+    if (rawBaseUrl.includes('anthropic.com') || options?.apiProtocol === 'anthropic-messages') {
+      return 'anthropic';
+    }
+  }
+  return providerType;
+}
+
+export function getRecommendedModelOptions(
+  providerType: ProviderType | string,
+  options?: {
+    baseUrl?: string;
+    apiProtocol?: 'openai-completions' | 'openai-responses' | 'anthropic-messages';
+  },
+): ProviderModelOption[] {
+  const key = inferModelCatalogKey(providerType, options);
+  return PROVIDER_MODEL_OPTIONS[key] ?? [];
+}
 
 /** Get the SVG logo URL for a provider type, falls back to undefined */
 export function getProviderIconUrl(type: ProviderType | string): string | undefined {

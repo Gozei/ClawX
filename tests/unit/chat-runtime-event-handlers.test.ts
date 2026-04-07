@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const clearErrorRecoveryTimer = vi.fn();
 const clearHistoryPoll = vi.fn();
@@ -81,9 +81,15 @@ function makeHarness(initial?: Partial<ChatLikeState>) {
 describe('chat runtime event handlers', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.useFakeTimers();
     hasErrorRecoveryTimer.mockReturnValue(false);
     collectToolUpdates.mockReturnValue([]);
     upsertToolStatuses.mockImplementation((_current, updates) => updates);
+  });
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
   });
 
   it('marks sending on started event', async () => {
@@ -110,6 +116,7 @@ describe('chat runtime event handlers', () => {
     const event = { message: { role: 'assistant', content: 'delta' } };
 
     handleRuntimeEventState(h.set as never, h.get as never, event, 'delta', 'run-2');
+    vi.runAllTimers();
     const next = h.read();
     expect(clearErrorRecoveryTimer).toHaveBeenCalledTimes(1);
     expect(next.error).toBeNull();
@@ -150,6 +157,7 @@ describe('chat runtime event handlers', () => {
     const h = makeHarness({ streamingMessage: existing });
 
     handleRuntimeEventState(h.set as never, h.get as never, { message: {} }, 'delta', 'run-x');
+    vi.runAllTimers();
     expect(h.read().streamingMessage).toEqual(existing);
   });
 
@@ -159,6 +167,7 @@ describe('chat runtime event handlers', () => {
     const h = makeHarness({ streamingMessage: existing });
 
     handleRuntimeEventState(h.set as never, h.get as never, { message: { role: 'assistant' } }, 'delta', 'run-x');
+    vi.runAllTimers();
     expect(h.read().streamingMessage).toEqual(existing);
   });
 
@@ -169,6 +178,7 @@ describe('chat runtime event handlers', () => {
     const h = makeHarness({ streamingMessage: null });
 
     handleRuntimeEventState(h.set as never, h.get as never, { message: { role: 'assistant' } }, 'delta', 'run-x');
+    vi.runAllTimers();
     expect(h.read().streamingMessage).toEqual({ role: 'assistant' });
   });
 
@@ -179,6 +189,7 @@ describe('chat runtime event handlers', () => {
     const h = makeHarness({ streamingMessage: existing });
 
     handleRuntimeEventState(h.set as never, h.get as never, { message: incoming }, 'delta', 'run-x');
+    vi.runAllTimers();
     expect(h.read().streamingMessage).toEqual(incoming);
   });
 
@@ -203,4 +214,3 @@ describe('chat runtime event handlers', () => {
     expect(next.pendingToolImages).toEqual([]);
   });
 });
-

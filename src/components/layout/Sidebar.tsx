@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
+  LayoutDashboard,
   Network,
   Bot,
   Puzzle,
@@ -30,6 +31,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { hostApiFetch } from '@/lib/host-api';
 import { useTranslation } from 'react-i18next';
 import logoSvg from '@/assets/logo.svg';
+import { useBranding } from '@/lib/branding';
 
 type SessionBucketKey =
   | 'today'
@@ -57,10 +59,10 @@ function NavItem({ to, icon, label, badge, collapsed, onClick, testId }: NavItem
       data-testid={testId}
       className={({ isActive }) =>
         cn(
-          'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[14px] font-medium transition-colors',
-          'hover:bg-black/5 dark:hover:bg-white/5 text-foreground/80',
+          'flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-all duration-200',
+          'text-foreground/78 hover:bg-[#eef3fb] hover:text-foreground dark:hover:bg-white/5',
           isActive
-            ? 'bg-black/5 dark:bg-white/10 text-foreground'
+            ? 'bg-white text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
             : '',
           collapsed && 'justify-center px-0'
         )
@@ -68,7 +70,7 @@ function NavItem({ to, icon, label, badge, collapsed, onClick, testId }: NavItem
     >
       {({ isActive }) => (
         <>
-          <div className={cn("flex shrink-0 items-center justify-center", isActive ? "text-foreground" : "text-muted-foreground")}>
+          <div className={cn("flex shrink-0 items-center justify-center", isActive ? "text-primary" : "text-muted-foreground")}>
             {icon}
           </div>
           {!collapsed && (
@@ -113,6 +115,7 @@ function getAgentIdFromSessionKey(sessionKey: string): string {
 }
 
 export function Sidebar() {
+  const branding = useBranding();
   const sidebarCollapsed = useSettingsStore((state) => state.sidebarCollapsed);
   const setSidebarCollapsed = useSettingsStore((state) => state.setSidebarCollapsed);
 
@@ -208,6 +211,7 @@ export function Sidebar() {
   }
 
   const navItems = [
+    { to: '/dashboard', icon: <LayoutDashboard className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.dashboard'), testId: 'sidebar-nav-dashboard' },
     { to: '/models', icon: <Cpu className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.models'), testId: 'sidebar-nav-models' },
     { to: '/agents', icon: <Bot className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.agents'), testId: 'sidebar-nav-agents' },
     { to: '/channels', icon: <Network className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.channels'), testId: 'sidebar-nav-channels' },
@@ -219,24 +223,31 @@ export function Sidebar() {
     <aside
       data-testid="sidebar"
       className={cn(
-        'flex shrink-0 flex-col border-r bg-[#eae8e1]/60 dark:bg-background transition-all duration-300',
+        'flex shrink-0 flex-col border-r border-black/6 bg-[#f3f6fb] text-foreground/90 transition-all duration-300 dark:bg-background',
         sidebarCollapsed ? 'w-16' : 'w-64'
       )}
     >
       {/* Top Header Toggle */}
-      <div className={cn("flex items-center p-2 h-12", sidebarCollapsed ? "justify-center" : "justify-between")}>
+      <div className={cn("flex items-center px-3 py-3 h-14 border-b border-black/5", sidebarCollapsed ? "justify-center" : "justify-between")}>
         {!sidebarCollapsed && (
-          <div className="flex items-center gap-2 px-2 overflow-hidden">
-            <img src={logoSvg} alt="Deep AI Worker" className="h-5 w-auto shrink-0" />
-            <span className="text-sm font-semibold truncate whitespace-nowrap text-foreground/90">
-              Deep AI Worker
-            </span>
+          <div className="flex items-center gap-2.5 overflow-hidden">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5">
+              <img src={logoSvg} alt={branding.productName} className="h-5 w-auto shrink-0" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold tracking-[-0.01em] truncate whitespace-nowrap text-foreground/95">
+                {branding.productName}
+              </div>
+              <div className="text-[11px] tracking-[0.02em] text-muted-foreground/90">
+                by {branding.vendorName}
+              </div>
+            </div>
           </div>
         )}
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-black/5 dark:hover:bg-white/10"
+          className="h-9 w-9 shrink-0 rounded-xl text-muted-foreground hover:bg-white hover:text-foreground dark:hover:bg-white/10"
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
         >
           {sidebarCollapsed ? (
@@ -248,7 +259,7 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex flex-col px-2 gap-0.5">
+      <nav className="flex flex-col gap-1 px-2.5 py-3">
         <button
           data-testid="sidebar-new-chat"
           onClick={() => {
@@ -257,15 +268,16 @@ export function Sidebar() {
             navigate('/');
           }}
           className={cn(
-            'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[14px] font-medium transition-colors mb-2',
-            'bg-black/5 dark:bg-accent shadow-none border border-transparent text-foreground',
+            'group mb-2 flex w-full items-center gap-2.5 rounded-2xl px-3.5 py-3 text-[14px] font-semibold transition-all duration-200',
+            'border-0 bg-[linear-gradient(135deg,#4f8df7_0%,#2f6fe4_100%)] text-white shadow-[0_14px_34px_rgba(47,111,228,0.28)]',
+            'hover:-translate-y-0.5 hover:bg-[linear-gradient(135deg,#5b97fb_0%,#3169d6_100%)] hover:shadow-[0_18px_38px_rgba(47,111,228,0.34)] active:translate-y-0',
             sidebarCollapsed && 'justify-center px-0',
           )}
         >
-          <div className="flex shrink-0 items-center justify-center text-foreground/80">
-            <Plus className="h-[18px] w-[18px]" strokeWidth={2} />
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/16 ring-1 ring-white/20 transition group-hover:bg-white/20">
+            <Plus className="h-[18px] w-[18px]" strokeWidth={2.2} />
           </div>
-          {!sidebarCollapsed && <span className="flex-1 text-left overflow-hidden text-ellipsis whitespace-nowrap">{t('sidebar.newChat')}</span>}
+          {!sidebarCollapsed && <span className="flex-1 overflow-hidden text-left text-ellipsis whitespace-nowrap">{t('sidebar.newChat')}</span>}
         </button>
 
         {navItems.map((item) => (
@@ -279,11 +291,11 @@ export function Sidebar() {
 
       {/* Session list — below Settings, only when expanded */}
       {!sidebarCollapsed && sessions.length > 0 && (
-        <div className="flex-1 overflow-y-auto overflow-x-hidden px-2 mt-4 space-y-0.5 pb-2">
+        <div className="mt-3 flex-1 overflow-y-auto overflow-x-hidden px-2.5 space-y-1 pb-3">
           {sessionBuckets.map((bucket) => (
             bucket.sessions.length > 0 ? (
               <div key={bucket.key} className="pt-2">
-                <div className="px-2.5 pb-1 text-[11px] font-medium text-muted-foreground/60 tracking-tight">
+                <div className="px-3 pb-1 text-[11px] font-medium text-muted-foreground/70 tracking-[0.01em]">
                   {bucket.label}
                 </div>
                 {bucket.sessions.map((s) => {
@@ -294,15 +306,15 @@ export function Sidebar() {
                       <button
                         onClick={() => { switchSession(s.key); navigate('/'); }}
                         className={cn(
-                          'w-full text-left rounded-lg px-2.5 py-1.5 text-[13px] transition-colors pr-7',
-                          'hover:bg-black/5 dark:hover:bg-white/5',
+                          'w-full rounded-xl px-3 py-2 pr-8 text-left text-[13px] transition-all duration-200',
+                          'hover:bg-[#eef3fb] dark:hover:bg-white/5',
                           isOnChat && currentSessionKey === s.key
-                            ? 'bg-black/5 dark:bg-white/10 text-foreground font-medium'
+                            ? 'bg-white text-foreground font-medium shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
                             : 'text-foreground/75',
                         )}
                       >
                         <div className="flex min-w-0 items-center gap-2">
-                          <span className="shrink-0 rounded-full bg-black/[0.04] px-2 py-0.5 text-[10px] font-medium text-foreground/70 dark:bg-white/[0.08]">
+                          <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-foreground/70 ring-1 ring-black/5 dark:bg-white/[0.08] dark:ring-white/10">
                             {agentName}
                           </span>
                           <span className="truncate">{getSessionLabel(s.key, s.displayName, s.label)}</span>
@@ -335,22 +347,22 @@ export function Sidebar() {
       )}
 
       {/* Footer */}
-      <div className="p-2 mt-auto">
+      <div className="mt-auto border-t border-black/5 p-2.5">
         <NavLink
             to="/settings"
             data-testid="sidebar-nav-settings"
             className={({ isActive }) =>
               cn(
-                'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[14px] font-medium transition-colors',
-                'hover:bg-black/5 dark:hover:bg-white/5 text-foreground/80',
-                isActive && 'bg-black/5 dark:bg-white/10 text-foreground',
+                'flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-all duration-200',
+                'text-foreground/78 hover:bg-[#eef3fb] dark:hover:bg-white/5',
+                isActive && 'bg-white text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10',
                 sidebarCollapsed ? 'justify-center px-0' : ''
               )
             }
           >
           {({ isActive }) => (
             <>
-              <div className={cn("flex shrink-0 items-center justify-center", isActive ? "text-foreground" : "text-muted-foreground")}>
+              <div className={cn("flex shrink-0 items-center justify-center", isActive ? "text-primary" : "text-muted-foreground")}>
                 <SettingsIcon className="h-[18px] w-[18px]" strokeWidth={2} />
               </div>
               {!sidebarCollapsed && <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{t('sidebar.settings')}</span>}
@@ -362,8 +374,8 @@ export function Sidebar() {
           data-testid="sidebar-open-dev-console"
           variant="ghost"
           className={cn(
-            'flex items-center gap-2.5 rounded-lg px-2.5 py-2 h-auto text-[14px] font-medium transition-colors w-full mt-1',
-            'hover:bg-black/5 dark:hover:bg-white/5 text-foreground/80',
+            'mt-1 flex h-auto w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-all duration-200',
+            'text-foreground/78 hover:bg-[#eef3fb] dark:hover:bg-white/5',
             sidebarCollapsed ? 'justify-center px-0' : 'justify-start'
           )}
           onClick={openDevConsole}

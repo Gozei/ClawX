@@ -30,6 +30,7 @@ import {
 import { dispatchJsonRpcNotification, dispatchProtocolEvent } from './event-dispatch';
 import { GatewayStateController } from './state';
 import { prepareGatewayLaunchContext } from './config-sync';
+import { getResolvedBranding } from '../utils/branding';
 import { connectGatewaySocket, waitForGatewayReady } from './ws-client';
 import {
   findExistingGatewayProcess,
@@ -796,10 +797,12 @@ export class GatewayManager extends EventEmitter {
    * Connect WebSocket to Gateway
    */
   private async connect(port: number, _externalToken?: string): Promise<void> {
+    const branding = await getResolvedBranding();
     this.ws = await connectGatewaySocket({
       port,
       deviceIdentity: this.deviceIdentity,
       platform: process.platform,
+      brandingDisplayName: branding.productName,
       pendingRequests: this.pendingRequests,
       getToken: async () => await import('../utils/store').then(({ getSetting }) => getSetting('gatewayToken')),
       onHandshakeComplete: (ws) => {

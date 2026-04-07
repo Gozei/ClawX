@@ -3,25 +3,35 @@
  * Handles routing and global providers
  */
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { Component, useEffect } from 'react';
+import { Component, lazy, Suspense, useEffect } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { Toaster } from 'sonner';
 import i18n from './i18n';
 import { MainLayout } from './components/layout/MainLayout';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { Models } from './pages/Models';
-import { Chat } from './pages/Chat';
-import { Agents } from './pages/Agents';
-import { Channels } from './pages/Channels';
-import { Skills } from './pages/Skills';
-import { Cron } from './pages/Cron';
-import { Settings } from './pages/Settings';
-import { Setup } from './pages/Setup';
+import { PageLoader } from './components/common/LoadingSpinner';
 import { useSettingsStore } from './stores/settings';
 import { useGatewayStore } from './stores/gateway';
 import { useProviderStore } from './stores/providers';
 import { applyGatewayTransportPreference } from './lib/api-client';
 
+const Chat = lazy(() => import('./pages/Chat').then((module) => ({ default: module.Chat })));
+const Dashboard = lazy(() => import('./pages/Dashboard').then((module) => ({ default: module.Dashboard })));
+const Models = lazy(() => import('./pages/Models').then((module) => ({ default: module.Models })));
+const Agents = lazy(() => import('./pages/Agents').then((module) => ({ default: module.Agents })));
+const Channels = lazy(() => import('./pages/Channels').then((module) => ({ default: module.Channels })));
+const Skills = lazy(() => import('./pages/Skills').then((module) => ({ default: module.Skills })));
+const Cron = lazy(() => import('./pages/Cron').then((module) => ({ default: module.Cron })));
+const Settings = lazy(() => import('./pages/Settings').then((module) => ({ default: module.Settings })));
+const Setup = lazy(() => import('./pages/Setup').then((module) => ({ default: module.Setup })));
+
+function RouteLoader() {
+  return (
+    <div className="flex h-screen items-center justify-center">
+      <PageLoader />
+    </div>
+  );
+}
 
 /**
  * Error Boundary to catch and display React rendering errors
@@ -48,37 +58,54 @@ class ErrorBoundary extends Component<
       return (
         <div style={{
           padding: '40px',
-          color: '#f87171',
-          background: '#0f172a',
+          color: '#1f2937',
+          background: '#f7f8fa',
           minHeight: '100vh',
-          fontFamily: 'monospace'
+          fontFamily: '"Tencent Sans", "Volcano Sans", "PingFang SC", sans-serif'
         }}>
-          <h1 style={{ fontSize: '24px', marginBottom: '16px' }}>Something went wrong</h1>
-          <pre style={{
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-            background: '#1e293b',
-            padding: '16px',
-            borderRadius: '8px',
-            fontSize: '14px'
+          <div style={{
+            maxWidth: '720px',
+            margin: '80px auto',
+            background: '#ffffff',
+            border: '1px solid #e5e7eb',
+            borderRadius: '20px',
+            padding: '28px',
+            boxShadow: '0 10px 30px rgba(15, 23, 42, 0.06)'
           }}>
-            {this.state.error?.message}
-            {'\n\n'}
-            {this.state.error?.stack}
-          </pre>
+            <h1 style={{ fontSize: '24px', marginBottom: '10px', color: '#111827' }}>页面加载失败</h1>
+            <p style={{ fontSize: '14px', lineHeight: 1.7, color: '#6b7280', margin: 0 }}>
+              这个页面刚才出了点问题。你可以先刷新应用，如果问题重复出现，我会继续帮你定位。
+            </p>
+            {this.state.error?.message ? (
+              <div style={{
+                marginTop: '18px',
+                padding: '14px 16px',
+                borderRadius: '12px',
+                background: '#f9fafb',
+                border: '1px solid #e5e7eb',
+                fontSize: '13px',
+                color: '#374151',
+                wordBreak: 'break-word'
+              }}>
+                {this.state.error.message}
+              </div>
+            ) : null}
+          </div>
           <button
             onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
             style={{
-              marginTop: '16px',
-              padding: '8px 16px',
+              display: 'block',
+              margin: '0 auto',
+              marginTop: '-56px',
+              padding: '10px 18px',
               background: '#3b82f6',
               color: 'white',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: '999px',
               cursor: 'pointer'
             }}
           >
-            Reload
+            重新加载
           </button>
         </div>
       );
@@ -167,21 +194,24 @@ function App() {
   return (
     <ErrorBoundary>
       <TooltipProvider delayDuration={300}>
-        <Routes>
-          {/* Setup wizard (shown on first launch) */}
-          <Route path="/setup/*" element={<Setup />} />
+        <Suspense fallback={<RouteLoader />}>
+          <Routes>
+            {/* Setup wizard (shown on first launch) */}
+            <Route path="/setup/*" element={<Setup />} />
 
-          {/* Main application routes */}
-          <Route element={<MainLayout />}>
-            <Route path="/" element={<Chat />} />
-            <Route path="/models" element={<Models />} />
-            <Route path="/agents" element={<Agents />} />
-            <Route path="/channels" element={<Channels />} />
-            <Route path="/skills" element={<Skills />} />
-            <Route path="/cron" element={<Cron />} />
-            <Route path="/settings/*" element={<Settings />} />
-          </Route>
-        </Routes>
+            {/* Main application routes */}
+            <Route element={<MainLayout />}>
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/" element={<Chat />} />
+              <Route path="/models" element={<Models />} />
+              <Route path="/agents" element={<Agents />} />
+              <Route path="/channels" element={<Channels />} />
+              <Route path="/skills" element={<Skills />} />
+              <Route path="/cron" element={<Cron />} />
+              <Route path="/settings/*" element={<Settings />} />
+            </Route>
+          </Routes>
+        </Suspense>
 
         {/* Global toast notifications */}
         <Toaster

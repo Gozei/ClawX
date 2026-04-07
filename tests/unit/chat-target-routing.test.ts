@@ -44,6 +44,10 @@ describe('chat target routing', () => {
         agentDir: '~/.openclaw/agents/main/agent',
         mainSessionKey: 'agent:main:main',
         channelTypes: [],
+        skillIds: [],
+        workflowSteps: [],
+        triggerModes: [],
+        description: null,
       },
       {
         id: 'research',
@@ -55,6 +59,20 @@ describe('chat target routing', () => {
         agentDir: '~/.openclaw/agents/research/agent',
         mainSessionKey: 'agent:research:desk',
         channelTypes: [],
+        modelRef: 'claude/sonnet',
+        profileType: 'coordinator',
+        skillIds: ['web-search', 'doc-reader'],
+        workflowSteps: ['检索资料', '总结输出'],
+        workflowNodes: [
+          { id: 'step-1', type: 'skill', title: '检索资料', target: 'web-search', onFailure: 'continue', inputSpec: 'topic', outputSpec: 'sources' },
+          { id: 'step-2', type: 'agent', title: '交给摘要智能体', target: 'summarizer', onFailure: 'continue', inputSpec: 'sources', outputSpec: 'draft' },
+          { id: 'step-3', type: 'model', title: '总结输出', target: 'claude/sonnet', onFailure: 'retry', modelRef: 'claude/sonnet' },
+        ],
+        triggerModes: ['manual', 'channel'],
+        description: '负责研究分析与资料整理',
+        objective: '协调多步骤研究流程并输出最终结论',
+        boundaries: '证据不足时必须说明不确定性',
+        outputContract: '输出结论、证据、风险和后续建议',
       },
     ];
 
@@ -113,7 +131,9 @@ describe('chat target routing', () => {
     expect(state.currentSessionKey).toBe('agent:research:desk');
     expect(state.currentAgentId).toBe('research');
     expect(state.sessions.some((session) => session.key === 'agent:research:desk')).toBe(true);
-    expect(state.messages.at(-1)?.content).toBe('Hello direct agent');
+    expect(String(state.messages.at(-1)?.content)).toContain('Conversation info (untrusted metadata):');
+    expect(String(state.messages.at(-1)?.content)).toContain('"allowedSkills": [');
+    expect(String(state.messages.at(-1)?.content)).toContain('Hello direct agent');
 
     const historyCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.history');
     expect(historyCall?.[1]).toEqual({ sessionKey: 'agent:research:desk', limit: 200 });
@@ -121,9 +141,21 @@ describe('chat target routing', () => {
     const sendCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.send');
     expect(sendCall?.[1]).toMatchObject({
       sessionKey: 'agent:research:desk',
-      message: 'Hello direct agent',
       deliver: false,
     });
+    expect(String((sendCall?.[1] as { message?: unknown })?.message)).toContain('Conversation info (untrusted metadata):');
+    expect(String((sendCall?.[1] as { message?: unknown })?.message)).toContain('"description": "负责研究分析与资料整理"');
+    expect(String((sendCall?.[1] as { message?: unknown })?.message)).toContain('"profileType": "coordinator"');
+    expect(String((sendCall?.[1] as { message?: unknown })?.message)).toContain('"objective": "协调多步骤研究流程并输出最终结论"');
+    expect(String((sendCall?.[1] as { message?: unknown })?.message)).toContain('"inputSpec": "topic"');
+    expect(String((sendCall?.[1] as { message?: unknown })?.message)).toContain('"target": "summarizer"');
+    expect(String((sendCall?.[1] as { message?: unknown })?.message)).toContain('"executionPlan"');
+    expect(String((sendCall?.[1] as { message?: unknown })?.message)).toContain('"downstreamAgents": [');
+    expect(String((sendCall?.[1] as { message?: unknown })?.message)).toContain('"playbook": [');
+    expect(String((sendCall?.[1] as { message?: unknown })?.message)).toContain('Execution playbook:');
+    expect(String((sendCall?.[1] as { message?: unknown })?.message)).toContain('智能体类型：coordinator。');
+    expect(String((sendCall?.[1] as { message?: unknown })?.message)).toContain('委派给智能体 "summarizer"');
+    expect(String((sendCall?.[1] as { message?: unknown })?.message)).toContain('Hello direct agent');
     expect(typeof (sendCall?.[1] as { idempotencyKey?: unknown })?.idempotencyKey).toBe('string');
   });
 
@@ -184,7 +216,8 @@ describe('chat target routing', () => {
     };
 
     expect(payload.sessionKey).toBe('agent:research:desk');
-    expect(payload.message).toBe('Process the attached file(s).');
+    expect(payload.message).toContain('Conversation info (untrusted metadata):');
+    expect(payload.message).toContain('Process the attached file(s).');
     expect(payload.media[0]?.filePath).toBe('/tmp/design.png');
   });
 });

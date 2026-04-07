@@ -3,12 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Agents } from '../../src/pages/Agents/index';
 
+const navigateMock = vi.fn();
 const hostApiFetchMock = vi.fn();
 const subscribeHostEventMock = vi.fn();
 const fetchAgentsMock = vi.fn();
 const updateAgentMock = vi.fn();
 const updateAgentModelMock = vi.fn();
 const refreshProviderSnapshotMock = vi.fn();
+const fetchSkillsMock = vi.fn();
+const gatewayRpcMock = vi.fn();
 
 const { gatewayState, agentsState, providersState } = vi.hoisted(() => ({
   gatewayState: {
@@ -29,7 +32,23 @@ const { gatewayState, agentsState, providersState } = vi.hoisted(() => ({
 }));
 
 vi.mock('@/stores/gateway', () => ({
-  useGatewayStore: (selector: (state: typeof gatewayState) => unknown) => selector(gatewayState),
+  useGatewayStore: (selector: (state: typeof gatewayState & { rpc: typeof gatewayRpcMock }) => unknown) => selector({
+    ...gatewayState,
+    rpc: gatewayRpcMock,
+  }),
+}));
+
+vi.mock('@/stores/skills', () => ({
+  useSkillsStore: (selector?: (state: {
+    skills: Array<Record<string, unknown>>;
+    fetchSkills: typeof fetchSkillsMock;
+  }) => unknown) => {
+    const state = {
+      skills: [],
+      fetchSkills: fetchSkillsMock,
+    };
+    return typeof selector === 'function' ? selector(state) : state;
+  },
 }));
 
 vi.mock('@/stores/agents', () => ({
@@ -75,8 +94,17 @@ vi.mock('@/lib/host-events', () => ({
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
+    i18n: { language: 'zh-CN' },
   }),
 }));
+
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => navigateMock,
+  };
+});
 
 vi.mock('sonner', () => ({
   toast: {
@@ -100,6 +128,9 @@ describe('Agents page status refresh', () => {
     updateAgentMock.mockResolvedValue(undefined);
     updateAgentModelMock.mockResolvedValue(undefined);
     refreshProviderSnapshotMock.mockResolvedValue(undefined);
+    fetchSkillsMock.mockResolvedValue(undefined);
+    gatewayRpcMock.mockResolvedValue({ sessions: [] });
+    navigateMock.mockReset();
     hostApiFetchMock.mockResolvedValue({
       success: true,
       channels: [],
@@ -196,11 +227,11 @@ describe('Agents page status refresh', () => {
     });
 
     fireEvent.click(screen.getByTitle('settings'));
-    fireEvent.click(screen.getByText('settingsDialog.modelLabel').closest('button') as HTMLButtonElement);
+    fireEvent.click(screen.getByTestId('agent-model-summary-card'));
 
     const useDefaultButton = await screen.findByRole('button', { name: 'settingsDialog.useDefaultModel' });
     const modelIdInput = screen.getByLabelText('settingsDialog.modelIdLabel');
-    const saveButton = screen.getByRole('button', { name: 'common:actions.save' });
+    const saveButton = screen.getAllByRole('button', { name: 'common:actions.save' }).at(-1);
 
     expect(useDefaultButton).toBeDisabled();
 

@@ -1,6 +1,6 @@
 {
   "title": "設定",
-  "subtitle": "Deep AI Worker の体験をカスタマイズ",
+  "subtitle": "{{appName}} の体験をカスタマイズ",
   "appearance": {
     "title": "通用",
     "description": "外観とスタイルをカスタマイズ",
@@ -10,7 +10,7 @@
     "system": "システム",
     "language": "言語",
     "launchAtStartup": "システム起動時に自動起動",
-    "launchAtStartupDesc": "ログイン時に Deep AI Worker を自動的に起動します"
+    "launchAtStartupDesc": "ログイン時に {{appName}} を自動的に起動します"
   },
   "aiProviders": {
     "title": "AI プロバイダー",
@@ -37,7 +37,7 @@
     "notRequired": "不要",
     "empty": {
       "title": "プロバイダーが構成されていません",
-      "desc": "Deep AI Worker の使用を開始するには AI プロバイダーを追加してください",
+      "desc": "{{appName}} の使用を開始するには AI プロバイダーを追加してください",
       "cta": "最初のプロバイダーを追加"
     },
     "dialog": {
@@ -49,9 +49,11 @@
       "apiKeyMissing": "このプロバイダーにはまだ API キーが保存されていません。",
       "apiKeyStored": "API キーはローカルマシンに保存されます。",
       "replaceApiKey": "API キーを置き換える",
-      "replaceApiKeyHelp": "現在保存されている API キーをそのまま使う場合は、この欄を空のままにしてください。",
+      "replaceApiKeyHelp": "現在保存されている API キーがこの欄に自動入力されます。必要に応じて変更して保存してください。",
       "baseUrl": "ベース URL",
       "modelId": "モデル ID",
+      "modelPreset": "おすすめモデル",
+      "modelPresetCustom": "手動入力",
       "codePlanPreset": "Code Plan プリセット",
       "codePlanMode": "Code Plan",
       "useCodePlanPreset": "Ark Code Plan プリセットを使用",
@@ -60,7 +62,7 @@
       "protocol": "プロトコル",
       "advancedConfig": "詳細設定",
       "userAgent": "User-Agent",
-      "userAgentPlaceholder": "Deep AI Worker/1.0",
+      "userAgentPlaceholder": "{{userAgentProduct}}",
       "fallbackModels": "フォールバックモデル",
       "fallbackProviders": "別プロバイダーへのフォールバック",
       "fallbackModelIds": "同一プロバイダーのフォールバックモデル ID",
@@ -79,6 +81,17 @@
       "configured": "構成済み",
       "noKey": "API キー未設定",
       "none": "なし",
+      "testButton": "テスト",
+      "testDetails": "テスト詳細",
+      "hideTestDetails": "結果を閉じる",
+      "testResult": "テスト結果",
+      "testPassed": "直近のテスト成功",
+      "testFailed": "直近のテスト失敗",
+      "testStatus": "状態",
+      "testBaseUrl": "リクエスト URL",
+      "testProtocol": "プロトコル",
+      "testOutput": "出力",
+      "testError": "エラー",
       "fallbacks_one": "フォールバック: {{names}}",
       "fallbacks_other": "フォールバック ({{count}}): {{names}}",
       "setDefault": "デフォルトに設定",
@@ -133,7 +146,7 @@
     "appLogs": "アプリケーションログ",
     "openFolder": "フォルダーを開く",
     "autoStart": "ゲートウェイ自動起動",
-    "autoStartDesc": "Deep AI Worker 起動時にゲートウェイを自動起動",
+    "autoStartDesc": "{{appName}} 起動時にゲートウェイを自動起動",
     "proxyTitle": "プロキシ",
     "proxyDesc": "Electron と Gateway の通信をローカルプロキシ経由にします。",
     "proxyServer": "プロキシサーバー",
@@ -154,7 +167,7 @@
   },
   "updates": {
     "title": "アップデート",
-    "description": "Deep AI Worker を最新に保つ",
+    "description": "{{appName}} を最新に保つ",
     "autoCheck": "自動更新チェック",
     "autoCheckDesc": "起動時に更新を確認",
     "autoDownload": "自動アップデート",
@@ -206,7 +219,17 @@
       }
     },
     "devMode": "開発者モード",
-    "devModeDesc": "開発者ツールとショートカットを表示"
+    "devModeDesc": "開発者ツールとショートカットを表示",
+    "chatProcessDisplay": "会話中の処理表示",
+    "chatProcessDisplayDesc": "会話内で exec / read などの処理カードを表示するかを切り替えます。",
+    "chatFontScale": "会話の文字サイズ",
+    "chatFontScaleDesc": "メッセージと入力欄の文字サイズを調整し、読みやすさを高めます。",
+    "chatFontScaleOption": "{{value}}%",
+    "chatProcessDisplayOptions": {
+      "all": "すべて表示",
+      "files": "ファイルのみ",
+      "hidden": "すべて非表示"
+    }
   },
   "developer": {
     "title": "開発者",
@@ -268,8 +291,8 @@
   },
   "about": {
     "title": "バージョン情報",
-    "appName": "Deep AI Worker",
-    "tagline": "グラフィカル AI アシスタント",
+    "appName": "{{appName}}",
+    "tagline": "{{slogan}}",
     "basedOn": "OpenClaw ベース",
     "version": "バージョン {{version}}",
     "docs": "公式サイト",

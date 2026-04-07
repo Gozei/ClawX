@@ -6,6 +6,7 @@ import {
   publicKeyRawBase64UrlFromPem,
   signDevicePayload,
 } from '../utils/device-identity';
+import { DEFAULT_BRANDING } from '../../shared/branding';
 import { logger } from '../utils/logger';
 
 export const GATEWAY_CHALLENGE_TIMEOUT_MS = 10_000;
@@ -149,7 +150,7 @@ export function buildGatewayConnectFrame(options: {
         maxProtocol: 3,
         client: {
           id: clientId,
-          displayName: 'ClawX',
+          displayName: options.brandingDisplayName || DEFAULT_BRANDING.productName,
           version: '0.1.0',
           platform: options.platform,
           mode: clientMode,
@@ -170,6 +171,7 @@ export async function connectGatewaySocket(options: {
   port: number;
   deviceIdentity: DeviceIdentity | null;
   platform: string;
+  brandingDisplayName?: string;
   pendingRequests: Map<string, PendingGatewayRequest>;
   getToken: () => Promise<string>;
   onHandshakeComplete: (ws: WebSocket) => void;

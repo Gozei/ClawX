@@ -23,6 +23,7 @@ import {
 import { TitleBar } from '@/components/layout/TitleBar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
@@ -99,6 +100,7 @@ import {
   type ProviderTypeInfo,
   getProviderDocsUrl,
   getProviderIconUrl,
+  getRecommendedModelOptions,
   resolveProviderApiKeyForSave,
   resolveProviderModelForSave,
   shouldInvertInDark,
@@ -111,6 +113,7 @@ import {
   pickPreferredAccount,
 } from '@/lib/provider-accounts';
 import clawxIcon from '@/assets/logo.svg';
+import { useBranding } from '@/lib/branding';
 
 // Use the shared provider registry for setup providers
 const providers = SETUP_PROVIDERS;
@@ -129,6 +132,7 @@ function getProtocolBaseUrlPlaceholder(
 
 export function Setup() {
   const { t } = useTranslation(['setup', 'channels']);
+  const branding = useBranding();
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState<number>(STEP.WELCOME);
 
@@ -247,8 +251,18 @@ export function Setup() {
             className="mx-auto max-w-2xl p-8"
           >
             <div className="text-center mb-8">
-              <h1 className="text-3xl font-bold mb-2">{t(`steps.${step.id}.title`)}</h1>
-              <p className="text-slate-400">{t(`steps.${step.id}.description`)}</p>
+              <h1 className="text-3xl font-bold mb-2">
+                {t(`steps.${step.id}.title`, {
+                  appName: branding.productName,
+                  slogan: branding.slogan,
+                })}
+              </h1>
+              <p className="text-slate-400">
+                {t(`steps.${step.id}.description`, {
+                  appName: branding.productName,
+                  slogan: branding.slogan,
+                })}
+              </p>
             </div>
 
             {/* Step-specific content */}
@@ -322,15 +336,22 @@ export function Setup() {
 function WelcomeContent() {
   const { t } = useTranslation(['setup', 'settings']);
   const { language, setLanguage } = useSettingsStore();
+  const branding = useBranding();
 
   return (
     <div data-testid="setup-welcome-step" className="text-center space-y-4">
       <div className="mb-4 flex justify-center">
-        <img src={clawxIcon} alt="ClawX" className="h-16 w-16" />
+        <img src={clawxIcon} alt={branding.productName} className="h-16 w-16" />
       </div>
-      <h2 className="text-xl font-semibold">{t('welcome.title')}</h2>
+      <div className="space-y-1">
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+          {branding.fullName}
+        </p>
+        <p className="text-sm font-medium text-foreground/85">{branding.slogan}</p>
+      </div>
+      <h2 className="text-xl font-semibold">{t('welcome.title', { appName: branding.productName })}</h2>
       <p className="text-muted-foreground">
-        {t('welcome.description')}
+        {t('welcome.description', { appName: branding.productName, slogan: branding.slogan })}
       </p>
 
       {/* Language Selector */}
@@ -999,6 +1020,15 @@ function ProviderContent({
     : undefined;
   const showBaseUrlField = selectedProviderData?.showBaseUrl ?? false;
   const showModelIdField = shouldShowProviderModelId(selectedProviderData, devModeUnlocked);
+  const recommendedModels = useMemo(
+    () => selectedProvider
+      ? getRecommendedModelOptions(selectedProvider, { baseUrl, apiProtocol })
+      : [],
+    [selectedProvider, baseUrl, apiProtocol],
+  );
+  const selectedRecommendedModel = recommendedModels.some((option) => option.value === modelId)
+    ? modelId
+    : '__custom__';
   const codePlanPreset = selectedProviderData?.codePlanPresetBaseUrl && selectedProviderData?.codePlanPresetModelId
     ? {
       baseUrl: selectedProviderData.codePlanPresetBaseUrl,
@@ -1350,6 +1380,28 @@ function ProviderContent({
           {showModelIdField && (
             <div className="space-y-2">
               <Label htmlFor="modelId">{t('provider.modelId')}</Label>
+              {recommendedModels.length > 0 && (
+                <div className="space-y-2">
+                  <Label>{t('provider.modelPreset')}</Label>
+                  <Select
+                    value={selectedRecommendedModel}
+                    onChange={(e) => {
+                      if (e.target.value !== '__custom__') {
+                        setModelId(e.target.value);
+                        onConfiguredChange(false);
+                      }
+                    }}
+                    className="bg-background border-input font-sans"
+                  >
+                    <option value="__custom__">{t('provider.modelPresetCustom')}</option>
+                    {recommendedModels.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
               <Input
                 id="modelId"
                 type="text"

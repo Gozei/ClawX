@@ -12,6 +12,7 @@ import { getOpenClawResolvedDir } from './paths';
 import * as logger from './logger';
 import { proxyAwareFetch } from './proxy-fetch';
 import { withConfigLock } from './config-mutex';
+import { readOpenClawRuntimeConfig, writeOpenClawRuntimeConfig } from './openclaw-config-assembler';
 import {
     OPENCLAW_WECHAT_CHANNEL_TYPE,
     isWechatChannelType,
@@ -335,14 +336,8 @@ async function ensureConfigDir(): Promise<void> {
 
 export async function readOpenClawConfig(): Promise<OpenClawConfig> {
     await ensureConfigDir();
-
-    if (!(await fileExists(CONFIG_FILE))) {
-        return {};
-    }
-
     try {
-        const content = await readFile(CONFIG_FILE, 'utf-8');
-        return JSON.parse(content) as OpenClawConfig;
+        return await readOpenClawRuntimeConfig() as OpenClawConfig;
     } catch (error) {
         logger.error('Failed to read OpenClaw config', error);
         console.error('Failed to read OpenClaw config:', error);
@@ -362,7 +357,7 @@ export async function writeOpenClawConfig(config: OpenClawConfig): Promise<void>
         commands.restart = true;
         config.commands = commands;
 
-        await writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+        await writeOpenClawRuntimeConfig(config);
     } catch (error) {
         logger.error('Failed to write OpenClaw config', error);
         console.error('Failed to write OpenClaw config:', error);

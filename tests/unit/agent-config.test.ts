@@ -183,6 +183,79 @@ describe('agent config lifecycle', () => {
     });
   });
 
+  it('writes studio context into the agent workspace AGENTS.md file', async () => {
+    await writeOpenClawJson({
+      agents: {
+        defaults: {
+          workspace: '~/.openclaw/workspace',
+          model: {
+            primary: 'zai/glm-5',
+          },
+        },
+        list: [
+          {
+            id: 'main',
+            name: 'Main',
+            default: true,
+            workspace: '~/.openclaw/workspace',
+            agentDir: '~/.openclaw/agents/main/agent',
+          },
+          {
+            id: 'writer',
+            name: '公文起草专家',
+            workspace: '~/.openclaw/workspace-writer',
+            agentDir: '~/.openclaw/agents/writer/agent',
+          },
+        ],
+      },
+    });
+
+    const workspaceDir = join(testHome, '.openclaw', 'workspace-writer');
+    await mkdir(workspaceDir, { recursive: true });
+    await writeFile(join(workspaceDir, 'AGENTS.md'), '# Workspace Writer\n\nExisting content.\n', 'utf8');
+
+    const { updateAgentStudio } = await import('@electron/utils/agent-config');
+
+    await updateAgentStudio('writer', {
+      profileType: 'specialist',
+      description: '负责公文起草与润色',
+      objective: '输出结构化、可审阅的公文草稿',
+      boundaries: '缺少政策依据时必须先澄清，不得自行编造',
+      outputContract: '输出标题、正文、落款和政策依据说明',
+      skillIds: ['search-docs', 'policy-lookup'],
+      triggerModes: ['manual', 'channel'],
+      workflowNodes: [
+        { id: 'step-1', type: 'instruction', title: '识别公文类型', inputSpec: 'topic, audience', outputSpec: 'docType' },
+        { id: 'step-2', type: 'skill', title: '检索政策依据', target: 'policy-lookup', inputSpec: 'docType', outputSpec: 'policyReferences', code: 'query_policy_index(docType)' },
+        { id: 'step-3', type: 'agent', title: '交给审稿智能体复核', target: 'reviewer', inputSpec: 'draft, policyReferences', outputSpec: 'reviewNotes' },
+        { id: 'step-4', type: 'model', title: '生成公文草稿', target: 'zai/glm-5', modelRef: 'zai/glm-5', onFailure: 'retry' },
+      ],
+    });
+
+    const content = await readFile(join(workspaceDir, 'AGENTS.md'), 'utf8');
+    expect(content).toContain('## Deep AI Worker Agent Studio');
+    expect(content).toContain('Agent Name: 公文起草专家');
+    expect(content).toContain('Role: 负责公文起草与润色');
+    expect(content).toContain('Agent Type: specialist');
+    expect(content).toContain('Business Goal: 输出结构化、可审阅的公文草稿');
+    expect(content).toContain('Guardrails: 缺少政策依据时必须先澄清，不得自行编造');
+    expect(content).toContain('Output Contract: 输出标题、正文、落款和政策依据说明');
+    expect(content).toContain('Enabled Skills: search-docs, policy-lookup');
+    expect(content).toContain('Trigger Modes: manual, channel');
+    expect(content).toContain('1. [instruction] 识别公文类型 | input: topic, audience | output: docType');
+    expect(content).toContain('2. [skill] 检索政策依据 -> policy-lookup | input: docType | output: policyReferences');
+    expect(content).toContain('query_policy_index(docType)');
+    expect(content).toContain('3. [agent] 交给审稿智能体复核 -> reviewer | input: draft, policyReferences | output: reviewNotes');
+    expect(content).toContain('4. [model] 生成公文草稿 -> zai/glm-5 | model: zai/glm-5 (on failure: retry)');
+    expect(content).toContain('### Execution Playbook');
+    expect(content).toContain('智能体类型：specialist。');
+    expect(content).toContain('业务目标：输出结构化、可审阅的公文草稿');
+    expect(content).toContain('执行边界：缺少政策依据时必须先澄清，不得自行编造');
+    expect(content).toContain('输出要求：输出标题、正文、落款和政策依据说明');
+    expect(content).toContain('仅优先使用这些已装配技能：search-docs、policy-lookup。');
+    expect(content).toContain('委派给智能体 "reviewer"');
+  });
+
   it('rejects invalid model ref formats when updating agent model', async () => {
     await writeOpenClawJson({
       agents: {

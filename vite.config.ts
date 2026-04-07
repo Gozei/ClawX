@@ -66,5 +66,18 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('react-markdown') || id.includes('remark-gfm')) return 'markdown';
+          if (id.includes('@radix-ui')) return 'react-vendor';
+          if (id.includes('react-dom') || id.includes('react-router') || id.includes('/react/')) return 'react-vendor';
+          if (id.includes('i18next') || id.includes('react-i18next')) return 'i18n';
+          if (id.includes('lucide-react') || id.includes('framer-motion')) return 'ui-vendor';
+          if (id.includes('sonner') || id.includes('zustand')) return 'app-vendor';
+        },
+      },
+    },
   },
 });

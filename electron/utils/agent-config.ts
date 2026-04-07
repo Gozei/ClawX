@@ -1,4 +1,4 @@
-import { access, copyFile, mkdir, readdir, rm } from 'fs/promises';
+import { access, copyFile, mkdir, readFile, readdir, rm, writeFile } from 'fs/promises';
 import { constants } from 'fs';
 import { join, normalize } from 'path';
 import { deleteAgentChannelAccounts, listConfiguredChannels, readOpenClawConfig, writeOpenClawConfig } from './channel-config';
@@ -6,6 +6,8 @@ import { withConfigLock } from './config-mutex';
 import { expandPath, getOpenClawConfigDir } from './paths';
 import * as logger from './logger';
 import { toUiChannelType } from './channel-alias';
+import { mergeClawXSection } from './openclaw-workspace';
+import { buildSharedExecutionPlaybook } from '../../shared/agent-execution';
 
 const MAIN_AGENT_ID = 'main';
 const MAIN_AGENT_NAME = 'Main Agent';
@@ -24,6 +26,7 @@ const AGENT_RUNTIME_FILES = [
   'auth-profiles.json',
   'models.json',
 ];
+const AGENT_STUDIO_CONTEXT_TITLE = '## Deep AI Worker Agent Studio';
 
 interface AgentModelConfig {
   primary?: string;
@@ -43,11 +46,36 @@ interface AgentListEntry extends Record<string, unknown> {
   workspace?: string;
   agentDir?: string;
   model?: string | AgentModelConfig;
+  studio?: AgentStudioConfig;
 }
 
 interface AgentsConfig extends Record<string, unknown> {
   defaults?: AgentDefaultsConfig;
   list?: AgentListEntry[];
+}
+
+interface AgentStudioConfig extends Record<string, unknown> {
+  profileType?: string;
+  description?: string;
+  objective?: string;
+  boundaries?: string;
+  outputContract?: string;
+  skillIds?: string[];
+  workflowSteps?: string[];
+  workflowNodes?: AgentWorkflowNodeConfig[];
+  triggerModes?: string[];
+}
+
+interface AgentWorkflowNodeConfig extends Record<string, unknown> {
+  id?: string;
+  type?: string;
+  title?: string;
+  target?: string | null;
+  onFailure?: string;
+  inputSpec?: string | null;
+  outputSpec?: string | null;
+  modelRef?: string | null;
+  code?: string | null;
 }
 
 interface BindingMatch extends Record<string, unknown> {
@@ -79,6 +107,7 @@ interface AgentConfigDocument extends Record<string, unknown> {
 export interface AgentSummary {
   id: string;
   name: string;
+  profileType?: 'specialist' | 'executor' | 'coordinator' | null;
   isDefault: boolean;
   modelDisplay: string;
   modelRef: string | null;
@@ -88,6 +117,26 @@ export interface AgentSummary {
   agentDir: string;
   mainSessionKey: string;
   channelTypes: string[];
+  skillIds: string[];
+  workflowSteps: string[];
+  workflowNodes?: AgentWorkflowNode[];
+  triggerModes: string[];
+  description?: string | null;
+  objective?: string | null;
+  boundaries?: string | null;
+  outputContract?: string | null;
+}
+
+export interface AgentWorkflowNode {
+  id: string;
+  type: 'instruction' | 'skill' | 'model' | 'channel' | 'agent';
+  title: string;
+  target?: string | null;
+  onFailure?: 'continue' | 'retry' | 'handoff';
+  inputSpec?: string | null;
+  outputSpec?: string | null;
+  modelRef?: string | null;
+  code?: string | null;
 }
 
 export interface AgentsSnapshot {
@@ -97,6 +146,18 @@ export interface AgentsSnapshot {
   configuredChannelTypes: string[];
   channelOwners: Record<string, string>;
   channelAccountOwners: Record<string, string>;
+}
+
+interface AgentStudioUpdates {
+  profileType?: string | null;
+  description?: string | null;
+  objective?: string | null;
+  boundaries?: string | null;
+  outputContract?: string | null;
+  skillIds?: string[];
+  workflowSteps?: string[];
+  workflowNodes?: AgentWorkflowNode[];
+  triggerModes?: string[];
 }
 
 function resolveModelRef(model: unknown): string | null {
@@ -129,6 +190,94 @@ function normalizeAgentName(name: string): string {
   return name.trim() || 'Agent';
 }
 
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(
+    value
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+  ));
+}
+
+function normalizeOptionalText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function normalizeProfileType(value: unknown): AgentSummary['profileType'] {
+  if (value === 'specialist' || value === 'executor' || value === 'coordinator') {
+    return value;
+  }
+  return null;
+}
+
+function normalizeWorkflowNodes(value: unknown): AgentWorkflowNode[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null;
+      const source = item as AgentWorkflowNodeConfig;
+      const type = typeof source.type === 'string' ? source.type.trim() : '';
+      const normalizedType = ['instruction', 'skill', 'model', 'channel', 'agent'].includes(type) ? type as AgentWorkflowNode['type'] : 'instruction';
+      const title = typeof source.title === 'string' ? source.title.trim() : '';
+      if (!title) return null;
+      const target = typeof source.target === 'string' ? source.target.trim() : '';
+      const onFailure = typeof source.onFailure === 'string' ? source.onFailure.trim() : '';
+      const inputSpec = typeof source.inputSpec === 'string' ? source.inputSpec.trim() : '';
+      const outputSpec = typeof source.outputSpec === 'string' ? source.outputSpec.trim() : '';
+      const modelRef = typeof source.modelRef === 'string' ? source.modelRef.trim() : '';
+      const code = typeof source.code === 'string' ? source.code.trim() : '';
+      const normalizedOnFailure = ['continue', 'retry', 'handoff'].includes(onFailure)
+        ? onFailure as AgentWorkflowNode['onFailure']
+        : 'continue';
+      return {
+        id: typeof source.id === 'string' && source.id.trim() ? source.id.trim() : `step-${index + 1}`,
+        type: normalizedType,
+        title,
+        ...(target ? { target } : {}),
+        onFailure: normalizedOnFailure,
+        ...(inputSpec ? { inputSpec } : {}),
+        ...(outputSpec ? { outputSpec } : {}),
+        ...(modelRef ? { modelRef } : {}),
+        ...(code ? { code } : {}),
+      };
+    })
+    .filter((item): item is AgentWorkflowNode => Boolean(item));
+}
+
+function summarizeWorkflowNode(node: AgentWorkflowNode): string {
+  const targetSuffix = node.target ? ` · ${node.target}` : '';
+  const modelSuffix = node.modelRef ? ` · model:${node.modelRef}` : '';
+  return `${node.title}${targetSuffix}${modelSuffix}`;
+}
+
+function normalizeAgentStudio(studio: unknown): AgentStudioConfig {
+  const source = studio && typeof studio === 'object' ? studio as AgentStudioConfig : {};
+  const profileType = normalizeProfileType(source.profileType);
+  const description = normalizeOptionalText(source.description);
+  const objective = normalizeOptionalText(source.objective);
+  const boundaries = normalizeOptionalText(source.boundaries);
+  const outputContract = normalizeOptionalText(source.outputContract);
+  const skillIds = normalizeStringList(source.skillIds);
+  const workflowNodes = normalizeWorkflowNodes(source.workflowNodes);
+  const workflowSteps = workflowNodes.length > 0
+    ? workflowNodes.map(summarizeWorkflowNode)
+    : normalizeStringList(source.workflowSteps);
+  const triggerModes = normalizeStringList(source.triggerModes);
+  return {
+    ...(profileType ? { profileType } : {}),
+    ...(description ? { description } : {}),
+    ...(objective ? { objective } : {}),
+    ...(boundaries ? { boundaries } : {}),
+    ...(outputContract ? { outputContract } : {}),
+    ...(skillIds.length > 0 ? { skillIds } : {}),
+    ...(workflowSteps.length > 0 ? { workflowSteps } : {}),
+    ...(workflowNodes.length > 0 ? { workflowNodes } : {}),
+    ...(triggerModes.length > 0 ? { triggerModes } : {}),
+  };
+}
+
 function slugifyAgentId(name: string): string {
   const normalized = name
     .normalize('NFKD')
@@ -155,6 +304,152 @@ async function fileExists(path: string): Promise<boolean> {
 async function ensureDir(path: string): Promise<void> {
   if (!(await fileExists(path))) {
     await mkdir(path, { recursive: true });
+  }
+}
+
+function renderAgentStudioContext(agent: AgentSummary): string {
+  const lines: string[] = [
+    AGENT_STUDIO_CONTEXT_TITLE,
+    '',
+    `- Agent ID: ${agent.id}`,
+    `- Agent Name: ${agent.name}`,
+    `- Preferred Model: ${agent.modelRef || 'inherit default model'}`,
+  ];
+
+  if (agent.description?.trim()) {
+    lines.push(`- Role: ${agent.description.trim()}`);
+  }
+  if (agent.profileType) {
+    lines.push(`- Agent Type: ${agent.profileType}`);
+  }
+  if (agent.objective?.trim()) {
+    lines.push(`- Business Goal: ${agent.objective.trim()}`);
+  }
+  if (agent.boundaries?.trim()) {
+    lines.push(`- Guardrails: ${agent.boundaries.trim()}`);
+  }
+  if (agent.outputContract?.trim()) {
+    lines.push(`- Output Contract: ${agent.outputContract.trim()}`);
+  }
+
+  if (agent.channelTypes.length > 0) {
+    lines.push(`- Bound Channels: ${agent.channelTypes.join(', ')}`);
+  }
+
+  if (agent.triggerModes.length > 0) {
+    lines.push(`- Trigger Modes: ${agent.triggerModes.join(', ')}`);
+  }
+
+  if (agent.skillIds.length > 0) {
+    lines.push(`- Enabled Skills: ${agent.skillIds.join(', ')}`);
+  }
+
+  if (agent.workflowNodes && agent.workflowNodes.length > 0) {
+    lines.push('', '### Workflow');
+    for (const [index, node] of agent.workflowNodes.entries()) {
+      const parts = [
+        `${index + 1}.`,
+        `[${node.type}]`,
+        node.title,
+      ];
+      if (node.target) {
+        parts.push(`-> ${node.target}`);
+      }
+      if (node.inputSpec) {
+        parts.push(`| input: ${node.inputSpec}`);
+      }
+      if (node.outputSpec) {
+        parts.push(`| output: ${node.outputSpec}`);
+      }
+      if (node.modelRef) {
+        parts.push(`| model: ${node.modelRef}`);
+      }
+      if (node.onFailure && node.onFailure !== 'continue') {
+        parts.push(`(on failure: ${node.onFailure})`);
+      }
+      lines.push(parts.join(' '));
+      if (node.code) {
+        lines.push('   ```text');
+        lines.push(`   ${node.code}`);
+        lines.push('   ```');
+      }
+    }
+  } else if (agent.workflowSteps.length > 0) {
+    lines.push('', '### Workflow');
+    for (const [index, step] of agent.workflowSteps.entries()) {
+      lines.push(`${index + 1}. ${step}`);
+    }
+  }
+
+  const playbook = buildSharedExecutionPlaybook({
+    id: agent.id,
+    name: agent.name,
+    profileType: agent.profileType,
+    description: agent.description,
+    objective: agent.objective,
+    boundaries: agent.boundaries,
+    outputContract: agent.outputContract,
+    modelRef: agent.modelRef,
+    skillIds: agent.skillIds,
+    triggerModes: agent.triggerModes,
+    workflowNodes: agent.workflowNodes,
+  });
+  if (playbook.length > 0) {
+    lines.push('', '### Execution Playbook');
+    for (const rule of playbook) {
+      lines.push(`- ${rule}`);
+    }
+  }
+
+  lines.push(
+    '',
+    'Use this configuration as the operating context for this agent. Respect the selected skills, preferred model, and workflow when deciding how to act.',
+  );
+
+  return lines.join('\n');
+}
+
+async function syncAgentWorkspaceStudioContextFromConfig(
+  config: AgentConfigDocument,
+  agentId: string,
+): Promise<void> {
+  const snapshot = await buildSnapshotFromConfig(config);
+  const agent = snapshot.agents.find((entry) => entry.id === agentId);
+  if (!agent) return;
+
+  const workspaceDir = expandPath(agent.workspace);
+  const agentsFilePath = join(workspaceDir, 'AGENTS.md');
+  await ensureDir(workspaceDir);
+
+  const baseContent = await fileExists(agentsFilePath)
+    ? await readFile(agentsFilePath, 'utf-8')
+    : `# ${agent.name}\n\n`;
+
+  const nextContent = mergeClawXSection(baseContent, renderAgentStudioContext(agent));
+  if (nextContent !== baseContent) {
+    await writeFile(agentsFilePath, nextContent, 'utf-8');
+    logger.info('Synced agent studio context into workspace', { agentId, workspaceDir });
+  }
+}
+
+export async function syncAllAgentWorkspaceStudioContexts(): Promise<void> {
+  const config = await readOpenClawConfig() as AgentConfigDocument;
+  const snapshot = await buildSnapshotFromConfig(config);
+
+  for (const agent of snapshot.agents) {
+    const workspaceDir = expandPath(agent.workspace);
+    const agentsFilePath = join(workspaceDir, 'AGENTS.md');
+    await ensureDir(workspaceDir);
+
+    const baseContent = await fileExists(agentsFilePath)
+      ? await readFile(agentsFilePath, 'utf-8')
+      : `# ${agent.name}\n\n`;
+
+    const nextContent = mergeClawXSection(baseContent, renderAgentStudioContext(agent));
+    if (nextContent !== baseContent) {
+      await writeFile(agentsFilePath, nextContent, 'utf-8');
+      logger.info('Synced agent studio context into workspace', { agentId: agent.id, workspaceDir });
+    }
   }
 }
 
@@ -521,6 +816,15 @@ async function buildSnapshotFromConfig(config: AgentConfigDocument): Promise<Age
       channelTypes: configuredChannels
         .filter((ct) => ownedChannels.has(ct))
         .map((channelType) => toUiChannelType(channelType)),
+      skillIds: normalizeStringList(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).skillIds : []),
+      workflowSteps: normalizeStringList(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).workflowSteps : []),
+      workflowNodes: normalizeWorkflowNodes(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).workflowNodes : []),
+      triggerModes: normalizeStringList(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).triggerModes : []),
+      profileType: normalizeProfileType(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).profileType : undefined),
+      description: normalizeOptionalText(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).description : undefined) || null,
+      objective: normalizeOptionalText(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).objective : undefined) || null,
+      boundaries: normalizeOptionalText(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).boundaries : undefined) || null,
+      outputContract: normalizeOptionalText(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).outputContract : undefined) || null,
     };
   });
 
@@ -549,7 +853,7 @@ export async function listConfiguredAgentIds(): Promise<string[]> {
 export async function createAgent(
   name: string,
   options?: { inheritWorkspace?: boolean },
-): Promise<AgentsSnapshot> {
+): Promise<{ snapshot: AgentsSnapshot; createdAgentId: string }> {
   return withConfigLock(async () => {
     const config = await readOpenClawConfig() as AgentConfigDocument;
     const { agentsConfig, entries, syntheticMain } = normalizeAgentsConfig(config);
@@ -584,8 +888,12 @@ export async function createAgent(
 
     await provisionAgentFilesystem(config, newAgent, { inheritWorkspace: options?.inheritWorkspace });
     await writeOpenClawConfig(config);
+    await syncAgentWorkspaceStudioContextFromConfig(config, nextId);
     logger.info('Created agent config entry', { agentId: nextId, inheritWorkspace: !!options?.inheritWorkspace });
-    return buildSnapshotFromConfig(config);
+    return {
+      snapshot: await buildSnapshotFromConfig(config),
+      createdAgentId: nextId,
+    };
   });
 }
 
@@ -610,6 +918,7 @@ export async function updateAgentName(agentId: string, name: string): Promise<Ag
     };
 
     await writeOpenClawConfig(config);
+    await syncAgentWorkspaceStudioContextFromConfig(config, agentId);
     logger.info('Updated agent name', { agentId, name: normalizedName });
     return buildSnapshotFromConfig(config);
   });
@@ -648,7 +957,69 @@ export async function updateAgentModel(agentId: string, modelRef: string | null)
     };
 
     await writeOpenClawConfig(config);
+    await syncAgentWorkspaceStudioContextFromConfig(config, agentId);
     logger.info('Updated agent model', { agentId, modelRef: normalizedModelRef || null });
+    return buildSnapshotFromConfig(config);
+  });
+}
+
+export async function updateAgentStudio(agentId: string, updates: AgentStudioUpdates): Promise<AgentsSnapshot> {
+  return withConfigLock(async () => {
+    const config = await readOpenClawConfig() as AgentConfigDocument;
+    const { agentsConfig, entries } = normalizeAgentsConfig(config);
+    const index = entries.findIndex((entry) => entry.id === agentId);
+    if (index === -1) {
+      throw new Error(`Agent "${agentId}" not found`);
+    }
+
+    const nextEntry: AgentListEntry = { ...entries[index] };
+    const currentStudio = normalizeAgentStudio(nextEntry.studio);
+    const nextStudio: AgentStudioConfig = {
+      ...currentStudio,
+      ...(updates.profileType !== undefined ? { profileType: normalizeProfileType(updates.profileType) || undefined } : {}),
+      ...(updates.description !== undefined
+        ? (updates.description?.trim() ? { description: updates.description.trim() } : { description: undefined })
+        : {}),
+      ...(updates.objective !== undefined
+        ? (updates.objective?.trim() ? { objective: updates.objective.trim() } : { objective: undefined })
+        : {}),
+      ...(updates.boundaries !== undefined
+        ? (updates.boundaries?.trim() ? { boundaries: updates.boundaries.trim() } : { boundaries: undefined })
+        : {}),
+      ...(updates.outputContract !== undefined
+        ? (updates.outputContract?.trim() ? { outputContract: updates.outputContract.trim() } : { outputContract: undefined })
+        : {}),
+      ...(updates.skillIds !== undefined ? { skillIds: normalizeStringList(updates.skillIds) } : {}),
+      ...(updates.workflowSteps !== undefined ? { workflowSteps: normalizeStringList(updates.workflowSteps) } : {}),
+      ...(updates.workflowNodes !== undefined ? {
+        workflowNodes: normalizeWorkflowNodes(updates.workflowNodes),
+        workflowSteps: normalizeWorkflowNodes(updates.workflowNodes).map(summarizeWorkflowNode),
+      } : {}),
+      ...(updates.triggerModes !== undefined ? { triggerModes: normalizeStringList(updates.triggerModes) } : {}),
+    };
+
+    const normalizedStudio = normalizeAgentStudio(nextStudio);
+    if (Object.keys(normalizedStudio).length === 0) {
+      delete nextEntry.studio;
+    } else {
+      nextEntry.studio = normalizedStudio;
+    }
+
+    entries[index] = nextEntry;
+    config.agents = {
+      ...agentsConfig,
+      list: entries,
+    };
+
+    await writeOpenClawConfig(config);
+    await syncAgentWorkspaceStudioContextFromConfig(config, agentId);
+    logger.info('Updated agent studio config', {
+      agentId,
+      skillCount: normalizedStudio.skillIds?.length || 0,
+      workflowStepCount: normalizedStudio.workflowSteps?.length || 0,
+      workflowNodeCount: normalizedStudio.workflowNodes?.length || 0,
+      triggerModeCount: normalizedStudio.triggerModes?.length || 0,
+    });
     return buildSnapshotFromConfig(config);
   });
 }

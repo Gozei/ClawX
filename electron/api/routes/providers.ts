@@ -17,11 +17,12 @@ import {
   syncSavedProviderToRuntime,
   syncUpdatedProviderToRuntime,
 } from '../../services/providers/provider-runtime-sync';
-import { validateApiKeyWithProvider } from '../../services/providers/provider-validation';
+import { testProviderConnection, validateApiKeyWithProvider } from '../../services/providers/provider-validation';
 import { getProviderService } from '../../services/providers/provider-service';
 import { providerAccountToConfig } from '../../services/providers/provider-store';
 import type { ProviderAccount } from '../../shared/providers/types';
 import { logger } from '../../utils/logger';
+import { getApiKey } from '../../utils/secure-storage';
 
 const legacyProviderRoutesWarned = new Set<string>();
 
@@ -119,6 +120,36 @@ export async function handleProviderRoutes(
       sendJson(res, 200, { success: true, account: nextAccount });
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname.startsWith('/api/provider-accounts/') && url.pathname.endsWith('/test') && req.method === 'POST') {
+    const accountId = decodeURIComponent(
+      url.pathname.slice('/api/provider-accounts/'.length, -'/test'.length),
+    );
+    try {
+      const body = await parseJsonBody<{
+        apiKey?: string | null;
+        model?: string;
+        baseUrl?: string;
+        apiProtocol?: string;
+      }>(req);
+      const existing = await providerService.getAccount(accountId);
+      if (!existing) {
+        sendJson(res, 404, { valid: false, error: 'Provider account not found' });
+        return true;
+      }
+
+      const apiKey = body.apiKey?.trim() || await getApiKey(accountId) || '';
+      const result = await testProviderConnection(existing.vendorId, apiKey, {
+        model: body.model || existing.model,
+        baseUrl: body.baseUrl || existing.baseUrl,
+        apiProtocol: body.apiProtocol || existing.apiProtocol,
+      });
+      sendJson(res, result.valid ? 200 : 400, result);
+    } catch (error) {
+      sendJson(res, 500, { valid: false, error: String(error) });
     }
     return true;
   }

@@ -4,10 +4,12 @@ import {
   clearChannelBinding,
   createAgent,
   deleteAgentConfig,
+  type AgentWorkflowNode,
   listAgentsSnapshot,
   removeAgentWorkspaceDirectory,
   resolveAccountIdForAgent,
   updateAgentModel,
+  updateAgentStudio,
   updateAgentName,
 } from '../../utils/agent-config';
 import { deleteChannelAccountConfig } from '../../utils/channel-config';
@@ -118,17 +120,31 @@ export async function handleAgentRoutes(
 
   if (url.pathname === '/api/agents' && req.method === 'POST') {
     try {
-      const body = await parseJsonBody<{ name: string; inheritWorkspace?: boolean }>(req);
-      const snapshot = await createAgent(body.name, { inheritWorkspace: body.inheritWorkspace });
-      // Sync provider API keys to the new agent's auth-profiles.json so the
-      // embedded runner can authenticate with LLM providers when messages
-      // arrive via channel bots (e.g. Feishu). Without this, the copied
-      // auth-profiles.json may contain a stale key → 401 from the LLM.
-      syncAllProviderAuthToRuntime().catch((err) => {
+      const body = await parseJsonBody<{
+        name: string;
+        inheritWorkspace?: boolean;
+        studio?: {
+          profileType?: string | null;
+          description?: string | null;
+          objective?: string | null;
+          boundaries?: string | null;
+          outputContract?: string | null;
+        };
+      }>(req);
+      const created = await createAgent(body.name, { inheritWorkspace: body.inheritWorkspace });
+      const snapshot = body.studio
+        ? await updateAgentStudio(created.createdAgentId, body.studio)
+        : created.snapshot;
+      // Sync provider API keys to the new agent's auth-profiles.json before
+      // returning success. If this runs in the background, users can open the
+      // new agent immediately and hit "No API key found" before the sync lands.
+      try {
+        await syncAllProviderAuthToRuntime();
+      } catch (err) {
         console.warn('[agents] Failed to sync provider auth after agent creation:', err);
-      });
+      }
       scheduleGatewayReload(ctx, 'create-agent');
-      sendJson(res, 200, { success: true, ...snapshot });
+      sendJson(res, 200, { success: true, createdAgentId: created.createdAgentId, ...snapshot });
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
     }
@@ -165,6 +181,25 @@ export async function handleAgentRoutes(
           console.warn('[agents] Failed to sync runtime after updating agent model:', syncError);
         }
         scheduleGatewayReload(ctx, 'update-agent-model');
+        sendJson(res, 200, { success: true, ...snapshot });
+      } catch (error) {
+        sendJson(res, 500, { success: false, error: String(error) });
+      }
+      return true;
+    }
+
+    if (parts.length === 2 && parts[1] === 'studio') {
+      try {
+        const body = await parseJsonBody<{
+          description?: string | null;
+          skillIds?: string[];
+          workflowSteps?: string[];
+          workflowNodes?: AgentWorkflowNode[];
+          triggerModes?: string[];
+        }>(req);
+        const agentId = decodeURIComponent(parts[0]);
+        const snapshot = await updateAgentStudio(agentId, body);
+        scheduleGatewayReload(ctx, 'update-agent-studio');
         sendJson(res, 200, { success: true, ...snapshot });
       } catch (error) {
         sendJson(res, 500, { success: false, error: String(error) });

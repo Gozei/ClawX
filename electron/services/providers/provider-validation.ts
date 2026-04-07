@@ -10,6 +10,14 @@ type ValidationProfile =
   | 'none';
 
 type ValidationResult = { valid: boolean; error?: string; status?: number };
+export type ProviderConnectionTestResult = {
+  valid: boolean;
+  error?: string;
+  status?: number;
+  model?: string;
+  output?: string;
+  latencyMs?: number;
+};
 
 function logValidationStatus(provider: string, status: number): void {
   console.log(`[clawx-validate] ${provider} HTTP ${status}`);
@@ -145,6 +153,103 @@ function classifyAuthResponse(
   const obj = data as { error?: { message?: string }; message?: string } | null;
   const msg = obj?.error?.message || obj?.message || `API error: ${status}`;
   return { valid: false, error: msg };
+}
+
+function extractOpenAiMessageText(payload: unknown): string | undefined {
+  const record = payload as Record<string, unknown> | null;
+  const choices = Array.isArray(record?.choices) ? record.choices : [];
+  const message = choices[0] && typeof choices[0] === 'object'
+    ? (choices[0] as Record<string, unknown>).message as Record<string, unknown> | undefined
+    : undefined;
+  const content = message?.content;
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+  if (Array.isArray(content)) {
+    const text = content
+      .map((item) => (typeof item === 'object' && item && typeof (item as Record<string, unknown>).text === 'string')
+        ? (item as Record<string, unknown>).text as string
+        : '')
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+    return text || undefined;
+  }
+  return undefined;
+}
+
+function extractResponsesText(payload: unknown): string | undefined {
+  const record = payload as Record<string, unknown> | null;
+  if (typeof record?.output_text === 'string' && record.output_text.trim()) {
+    return record.output_text.trim();
+  }
+
+  const output = Array.isArray(record?.output) ? record.output : [];
+  const text = output.flatMap((item) => {
+    if (typeof item !== 'object' || !item) return [];
+    const content = (item as Record<string, unknown>).content;
+    if (!Array.isArray(content)) return [];
+    return content.map((part) => (
+      typeof part === 'object' && part && typeof (part as Record<string, unknown>).text === 'string'
+        ? (part as Record<string, unknown>).text as string
+        : ''
+    ));
+  }).filter(Boolean).join('\n').trim();
+  return text || undefined;
+}
+
+function extractAnthropicText(payload: unknown): string | undefined {
+  const record = payload as Record<string, unknown> | null;
+  const content = Array.isArray(record?.content) ? record.content : [];
+  const text = content
+    .map((item) => (
+      typeof item === 'object' && item && typeof (item as Record<string, unknown>).text === 'string'
+        ? (item as Record<string, unknown>).text as string
+        : ''
+    ))
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+  return text || undefined;
+}
+
+async function performConnectionTestRequest(
+  providerLabel: string,
+  url: string,
+  init: RequestInit,
+  extractOutput: (payload: unknown) => string | undefined,
+  model: string,
+): Promise<ProviderConnectionTestResult> {
+  const startedAt = Date.now();
+  try {
+    logValidationRequest(providerLabel, init.method || 'POST', url, (init.headers as Record<string, string>) || {});
+    const response = await proxyAwareFetch(url, init);
+    logValidationStatus(providerLabel, response.status);
+    const data = await response.json().catch(() => ({}));
+    if (response.status < 200 || response.status >= 300) {
+      return {
+        ...classifyAuthResponse(response.status, data),
+        status: response.status,
+        model,
+        latencyMs: Date.now() - startedAt,
+      };
+    }
+
+    return {
+      valid: true,
+      status: response.status,
+      model,
+      output: extractOutput(data) || '连接成功',
+      latencyMs: Date.now() - startedAt,
+    };
+  } catch (error) {
+    return {
+      valid: false,
+      error: `Connection error: ${error instanceof Error ? error.message : String(error)}`,
+      model,
+      latencyMs: Date.now() - startedAt,
+    };
+  }
 }
 
 async function validateOpenAiCompatibleKey(
@@ -385,4 +490,143 @@ export async function validateApiKeyWithProvider(
     const errorMessage = error instanceof Error ? error.message : String(error);
     return { valid: false, error: errorMessage };
   }
+}
+
+export async function testProviderConnection(
+  providerType: string,
+  apiKey: string,
+  options?: { baseUrl?: string; apiProtocol?: string; model?: string },
+): Promise<ProviderConnectionTestResult> {
+  const profile = getValidationProfile(providerType, options);
+  const resolvedBaseUrl = options?.baseUrl || getProviderConfig(providerType)?.baseUrl;
+  const model = options?.model?.trim();
+
+  if (!model) {
+    return { valid: false, error: 'Model is required for connection test' };
+  }
+
+  const trimmedKey = apiKey.trim();
+  if (!trimmedKey && profile !== 'none') {
+    return { valid: false, error: 'API key is required' };
+  }
+
+  if (profile === 'openai-completions' || profile === 'openrouter') {
+    if (!resolvedBaseUrl) return { valid: false, error: `Base URL is required for provider "${providerType}" test` };
+    const headers = {
+      Authorization: `Bearer ${trimmedKey}`,
+      'Content-Type': 'application/json',
+    };
+    const { probeUrl } = resolveOpenAiProbeUrls(resolvedBaseUrl, 'openai-completions');
+    return await performConnectionTestRequest(
+      providerType,
+      probeUrl,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: '请简短回复“连接成功”，并带上当前模型名。' }],
+          max_tokens: 64,
+          temperature: 0,
+        }),
+      },
+      extractOpenAiMessageText,
+      model,
+    );
+  }
+
+  if (profile === 'openai-responses') {
+    if (!resolvedBaseUrl) return { valid: false, error: `Base URL is required for provider "${providerType}" test` };
+    const headers = {
+      Authorization: `Bearer ${trimmedKey}`,
+      'Content-Type': 'application/json',
+    };
+    const { probeUrl } = resolveOpenAiProbeUrls(resolvedBaseUrl, 'openai-responses');
+    return await performConnectionTestRequest(
+      providerType,
+      probeUrl,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model,
+          input: '请简短回复“连接成功”，并带上当前模型名。',
+          max_output_tokens: 64,
+        }),
+      },
+      extractResponsesText,
+      model,
+    );
+  }
+
+  if (profile === 'anthropic-header') {
+    const rawBase = normalizeBaseUrl(resolvedBaseUrl || 'https://api.anthropic.com/v1');
+    const base = rawBase.endsWith('/v1') ? rawBase : `${rawBase}/v1`;
+    return await performConnectionTestRequest(
+      providerType,
+      `${base}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'x-api-key': trimmedKey,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 64,
+          messages: [{ role: 'user', content: '请简短回复“连接成功”，并带上当前模型名。' }],
+        }),
+      },
+      extractAnthropicText,
+      model,
+    );
+  }
+
+  if (profile === 'google-query-key') {
+    const base = normalizeBaseUrl(resolvedBaseUrl || 'https://generativelanguage.googleapis.com/v1beta');
+    const url = `${base}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+    return await performConnectionTestRequest(
+      providerType,
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: '请简短回复“连接成功”，并带上当前模型名。' }] }],
+        }),
+      },
+      (payload) => {
+        const record = payload as Record<string, unknown> | null;
+        const candidates = Array.isArray(record?.candidates) ? record.candidates : [];
+        const parts = candidates.flatMap((candidate) => {
+          if (typeof candidate !== 'object' || !candidate) return [];
+          const content = (candidate as Record<string, unknown>).content;
+          const contentParts = (content && typeof content === 'object')
+            ? (content as Record<string, unknown>).parts
+            : undefined;
+          return Array.isArray(contentParts)
+            ? contentParts.map((part) => (
+              typeof part === 'object' && part && typeof (part as Record<string, unknown>).text === 'string'
+                ? (part as Record<string, unknown>).text as string
+                : ''
+            ))
+            : [];
+        }).filter(Boolean).join('\n').trim();
+        return parts || undefined;
+      },
+      model,
+    );
+  }
+
+  if (profile === 'none') {
+    return {
+      valid: true,
+      model,
+      output: '本地模型接口可用',
+      latencyMs: 0,
+    };
+  }
+
+  return { valid: false, error: `Unsupported validation profile for provider: ${providerType}` };
 }

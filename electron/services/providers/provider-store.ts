@@ -102,3 +102,42 @@ export async function getDefaultProviderAccountId(): Promise<string | undefined>
   const store = await getClawXProviderStore();
   return store.get('defaultProviderAccountId') as string | undefined;
 }
+
+export async function listSuppressedProviderKeys(): Promise<string[]> {
+  const store = await getClawXProviderStore();
+  const keys = store.get('suppressedProviderKeys') as string[] | undefined;
+  return Array.isArray(keys) ? [...new Set(keys.filter(Boolean))] : [];
+}
+
+export async function suppressProviderKeys(keys: string[]): Promise<void> {
+  const normalizedKeys = Array.from(new Set(keys.map((key) => key.trim()).filter(Boolean)));
+  if (normalizedKeys.length === 0) {
+    return;
+  }
+
+  const store = await getClawXProviderStore();
+  const existing = store.get('suppressedProviderKeys') as string[] | undefined;
+  const next = Array.from(new Set([...(existing ?? []), ...normalizedKeys]));
+  store.set('suppressedProviderKeys', next);
+}
+
+export async function unsuppressProviderKeys(keys: string[]): Promise<void> {
+  const normalizedKeys = new Set(keys.map((key) => key.trim()).filter(Boolean));
+  if (normalizedKeys.size === 0) {
+    return;
+  }
+
+  const store = await getClawXProviderStore();
+  const existing = store.get('suppressedProviderKeys') as string[] | undefined;
+  if (!Array.isArray(existing) || existing.length === 0) {
+    return;
+  }
+
+  const next = existing.filter((key) => !normalizedKeys.has(key));
+  if (next.length > 0) {
+    store.set('suppressedProviderKeys', next);
+    return;
+  }
+
+  store.delete('suppressedProviderKeys');
+}

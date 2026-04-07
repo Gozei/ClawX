@@ -10,12 +10,22 @@
     },
     "filter": {
         "all": "All ({{count}})",
-        "builtIn": "Built-in ({{count}})",
-        "marketplace": "Marketplace ({{count}})"
+        "clawBuiltIn": "Claw Built-in ({{count}})",
+        "hubMarket": "Hub Market ({{count}})",
+        "custom": "Custom ({{count}})",
+        "keyDivider": "Access Requirements",
+        "keyAll": "All ({{count}})",
+        "requiresKey": "Requires Key ({{count}})",
+        "noKey": "No Key ({{count}})"
     },
     "search": "Search skills...",
     "searchMarketplace": "Search marketplace...",
     "searchButton": "Search",
+    "group": {
+        "summary": "{{count}} skills in this section, with {{requiresKey}} requiring keys and {{noKey}} not requiring keys",
+        "requiresKey": "Requires Key {{count}}",
+        "noKey": "No Key {{count}}"
+    },
     "actions": {
         "enableVisible": "Enable Visible",
         "disableVisible": "Disable Visible",
@@ -59,12 +69,11 @@
     },
     "source": {
         "badge": {
-            "bundled": "Bundled",
-            "managed": "Managed",
-            "workspace": "Workspace",
-            "extra": "Extra dirs",
-            "agentsPersonal": "Personal .agents",
-            "agentsProject": "Project .agents",
+            "clawBuiltIn": "Claw Built-in",
+            "hubMarket": "Hub Market",
+            "custom": "Custom",
+            "requiresKey": "Requires Key",
+            "noKey": "No Key",
             "unknown": "Unknown source"
         }
     },

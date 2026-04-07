@@ -21,6 +21,8 @@ vi.mock('@electron/utils/agent-config', () => ({
   listAgentsSnapshot: vi.fn(),
   removeAgentWorkspaceDirectory: vi.fn(),
   resolveAccountIdForAgent: vi.fn(),
+  updateAgentModel: vi.fn(),
+  updateAgentStudio: vi.fn(),
   updateAgentName: vi.fn(),
 }));
 
@@ -36,6 +38,10 @@ vi.mock('@electron/api/route-utils', () => ({
   parseJsonBody: vi.fn(),
   sendJson: vi.fn(),
 }));
+
+import { createAgent, updateAgentStudio } from '@electron/utils/agent-config';
+import { syncAllProviderAuthToRuntime } from '@electron/services/providers/provider-runtime-sync';
+import { parseJsonBody, sendJson } from '@electron/api/route-utils';
 
 function setPlatform(platform: string): void {
   Object.defineProperty(process, 'platform', { value: platform, writable: true });
@@ -74,5 +80,62 @@ describe('restartGatewayForAgentDeletion', () => {
       expect.any(Function),
     );
     expect(restart).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('handleAgentRoutes create flow', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+  });
+
+  it('awaits provider auth sync before returning create success', async () => {
+    const { handleAgentRoutes } = await import('@electron/api/routes/agents');
+
+    vi.mocked(parseJsonBody).mockResolvedValue({
+      name: 'Writer',
+      inheritWorkspace: false,
+    });
+    vi.mocked(createAgent).mockResolvedValue({
+      createdAgentId: 'writer',
+      snapshot: {
+        agents: [],
+        defaultAgentId: 'main',
+        defaultModelRef: null,
+        configuredChannelTypes: [],
+        channelOwners: {},
+        channelAccountOwners: {},
+      },
+    } as never);
+    vi.mocked(updateAgentStudio).mockResolvedValue({
+      agents: [],
+      defaultAgentId: 'main',
+      defaultModelRef: null,
+      configuredChannelTypes: [],
+      channelOwners: {},
+      channelAccountOwners: {},
+    } as never);
+
+    let synced = false;
+    vi.mocked(syncAllProviderAuthToRuntime).mockImplementation(async () => {
+      await Promise.resolve();
+      synced = true;
+    });
+    vi.mocked(sendJson).mockImplementation((_res, _status, body) => {
+      expect(synced).toBe(true);
+      expect(body).toMatchObject({ success: true, createdAgentId: 'writer' });
+    });
+
+    await handleAgentRoutes(
+      { method: 'POST' } as never,
+      {} as never,
+      new URL('http://localhost/api/agents'),
+      {
+        gatewayManager: {
+          getStatus: () => ({ state: 'running' }),
+          debouncedReload: vi.fn(),
+        },
+      } as never,
+    );
   });
 });

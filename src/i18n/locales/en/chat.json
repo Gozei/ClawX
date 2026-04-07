@@ -1,21 +1,39 @@
 {
     "gatewayNotRunning": "Gateway Not Running",
     "gatewayRequired": "The OpenClaw Gateway needs to be running to use chat. It will start automatically, or you can start it from Settings.",
+    "offline": {
+        "stoppedTitle": "Ready To Start",
+        "stoppedDesc": "{{appName}} needs to connect to the OpenClaw Gateway before chat, agent routing, and workflow execution can begin. You can start it now on port {{port}}.",
+        "startingTitle": "Connecting To OpenClaw",
+        "startingDesc": "{{appName}} is starting and connecting to the OpenClaw Gateway. This usually takes a moment. Current port: {{port}}.",
+        "errorTitle": "Gateway Connection Needs Attention",
+        "errorDesc": "{{appName}} ran into a problem while connecting to OpenClaw. You can restart the gateway now, or check the configuration in Settings.",
+        "errorDetail": "Error details",
+        "startNow": "Start Gateway",
+        "retry": "Restart Gateway",
+        "openSettings": "Open Settings"
+    },
     "welcome": {
-        "title": "Deep AI Worker Chat",
-        "subtitle": "What can I do for you?",
+        "title": "{{appName}} Chat",
+        "eyebrow": "{{appName}} Workspace",
+        "subtitle": "Hand off the work and I'll keep it moving",
+        "description": "{{appName}} can handle complex tasks, drive multi-step execution, and coordinate multiple agents toward a finished result.",
         "askQuestions": "Handle Tasks",
         "askQuestionsDesc": "Work on task-oriented requests",
         "creativeTasks": "Continuous Execution",
         "creativeTasksDesc": "Keep running through multi-step work",
-        "brainstorming": "Multi-Agent Parallel"
+        "brainstorming": "Multi-Agent Coordination",
+        "brainstormingDesc": "Split and execute work across multiple agents",
+        "footerHint": "Start by typing a goal, attaching materials, or choosing a target agent from the toolbar."
     },
     "noLogs": "(No logs available yet)",
     "toolbar": {
         "refresh": "Refresh chat",
         "showThinking": "Show thinking",
         "hideThinking": "Hide thinking",
-        "currentAgent": "Talking to {{agent}}"
+        "currentAgent": "Talking to {{agent}}",
+        "fontSmaller": "Smaller text",
+        "fontLarger": "Larger text"
     },
     "composer": {
         "attachFiles": "Attach files",

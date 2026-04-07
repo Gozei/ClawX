@@ -117,7 +117,7 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
       apiKeyEnv: 'OPENROUTER_API_KEY',
       headers: {
         'HTTP-Referer': 'https://claw-x.com',
-        'X-Title': 'ClawX',
+        'X-Title': DEFAULT_BRANDING.requestTitle,
       },
     },
   },
@@ -345,3 +345,4 @@ export function getKeyableProviderTypes(): string[] {
     (definition) => definition.id,
   );
 }
+import { DEFAULT_BRANDING } from '../../../shared/branding';

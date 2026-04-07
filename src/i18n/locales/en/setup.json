@@ -1,8 +1,8 @@
 {
     "steps": {
         "welcome": {
-            "title": "Welcome to Deep AI Worker",
-            "description": "Your AI assistant is ready to be configured"
+            "title": "Welcome to {{appName}}",
+            "description": "Set up your enterprise intelligence hub"
         },
         "runtime": {
             "title": "Environment Check",
@@ -22,12 +22,12 @@
         },
         "complete": {
             "title": "All Set!",
-            "description": "Deep AI Worker is ready to use"
+            "description": "The app is ready to use"
         }
     },
     "welcome": {
-        "title": "Welcome to Deep AI Worker",
-        "description": "Deep AI Worker is a graphical interface for OpenClaw, making it easy to use AI assistants across your favorite messaging platforms.",
+        "title": "Welcome to {{appName}}",
+        "description": "{{appName}} is the operating, collaboration, and governance hub for enterprise intelligence. {{slogan}}.",
         "features": {
             "noCommand": "Zero command-line required",
             "modernUI": "Modern, beautiful interface",
@@ -66,6 +66,8 @@
         "selectPlaceholder": "Select a provider...",
         "baseUrl": "Base URL",
         "modelId": "Model ID",
+        "modelPreset": "Recommended models",
+        "modelPresetCustom": "Custom input",
         "modelIdDesc": "The model identifier from your provider (e.g. deepseek-ai/DeepSeek-V3)",
         "codePlanPreset": "Code Plan Preset",
         "codePlanMode": "Code Plan",
@@ -113,7 +115,7 @@
     },
     "complete": {
         "title": "Setup Complete!",
-        "subtitle": "Deep AI Worker is configured and ready to use. You can now start chatting with your AI assistant.",
+        "subtitle": "Your workspace is configured and ready to use. You can now connect models, channels, and agents.",
         "provider": "AI Provider",
         "components": "Components",
         "gateway": "Gateway",

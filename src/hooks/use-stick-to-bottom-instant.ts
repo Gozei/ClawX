@@ -14,7 +14,11 @@ export function useStickToBottomInstant(resetKey?: string) {
 
   const result = useStickToBottom({
     initial: "instant",
-    resize: "smooth",
+    // Streaming chat updates can resize the container dozens of times per
+    // second. Smooth scrolling on every resize keeps scheduling animations
+    // and makes long conversations feel janky, so keep resize scrolling
+    // instant while preserving the instant initial jump.
+    resize: "instant",
   });
 
   const { scrollRef } = result;

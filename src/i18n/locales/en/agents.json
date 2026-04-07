@@ -1,6 +1,6 @@
 {
     "title": "Agents",
-    "subtitle": "Create a new Agent to route specific channels to a separate personality or workspace.",
+    "subtitle": "Define agents, attach skills, shape workflows, and manage how they operate in the business.",
     "refresh": "Refresh",
     "addAgent": "Add Agent",
     "gatewayWarning": "Gateway service is not running. Agent/channel changes may take a moment to apply.",
@@ -8,27 +8,66 @@
     "inherited": "inherited",
     "none": "none",
     "modelLine": "Model: {{model}}{{suffix}}",
+    "profileLine": "Type: {{profile}}",
     "channelsLine": "Channels: {{channels}}",
+    "skillCount": "{{count}} skills",
+    "workflowCount": "{{count}} workflow steps",
+    "triggerCount": "{{count}} trigger modes",
     "deleteAgent": "Delete Agent",
     "settings": "Settings",
     "creating": "Creating...",
     "createDialog": {
         "title": "Add Agent",
-        "description": "Create a new agent by name. You can optionally inherit the main agent's workspace bootstrap files.",
+        "description": "Define the role type, business goal, and role statement first, then decide whether to inherit the main agent workspace bootstrap files.",
         "nameLabel": "Agent Name",
         "namePlaceholder": "Coding Helper",
+        "profileTypeLabel": "Agent type",
+        "objectiveLabel": "Business goal",
+        "objectivePlaceholder": "Describe the business result this agent should ultimately deliver.",
+        "roleLabel": "Role statement",
+        "rolePlaceholder": "Describe who this agent is, who it serves, and what work it owns.",
         "inheritWorkspaceLabel": "Inherit main agent workspace",
         "inheritWorkspaceDescription": "Copy SOUL.md, AGENTS.md, etc. from the main agent"
     },
+    "profileTypes": {
+        "specialist": {
+            "label": "Specialist",
+            "description": "Focused on one domain and responsible for high-quality expert output."
+        },
+        "executor": {
+            "label": "Executor",
+            "description": "Strong at calling skills and systems to complete well-defined actions."
+        },
+        "coordinator": {
+            "label": "Coordinator",
+            "description": "Breaks down work, delegates to downstream agents, and consolidates results."
+        }
+    },
     "deleteDialog": {
         "title": "Delete Agent",
-        "message": "Delete \"{{name}}\" from Deep AI Worker? This permanently deletes the agent and its Deep AI Worker-managed workspace, runtime, and session files from disk."
+        "message": "Delete \"{{name}}\" from {{appName}}? This permanently deletes the agent and its {{appName}}-managed workspace, runtime, and session files from disk."
     },
     "settingsDialog": {
         "title": "{{name}} Settings",
         "description": "Update the agent name and manage which channels belong to this agent.",
+        "tabs": {
+            "overview": "Overview",
+            "skills": "Skills",
+            "workflow": "Workflow",
+            "runtime": "Runtime",
+            "channels": "Channels"
+        },
         "nameLabel": "Agent Name",
         "agentIdLabel": "Agent ID",
+        "profileTypeLabel": "Agent type",
+        "descriptionLabel": "Role Description",
+        "descriptionPlaceholder": "Describe what this agent owns, who it serves, and what outcomes it should deliver.",
+        "objectiveLabel": "Business goal",
+        "objectivePlaceholder": "Describe the end result and deliverable this agent is expected to achieve.",
+        "boundariesLabel": "Execution boundaries",
+        "boundariesPlaceholder": "Define when the agent must clarify, hand off, or stop instead of guessing.",
+        "outputContractLabel": "Output contract",
+        "outputContractPlaceholder": "Define the expected format, structure, and quality bar of the final output.",
         "modelLabel": "Model",
         "modelOverrideLabel": "Model Override",
         "modelProviderLabel": "Provider",
@@ -45,15 +84,187 @@
         "saveModelOverride": "Save model",
         "useDefaultModel": "Use default model",
         "channelsTitle": "Channels",
-        "channelsDescription": "This list is read-only. Manage channel accounts and bindings in the Channels page.",
+        "channelsDescription": "This shows which channels currently route to the agent. Configure account login, bindings, and routing rules in the Channels page.",
+        "openChannels": "Open channels",
         "mainAccount": "Main account",
         "channelsManagedInChannels": "This agent is linked to channel types. Manage exact account bindings in the Channels page.",
         "addChannel": "Add Channel",
-        "noChannels": "No channels are assigned to this agent yet."
+        "noChannels": "No channels are assigned to this agent yet.",
+        "skillsTitle": "Skill Assembly",
+        "skillsDescription": "Choose which skills this agent can call so it can do real work, not just chat.",
+        "skillsSearchLabel": "Filter skills",
+        "skillsSearchPlaceholder": "Search by name, description, or ID",
+        "skillsEmpty": "No skills are available yet. Install or enable skills in the Skills page first.",
+        "skillsNoMatch": "No matching skills found. Try a different keyword.",
+        "skillDisabled": "Disabled",
+        "workflowTitle": "Workflow",
+        "workflowDescription": "Use lightweight steps to define how this agent receives input, invokes capabilities, and delivers output.",
+        "workflowTemplatesTitle": "Workflow templates",
+        "workflowTemplatesDescription": "Start from a common flow, then tailor the steps to your business.",
+        "workflowTemplates": {
+            "support": {
+                "label": "Support agent",
+                "description": "Good for inbound support, presales, and human handoff.",
+                "steps": [
+                    "Receive the incoming message and identify the user's intent",
+                    "Use attached skills to look up customer or order details",
+                    "Generate a clear response with the current model",
+                    "Escalate to a human and keep the context when needed"
+                ]
+            },
+            "ops": {
+                "label": "Ops briefing",
+                "description": "Good for scheduled summaries, daily reports, and monitoring updates.",
+                "steps": [
+                    "Collect the key business data for the day",
+                    "Use data skills to produce a structured summary",
+                    "Turn the result into an operator-friendly briefing",
+                    "Send it to the target channel and archive the result"
+                ]
+            },
+            "research": {
+                "label": "Research analyst",
+                "description": "Good for synthesis, competitor scans, and recommendation output.",
+                "steps": [
+                    "Receive the research topic and break down the questions",
+                    "Use search or file skills to gather source material",
+                    "Summarize findings and evidence with the current model",
+                    "Output conclusions, risks, and recommended next steps"
+                ]
+            },
+            "multiAgent": {
+                "label": "Multi-agent collaboration",
+                "description": "Good for a coordinator agent delegating work to specialist agents and skills.",
+                "steps": [
+                    "Receive the business goal and turn it into a standard task brief",
+                    "Call a downstream agent for specialist processing",
+                    "Use a skill to validate the intermediate result and enrich data",
+                    "Use the current model to consolidate the final business answer"
+                ]
+            }
+        },
+        "workflowEmpty": "No workflow steps yet",
+        "workflowStepPlaceholder": "Step {{index}}, for example: Read customer profile and extract key fields",
+        "workflowStepTypeLabel": "Step type",
+        "workflowStepTitleLabel": "Step description",
+        "workflowStepTargetLabel": "Execution target",
+        "workflowStepModelRefLabel": "Step model override",
+        "workflowStepModelRefDescription": "Optional. Use a different model for this step without changing the agent default.",
+        "workflowFailureModeLabel": "Failure handling",
+        "workflowSuggestedModelsLabel": "Suggested models",
+        "workflowInputSpecLabel": "Standard input",
+        "workflowInputSpecPlaceholder": "Describe the input contract for this step and the expected fields.",
+        "workflowOutputSpecLabel": "Standard output",
+        "workflowOutputSpecPlaceholder": "Describe the output contract this step should return to the next step.",
+        "workflowCodeLabel": "Step code / instruction",
+        "workflowCodePlaceholder": "Optional. Add a script snippet, prompt template, or execution note.",
+        "workflowCodeDescription": "Useful for step-level prompts, templates, or code snippets.",
+        "workflowStepTypes": {
+            "instruction": {
+                "label": "Instruction",
+                "description": "Use this for prep work, routing logic, or general operating guidance."
+            },
+            "skill": {
+                "label": "Skill call",
+                "description": "Explicitly invoke an attached skill in this step."
+            },
+            "model": {
+                "label": "Model call",
+                "description": "Use a model here for generation, summarization, or reasoning."
+            },
+            "channel": {
+                "label": "Channel output",
+                "description": "Send the result to a bound channel or account."
+            },
+            "agent": {
+                "label": "Agent call",
+                "description": "Hand the current context to another agent so the workflow can collaborate across specialists."
+            }
+        },
+        "workflowTargetPlaceholders": {
+            "skill": "Select an attached skill",
+            "model": "Enter the model ID to use",
+            "channel": "Select a bound channel",
+            "agent": "Select a downstream agent",
+            "modelRef": "Optional, enter provider/model"
+        },
+        "workflowFailureModes": {
+            "continue": {
+                "label": "Continue",
+                "description": "Proceed to the next step even if this one fails."
+            },
+            "retry": {
+                "label": "Retry",
+                "description": "Retry this step first when the model or integration is flaky."
+            },
+            "handoff": {
+                "label": "Handoff",
+                "description": "Stop the automated flow and hand off to a human or supervising agent."
+            }
+        },
+        "addWorkflowStep": "Add step",
+        "runtimeTitle": "Runtime",
+        "runtimeDescription": "Define how this agent is triggered and review its recent operating activity.",
+        "runtimeLoading": "Loading...",
+        "triggerModes": {
+            "manual": {
+                "label": "Manual",
+                "description": "Best for starting chats, testing, or launching one-off tasks from the console."
+            },
+            "channel": {
+                "label": "Channel message",
+                "description": "Triggers automatically when a new message arrives from a bound channel."
+            },
+            "schedule": {
+                "label": "Scheduled",
+                "description": "Runs from Cron or scheduled jobs on a fixed cadence."
+            },
+            "webhook": {
+                "label": "Webhook",
+                "description": "Starts from external callbacks or business events."
+            },
+            "unknown": {
+                "label": "Unknown source"
+            }
+        },
+        "runtimeCards": {
+            "lastActive": "Last active",
+            "sessionCount": "Sessions",
+            "latestModel": "Latest model"
+        },
+        "runtimeChecklistTitle": "Readiness checklist",
+        "runtimeChecklist": {
+            "skillsReady": "{{count}} skills attached",
+            "workflowReady": "{{count}} workflow steps configured",
+            "channelsReady": "{{count}} channels linked",
+            "triggersReady": "{{count}} trigger modes enabled"
+        },
+        "runtimeRecentTitle": "Recent activity",
+        "runtimeRecentDescription": "A quick view of the latest sessions for this agent so you can tell whether it is actively working.",
+        "runtimeRecentEmpty": "No recent activity yet. Once this agent starts taking work, the recent sessions will appear here.",
+        "runtimeRecentFields": {
+            "time": "Time",
+            "model": "Model"
+        },
+        "runtimeStatuses": {
+            "active": "Active",
+            "idle": "Idle"
+        },
+        "runtimeOpenSession": "Open session",
+        "saveStudio": "Save studio settings",
+        "pendingStudioChanges": "This agent definition has unsaved changes. Save it before closing.",
+        "studioSavedHint": "Studio definitions sync to OpenClaw config and the agent workspace.",
+        "rightRailTitle": "Studio Summary",
+        "overview": {
+            "skills": "Skills attached",
+            "workflow": "Workflow steps",
+            "channels": "Bound channels",
+            "triggers": "Trigger modes"
+        }
     },
     "removeChannelDialog": {
         "title": "Remove Channel",
-        "message": "Remove {{name}} from Deep AI Worker? This deletes the current channel configuration."
+        "message": "Remove {{name}} from {{appName}}? This deletes the current channel configuration."
     },
     "toast": {
         "agentCreated": "Agent created",
@@ -69,6 +280,8 @@
         "agentModelUpdateFailed": "Failed to update agent model: {{error}}",
         "agentModelReset": "Agent model reset to default",
         "agentModelResetFailed": "Failed to reset agent model: {{error}}",
+        "agentStudioUpdated": "Agent studio updated",
+        "agentStudioUpdateFailed": "Failed to update agent studio: {{error}}",
         "channelAssigned": "{{channel}} assigned to agent",
         "channelAssignFailed": "Failed to assign channel: {{error}}",
         "channelRemoved": "{{channel}} removed",

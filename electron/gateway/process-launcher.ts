@@ -3,10 +3,12 @@ import { existsSync, writeFileSync } from 'fs';
 import path from 'path';
 import type { GatewayLaunchContext } from './config-sync';
 import type { GatewayLifecycleState } from './process-policy';
+import { DEFAULT_BRANDING } from '../../shared/branding';
 import { logger } from '../utils/logger';
 import { appendNodeRequireToNodeOptions } from '../utils/paths';
 
-const GATEWAY_FETCH_PRELOAD_SOURCE = `'use strict';
+function getGatewayFetchPreloadSource(requestTitle: string): string {
+  return `'use strict';
 (function () {
   var _f = globalThis.fetch;
   if (typeof _f !== 'function') return;
@@ -33,7 +35,7 @@ const GATEWAY_FETCH_PRELOAD_SOURCE = `'use strict';
       delete flat['x-title'];
       delete flat['X-Title'];
       flat['HTTP-Referer'] = 'https://claw-x.com';
-      flat['X-Title'] = 'ClawX';
+      flat['X-Title'] = ${JSON.stringify(requestTitle)};
       init.headers = flat;
     }
     return _f.call(globalThis, input, init);
@@ -77,11 +79,12 @@ const GATEWAY_FETCH_PRELOAD_SOURCE = `'use strict';
   }
 })();
 `;
+}
 
 function ensureGatewayFetchPreload(): string {
   const dest = path.join(app.getPath('userData'), 'gateway-fetch-preload.cjs');
   try {
-    writeFileSync(dest, GATEWAY_FETCH_PRELOAD_SOURCE, 'utf-8');
+    writeFileSync(dest, getGatewayFetchPreloadSource(DEFAULT_BRANDING.requestTitle), 'utf-8');
   } catch {
     // best-effort
   }

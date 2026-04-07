@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
 import { useChatStore } from '@/stores/chat';
+import { useSettingsStore } from '@/stores/settings';
 import type { AgentSummary } from '@/types/agent';
 import { useTranslation } from 'react-i18next';
 
@@ -95,6 +96,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
   const isComposingRef = useRef(false);
   const gatewayStatus = useGatewayStore((s) => s.status);
   const agents = useAgentsStore((s) => s.agents);
+  const chatFontScale = useSettingsStore((s) => s.chatFontScale);
   const currentAgentId = useChatStore((s) => s.currentAgentId);
   const currentAgentName = useMemo(
     () => (agents ?? []).find((agent) => agent.id === currentAgentId)?.name ?? currentAgentId,
@@ -109,6 +111,8 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
     [agents, targetAgentId],
   );
   const showAgentPicker = mentionableAgents.length > 0;
+  const inputFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
+  const metaFontSize = `${Math.round(11 * (chatFontScale / 100) * 10) / 10}px`;
 
   // Auto-resize textarea
   useEffect(() => {
@@ -408,13 +412,17 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
         )}
 
         {/* Input Row */}
-        <div className={`relative bg-white dark:bg-card rounded-[28px] shadow-sm border p-1.5 transition-all ${dragOver ? 'border-primary ring-1 ring-primary' : 'border-black/10 dark:border-white/10'}`}>
+        <div className={cn(
+          'relative rounded-[30px] border px-2.5 pb-2 pt-2 shadow-[0_18px_48px_rgba(15,23,42,0.10)] backdrop-blur-xl transition-all',
+          'bg-[linear-gradient(180deg,rgba(255,255,255,0.84)_0%,rgba(248,250,252,0.72)_100%)] dark:bg-[linear-gradient(180deg,rgba(27,34,46,0.90)_0%,rgba(22,28,38,0.84)_100%)]',
+          dragOver ? 'border-primary/60 ring-2 ring-primary/20' : 'border-black/8 dark:border-white/10'
+        )}>
           {selectedTarget && (
-            <div className="px-2.5 pt-2 pb-1">
+            <div className="px-2.5 pb-1 pt-1">
               <button
                 type="button"
                 onClick={() => setTargetAgentId(null)}
-                className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-[13px] font-medium text-foreground transition-colors hover:bg-primary/10"
+                className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/7 px-3 py-1 text-[13px] font-medium text-foreground transition-colors hover:bg-primary/12"
                 title={t('composer.clearTarget')}
               >
                 <span>{t('composer.targetChip', { agent: selectedTarget.name })}</span>
@@ -428,7 +436,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
             <Button
               variant="ghost"
               size="icon"
-              className="shrink-0 h-10 w-10 rounded-full text-muted-foreground hover:bg-black/5 dark:hover:bg-white/10 hover:text-foreground transition-colors"
+              className="h-10 w-10 shrink-0 rounded-full text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-white/8"
               onClick={pickFiles}
               disabled={disabled || sending}
               title={t('composer.attachFiles')}
@@ -442,7 +450,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
                   variant="ghost"
                   size="icon"
                   className={cn(
-                    'h-10 w-10 rounded-full text-muted-foreground hover:bg-black/5 dark:hover:bg-white/10 hover:text-foreground transition-colors',
+                    'h-10 w-10 rounded-full text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-white/8',
                     (pickerOpen || selectedTarget) && 'bg-primary/10 text-primary hover:bg-primary/20'
                   )}
                   onClick={() => setPickerOpen((open) => !open)}
@@ -476,7 +484,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
             )}
 
             {/* Textarea */}
-            <div className="flex-1 relative">
+            <div className="relative flex-1">
               <Textarea
                 ref={textareaRef}
                 value={input}
@@ -491,8 +499,9 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
                 onPaste={handlePaste}
                 placeholder={disabled ? t('composer.gatewayDisconnectedPlaceholder') : ''}
                 disabled={disabled}
-                className="min-h-[40px] max-h-[200px] resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none bg-transparent py-2.5 px-2 text-[15px] placeholder:text-muted-foreground/60 leading-relaxed"
+                className="min-h-[42px] max-h-[220px] resize-none border-0 bg-transparent px-2 py-2.5 leading-[1.75] tracking-[0.01em] text-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/52"
                 rows={1}
+                style={{ fontSize: inputFontSize }}
               />
             </div>
 
@@ -503,10 +512,10 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
               size="icon"
               className={`shrink-0 h-10 w-10 rounded-full transition-colors ${
                 (sending || canSend)
-                  ? 'bg-black/5 dark:bg-white/10 text-foreground hover:bg-black/10 dark:hover:bg-white/20'
-                  : 'text-muted-foreground/50 hover:bg-transparent bg-transparent'
+                  ? 'bg-[linear-gradient(135deg,#4f8df7_0%,#2f6fe4_100%)] text-white shadow-[0_10px_24px_rgba(47,111,228,0.28)] hover:brightness-105'
+                  : 'bg-transparent text-muted-foreground/40 hover:bg-transparent'
               }`}
-              variant="ghost"
+              variant={sending || canSend ? 'default' : 'ghost'}
               title={sending ? t('composer.stop') : t('composer.send')}
             >
               {sending ? (
@@ -517,7 +526,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
             </Button>
           </div>
         </div>
-        <div className="mt-2.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground/60 px-4">
+        <div className="mt-2.5 flex items-center justify-between gap-2 px-4 text-muted-foreground/58" style={{ fontSize: metaFontSize }}>
           <div className="flex items-center gap-1.5">
             <div className={cn("w-1.5 h-1.5 rounded-full", gatewayStatus.state === 'running' ? "bg-green-500/80" : "bg-red-500/80")} />
             <span>

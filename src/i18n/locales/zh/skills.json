@@ -10,12 +10,22 @@
     },
     "filter": {
         "all": "全部 ({{count}})",
-        "builtIn": "内置 ({{count}})",
-        "marketplace": "市场 ({{count}})"
+        "clawBuiltIn": "Claw 内置 ({{count}})",
+        "hubMarket": "Hub 市场 ({{count}})",
+        "custom": "自建 ({{count}})",
+        "keyDivider": "接入要求",
+        "keyAll": "全部 ({{count}})",
+        "requiresKey": "需要 Key ({{count}})",
+        "noKey": "无需 Key ({{count}})"
     },
     "search": "搜索技能...",
     "searchMarketplace": "搜索市场...",
     "searchButton": "搜索",
+    "group": {
+        "summary": "共 {{count}} 个技能，其中 {{requiresKey}} 个需要 Key，{{noKey}} 个无需 Key",
+        "requiresKey": "需要 Key {{count}}",
+        "noKey": "无需 Key {{count}}"
+    },
     "actions": {
         "enableVisible": "批量启用可见项",
         "disableVisible": "批量禁用可见项",
@@ -59,12 +69,11 @@
     },
     "source": {
         "badge": {
-            "bundled": "内置",
-            "managed": "托管目录",
-            "workspace": "工作区",
-            "extra": "额外目录",
-            "agentsPersonal": "个人 .agents",
-            "agentsProject": "项目 .agents",
+            "clawBuiltIn": "Claw 内置",
+            "hubMarket": "Hub 市场",
+            "custom": "自建",
+            "requiresKey": "需要 Key",
+            "noKey": "无需 Key",
             "unknown": "未知来源"
         }
     },

@@ -9,6 +9,7 @@ import { GatewayManager } from '../gateway/manager';
 import { registerIpcHandlers } from './ipc-handlers';
 import { createTray } from './tray';
 import { createMenu } from './menu';
+import { attachContextMenu } from './context-menu';
 
 import { appUpdater, registerUpdateHandlers } from './updater';
 import { logger } from '../utils/logger';
@@ -17,6 +18,7 @@ import { initTelemetry } from '../utils/telemetry';
 
 import { ClawHubService } from '../gateway/clawhub';
 import { ensureClawXContext, repairClawXOnlyBootstrapFiles } from '../utils/openclaw-workspace';
+import { syncAllAgentWorkspaceStudioContexts } from '../utils/agent-config';
 import { autoInstallCliIfNeeded, generateCompletionCache, installCompletionToProfile } from '../utils/openclaw-cli';
 import { isQuitting, setQuitting } from './app-state';
 import { applyProxySettings } from './proxy';
@@ -43,6 +45,8 @@ import { deviceOAuthManager } from '../utils/device-oauth';
 import { browserOAuthManager } from '../utils/browser-oauth';
 import { whatsAppLoginManager } from '../utils/whatsapp-login';
 import { syncAllProviderAuthToRuntime } from '../services/providers/provider-runtime-sync';
+import { migrateLegacyUserDataIfNeeded } from '../utils/user-data-migration';
+import { auditAndRepairOpenClawRuntimeConfig } from '../utils/openclaw-runtime-audit';
 
 const WINDOWS_APP_USER_MODEL_ID = 'app.clawx.desktop';
 const isE2EMode = process.env.CLAWX_E2E === '1';
@@ -51,6 +55,8 @@ const requestedUserDataDir = process.env.CLAWX_USER_DATA_DIR?.trim();
 if (isE2EMode && requestedUserDataDir) {
   app.setPath('userData', requestedUserDataDir);
 }
+
+app.setName('Deep AI Worker');
 
 // Disable GPU hardware acceleration globally for maximum stability across
 // all GPU configurations (no GPU, integrated, discrete).
@@ -83,7 +89,7 @@ if (process.platform === 'linux') {
 // The losing process must exit immediately so it never reaches Gateway startup.
 const gotElectronLock = isE2EMode ? true : app.requestSingleInstanceLock();
 if (!gotElectronLock) {
-  console.info('[ClawX] Another instance already holds the single-instance lock; exiting duplicate process');
+  console.info('[Deep AI Worker] Another instance already holds the single-instance lock; exiting duplicate process');
   app.exit(0);
 }
 let releaseProcessInstanceFileLock: () => void = () => {};
@@ -104,12 +110,12 @@ if (gotElectronLock && !isE2EMode) {
           ? 'unknown lock format/content'
           : 'unknown owner';
       console.info(
-        `[ClawX] Another instance already holds process lock (${fileLock.lockPath}, ${ownerDescriptor}); exiting duplicate process`,
+        `[Deep AI Worker] Another instance already holds process lock (${fileLock.lockPath}, ${ownerDescriptor}); exiting duplicate process`,
       );
       app.exit(0);
     }
   } catch (error) {
-    console.warn('[ClawX] Failed to acquire process instance file lock; continuing with Electron single-instance lock only', error);
+    console.warn('[Deep AI Worker] Failed to acquire process instance file lock; continuing with Electron single-instance lock only', error);
   }
 }
 const gotTheLock = gotElectronLock && gotFileLock;
@@ -275,12 +281,21 @@ function createMainWindow(): BrowserWindow {
  * Initialize the application
  */
 async function initialize(): Promise<void> {
+  const userDataMigrationReport = await migrateLegacyUserDataIfNeeded();
+
   // Initialize logger first
   logger.init();
-  logger.info('=== ClawX Application Starting ===');
+  logger.info('=== Deep AI Worker Application Starting ===');
   logger.debug(
     `Runtime: platform=${process.platform}/${process.arch}, electron=${process.versions.electron}, node=${process.versions.node}, packaged=${app.isPackaged}, pid=${process.pid}, ppid=${process.ppid}`
   );
+  if (userDataMigrationReport) {
+    logger.info(
+      `Migrated legacy user data from ${userDataMigrationReport.legacyUserDataDir} to ${userDataMigrationReport.currentUserDataDir}`
+      + ` (merged: ${userDataMigrationReport.mergedFiles.join(', ') || 'none'};`
+      + ` copied: ${userDataMigrationReport.migratedFiles.join(', ') || 'none'})`,
+    );
+  }
 
   if (!isE2EMode) {
     // Warm up network optimization (non-blocking)
@@ -301,10 +316,11 @@ async function initialize(): Promise<void> {
 
   // Create the main window
   const window = createMainWindow();
+  attachContextMenu(window.webContents);
 
   // Create system tray
   if (!isE2EMode) {
-    createTray(window);
+    void createTray(window);
   }
 
   // Override security headers ONLY for the OpenClaw Gateway Control UI.
@@ -386,9 +402,12 @@ async function initialize(): Promise<void> {
   gatewayManager.on('status', (status: { state: string }) => {
     hostEventBus.emit('gateway:status', status);
     if (status.state === 'running' && !isE2EMode) {
-      void ensureClawXContext().catch((error) => {
-        logger.warn('Failed to re-merge ClawX context after gateway reconnect:', error);
-      });
+    void ensureClawXContext().catch((error) => {
+      logger.warn('Failed to re-merge Deep AI Worker context after gateway reconnect:', error);
+    });
+    void syncAllAgentWorkspaceStudioContexts().catch((error) => {
+      logger.warn('Failed to sync agent studio context after gateway reconnect:', error);
+    });
     }
   });
 
@@ -458,9 +477,18 @@ async function initialize(): Promise<void> {
 
   // Start Gateway automatically (this seeds missing bootstrap files with full templates)
   const gatewayAutoStart = await getSetting('gatewayAutoStart');
-  if (!isE2EMode && gatewayAutoStart) {
+  if (!isE2EMode) {
     try {
       await syncAllProviderAuthToRuntime();
+      await auditAndRepairOpenClawRuntimeConfig();
+    } catch (error) {
+      logger.error('OpenClaw runtime config sync failed:', error);
+      mainWindow?.webContents.send('gateway:error', String(error));
+    }
+  }
+
+  if (!isE2EMode && gatewayAutoStart) {
+    try {
       logger.debug('Auto-starting Gateway...');
       await gatewayManager.start();
       logger.info('Gateway auto-start succeeded');
@@ -479,7 +507,10 @@ async function initialize(): Promise<void> {
   // is ready, so ensureClawXContext will retry until the target files appear.
   if (!isE2EMode) {
     void ensureClawXContext().catch((error) => {
-      logger.warn('Failed to merge ClawX context into workspace:', error);
+      logger.warn('Failed to merge Deep AI Worker context into workspace:', error);
+    });
+    void syncAllAgentWorkspaceStudioContexts().catch((error) => {
+      logger.warn('Failed to sync agent studio context into workspace:', error);
     });
   }
 
@@ -523,7 +554,7 @@ if (gotTheLock) {
 
   // When a second instance is launched, focus the existing window instead.
   app.on('second-instance', () => {
-    logger.info('Second ClawX instance detected; redirecting to the existing window');
+    logger.info('Second Deep AI Worker instance detected; redirecting to the existing window');
 
     const focusRequest = requestSecondInstanceFocus(
       mainWindowFocusState,

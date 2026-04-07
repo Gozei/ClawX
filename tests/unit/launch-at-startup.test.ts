@@ -8,9 +8,14 @@ const {
   testHome,
   electronAppMock,
   setLoginItemSettingsMock,
+  getResolvedBrandingMock,
 } = vi.hoisted(() => {
   const suffix = Math.random().toString(36).slice(2);
   const setLoginItemSettingsMock = vi.fn();
+  const getResolvedBrandingMock = vi.fn(async () => ({
+    productName: 'Deep AI Worker',
+    slogan: 'Let Intelligence Work',
+  }));
   const electronAppMock = {
     isPackaged: true,
     getPath: (name: string) => (name === 'home' ? `/tmp/clawx-launch-startup-${suffix}` : '/tmp'),
@@ -21,11 +26,28 @@ const {
     testHome: `/tmp/clawx-launch-startup-${suffix}`,
     electronAppMock,
     setLoginItemSettingsMock,
+    getResolvedBrandingMock,
   };
 });
 
 vi.mock('electron', () => ({
   app: electronAppMock,
+}));
+
+vi.mock('@electron/utils/branding', () => ({
+  getResolvedBranding: () => getResolvedBrandingMock(),
+}));
+
+vi.mock('@electron/utils/store', () => ({
+  getSetting: vi.fn(),
+}));
+
+vi.mock('@electron/utils/logger', () => ({
+  logger: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
 }));
 
 function setPlatform(platform: string): void {
@@ -75,7 +97,7 @@ describe('launch-at-startup integration', () => {
 
     const content = await readFile(autostartPath, 'utf8');
     expect(content).toContain('[Desktop Entry]');
-    expect(content).toContain('Name=ClawX');
+    expect(content).toContain('Name=Deep AI Worker');
     expect(content).toContain('Exec=');
 
     await applyLaunchAtStartupSetting(false);

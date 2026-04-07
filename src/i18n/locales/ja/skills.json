@@ -10,12 +10,22 @@
     },
     "filter": {
         "all": "すべて ({{count}})",
-        "builtIn": "内蔵 ({{count}})",
-        "marketplace": "マーケットプレイス ({{count}})"
+        "clawBuiltIn": "Claw 内蔵 ({{count}})",
+        "hubMarket": "Hub マーケット ({{count}})",
+        "custom": "自作 ({{count}})",
+        "keyDivider": "接続要件",
+        "keyAll": "すべて ({{count}})",
+        "requiresKey": "Key 必要 ({{count}})",
+        "noKey": "Key 不要 ({{count}})"
     },
     "search": "スキルを検索...",
     "searchMarketplace": "マーケットプレイスを検索...",
     "searchButton": "検索",
+    "group": {
+        "summary": "この区分には {{count}} 件あり、{{requiresKey}} 件は Key が必要、{{noKey}} 件は不要です",
+        "requiresKey": "Key 必要 {{count}}",
+        "noKey": "Key 不要 {{count}}"
+    },
     "actions": {
         "enableVisible": "表示中を一括有効化",
         "disableVisible": "表示中を一括無効化",
@@ -59,12 +69,11 @@
     },
     "source": {
         "badge": {
-            "bundled": "内蔵",
-            "managed": "管理ディレクトリ",
-            "workspace": "ワークスペース",
-            "extra": "追加ディレクトリ",
-            "agentsPersonal": "個人 .agents",
-            "agentsProject": "プロジェクト .agents",
+            "clawBuiltIn": "Claw 内蔵",
+            "hubMarket": "Hub マーケット",
+            "custom": "自作",
+            "requiresKey": "Key 必要",
+            "noKey": "Key 不要",
             "unknown": "不明なソース"
         }
     },

@@ -20,7 +20,7 @@ describe('TitleBar platform behavior', () => {
     const { container } = render(<TitleBar />);
 
     expect(container.querySelector('.drag-region')).toBeInTheDocument();
-    expect(screen.queryByTitle('Minimize')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('最小化')).not.toBeInTheDocument();
     expect(invokeIpcMock).not.toHaveBeenCalled();
   });
 
@@ -29,9 +29,9 @@ describe('TitleBar platform behavior', () => {
 
     render(<TitleBar />);
 
-    expect(screen.getByTitle('Minimize')).toBeInTheDocument();
-    expect(screen.getByTitle('Maximize')).toBeInTheDocument();
-    expect(screen.getByTitle('Close')).toBeInTheDocument();
+    expect(screen.getByTitle('最小化')).toBeInTheDocument();
+    expect(screen.getByTitle('最大化')).toBeInTheDocument();
+    expect(screen.getByTitle('关闭')).toBeInTheDocument();
 
     await waitFor(() => {
       expect(invokeIpcMock).toHaveBeenCalledWith('window:isMaximized');
@@ -44,7 +44,7 @@ describe('TitleBar platform behavior', () => {
     const { container } = render(<TitleBar />);
 
     expect(container.firstChild).toBeNull();
-    expect(screen.queryByTitle('Minimize')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('最小化')).not.toBeInTheDocument();
     expect(invokeIpcMock).not.toHaveBeenCalled();
   });
 });

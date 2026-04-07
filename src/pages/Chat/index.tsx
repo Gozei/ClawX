@@ -4,8 +4,9 @@
  * via gateway:rpc IPC. Session selector, thinking toggle, and refresh
  * are in the toolbar; messages render with markdown + streaming.
  */
-import { useEffect, useState } from 'react';
-import { AlertCircle, Loader2, Sparkles } from 'lucide-react';
+import { memo, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { AlertCircle, ListTodo, Loader2, Network, Sparkles, Workflow } from 'lucide-react';
 import { useChatStore, type RawMessage } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
@@ -16,12 +17,17 @@ import { ChatToolbar } from './ChatToolbar';
 import { extractImages, extractText, extractThinking, extractToolUse } from './message-utils';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
+import { useBranding } from '@/lib/branding';
 import { useStickToBottomInstant } from '@/hooks/use-stick-to-bottom-instant';
 import { useMinLoading } from '@/hooks/use-min-loading';
+import { useSettingsStore } from '@/stores/settings';
 
 export function Chat() {
   const { t } = useTranslation('chat');
+  const navigate = useNavigate();
   const gatewayStatus = useGatewayStore((s) => s.status);
+  const startGateway = useGatewayStore((s) => s.start);
+  const restartGateway = useGatewayStore((s) => s.restart);
   const isGatewayRunning = gatewayStatus.state === 'running';
 
   const messages = useChatStore((s) => s.messages);
@@ -30,6 +36,7 @@ export function Chat() {
   const sending = useChatStore((s) => s.sending);
   const error = useChatStore((s) => s.error);
   const showThinking = useChatStore((s) => s.showThinking);
+  const chatProcessDisplayMode = useSettingsStore((s) => s.chatProcessDisplayMode);
   const streamingMessage = useChatStore((s) => s.streamingMessage);
   const streamingTools = useChatStore((s) => s.streamingTools);
   const pendingFinal = useChatStore((s) => s.pendingFinal);
@@ -40,8 +47,9 @@ export function Chat() {
 
   const cleanupEmptySession = useChatStore((s) => s.cleanupEmptySession);
 
+  const safeMessages = Array.isArray(messages) ? messages : [];
   const [streamingTimestamp, setStreamingTimestamp] = useState<number>(0);
-  const minLoading = useMinLoading(loading && messages.length > 0);
+  const minLoading = useMinLoading(loading && safeMessages.length > 0);
   const { contentRef, scrollRef } = useStickToBottomInstant(currentSessionKey);
 
   // Load data when gateway is running.
@@ -81,36 +89,58 @@ export function Chat() {
   const streamThinking = streamMsg ? extractThinking(streamMsg) : null;
   const hasStreamThinking = showThinking && !!streamThinking && streamThinking.trim().length > 0;
   const streamTools = streamMsg ? extractToolUse(streamMsg) : [];
-  const hasStreamTools = streamTools.length > 0;
+  const hasStreamTools = chatProcessDisplayMode === 'all' && streamTools.length > 0;
   const streamImages = streamMsg ? extractImages(streamMsg) : [];
   const hasStreamImages = streamImages.length > 0;
-  const hasStreamToolStatus = streamingTools.length > 0;
+  const hasStreamToolStatus = chatProcessDisplayMode === 'all' && streamingTools.length > 0;
   const shouldRenderStreaming = sending && (hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus);
   const hasAnyStreamContent = hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus;
 
-  const isEmpty = messages.length === 0 && !sending;
+  const isEmpty = safeMessages.length === 0 && !sending;
+  const showGatewayOfflineState = !isGatewayRunning && safeMessages.length === 0 && !sending;
+
+  const handleStartGateway = async () => {
+    try {
+      if (gatewayStatus.state === 'error') {
+        await restartGateway();
+      } else {
+        await startGateway();
+      }
+    } catch {
+      // keep the page calm; gateway errors are surfaced by store status
+    }
+  };
 
   return (
-    <div className={cn("relative flex flex-col -m-6 transition-colors duration-500 dark:bg-background")} style={{ height: 'calc(100vh - 2.5rem)' }}>
+    <div
+      className={cn("relative -m-6 flex flex-col transition-colors duration-500 dark:bg-background")}
+      style={{
+        height: 'calc(100vh - 2.5rem)',
+        backgroundImage:
+          'radial-gradient(circle at top right, rgba(59,130,246,0.10), transparent 24%), radial-gradient(circle at 18% 12%, rgba(148,163,184,0.08), transparent 18%)',
+      }}
+    >
       {/* Toolbar */}
-      <div className="flex shrink-0 items-center justify-end px-4 py-2">
+      <div className="flex shrink-0 items-center justify-end border-b border-black/5 bg-white/32 px-4 py-2 backdrop-blur-md dark:border-white/5 dark:bg-white/[0.02]">
         <ChatToolbar />
       </div>
 
       {/* Messages Area */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-5">
         <div ref={contentRef} className="max-w-4xl mx-auto space-y-4">
-          {isEmpty ? (
+          {showGatewayOfflineState ? (
+            <GatewayOfflineState
+              state={gatewayStatus.state}
+              error={gatewayStatus.error}
+              port={gatewayStatus.port}
+              onStart={handleStartGateway}
+              onOpenSettings={() => navigate('/settings')}
+            />
+          ) : isEmpty ? (
             <WelcomeScreen />
           ) : (
             <>
-              {messages.map((msg, idx) => (
-                <ChatMessage
-                  key={msg.id || `msg-${idx}`}
-                  message={msg}
-                  showThinking={showThinking}
-                />
-              ))}
+              <HistoryMessages messages={safeMessages} showThinking={showThinking} />
 
               {/* Streaming message */}
               {shouldRenderStreaming && (
@@ -134,7 +164,7 @@ export function Chat() {
               )}
 
               {/* Activity indicator: waiting for next AI turn after tool execution */}
-              {sending && pendingFinal && !shouldRenderStreaming && (
+              {sending && pendingFinal && !shouldRenderStreaming && chatProcessDisplayMode === 'all' && (
                 <ActivityIndicator phase="tool_processing" />
               )}
 
@@ -186,31 +216,179 @@ export function Chat() {
   );
 }
 
+const HistoryMessages = memo(function HistoryMessages({
+  messages,
+  showThinking,
+}: {
+  messages: RawMessage[];
+  showThinking: boolean;
+}) {
+  return (
+    <>
+      {messages.map((msg, idx) => (
+        <ChatMessage
+          key={msg.id || `msg-${idx}`}
+          message={msg}
+          showThinking={showThinking}
+        />
+      ))}
+    </>
+  );
+});
+
 // ── Welcome Screen ──────────────────────────────────────────────
 
 function WelcomeScreen() {
   const { t } = useTranslation('chat');
+  const branding = useBranding();
   const quickActions = [
-    { key: 'askQuestions', label: t('welcome.askQuestions') },
-    { key: 'creativeTasks', label: t('welcome.creativeTasks') },
-    { key: 'brainstorming', label: t('welcome.brainstorming') },
+    {
+      key: 'askQuestions',
+      icon: ListTodo,
+      label: t('welcome.askQuestions'),
+      description: t('welcome.askQuestionsDesc'),
+    },
+    {
+      key: 'creativeTasks',
+      icon: Workflow,
+      label: t('welcome.creativeTasks'),
+      description: t('welcome.creativeTasksDesc'),
+    },
+    {
+      key: 'brainstorming',
+      icon: Network,
+      label: t('welcome.brainstorming'),
+      description: t('welcome.brainstormingDesc'),
+    },
   ];
 
   return (
-    <div className="flex flex-col items-center justify-center text-center h-[60vh]">
-      <h1 className="text-4xl md:text-5xl font-serif text-foreground/80 mb-8 font-normal tracking-tight" style={{ fontFamily: 'Georgia, Cambria, "Times New Roman", Times, serif' }}>
-        {t('welcome.subtitle')}
-      </h1>
+    <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="w-full max-w-5xl px-2">
+        <div className="mx-auto max-w-3xl text-center">
+          <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-foreground/42">
+            <Sparkles className="h-3.5 w-3.5 text-primary/80" />
+            <span>{t('welcome.eyebrow', { appName: branding.productName })}</span>
+          </div>
 
-      <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-lg w-full">
-        {quickActions.map(({ key, label }) => (
-          <button 
-            key={key}
-            className="px-4 py-1.5 rounded-full border border-black/10 dark:border-white/10 text-[13px] font-medium text-foreground/70 hover:bg-black/5 dark:hover:bg-white/5 transition-colors bg-black/[0.02]"
+          <h1 className="mt-6 text-[40px] font-semibold tracking-[-0.05em] text-foreground md:text-[58px]">
+            {t('welcome.subtitle', { appName: branding.productName })}
+          </h1>
+
+          <p className="mx-auto mt-4 max-w-2xl text-[17px] leading-8 text-foreground/62 md:text-[18px]">
+            {t('welcome.description', { appName: branding.productName })}
+          </p>
+        </div>
+
+        <div className="mt-10 grid gap-4 md:grid-cols-3">
+          {quickActions.map(({ key, icon: Icon, label, description }) => (
+            <button
+              key={key}
+              className="group rounded-[26px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 text-left shadow-[0_18px_45px_rgba(2,6,23,0.18)] transition duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-[linear-gradient(180deg,rgba(59,130,246,0.10),rgba(255,255,255,0.04))]"
+            >
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-primary/90 transition group-hover:border-primary/30 group-hover:bg-primary/12">
+                <Icon className="h-5 w-5" />
+              </div>
+
+              <div className="mt-5">
+                <h3 className="text-[18px] font-semibold tracking-[-0.02em] text-foreground">
+                  {label}
+                </h3>
+                <p className="mt-2 text-[14px] leading-6 text-foreground/58">
+                  {description}
+                </p>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-8 text-center text-[13px] text-foreground/42">
+          {t('welcome.footerHint')}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GatewayOfflineState({
+  state,
+  error,
+  port,
+  onStart,
+  onOpenSettings,
+}: {
+  state: string;
+  error?: string;
+  port: number;
+  onStart: () => Promise<void>;
+  onOpenSettings: () => void;
+}) {
+  const { t } = useTranslation('chat');
+  const branding = useBranding();
+  const [pending, setPending] = useState(false);
+
+  const title = state === 'starting' || state === 'reconnecting'
+    ? t('offline.startingTitle')
+    : state === 'error'
+      ? t('offline.errorTitle')
+      : t('offline.stoppedTitle');
+  const description = state === 'starting' || state === 'reconnecting'
+    ? t('offline.startingDesc', { appName: branding.productName, port })
+    : state === 'error'
+      ? t('offline.errorDesc', { appName: branding.productName })
+      : t('offline.stoppedDesc', { appName: branding.productName, port });
+
+  const handleClick = async () => {
+    setPending(true);
+    try {
+      await onStart();
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="w-full max-w-2xl rounded-[28px] border border-black/8 bg-white/80 px-8 py-10 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.04]">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#eff6ff] text-[#2563eb] dark:bg-[#172554] dark:text-[#93c5fd]">
+          {pending || state === 'starting' || state === 'reconnecting' ? (
+            <Loader2 className="h-6 w-6 animate-spin" />
+          ) : (
+            <Sparkles className="h-6 w-6" />
+          )}
+        </div>
+
+        <div className="mt-6 text-center">
+          <h2 className="text-3xl font-semibold tracking-tight text-foreground">{title}</h2>
+            <p className="mx-auto mt-3 max-w-xl text-[15px] leading-7 text-foreground/65">
+            {description}
+          </p>
+        </div>
+
+        {error ? (
+          <div className="mt-6 rounded-2xl border border-amber-200/70 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+            <div className="font-medium">{t('offline.errorDetail')}</div>
+            <div className="mt-1 break-words opacity-85">{error}</div>
+          </div>
+        ) : null}
+
+        <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+          <button
+            type="button"
+            onClick={handleClick}
+            disabled={pending || state === 'starting' || state === 'reconnecting'}
+            className="rounded-full bg-[#2563eb] px-5 py-2.5 text-[14px] font-medium text-white transition hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {label}
+            {state === 'error' ? t('offline.retry') : t('offline.startNow')}
           </button>
-        ))}
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="rounded-full border border-black/10 bg-white px-5 py-2.5 text-[14px] font-medium text-foreground/80 transition hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]"
+          >
+            {t('offline.openSettings')}
+          </button>
+        </div>
       </div>
     </div>
   );

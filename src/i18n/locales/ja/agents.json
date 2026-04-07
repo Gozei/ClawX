@@ -1,6 +1,6 @@
 {
     "title": "Agents",
-    "subtitle": "新しい Agent を作成し、特定のチャンネルを異なるパーソナリティやワークスペースにルーティングできます。",
+    "subtitle": "エージェントを定義し、スキルを装着し、業務フローをまとめて運用できます。",
     "refresh": "更新",
     "addAgent": "Agent を追加",
     "gatewayWarning": "Gateway サービスが停止しています。Agent または Channel の変更が反映されるまで少し時間がかかる場合があります。",
@@ -8,27 +8,66 @@
     "inherited": "継承",
     "none": "なし",
     "modelLine": "Model: {{model}}{{suffix}}",
+    "profileLine": "タイプ: {{profile}}",
     "channelsLine": "Channels: {{channels}}",
+    "skillCount": "{{count}} 個のスキル",
+    "workflowCount": "{{count}} 個のフローステップ",
+    "triggerCount": "{{count}} 個の起動方式",
     "deleteAgent": "Agent を削除",
     "settings": "設定",
     "creating": "作成中...",
     "createDialog": {
         "title": "Agent を追加",
-        "description": "名前だけで新しい Agent を作成できます。メイン Agent のワークスペース初期ファイルを引き継ぐかどうかも選択できます。",
+        "description": "役割タイプ、業務目標、役割説明を先に定義し、そのうえでメイン Agent のワークスペース初期ファイルを引き継ぐか決めます。",
         "nameLabel": "Agent 名",
         "namePlaceholder": "Coding Helper",
+        "profileTypeLabel": "Agent タイプ",
+        "objectiveLabel": "業務目標",
+        "objectivePlaceholder": "この Agent が最終的にどんな業務成果を出すべきかを書いてください。",
+        "roleLabel": "役割説明",
+        "rolePlaceholder": "この Agent が何者で、誰に奉仕し、何を担当するかを書いてください。",
         "inheritWorkspaceLabel": "メイン Agent のワークスペースを引き継ぐ",
         "inheritWorkspaceDescription": "SOUL.md、AGENTS.md などの初期ファイルをコピーします"
     },
+    "profileTypes": {
+        "specialist": {
+            "label": "専門型",
+            "description": "単一領域に集中し、高品質な専門アウトプットを担います。"
+        },
+        "executor": {
+            "label": "実行型",
+            "description": "スキルやシステム呼び出しに強く、明確な作業を進めるのに向いています。"
+        },
+        "coordinator": {
+            "label": "調整型",
+            "description": "作業を分解し、下流 Agent に委譲し、最終結果をまとめます。"
+        }
+    },
     "deleteDialog": {
         "title": "Agent を削除",
-        "message": "Deep AI Worker から「{{name}}」を削除しますか？この操作により Agent と、その Deep AI Worker 管理下のワークスペース、実行時ファイル、セッションファイルがディスクから完全に削除されます。"
+        "message": "{{appName}} から「{{name}}」を削除しますか？この操作により Agent と、その {{appName}} 管理下のワークスペース、実行時ファイル、セッションファイルがディスクから完全に削除されます。"
     },
     "settingsDialog": {
         "title": "{{name}} Settings",
         "description": "Agent 名を更新し、この Agent に属する Channel を管理します。",
+        "tabs": {
+            "overview": "概要",
+            "skills": "スキル",
+            "workflow": "フロー",
+            "runtime": "稼働",
+            "channels": "チャンネル"
+        },
         "nameLabel": "Agent 名",
         "agentIdLabel": "Agent ID",
+        "profileTypeLabel": "Agent タイプ",
+        "descriptionLabel": "役割説明",
+        "descriptionPlaceholder": "このエージェントが担当する業務、対象ユーザー、期待する成果を書いてください。",
+        "objectiveLabel": "業務目標",
+        "objectivePlaceholder": "この Agent が最終的に達成すべき成果物と結果を書いてください。",
+        "boundariesLabel": "実行境界",
+        "boundariesPlaceholder": "推測してはいけない条件、確認が必要な条件、引き継ぐ条件を明確にしてください。",
+        "outputContractLabel": "出力要件",
+        "outputContractPlaceholder": "最終出力の形式、構造、品質基準、必須項目を明確にしてください。",
         "modelLabel": "Model",
         "modelOverrideLabel": "モデル上書き",
         "modelProviderLabel": "Provider",
@@ -45,11 +84,183 @@
         "saveModelOverride": "モデルを保存",
         "useDefaultModel": "デフォルトモデルを使用",
         "channelsTitle": "Channels",
-        "channelsDescription": "この一覧は読み取り専用です。チャンネルアカウントと紐付けは Channels ページで管理してください。",
+        "channelsDescription": "ここでは、このエージェントが受け持つチャネル関係を表示します。アカウント接続、紐付け、ルーティングは Channels ページで設定してください。",
+        "openChannels": "チャネル設定へ",
         "mainAccount": "メインアカウント",
         "channelsManagedInChannels": "この Agent はチャンネル種別に紐付いています。アカウント単位の紐付けは Channels ページで管理してください。",
         "addChannel": "Channel を追加",
-        "noChannels": "この Agent にはまだ Channel が割り当てられていません。"
+        "noChannels": "この Agent にはまだ Channel が割り当てられていません。",
+        "skillsTitle": "スキル構成",
+        "skillsDescription": "このエージェントが呼び出せるスキルを選び、実行能力を持たせます。",
+        "skillsSearchLabel": "スキルを絞り込む",
+        "skillsSearchPlaceholder": "名前、説明、ID でスキルを検索",
+        "skillsEmpty": "利用可能なスキルがまだありません。先に Skills ページでインストールまたは有効化してください。",
+        "skillsNoMatch": "一致するスキルが見つかりません。別のキーワードを試してください。",
+        "skillDisabled": "未有効化",
+        "workflowTitle": "業務フロー",
+        "workflowDescription": "入力の受け取りから能力呼び出し、結果の出力までを軽量ステップで定義します。",
+        "workflowTemplatesTitle": "よく使うフローテンプレート",
+        "workflowTemplatesDescription": "一般的な流れから始めて、業務に合わせて調整してください。",
+        "workflowTemplates": {
+            "support": {
+                "label": "サポート対応",
+                "description": "問い合わせ対応、事前相談、人への引き継ぎに向いています。",
+                "steps": [
+                    "チャネルからのメッセージを受け取り、意図を判定する",
+                    "装着済みスキルで顧客情報や注文情報を確認する",
+                    "現在のモデルで分かりやすい回答を作成する",
+                    "対応できない場合は文脈を添えて人に引き継ぐ"
+                ]
+            },
+            "ops": {
+                "label": "運用レポート",
+                "description": "定期要約、日報、監視結果の共有に向いています。",
+                "steps": [
+                    "その日の主要な業務データを集める",
+                    "データ系スキルで構造化サマリーを作る",
+                    "現在のモデルで運用向けレポートに整える",
+                    "指定チャネルへ送信し、結果を保管する"
+                ]
+            },
+            "research": {
+                "label": "調査分析",
+                "description": "情報整理、競合分析、提案作成に向いています。",
+                "steps": [
+                    "調査テーマを受け取り、論点を分解する",
+                    "検索やファイル系スキルで資料を集める",
+                    "現在のモデルで論点と根拠を整理する",
+                    "結論、リスク、次の提案をまとめて出力する"
+                ]
+            },
+            "multiAgent": {
+                "label": "マルチエージェント協調",
+                "description": "統括エージェントが仕事を分解し、専門エージェントとスキルへ委譲する流れに向いています。",
+                "steps": [
+                    "業務目標を受け取り、標準タスクブリーフに整理する",
+                    "下流の専門エージェントへ処理を委譲する",
+                    "スキルで中間結果を検証し、必要なデータを補う",
+                    "現在のモデルで最終業務アウトプットにまとめる"
+                ]
+            }
+        },
+        "workflowEmpty": "フローステップがまだありません",
+        "workflowStepPlaceholder": "ステップ {{index}}。例: 顧客情報を読み込み、重要項目を抽出する",
+        "workflowStepTypeLabel": "ステップ種別",
+        "workflowStepTitleLabel": "ステップ内容",
+        "workflowStepTargetLabel": "実行対象",
+        "workflowStepModelRefLabel": "ステップモデル上書き",
+        "workflowStepModelRefDescription": "任意。このステップだけ別モデルを使い、エージェント全体の既定モデルは変えません。",
+        "workflowFailureModeLabel": "失敗時の扱い",
+        "workflowSuggestedModelsLabel": "候補モデル",
+        "workflowInputSpecLabel": "標準入力",
+        "workflowInputSpecPlaceholder": "このステップが受け取る入力項目と形式を書いてください。",
+        "workflowOutputSpecLabel": "標準出力",
+        "workflowOutputSpecPlaceholder": "次のステップへ渡す出力項目と形式を書いてください。",
+        "workflowCodeLabel": "ステップコード / 指示",
+        "workflowCodePlaceholder": "任意。スクリプト断片、プロンプト、実行メモを書けます。",
+        "workflowCodeDescription": "ステップごとのテンプレート、プロンプト、コード断片を保存するのに使えます。",
+        "workflowStepTypes": {
+            "instruction": {
+                "label": "説明ステップ",
+                "description": "準備作業、分岐判断、共通ルールの説明に使います。"
+            },
+            "skill": {
+                "label": "スキル呼び出し",
+                "description": "このステップで呼び出すスキルを明示します。"
+            },
+            "model": {
+                "label": "モデル呼び出し",
+                "description": "生成、要約、判断のためにモデルを使うステップです。"
+            },
+            "channel": {
+                "label": "チャネル出力",
+                "description": "結果を指定したチャネルまたはアカウントへ送ります。"
+            },
+            "agent": {
+                "label": "Agent 呼び出し",
+                "description": "現在の文脈を別のエージェントに渡して続きの処理を任せます。"
+            }
+        },
+        "workflowTargetPlaceholders": {
+            "skill": "装着済みスキルを選択",
+            "model": "使用するモデル ID を入力",
+            "channel": "紐付いたチャネルを選択",
+            "agent": "下流 Agent を選択",
+            "modelRef": "任意、provider/model を入力"
+        },
+        "workflowFailureModes": {
+            "continue": {
+                "label": "次へ進む",
+                "description": "このステップが失敗しても、そのまま次のステップへ進みます。"
+            },
+            "retry": {
+                "label": "再試行",
+                "description": "不安定なモデルや連携向けに、まずこのステップを再試行します。"
+            },
+            "handoff": {
+                "label": "人へ引き継ぐ",
+                "description": "自動処理を止めて、人または上位エージェントに引き継ぎます。"
+            }
+        },
+        "addWorkflowStep": "ステップを追加",
+        "runtimeTitle": "稼働",
+        "runtimeDescription": "このエージェントの起動方法を定義し、最近の稼働状況を確認します。",
+        "runtimeLoading": "読み込み中...",
+        "triggerModes": {
+            "manual": {
+                "label": "手動起動",
+                "description": "コンソールから会話やテスト、単発実行を始める用途に向いています。"
+            },
+            "channel": {
+                "label": "チャネルメッセージ",
+                "description": "紐付いたチャネルに新着メッセージが届くと自動で起動します。"
+            },
+            "schedule": {
+                "label": "定期実行",
+                "description": "Cron や定期ジョブから一定周期で実行されます。"
+            },
+            "webhook": {
+                "label": "Webhook",
+                "description": "外部システムのコールバックや業務イベントから起動します。"
+            },
+            "unknown": {
+                "label": "不明な起点"
+            }
+        },
+        "runtimeCards": {
+            "lastActive": "最終アクティブ",
+            "sessionCount": "セッション数",
+            "latestModel": "最新モデル"
+        },
+        "runtimeChecklistTitle": "稼働準備チェック",
+        "runtimeChecklist": {
+            "skillsReady": "{{count}} 個のスキルを装着済み",
+            "workflowReady": "{{count}} 個のフローステップを設定済み",
+            "channelsReady": "{{count}} 個のチャネルを関連付け済み",
+            "triggersReady": "{{count}} 個の起動方式を有効化済み"
+        },
+        "runtimeRecentTitle": "最近の稼働履歴",
+        "runtimeRecentDescription": "直近のセッションから、このエージェントが継続的に動いているかをすぐ確認できます。",
+        "runtimeRecentEmpty": "最近の稼働履歴はまだありません。エージェントが動き始めると、ここに履歴が表示されます。",
+        "runtimeRecentFields": {
+            "time": "時間",
+            "model": "モデル"
+        },
+        "runtimeStatuses": {
+            "active": "稼働中",
+            "idle": "待機"
+        },
+        "runtimeOpenSession": "会話を開く",
+        "saveStudio": "スタジオ設定を保存",
+        "pendingStudioChanges": "この Agent 定義には未保存の変更があります。閉じる前に保存してください。",
+        "studioSavedHint": "スタジオ定義は OpenClaw 設定と Agent ワークスペースへ同期されます。",
+        "rightRailTitle": "スタジオ概要",
+        "overview": {
+            "skills": "装着スキル",
+            "workflow": "フローステップ",
+            "channels": "関連チャンネル",
+            "triggers": "起動方式"
+        }
     },
     "removeChannelDialog": {
         "title": "Channel を削除",
@@ -69,6 +280,8 @@
         "agentModelUpdateFailed": "Agent モデルの更新に失敗しました: {{error}}",
         "agentModelReset": "Agent モデルをデフォルトに戻しました",
         "agentModelResetFailed": "Agent モデルのリセットに失敗しました: {{error}}",
+        "agentStudioUpdated": "エージェントスタジオを更新しました",
+        "agentStudioUpdateFailed": "エージェントスタジオの更新に失敗しました: {{error}}",
         "channelAssigned": "{{channel}} を Agent に割り当てました",
         "channelAssignFailed": "Channel の割り当てに失敗しました: {{error}}",
         "channelRemoved": "{{channel}} を削除しました",

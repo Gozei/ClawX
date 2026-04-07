@@ -17,16 +17,18 @@ import {
   Copy,
   XCircle,
   ChevronDown,
+  CheckCircle2,
+  Tags,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import {
   useProviderStore,
   type ProviderAccount,
-  type ProviderConfig,
   type ProviderVendorInfo,
 } from '@/stores/providers';
 import {
@@ -34,6 +36,7 @@ import {
   getProviderDocsUrl,
   type ProviderType,
   getProviderIconUrl,
+  getRecommendedModelOptions,
   resolveProviderApiKeyForSave,
   resolveProviderModelForSave,
   shouldShowProviderModelId,
@@ -44,6 +47,7 @@ import {
   buildProviderListItems,
   hasConfiguredCredentials,
   type ProviderListItem,
+  type ProviderModelSummary,
 } from '@/lib/provider-accounts';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -52,10 +56,18 @@ import { invokeIpc } from '@/lib/api-client';
 import { useSettingsStore } from '@/stores/settings';
 import { hostApiFetch } from '@/lib/host-api';
 import { subscribeHostEvent } from '@/lib/host-events';
+import { useBranding } from '@/lib/branding';
 
 const inputClasses = 'h-[44px] rounded-xl font-mono text-[13px] bg-[#eeece3] dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
 const labelClasses = 'text-[14px] text-foreground/80 font-bold';
 type ArkMode = 'apikey' | 'codeplan';
+type ProviderTestResult = {
+  valid: boolean;
+  error?: string;
+  model?: string;
+  output?: string;
+  latencyMs?: number;
+};
 
 function normalizeFallbackProviderIds(ids?: string[]): string[] {
   return Array.from(new Set((ids ?? []).filter(Boolean)));
@@ -162,6 +174,7 @@ export function ProvidersSettings() {
     updateAccount,
     setDefaultAccount,
     validateAccountApiKey,
+    getAccountApiKey,
   } = useProviderStore();
 
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -221,9 +234,12 @@ export function ProvidersSettings() {
     }
   };
 
-  const handleDeleteProvider = async (providerId: string) => {
+  const handleDeleteProvider = async (item: ProviderListItem) => {
     try {
-      await removeAccount(providerId);
+      const accountIds = Array.from(new Set(item.aliases.map((account) => account.id)));
+      for (const accountId of accountIds) {
+        await removeAccount(accountId);
+      }
       toast.success(t('aiProviders.toast.deleted'));
     } catch (error) {
       toast.error(`${t('aiProviders.toast.failedDelete')}: ${error}`);
@@ -278,28 +294,14 @@ export function ProvidersSettings() {
               isEditing={editingProvider === item.account.id}
               onEdit={() => setEditingProvider(item.account.id)}
               onCancelEdit={() => setEditingProvider(null)}
-              onDelete={() => handleDeleteProvider(item.account.id)}
+              onDelete={() => handleDeleteProvider(item)}
               onSetDefault={() => handleSetDefault(item.account.id)}
               onSaveEdits={async (payload) => {
-                const updates: Partial<ProviderAccount> = {};
-                if (payload.updates) {
-                  if (payload.updates.baseUrl !== undefined) updates.baseUrl = payload.updates.baseUrl;
-                  if (payload.updates.apiProtocol !== undefined) updates.apiProtocol = payload.updates.apiProtocol;
-                  if (payload.updates.headers !== undefined) updates.headers = payload.updates.headers;
-                  if (payload.updates.model !== undefined) updates.model = payload.updates.model;
-                  if (payload.updates.fallbackModels !== undefined) updates.fallbackModels = payload.updates.fallbackModels;
-                  if (payload.updates.fallbackProviderIds !== undefined) {
-                    updates.fallbackAccountIds = payload.updates.fallbackProviderIds;
-                  }
-                }
-                await updateAccount(
-                  item.account.id,
-                  updates,
-                  payload.newApiKey
-                );
+                await updateAccount(item.account.id, payload.updates ?? {}, payload.newApiKey);
                 setEditingProvider(null);
               }}
               onValidateKey={(key, options) => validateAccountApiKey(item.account.id, key, options)}
+              onGetStoredKey={() => getAccountApiKey(item.account.id)}
               devModeUnlocked={devModeUnlocked}
             />
           ))}
@@ -330,11 +332,12 @@ interface ProviderCardProps {
   onCancelEdit: () => void;
   onDelete: () => void;
   onSetDefault: () => void;
-  onSaveEdits: (payload: { newApiKey?: string; updates?: Partial<ProviderConfig> }) => Promise<void>;
+  onSaveEdits: (payload: { newApiKey?: string; updates?: Partial<ProviderAccount> }) => Promise<void>;
   onValidateKey: (
     key: string,
     options?: { baseUrl?: string; apiProtocol?: ProviderAccount['apiProtocol'] }
-  ) => Promise<{ valid: boolean; error?: string }>;
+  ) => Promise<{ valid: boolean; error?: string; model?: string; output?: string; latencyMs?: number }>;
+  onGetStoredKey: () => Promise<string | null>;
   devModeUnlocked: boolean;
 }
 
@@ -351,11 +354,14 @@ function ProviderCard({
   onSetDefault,
   onSaveEdits,
   onValidateKey,
+  onGetStoredKey,
   devModeUnlocked,
 }: ProviderCardProps) {
   const { t, i18n } = useTranslation('settings');
+  const branding = useBranding();
   const { account, vendor, status } = item;
   const [newKey, setNewKey] = useState('');
+  const [initialStoredKey, setInitialStoredKey] = useState('');
   const [baseUrl, setBaseUrl] = useState(account.baseUrl || '');
   const [apiProtocol, setApiProtocol] = useState<ProviderAccount['apiProtocol']>(account.apiProtocol || 'openai-completions');
   const [userAgent, setUserAgent] = useState(getUserAgentHeader(account.headers));
@@ -369,8 +375,16 @@ function ProviderCard({
   const [showKey, setShowKey] = useState(false);
   const [showFallback, setShowFallback] = useState(false);
   const [validating, setValidating] = useState(false);
+  const [providerTesting, setProviderTesting] = useState(false);
+  const [testingModelId, setTestingModelId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingDefaultModel, setSavingDefaultModel] = useState<string | null>(null);
+  const [editingUsageModelId, setEditingUsageModelId] = useState<string | null>(null);
+  const [usageTagsDraft, setUsageTagsDraft] = useState('');
   const [arkMode, setArkMode] = useState<ArkMode>('apikey');
+  const [testResult, setTestResult] = useState<ProviderTestResult | null>(null);
+  const [showTestDetails, setShowTestDetails] = useState(false);
+  const [modelTestResults, setModelTestResults] = useState<Record<string, ProviderTestResult>>({});
 
   const typeInfo = PROVIDER_TYPE_INFO.find((t) => t.id === account.vendorId);
   const providerDocsUrl = getProviderDocsUrl(typeInfo, i18n.language);
@@ -386,11 +400,20 @@ function ProviderCard({
     : providerDocsUrl;
   const canEditModelConfig = Boolean(typeInfo?.showBaseUrl || showModelIdField);
   const showUserAgentField = shouldShowUserAgentField(account);
+  const recommendedModels = useMemo(
+    () => getRecommendedModelOptions(account.vendorId, { baseUrl, apiProtocol }),
+    [account.vendorId, baseUrl, apiProtocol],
+  );
+  const selectedRecommendedModel = recommendedModels.some((option) => option.value === modelId)
+    ? modelId
+    : '__custom__';
 
   useEffect(() => {
+    let active = true;
     if (isEditing) {
       setNewKey('');
-      setShowKey(false);
+      setInitialStoredKey('');
+      setShowKey(true);
       setBaseUrl(account.baseUrl || '');
       setApiProtocol(account.apiProtocol || 'openai-completions');
       setUserAgent(getUserAgentHeader(account.headers));
@@ -406,10 +429,131 @@ function ProviderCard({
           typeInfo?.codePlanPresetModelId,
         ) ? 'codeplan' : 'apikey'
       );
+      void onGetStoredKey().then((storedKey) => {
+        if (!active) return;
+        const normalized = storedKey || '';
+        setInitialStoredKey(normalized);
+        setNewKey((current) => current || normalized);
+      }).catch(() => {
+        if (!active) return;
+        setInitialStoredKey('');
+      });
     }
-  }, [isEditing, account.baseUrl, account.headers, account.fallbackModels, account.fallbackAccountIds, account.model, account.apiProtocol, account.vendorId, typeInfo?.codePlanPresetBaseUrl, typeInfo?.codePlanPresetModelId]);
+    return () => {
+      active = false;
+    };
+  }, [isEditing, account.baseUrl, account.headers, account.fallbackModels, account.fallbackAccountIds, account.model, account.apiProtocol, account.vendorId, onGetStoredKey, typeInfo?.codePlanPresetBaseUrl, typeInfo?.codePlanPresetModelId]);
 
   const fallbackOptions = allProviders.filter((candidate) => candidate.account.id !== account.id);
+  const normalizedNewKey = newKey.trim();
+  const normalizedInitialStoredKey = initialStoredKey.trim();
+  const apiKeyChanged = normalizedNewKey !== normalizedInitialStoredKey;
+  const hasMeaningfulApiKeyUpdate = Boolean(normalizedNewKey) && apiKeyChanged;
+  const resolvedBaseUrl = baseUrl.trim() || account.baseUrl || undefined;
+  const resolvedProtocol = (account.vendorId === 'custom' || account.vendorId === 'ollama')
+    ? (apiProtocol || account.apiProtocol)
+    : account.apiProtocol;
+  const resolvedModelId = modelId.trim() || item.resolvedModel || account.model || undefined;
+  const hasNonKeyUpdates = (baseUrl.trim() || undefined) !== (account.baseUrl || undefined)
+    || ((account.vendorId === 'custom' || account.vendorId === 'ollama') && apiProtocol !== account.apiProtocol)
+    || userAgent.trim() !== getUserAgentHeader(account.headers).trim()
+    || (modelId.trim() || undefined) !== (account.model || undefined)
+    || fallbackModelsEqual(normalizeFallbackModels(fallbackModelsText.split('\n')), account.fallbackModels) === false
+    || fallbackProviderIdsEqual(fallbackProviderIds, account.fallbackAccountIds) === false;
+
+  const runConnectionTest = async (modelOverride?: string) => {
+    const storedKey = await onGetStoredKey();
+    return hostApiFetch<ProviderTestResult>(`/api/provider-accounts/${encodeURIComponent(account.id)}/test`, {
+      method: 'POST',
+      body: JSON.stringify({
+        apiKey: normalizedNewKey || storedKey,
+        baseUrl: resolvedBaseUrl,
+        apiProtocol: resolvedProtocol,
+        model: modelOverride || resolvedModelId,
+      }),
+    });
+  };
+
+  const handleProviderTestConnection = async () => {
+    setProviderTesting(true);
+    try {
+      const result = await runConnectionTest();
+      setTestResult(result);
+      setShowTestDetails(true);
+
+      if (!result.valid) {
+        toast.error(result.error || t('aiProviders.toast.testFailed', '连接测试失败'));
+        return;
+      }
+
+      const parts = [
+        result.model ? `${t('aiProviders.toast.testModel', '模型')}: ${result.model}` : '',
+        typeof result.latencyMs === 'number' ? `${t('aiProviders.toast.testLatency', '耗时')}: ${result.latencyMs}ms` : '',
+        result.output ? `${t('aiProviders.toast.testOutput', '输出')}: ${result.output}` : '',
+      ].filter(Boolean);
+      toast.success(parts.join(' | ') || t('aiProviders.toast.testSuccess', '连接测试成功'));
+    } catch (error) {
+      toast.error(`${t('aiProviders.toast.testFailed', '连接测试失败')}: ${error}`);
+    } finally {
+      setProviderTesting(false);
+    }
+  };
+
+  const handleModelTestConnection = async (modelOverride: string) => {
+    setTestingModelId(modelOverride);
+    try {
+      const result = await runConnectionTest(modelOverride);
+      setModelTestResults((current) => ({ ...current, [modelOverride]: result }));
+    } catch (error) {
+      setModelTestResults((current) => ({
+        ...current,
+        [modelOverride]: {
+          valid: false,
+          error: String(error),
+          model: modelOverride,
+        },
+      }));
+    } finally {
+      setTestingModelId(null);
+    }
+  };
+
+  const handleSetDefaultModel = async (modelIdToSet: string) => {
+    setSavingDefaultModel(modelIdToSet);
+    try {
+      await onSaveEdits({ updates: { model: modelIdToSet } });
+      toast.success(t('aiProviders.toast.defaultUpdated', '默认模型已更新'));
+    } catch (error) {
+      toast.error(`${t('aiProviders.toast.failedUpdate')}: ${error}`);
+    } finally {
+      setSavingDefaultModel(null);
+    }
+  };
+
+  const handleSaveUsageTags = async (modelIdToSet: string) => {
+    const nextTags = Array.from(new Set(usageTagsDraft.split(/[,，\n]/).map((tag) => tag.trim()).filter(Boolean)));
+    const currentTags = { ...(account.metadata?.modelUsageTags ?? {}) };
+    if (nextTags.length > 0) {
+      currentTags[modelIdToSet] = nextTags;
+    } else {
+      delete currentTags[modelIdToSet];
+    }
+
+    try {
+      await onSaveEdits({
+        updates: {
+          metadata: {
+            ...(account.metadata ?? {}),
+            modelUsageTags: currentTags,
+          },
+        },
+      });
+      setEditingUsageModelId(null);
+      toast.success(t('aiProviders.toast.updated'));
+    } catch (error) {
+      toast.error(`${t('aiProviders.toast.failedUpdate')}: ${error}`);
+    }
+  };
 
   const toggleFallbackProvider = (providerId: string) => {
     setFallbackProviderIds((current) => (
@@ -422,12 +566,12 @@ function ProviderCard({
   const handleSaveEdits = async () => {
     setSaving(true);
     try {
-      const payload: { newApiKey?: string; updates?: Partial<ProviderConfig> } = {};
+      const payload: { newApiKey?: string; updates?: Partial<ProviderAccount> } = {};
       const normalizedFallbackModels = normalizeFallbackModels(fallbackModelsText.split('\n'));
 
-      if (newKey.trim()) {
+      if (hasMeaningfulApiKeyUpdate) {
         setValidating(true);
-        const result = await onValidateKey(newKey, {
+        const result = await onValidateKey(normalizedNewKey, {
           baseUrl: baseUrl.trim() || undefined,
           apiProtocol: (account.vendorId === 'custom' || account.vendorId === 'ollama') ? apiProtocol : undefined,
         });
@@ -437,7 +581,7 @@ function ProviderCard({
           setSaving(false);
           return;
         }
-        payload.newApiKey = newKey.trim();
+        payload.newApiKey = normalizedNewKey;
       }
 
       {
@@ -447,7 +591,7 @@ function ProviderCard({
           return;
         }
 
-        const updates: Partial<ProviderConfig> = {};
+        const updates: Partial<ProviderAccount> = {};
         if (typeInfo?.showBaseUrl && (baseUrl.trim() || undefined) !== (account.baseUrl || undefined)) {
           updates.baseUrl = baseUrl.trim() || undefined;
         }
@@ -466,7 +610,7 @@ function ProviderCard({
           updates.fallbackModels = normalizedFallbackModels;
         }
         if (!fallbackProviderIdsEqual(fallbackProviderIds, account.fallbackAccountIds)) {
-          updates.fallbackProviderIds = normalizeFallbackProviderIds(fallbackProviderIds);
+          updates.fallbackAccountIds = normalizeFallbackProviderIds(fallbackProviderIds);
         }
         if (Object.keys(updates).length > 0) {
           payload.updates = updates;
@@ -502,6 +646,10 @@ function ProviderCard({
 
   const currentLabelClasses = isDefault ? "text-[13px] text-muted-foreground" : labelClasses;
   const currentSectionLabelClasses = isDefault ? "text-[14px] font-bold text-foreground/80" : labelClasses;
+  const testStatusLabel = testResult?.valid
+    ? t('aiProviders.card.testPassed', '最近测试成功')
+    : t('aiProviders.card.testFailed', '最近测试失败');
+  const modelCountLabel = t('aiProviders.card.modelCount', '共 {{count}} 个模型', { count: item.models.length });
 
   return (
     <div
@@ -524,7 +672,7 @@ function ProviderCard({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-[15px]">{account.label}</span>
+              <span className="font-semibold text-[15px]">{item.displayName}</span>
               {isDefault && (
                 <span className="flex items-center gap-1 font-mono text-[10px] font-medium px-2 py-0.5 rounded-full bg-black/[0.04] dark:bg-white/[0.08] border-0 shadow-none text-foreground/70">
                   <Check className="h-3 w-3" />
@@ -533,23 +681,31 @@ function ProviderCard({
               )}
             </div>
             <div className="flex items-center gap-2 mt-0.5 text-[13px] text-muted-foreground">
-              <span className="capitalize">{vendor?.name || account.vendorId}</span>
+              <span>{item.displayVendorName}</span>
               <span className="w-1 h-1 rounded-full bg-black/20 dark:bg-white/20" />
               <span>{getAuthModeLabel(account.authMode, t)}</span>
-              {account.model && (
+              {item.resolvedModel && (
                 <>
                   <span className="w-1 h-1 rounded-full bg-black/20 dark:bg-white/20" />
-                  <span className="truncate max-w-[200px]">{account.model}</span>
+                  <span className="truncate max-w-[220px]">{item.resolvedModel}</span>
                 </>
               )}
               <span className="w-1 h-1 rounded-full bg-black/20 dark:bg-white/20" />
               <span className="flex items-center gap-1">
-                {hasConfiguredCredentials(account, status) ? (
+                {item.hasConfiguredCredentials ? (
                   <><div className="w-1.5 h-1.5 rounded-full bg-green-500" /> {t('aiProviders.card.configured')}</>
                 ) : (
                   <><div className="w-1.5 h-1.5 rounded-full bg-red-500" /> {t('aiProviders.dialog.apiKeyMissing')}</>
                 )}
               </span>
+              {item.aliases.length > 1 && (
+                <>
+                  <span className="w-1 h-1 rounded-full bg-black/20 dark:bg-white/20" />
+                  <span className="truncate max-w-[160px]">
+                    {t('aiProviders.card.mergedAliases', '已合并 {{count}} 个重复配置', { count: item.aliases.length })}
+                  </span>
+                </>
+              )}
               {((account.fallbackModels?.length ?? 0) > 0 || (account.fallbackAccountIds?.length ?? 0) > 0) && (
                 <>
                   <span className="w-1 h-1 rounded-full bg-black/20 dark:bg-white/20" />
@@ -568,7 +724,7 @@ function ProviderCard({
         </div>
 
         {!isEditing && (
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-1">
             {!isDefault && (
             <Button
               data-testid={`provider-set-default-${account.id}`}
@@ -579,6 +735,30 @@ function ProviderCard({
                 title={t('aiProviders.card.setDefault')}
               >
                 <Check className="h-4 w-4" />
+              </Button>
+            )}
+            <Button
+              data-testid={`provider-test-${account.id}`}
+              variant="outline"
+              className="h-8 rounded-full px-3 border-black/10 dark:border-white/10 bg-white/80 dark:bg-card/80 hover:bg-white dark:hover:bg-card shadow-sm text-[12px]"
+              onClick={() => void handleProviderTestConnection()}
+              title={t('aiProviders.card.testConnection', '测试连接')}
+              disabled={providerTesting}
+            >
+              {providerTesting ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Check className="mr-1 h-3.5 w-3.5" />}
+              {t('aiProviders.card.testButton', '测试')}
+            </Button>
+            {testResult && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-white dark:hover:bg-card shadow-sm"
+                onClick={() => setShowTestDetails((current) => !current)}
+                title={showTestDetails
+                  ? t('aiProviders.card.hideTestDetails', '收起结果')
+                  : t('aiProviders.card.testDetails', '测试详情')}
+              >
+                <ChevronDown className={cn('h-4 w-4 transition-transform', showTestDetails && 'rotate-180')} />
               </Button>
             )}
             <Button
@@ -604,6 +784,125 @@ function ProviderCard({
           </div>
         )}
       </div>
+
+      {testResult && showTestDetails && (
+        <div className="mt-4 rounded-2xl border border-black/5 dark:border-white/10 bg-white/70 dark:bg-card/70 p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[13px] font-semibold text-foreground">
+                {t('aiProviders.card.testResult', '测试结果')}
+              </p>
+              <p className="mt-1 text-[12px] text-muted-foreground">
+                {testStatusLabel}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowTestDetails(false)}
+              className="text-[12px] text-muted-foreground hover:text-foreground"
+            >
+              {t('aiProviders.card.hideTestDetails', '收起结果')}
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="rounded-xl bg-black/[0.03] dark:bg-white/[0.04] px-3 py-2">
+              <p className="text-[11px] text-muted-foreground">{t('aiProviders.card.testStatus', '状态')}</p>
+              <p className={cn('mt-1 text-[13px] font-medium', testResult.valid ? 'text-green-600 dark:text-green-500' : 'text-red-500')}>
+                {testResult.valid ? t('aiProviders.toast.testSuccess', '连接测试成功') : t('aiProviders.toast.testFailed', '连接测试失败')}
+              </p>
+            </div>
+            <div className="rounded-xl bg-black/[0.03] dark:bg-white/[0.04] px-3 py-2">
+              <p className="text-[11px] text-muted-foreground">{t('aiProviders.toast.testModel', '模型')}</p>
+              <p className="mt-1 text-[13px] font-medium text-foreground break-all">
+                {testResult.model || resolvedModelId || t('aiProviders.overview.noModelSelected')}
+              </p>
+            </div>
+            <div className="rounded-xl bg-black/[0.03] dark:bg-white/[0.04] px-3 py-2">
+              <p className="text-[11px] text-muted-foreground">{t('aiProviders.card.testBaseUrl', '请求地址')}</p>
+              <p className="mt-1 text-[13px] font-medium text-foreground break-all">
+                {resolvedBaseUrl || t('aiProviders.card.none')}
+              </p>
+            </div>
+            <div className="rounded-xl bg-black/[0.03] dark:bg-white/[0.04] px-3 py-2">
+              <p className="text-[11px] text-muted-foreground">{t('aiProviders.card.testProtocol', '协议')}</p>
+              <p className="mt-1 text-[13px] font-medium text-foreground">
+                {resolvedProtocol || t('aiProviders.card.none')}
+              </p>
+            </div>
+            <div className="rounded-xl bg-black/[0.03] dark:bg-white/[0.04] px-3 py-2 md:col-span-2">
+              <p className="text-[11px] text-muted-foreground">{t('aiProviders.toast.testLatency', '耗时')}</p>
+              <p className="mt-1 text-[13px] font-medium text-foreground">
+                {typeof testResult.latencyMs === 'number' ? `${testResult.latencyMs} ms` : t('aiProviders.card.none')}
+              </p>
+            </div>
+          </div>
+
+          {testResult.output ? (
+            <div className="mt-3 rounded-xl bg-black/[0.03] dark:bg-white/[0.04] px-3 py-2">
+              <p className="text-[11px] text-muted-foreground">{t('aiProviders.card.testOutput', '返回内容')}</p>
+              <p className="mt-1 whitespace-pre-wrap break-words text-[13px] text-foreground">{testResult.output}</p>
+            </div>
+          ) : null}
+
+          {!testResult.valid && testResult.error ? (
+            <div className="mt-3 rounded-xl bg-red-500/5 px-3 py-2">
+              <p className="text-[11px] text-muted-foreground">{t('aiProviders.card.testError', '错误信息')}</p>
+              <p className="mt-1 whitespace-pre-wrap break-words text-[13px] text-red-600 dark:text-red-400">{testResult.error}</p>
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {!isEditing && item.models.length > 0 && (
+        <div className="mt-4 rounded-2xl border border-black/5 dark:border-white/10 bg-white/40 dark:bg-white/[0.03] px-4 py-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[13px] font-semibold text-foreground">
+                {t('aiProviders.card.modelListTitle', '可用模型')}
+              </p>
+              <p className="mt-1 text-[12px] text-muted-foreground">
+                {modelCountLabel}
+              </p>
+            </div>
+            {item.resolvedModel ? (
+              <div className="rounded-full bg-[#eff6ff] px-3 py-1 text-[11px] font-medium text-[#2563eb] dark:bg-[#172554] dark:text-[#93c5fd]">
+                {t('aiProviders.card.defaultModel', '默认模型')}: {item.resolvedModel}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="space-y-2">
+            {item.models.map((model, index) => (
+              <ProviderModelRow
+                key={`${item.account.id}-${model.id}`}
+                model={model}
+                index={index}
+                defaultLabel={t('aiProviders.card.default', '默认')}
+                usageLabel={t('aiProviders.card.primaryUse', '主要场景')}
+                setDefaultLabel={t('aiProviders.card.setDefaultModel', '设为默认')}
+                testLabel={t('aiProviders.card.testModelCta', '测试该模型')}
+                usageEditLabel={t('aiProviders.card.editUsageTags', '标注用途')}
+                usagePlaceholder={t('aiProviders.card.usageTagsPlaceholder', '例如：公文写作，客服，代码')}
+                onSetDefault={() => void handleSetDefaultModel(model.id)}
+                onTest={() => void handleModelTestConnection(model.id)}
+                isSettingDefault={savingDefaultModel === model.id}
+                isTesting={testingModelId === model.id}
+                testResult={modelTestResults[model.id] || null}
+                isEditingUsage={editingUsageModelId === model.id}
+                usageDraft={editingUsageModelId === model.id ? usageTagsDraft : model.manualUsageTags.join('，')}
+                onStartEditUsage={() => {
+                  setEditingUsageModelId(model.id);
+                  setUsageTagsDraft(model.manualUsageTags.join('，'));
+                }}
+                onUsageDraftChange={setUsageTagsDraft}
+                onCancelEditUsage={() => setEditingUsageModelId(null)}
+                onSaveUsage={() => void handleSaveUsageTags(model.id)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {isEditing && (
         <div className="space-y-6 mt-4 pt-4 border-t border-black/5 dark:border-white/5">
@@ -637,6 +936,29 @@ function ProviderCard({
               {showModelIdField && (
                 <div className="space-y-1.5 pt-2">
                   <Label className={currentLabelClasses}>{t('aiProviders.dialog.modelId')}</Label>
+                  {recommendedModels.length > 0 && (
+                    <div className="space-y-1.5">
+                      <Label className="text-[12px] text-muted-foreground">
+                        {t('aiProviders.dialog.modelPreset', '推荐模型')}
+                      </Label>
+                      <Select
+                        value={selectedRecommendedModel}
+                        onChange={(e) => {
+                          if (e.target.value !== '__custom__') {
+                            setModelId(e.target.value);
+                          }
+                        }}
+                        className={cn(currentInputClasses, 'font-sans')}
+                      >
+                        <option value="__custom__">{t('aiProviders.dialog.modelPresetCustom', '自定义输入')}</option>
+                        {recommendedModels.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  )}
                   <Input
                     value={modelId}
                     onChange={(e) => setModelId(e.target.value)}
@@ -728,7 +1050,7 @@ function ProviderCard({
                   <Input
                     value={userAgent}
                     onChange={(e) => setUserAgent(e.target.value)}
-                    placeholder={t('aiProviders.dialog.userAgentPlaceholder')}
+                    placeholder={t('aiProviders.dialog.userAgentPlaceholder', { userAgentProduct: branding.userAgentProduct })}
                     className={currentInputClasses}
                   />
                 </div>
@@ -815,9 +1137,9 @@ function ProviderCard({
                 </a>
               </div>
             )}
-            <div className="space-y-1.5 pt-1">
-              <Label className={currentLabelClasses}>{t('aiProviders.dialog.replaceApiKey')}</Label>
-              <div className="flex gap-2">
+              <div className="space-y-1.5 pt-1">
+                <Label className={currentLabelClasses}>{t('aiProviders.dialog.replaceApiKey')}</Label>
+                <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Input
                     type={showKey ? 'text' : 'password'}
@@ -847,12 +1169,8 @@ function ProviderCard({
                     validating
                     || saving
                     || (
-                      !newKey.trim()
-                      && (baseUrl.trim() || undefined) === (account.baseUrl || undefined)
-                      && userAgent.trim() === getUserAgentHeader(account.headers).trim()
-                      && (modelId.trim() || undefined) === (account.model || undefined)
-                      && fallbackModelsEqual(normalizeFallbackModels(fallbackModelsText.split('\n')), account.fallbackModels)
-                      && fallbackProviderIdsEqual(fallbackProviderIds, account.fallbackAccountIds)
+                      !hasMeaningfulApiKeyUpdate
+                      && !hasNonKeyUpdates
                     )
                     || Boolean(showModelIdField && !modelId.trim())
                   }
@@ -879,10 +1197,180 @@ function ProviderCard({
               <p className="text-[12px] text-muted-foreground">
                 {t('aiProviders.dialog.replaceApiKeyHelp')}
               </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleProviderTestConnection()}
+                  className="rounded-xl border-black/10 dark:border-white/10 bg-white dark:bg-card hover:bg-black/5 dark:hover:bg-white/10"
+                  disabled={providerTesting}
+                >
+                  {providerTesting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                  {t('aiProviders.card.testButton', '测试')}
+                </Button>
+                {testResult && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setShowTestDetails((current) => !current)}
+                    className="rounded-xl"
+                  >
+                    {showTestDetails
+                      ? t('aiProviders.card.hideTestDetails', '收起结果')
+                      : t('aiProviders.card.testDetails', '测试详情')}
+                    <ChevronDown className={cn('ml-2 h-4 w-4 transition-transform', showTestDetails && 'rotate-180')} />
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function ProviderModelRow({
+  model,
+  index,
+  defaultLabel,
+  usageLabel,
+  setDefaultLabel,
+  testLabel,
+  usageEditLabel,
+  usagePlaceholder,
+  onSetDefault,
+  onTest,
+  isSettingDefault,
+  isTesting,
+  testResult,
+  isEditingUsage,
+  usageDraft,
+  onStartEditUsage,
+  onUsageDraftChange,
+  onCancelEditUsage,
+  onSaveUsage,
+}: {
+  model: ProviderModelSummary;
+  index: number;
+  defaultLabel: string;
+  usageLabel: string;
+  setDefaultLabel: string;
+  testLabel: string;
+  usageEditLabel: string;
+  usagePlaceholder: string;
+  onSetDefault: () => void;
+  onTest: () => void;
+  isSettingDefault: boolean;
+  isTesting: boolean;
+  testResult: ProviderTestResult | null;
+  isEditingUsage: boolean;
+  usageDraft: string;
+  onStartEditUsage: () => void;
+  onUsageDraftChange: (value: string) => void;
+  onCancelEditUsage: () => void;
+  onSaveUsage: () => void;
+}) {
+  return (
+    <div className="ml-3 rounded-xl border border-black/5 bg-black/[0.025] px-4 py-3 dark:border-white/8 dark:bg-white/[0.03]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+        <span className="w-6 shrink-0 text-[12px] font-semibold text-muted-foreground">
+          {index + 1}.
+        </span>
+        <span className="text-[14px] font-semibold text-foreground">{model.label}</span>
+        {model.isDefault ? (
+          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+            {defaultLabel}
+          </span>
+        ) : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {!model.isDefault && (
+            <button
+              type="button"
+              onClick={onSetDefault}
+              disabled={isSettingDefault}
+              className="inline-flex items-center gap-1 rounded-full bg-[#2563eb] px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSettingDefault ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+              {setDefaultLabel}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onTest}
+            disabled={isTesting}
+            className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-white px-3 py-1.5 text-[12px] font-medium text-foreground/80 transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]"
+          >
+            {isTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+            {isTesting ? '测试中...' : testLabel}
+          </button>
+          <button
+            type="button"
+            onClick={onStartEditUsage}
+            className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-white px-3 py-1.5 text-[12px] font-medium text-foreground/80 transition hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]"
+          >
+            <Tags className="h-3.5 w-3.5" />
+            {usageEditLabel}
+          </button>
+        </div>
+      </div>
+      <div className="mt-1 pl-8 text-[12px] text-muted-foreground">
+        {usageLabel}: {model.usageTags.join(' / ')}
+      </div>
+      {testResult ? (
+        <div
+          className={cn(
+            'mt-3 ml-8 rounded-xl border px-3 py-2 text-[12px]',
+            testResult.valid
+              ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300'
+              : 'border-red-500/20 bg-red-500/5 text-red-700 dark:text-red-300',
+          )}
+        >
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="font-medium">{testResult.valid ? '连接成功' : '连接失败'}</span>
+            {testResult.model ? <span>模型：{testResult.model}</span> : null}
+            {typeof testResult.latencyMs === 'number' ? <span>耗时：{testResult.latencyMs}ms</span> : null}
+          </div>
+          {testResult.output ? (
+            <div className="mt-1 break-words text-foreground/80 dark:text-white/80">
+              输出：{testResult.output}
+            </div>
+          ) : null}
+          {!testResult.valid && testResult.error ? (
+            <div className="mt-1 break-words text-red-700 dark:text-red-300">
+              错误：{testResult.error}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {isEditingUsage ? (
+        <div className="mt-3 pl-8">
+          <Input
+            value={usageDraft}
+            onChange={(e) => onUsageDraftChange(e.target.value)}
+            placeholder={usagePlaceholder}
+            className="h-[40px] rounded-xl border-black/10 bg-white text-[13px] dark:border-white/10 dark:bg-white/[0.03]"
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onSaveUsage}
+              className="rounded-full bg-[#2563eb] px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-[#1d4ed8]"
+            >
+              保存用途
+            </button>
+            <button
+              type="button"
+              onClick={onCancelEditUsage}
+              className="rounded-full border border-black/10 bg-white px-3 py-1.5 text-[12px] font-medium text-foreground/70 transition hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03]"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -920,6 +1408,7 @@ function AddProviderDialog({
   devModeUnlocked,
 }: AddProviderDialogProps) {
   const { t, i18n } = useTranslation('settings');
+  const branding = useBranding();
   const [selectedType, setSelectedType] = useState<ProviderType | null>(null);
   const [name, setName] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -968,6 +1457,13 @@ function AddProviderDialog({
   const vendorMap = new Map(vendors.map((vendor) => [vendor.id, vendor]));
   const selectedVendor = selectedType ? vendorMap.get(selectedType) : undefined;
   const showUserAgentInAddDialog = shouldShowUserAgentFieldForNewProvider(selectedType);
+  const recommendedModels = useMemo(
+    () => selectedType ? getRecommendedModelOptions(selectedType, { baseUrl, apiProtocol }) : [],
+    [selectedType, baseUrl, apiProtocol],
+  );
+  const selectedRecommendedModel = recommendedModels.some((option) => option.value === modelId)
+    ? modelId
+    : '__custom__';
   const preferredOAuthMode = selectedVendor?.supportedAuthModes.includes('oauth_browser')
     ? 'oauth_browser'
     : (selectedVendor?.supportedAuthModes.includes('oauth_device')
@@ -1402,6 +1898,28 @@ function AddProviderDialog({
                 {showModelIdField && (
                   <div className="space-y-2.5">
                     <Label htmlFor="modelId" className={labelClasses}>{t('aiProviders.dialog.modelId')}</Label>
+                    {recommendedModels.length > 0 && (
+                      <div className="space-y-2">
+                        <Label className="text-[12px] text-muted-foreground">{t('aiProviders.dialog.modelPreset', '推荐模型')}</Label>
+                        <Select
+                          value={selectedRecommendedModel}
+                          onChange={(e) => {
+                            if (e.target.value !== '__custom__') {
+                              setModelId(e.target.value);
+                              setValidationError(null);
+                            }
+                          }}
+                          className={cn(inputClasses, 'font-sans')}
+                        >
+                          <option value="__custom__">{t('aiProviders.dialog.modelPresetCustom', '自定义输入')}</option>
+                          {recommendedModels.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    )}
                     <Input
                       data-testid="add-provider-model-id-input"
                       id="modelId"
@@ -1510,7 +2028,7 @@ function AddProviderDialog({
                         <Label htmlFor="userAgent" className={labelClasses}>{t('aiProviders.dialog.userAgent')}</Label>
                         <Input
                           id="userAgent"
-                          placeholder={t('aiProviders.dialog.userAgentPlaceholder')}
+                          placeholder={t('aiProviders.dialog.userAgentPlaceholder', { userAgentProduct: branding.userAgentProduct })}
                           value={userAgent}
                           onChange={(e) => setUserAgent(e.target.value)}
                           className={inputClasses}

@@ -1,6 +1,6 @@
 {
   "title": "Settings",
-  "subtitle": "Configure your Deep AI Worker experience",
+  "subtitle": "Configure your {{appName}} experience",
   "appearance": {
     "title": "General",
     "description": "Customize the look and feel",
@@ -10,7 +10,7 @@
     "system": "System",
     "language": "Language",
     "launchAtStartup": "Launch at system startup",
-    "launchAtStartupDesc": "Automatically launch Deep AI Worker when you log in"
+    "launchAtStartupDesc": "Automatically launch {{appName}} when you log in"
   },
   "aiProviders": {
     "title": "AI Providers",
@@ -37,7 +37,7 @@
     "notRequired": "Not required",
     "empty": {
       "title": "No providers configured",
-      "desc": "Add an AI provider to start using Deep AI Worker",
+      "desc": "Add an AI provider to start using {{appName}}",
       "cta": "Add Your First Provider"
     },
     "dialog": {
@@ -49,9 +49,11 @@
       "apiKeyMissing": "No API key is stored for this provider yet.",
       "apiKeyStored": "Your API key is stored locally on your machine.",
       "replaceApiKey": "Replace API Key",
-      "replaceApiKeyHelp": "Leave this field empty if you want to keep the currently stored API key.",
+      "replaceApiKeyHelp": "The currently stored API key is filled into this field. Update it here and save when needed.",
       "baseUrl": "Base URL",
       "modelId": "Model ID",
+      "modelPreset": "Recommended models",
+      "modelPresetCustom": "Custom input",
       "codePlanPreset": "Code Plan Preset",
       "codePlanMode": "Code Plan",
       "useCodePlanPreset": "Use Ark Code Plan Preset",
@@ -60,7 +62,7 @@
       "protocol": "Protocol",
       "advancedConfig": "Advanced configuration",
       "userAgent": "User-Agent",
-      "userAgentPlaceholder": "Deep AI Worker/1.0",
+      "userAgentPlaceholder": "{{userAgentProduct}}",
       "fallbackModels": "Fallback Models",
       "fallbackProviders": "Fallback Providers",
       "fallbackModelIds": "Fallback Model IDs",
@@ -79,6 +81,19 @@
       "configured": "Configured",
       "noKey": "No API key set",
       "none": "None",
+      "testButton": "Test",
+      "testDetails": "Test details",
+      "hideTestDetails": "Hide results",
+      "testResult": "Test result",
+      "testPassed": "Latest test passed",
+      "testFailed": "Latest test failed",
+      "testStatus": "Status",
+      "testBaseUrl": "Request URL",
+      "testProtocol": "Protocol",
+      "testOutput": "Output",
+      "testError": "Error",
+      "testConnection": "Test Connection",
+      "mergedAliases": "Merged {{count}} duplicate configs",
       "fallbacks_one": "Fallback: {{names}}",
       "fallbacks_other": "Fallbacks ({{count}}): {{names}}",
       "setDefault": "Set as default",
@@ -102,7 +117,12 @@
       "failedUpdate": "Failed to update provider",
       "invalidKey": "Invalid API key",
       "modelRequired": "Model ID is required",
-      "minimaxConflict": "Cannot add both MiniMax (Global) and MiniMax (CN) providers."
+      "minimaxConflict": "Cannot add both MiniMax (Global) and MiniMax (CN) providers.",
+      "testSuccess": "Connection test passed",
+      "testFailed": "Connection test failed",
+      "testModel": "Model",
+      "testLatency": "Latency",
+      "testOutput": "Output"
     },
     "oauth": {
       "loginMode": "OAuth Login",
@@ -134,7 +154,7 @@
     "appLogs": "Application Logs",
     "openFolder": "Open Folder",
     "autoStart": "Auto-start Gateway",
-    "autoStartDesc": "Start Gateway when Deep AI Worker launches",
+    "autoStartDesc": "Start Gateway when {{appName}} launches",
     "proxyTitle": "Proxy",
     "proxyDesc": "Route Electron and Gateway traffic through your local proxy client.",
     "proxyServer": "Proxy Server",
@@ -155,7 +175,7 @@
   },
   "updates": {
     "title": "Updates",
-    "description": "Keep Deep AI Worker up to date",
+    "description": "Keep {{appName}} up to date",
     "autoCheck": "Auto-check for updates",
     "autoCheckDesc": "Check for updates on startup",
     "autoDownload": "Auto-update",
@@ -208,13 +228,23 @@
     },
     "devMode": "Developer Mode",
     "devModeDesc": "Show developer tools and shortcuts",
+    "chatProcessDisplay": "Chat process hints",
+    "chatProcessDisplayDesc": "Control whether tool execution and read-process cards appear in the conversation.",
+    "chatFontScale": "Chat font size",
+    "chatFontScaleDesc": "Adjust message and composer font size for a lighter, easier reading experience.",
+    "chatFontScaleOption": "{{value}}%",
+    "chatProcessDisplayOptions": {
+      "all": "Show all",
+      "files": "Files only",
+      "hidden": "Hide all"
+    },
     "telemetry": "Anonymous Usage Data",
-    "telemetryDesc": "Allow providing anonymous basic usage data to improve Deep AI Worker"
+    "telemetryDesc": "Allow providing anonymous basic usage data to improve {{appName}}"
   },
   "developer": {
     "title": "Developer",
     "description": "Advanced options for developers",
-    "console": "OpenClaw Console",
+    "console": "{{appName}} Console",
     "consoleDesc": "Access the native OpenClaw management interface",
     "openConsole": "Open Developer Console",
     "consoleNote": "Opens the Control UI with gateway token injected",
@@ -271,8 +301,8 @@
   },
   "about": {
     "title": "About",
-    "appName": "Deep AI Worker",
-    "tagline": "Graphical AI Assistant",
+    "appName": "{{appName}}",
+    "tagline": "{{slogan}}",
     "basedOn": "Based on OpenClaw",
     "version": "Version {{version}}",
     "docs": "Website",

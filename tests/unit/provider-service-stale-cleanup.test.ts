@@ -4,6 +4,9 @@ const mocks = vi.hoisted(() => ({
   ensureProviderStoreMigrated: vi.fn(),
   listProviderAccounts: vi.fn(),
   deleteProviderAccount: vi.fn(),
+  listSuppressedProviderKeys: vi.fn(),
+  suppressProviderKeys: vi.fn(),
+  unsuppressProviderKeys: vi.fn(),
   saveProviderAccount: vi.fn(),
   getActiveOpenClawProviders: vi.fn(),
   getOpenClawProvidersConfig: vi.fn(),
@@ -21,12 +24,15 @@ vi.mock('@electron/services/providers/provider-migration', () => ({
 vi.mock('@electron/services/providers/provider-store', () => ({
   listProviderAccounts: mocks.listProviderAccounts,
   deleteProviderAccount: mocks.deleteProviderAccount,
+  listSuppressedProviderKeys: mocks.listSuppressedProviderKeys,
   getProviderAccount: vi.fn(),
   getDefaultProviderAccountId: vi.fn(),
   providerAccountToConfig: vi.fn(),
   providerConfigToAccount: vi.fn(),
   saveProviderAccount: mocks.saveProviderAccount,
   setDefaultProviderAccount: vi.fn(),
+  suppressProviderKeys: mocks.suppressProviderKeys,
+  unsuppressProviderKeys: mocks.unsuppressProviderKeys,
 }));
 
 vi.mock('@electron/utils/openclaw-auth', () => ({
@@ -101,6 +107,7 @@ describe('ProviderService.listAccounts (openclaw.json as sole source of truth)',
     mocks.getProviderDefinition.mockReturnValue(undefined);
     mocks.getOpenClawProvidersConfig.mockResolvedValue({ providers: {}, defaultModel: undefined });
     mocks.listProviderAccounts.mockResolvedValue([]);
+    mocks.listSuppressedProviderKeys.mockResolvedValue([]);
     service = new ProviderService();
   });
 
@@ -344,5 +351,37 @@ describe('ProviderService.listAccounts (openclaw.json as sole source of truth)',
         model: 'claude-opus-4-6',
       }),
     ]));
+  });
+
+  it('does not surface providers that were explicitly suppressed by the user', async () => {
+    mocks.listProviderAccounts.mockResolvedValue([]);
+    mocks.listSuppressedProviderKeys.mockResolvedValue(['openai', 'openai-codex']);
+    mocks.getActiveOpenClawProviders.mockResolvedValue(new Set(['openai']));
+    mocks.getOpenClawProvidersConfig.mockResolvedValue({
+      providers: {
+        openai: {},
+      },
+      defaultModel: undefined,
+    });
+    mocks.getProviderDefinition.mockImplementation((key: string) => {
+      if (key === 'openai') {
+        return {
+          id: 'openai',
+          name: 'OpenAI',
+          defaultAuthMode: 'api_key',
+          defaultModelId: 'gpt-5.4',
+          providerConfig: {
+            baseUrl: 'https://api.openai.com/v1',
+            api: 'openai-responses',
+          },
+        };
+      }
+      return undefined;
+    });
+
+    const result = await service.listAccounts();
+
+    expect(result).toEqual([]);
+    expect(mocks.saveProviderAccount).not.toHaveBeenCalled();
   });
 });

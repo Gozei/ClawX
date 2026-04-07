@@ -4,50 +4,50 @@
 
 @layer base {
   :root {
-    /* #f1ede1 */
-    --background: 45 36.4% 91.4%;
-    --foreground: 222.2 84% 4.9%;
+    --font-ui: "Tencent Sans W7", "Tencent Sans", "Volcano Sans", "Douyin Sans", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-display: "Tencent Sans W7", "Tencent Sans", "Volcano Sans", "Douyin Sans", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    --background: 220 23% 97%;
+    --foreground: 222 29% 16%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 222 29% 16%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
+    --popover-foreground: 222 29% 16%;
+    --primary: 217 78% 54%;
     --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
+    --secondary: 220 17% 95%;
+    --secondary-foreground: 222 29% 16%;
+    --muted: 220 17% 95%;
+    --muted-foreground: 220 10% 45%;
+    --accent: 214 56% 96%;
+    --accent-foreground: 222 29% 16%;
+    --destructive: 0 72% 54%;
     --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
+    --border: 220 18% 90%;
+    --input: 220 18% 90%;
+    --ring: 217 78% 54%;
+    --radius: 0.8rem;
   }
 
-  /* Neutral deep-gray dark palette */
   .dark {
-    --background: 240 4% 11%;
-    --foreground: 210 20% 96%;
-    --card: 240 3% 14%;
-    --card-foreground: 210 20% 96%;
-    --popover: 240 3% 14%;
-    --popover-foreground: 210 20% 96%;
-    --primary: 217.2 91.2% 59.8%;
+    --background: 220 14% 11%;
+    --foreground: 210 25% 96%;
+    --card: 220 14% 14%;
+    --card-foreground: 210 25% 96%;
+    --popover: 220 14% 14%;
+    --popover-foreground: 210 25% 96%;
+    --primary: 217 78% 62%;
     --primary-foreground: 210 40% 98%;
-    --secondary: 240 3% 18%;
-    --secondary-foreground: 210 20% 96%;
-    --muted: 240 3% 18%;
-    --muted-foreground: 220 8% 72%;
-    --accent: 240 3% 22%;
-    --accent-foreground: 210 20% 96%;
-    --destructive: 0 65% 42%;
-    --destructive-foreground: 210 20% 96%;
-    --border: 240 3% 24%;
-    --input: 240 3% 18%;
-    --ring: 217.2 91.2% 59.8%;
+    --secondary: 220 12% 18%;
+    --secondary-foreground: 210 25% 96%;
+    --muted: 220 12% 18%;
+    --muted-foreground: 218 12% 70%;
+    --accent: 220 12% 20%;
+    --accent-foreground: 210 25% 96%;
+    --destructive: 0 62% 44%;
+    --destructive-foreground: 210 25% 96%;
+    --border: 220 12% 24%;
+    --input: 220 12% 18%;
+    --ring: 217 78% 62%;
   }
 }
 
@@ -58,7 +58,20 @@
 
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-ui);
     font-feature-settings: "rlig" 1, "calt" 1;
+    background-image: radial-gradient(circle at top left, rgba(37, 99, 235, 0.06), transparent 28%);
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  .font-serif {
+    font-family: var(--font-display) !important;
   }
 }
 

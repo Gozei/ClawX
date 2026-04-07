@@ -12,6 +12,7 @@ import { hostApiFetch } from '@/lib/host-api';
 import { trackUiEvent } from '@/lib/telemetry';
 import { ProvidersSettings } from '@/components/settings/ProvidersSettings';
 import { FeedbackState } from '@/components/common/FeedbackState';
+import { PageHeader } from '@/components/layout/PageHeader';
 import {
   filterUsageHistoryByWindow,
   groupUsageHistory,
@@ -282,17 +283,11 @@ export function Models() {
     <div data-testid="models-page" className="flex flex-col -m-6 dark:bg-background h-[calc(100vh-2.5rem)] overflow-hidden">
       <div className="w-full max-w-5xl mx-auto flex flex-col h-full p-10 pt-16">
         
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-start justify-between mb-12 shrink-0 gap-4">
-          <div>
-            <h1 data-testid="models-page-title" className="text-5xl md:text-6xl font-serif text-foreground mb-3 font-normal tracking-tight" style={{ fontFamily: 'Georgia, Cambria, "Times New Roman", Times, serif' }}>
-              {t('dashboard:models.title')}
-            </h1>
-            <p className="text-[17px] text-foreground/70 font-medium">
-              {t('dashboard:models.subtitle')}
-            </p>
-          </div>
-        </div>
+        <PageHeader
+          title={t('dashboard:models.title')}
+          subtitle={t('dashboard:models.subtitle')}
+          titleTestId="models-page-title"
+        />
 
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto pr-2 pb-10 min-h-0 -mr-2 space-y-12">

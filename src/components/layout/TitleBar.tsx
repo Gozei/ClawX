@@ -13,7 +13,7 @@ export function TitleBar() {
 
   if (platform === 'darwin') {
     // macOS: just a drag region, traffic lights are native
-    return <div className="drag-region h-10 shrink-0 border-b bg-background" />;
+    return <div className="drag-region h-10 shrink-0 border-b border-black/5 bg-[#f7f9fc]/95 backdrop-blur supports-[backdrop-filter]:bg-[#f7f9fc]/80 dark:bg-background" />;
   }
 
   // Linux keeps the native frame/title bar for better IME compatibility.
@@ -51,28 +51,28 @@ function WindowsTitleBar() {
   };
 
   return (
-    <div className="drag-region flex h-10 shrink-0 items-center justify-end border-b bg-background">
+    <div className="drag-region flex h-10 shrink-0 items-center justify-end border-b border-black/5 bg-[#f7f9fc]/95 backdrop-blur supports-[backdrop-filter]:bg-[#f7f9fc]/80 dark:bg-background">
 
       {/* Right: Window Controls */}
       <div className="no-drag flex h-full">
         <button
           onClick={handleMinimize}
-          className="flex h-full w-11 items-center justify-center text-muted-foreground hover:bg-accent transition-colors"
-          title="Minimize"
+          className="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-white hover:text-foreground"
+          title="最小化"
         >
           <Minus className="h-4 w-4" />
         </button>
         <button
           onClick={handleMaximize}
-          className="flex h-full w-11 items-center justify-center text-muted-foreground hover:bg-accent transition-colors"
-          title={maximized ? 'Restore' : 'Maximize'}
+          className="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-white hover:text-foreground"
+          title={maximized ? '还原' : '最大化'}
         >
           {maximized ? <Copy className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
         </button>
         <button
           onClick={handleClose}
           className="flex h-full w-11 items-center justify-center text-muted-foreground hover:bg-red-500 hover:text-white transition-colors"
-          title="Close"
+          title="关闭"
         >
           <X className="h-4 w-4" />
         </button>

@@ -1,24 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Bot, Check, Plus, RefreshCw, Settings2, Trash2, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { AlertCircle, ArrowDown, ArrowUp, Bot, Check, Plus, RefreshCw, Settings2, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { useAgentsStore } from '@/stores/agents';
 import { useGatewayStore } from '@/stores/gateway';
 import { useProviderStore } from '@/stores/providers';
+import { useSkillsStore } from '@/stores/skills';
+import { useChatStore } from '@/stores/chat';
 import { hostApiFetch } from '@/lib/host-api';
 import { subscribeHostEvent } from '@/lib/host-events';
 import { CHANNEL_ICONS, CHANNEL_NAMES, type ChannelType } from '@/types/channel';
-import type { AgentSummary } from '@/types/agent';
+import type { AgentProfileType, AgentSummary, AgentWorkflowNode } from '@/types/agent';
 import type { ProviderAccount, ProviderVendorInfo, ProviderWithKeyInfo } from '@/lib/providers';
+import type { Skill } from '@/types/skill';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { PageHeader } from '@/components/layout/PageHeader';
 import telegramIcon from '@/assets/channels/telegram.svg';
 import discordIcon from '@/assets/channels/discord.svg';
 import whatsappIcon from '@/assets/channels/whatsapp.svg';
@@ -51,6 +57,121 @@ interface RuntimeProviderOption {
   label: string;
   modelIdPlaceholder?: string;
   configuredModelId?: string;
+}
+
+type AgentTriggerMode = 'manual' | 'channel' | 'schedule' | 'webhook';
+
+interface AgentProfileOption {
+  id: AgentProfileType;
+  label: string;
+  description: string;
+}
+
+interface AgentRuntimeSummary {
+  lastActiveAt: number | null;
+  sessionCount: number;
+  latestModel: string | null;
+  recentSessions: Array<{
+    key: string;
+    label: string;
+    preview: string | null;
+    updatedAt: number | null;
+    model: string | null;
+    triggerSource: AgentTriggerMode | 'unknown';
+    status: 'active' | 'idle';
+  }>;
+}
+
+function toSafeText(value: unknown, fallback = ''): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return fallback;
+}
+
+function toSafeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => toSafeText(item)).filter(Boolean);
+}
+
+function summarizeNames(values: string[], emptyLabel: string): string {
+  if (values.length === 0) return emptyLabel;
+  if (values.length <= 2) return values.join('、');
+  return `${values.slice(0, 2).join('、')} +${values.length - 2}`;
+}
+
+interface WorkflowTemplate {
+  id: string;
+  label: string;
+  description: string;
+  steps: AgentWorkflowNode[];
+}
+
+interface WorkflowStepTypeOption {
+  id: AgentWorkflowNode['type'];
+  label: string;
+  description: string;
+}
+
+interface WorkflowFailureOption {
+  id: NonNullable<AgentWorkflowNode['onFailure']>;
+  label: string;
+  description: string;
+}
+
+function formatRelativeTime(timestamp: number | null, locale: string): string {
+  if (!timestamp || !Number.isFinite(timestamp)) return '-';
+  const diffMs = Date.now() - timestamp;
+  const diffMinutes = Math.max(1, Math.round(diffMs / 60000));
+  const formatter = new Intl.RelativeTimeFormat(locale.startsWith('zh') ? 'zh-CN' : locale, { numeric: 'auto' });
+  if (diffMinutes < 60) return formatter.format(-diffMinutes, 'minute');
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return formatter.format(-diffHours, 'hour');
+  const diffDays = Math.round(diffHours / 24);
+  return formatter.format(-diffDays, 'day');
+}
+
+function inferTriggerSourceFromSessionKey(sessionKey: string): AgentTriggerMode | 'unknown' {
+  if (!sessionKey) return 'unknown';
+  if (sessionKey.includes(':cron:') || sessionKey.includes('cron:')) return 'schedule';
+  if (sessionKey.includes(':webhook:') || sessionKey.includes('webhook:')) return 'webhook';
+  if (sessionKey.includes(':channel:') || sessionKey.includes(':telegram:') || sessionKey.includes(':wechat:') || sessionKey.includes(':discord:') || sessionKey.includes(':feishu:')) {
+    return 'channel';
+  }
+  if (sessionKey.startsWith('agent:')) return 'manual';
+  return 'unknown';
+}
+
+function inferRuntimeStatus(updatedAt: number | null): 'active' | 'idle' {
+  if (!updatedAt) return 'idle';
+  return Date.now() - updatedAt <= 30 * 60 * 1000 ? 'active' : 'idle';
+}
+
+function createWorkflowNode(
+  partial?: Partial<AgentWorkflowNode>,
+  index = 0,
+): AgentWorkflowNode {
+  return {
+    id: partial?.id || `step-${Date.now()}-${index}`,
+    type: partial?.type || 'instruction',
+    title: partial?.title || '',
+    target: partial?.target || null,
+    onFailure: partial?.onFailure || 'continue',
+    inputSpec: partial?.inputSpec || null,
+    outputSpec: partial?.outputSpec || null,
+    modelRef: partial?.modelRef || null,
+    code: partial?.code || null,
+  };
+}
+
+function normalizeWorkflowNodesFromAgent(agent: AgentSummary): AgentWorkflowNode[] {
+  if (Array.isArray(agent.workflowNodes) && agent.workflowNodes.length > 0) {
+    return agent.workflowNodes.map((node, index) => createWorkflowNode(node, index));
+  }
+  const fallbackSteps = toSafeStringArray(agent.workflowSteps);
+  if (fallbackSteps.length === 0) {
+    return [createWorkflowNode(undefined, 0)];
+  }
+  return fallbackSteps.map((step, index) => createWorkflowNode({ title: step, type: 'instruction' }, index));
 }
 
 function resolveRuntimeProviderKey(account: ProviderAccount): string {
@@ -90,6 +211,46 @@ function hasConfiguredProviderCredentials(
     return true;
   }
   return statusById.get(account.id)?.hasKey ?? false;
+}
+
+function buildRuntimeProviderOptions(
+  providerAccounts: ProviderAccount[],
+  providerStatuses: ProviderWithKeyInfo[],
+  providerVendors: ProviderVendorInfo[],
+  providerDefaultAccountId: string | null,
+): RuntimeProviderOption[] {
+  const vendorMap = new Map<string, ProviderVendorInfo>(providerVendors.map((vendor) => [vendor.id, vendor]));
+  const statusById = new Map<string, ProviderWithKeyInfo>(providerStatuses.map((status) => [status.id, status]));
+  const entries = providerAccounts
+    .filter((account) => account.enabled && hasConfiguredProviderCredentials(account, statusById))
+    .sort((left, right) => {
+      if (left.id === providerDefaultAccountId) return -1;
+      if (right.id === providerDefaultAccountId) return 1;
+      return right.updatedAt.localeCompare(left.updatedAt);
+    });
+
+  const deduped = new Map<string, RuntimeProviderOption>();
+  for (const account of entries) {
+    const runtimeProviderKey = resolveRuntimeProviderKey(account);
+    if (!runtimeProviderKey || deduped.has(runtimeProviderKey)) continue;
+    const vendor = vendorMap.get(account.vendorId);
+    const label = `${account.label} (${vendor?.name || account.vendorId})`;
+    const configuredModelId = account.model
+      ? (account.model.startsWith(`${runtimeProviderKey}/`)
+        ? account.model.slice(runtimeProviderKey.length + 1)
+        : account.model)
+      : undefined;
+
+    deduped.set(runtimeProviderKey, {
+      runtimeProviderKey,
+      accountId: account.id,
+      label,
+      modelIdPlaceholder: vendor?.modelIdPlaceholder,
+      configuredModelId,
+    });
+  }
+
+  return [...deduped.values()];
 }
 
 export function Agents() {
@@ -169,7 +330,7 @@ export function Agents() {
 
   if (loading && !hasCompletedInitialLoad) {
     return (
-      <div className="flex flex-col -m-6 dark:bg-background min-h-[calc(100vh-2.5rem)] items-center justify-center">
+      <div data-testid="agents-page" className="flex flex-col -m-6 dark:bg-background min-h-[calc(100vh-2.5rem)] items-center justify-center">
         <LoadingSpinner size="lg" />
       </div>
     );
@@ -178,34 +339,29 @@ export function Agents() {
   return (
     <div data-testid="agents-page" className="flex flex-col -m-6 dark:bg-background h-[calc(100vh-2.5rem)] overflow-hidden">
       <div className="w-full max-w-5xl mx-auto flex flex-col h-full p-10 pt-16">
-        <div className="flex flex-col md:flex-row md:items-start justify-between mb-12 shrink-0 gap-4">
-          <div>
-            <h1
-              className="text-5xl md:text-6xl font-serif text-foreground mb-3 font-normal tracking-tight"
-              style={{ fontFamily: 'Georgia, Cambria, "Times New Roman", Times, serif' }}
-            >
-              {t('title')}
-            </h1>
-            <p className="text-[17px] text-foreground/70 font-medium">{t('subtitle')}</p>
-          </div>
-          <div className="flex items-center gap-3 md:mt-2">
-            <Button
-              variant="outline"
-              onClick={handleRefresh}
-              className="h-9 text-[13px] font-medium rounded-full px-4 border-black/10 dark:border-white/10 bg-transparent hover:bg-black/5 dark:hover:bg-white/5 shadow-none text-foreground/80 hover:text-foreground transition-colors"
-            >
-              <RefreshCw className={cn('h-3.5 w-3.5 mr-2', isUsingStableValue && 'animate-spin')} />
-              {t('refresh')}
-            </Button>
-            <Button
-              onClick={() => setShowAddDialog(true)}
-              className="h-9 text-[13px] font-medium rounded-full px-4 shadow-none"
-            >
-              <Plus className="h-3.5 w-3.5 mr-2" />
-              {t('addAgent')}
-            </Button>
-          </div>
-        </div>
+        <PageHeader
+          title={t('title')}
+          subtitle={t('subtitle')}
+          actions={(
+            <>
+              <Button
+                variant="outline"
+                onClick={handleRefresh}
+                className="h-10 rounded-full px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white/82 dark:hover:bg-white/6"
+              >
+                <RefreshCw className={cn('h-3.5 w-3.5 mr-2', isUsingStableValue && 'animate-spin')} />
+                {t('refresh')}
+              </Button>
+              <Button
+                onClick={() => setShowAddDialog(true)}
+                className="h-10 rounded-full px-4 text-[13px] font-medium shadow-none"
+              >
+                <Plus className="h-3.5 w-3.5 mr-2" />
+                {t('addAgent')}
+              </Button>
+            </>
+          )}
+        />
 
         <div className="flex-1 overflow-y-auto pr-2 pb-10 min-h-0 -mr-2">
           {gatewayStatus.state !== 'running' && (
@@ -298,6 +454,16 @@ function AgentCard({
   onDelete: () => void;
 }) {
   const { t } = useTranslation('agents');
+  const safeAgentName = toSafeText(agent.name, agent.id);
+  const safeModelDisplay = toSafeText(agent.modelDisplay, t('none'));
+  const safeProfileTypeLabel = agent.profileType
+    ? t(`profileTypes.${agent.profileType}.label`)
+    : t('profileTypes.specialist.label');
+  const safeSkillIds = toSafeStringArray(agent.skillIds);
+  const safeWorkflowSteps = toSafeStringArray(agent.workflowSteps);
+  const safeTriggerModes = toSafeStringArray(agent.triggerModes);
+  const safeObjective = toSafeText(agent.objective);
+  const safeDescription = toSafeText(agent.description);
   const boundChannelAccounts = channelGroups.flatMap((group) =>
     group.accounts
       .filter((account) => account.agentId === agent.id)
@@ -313,67 +479,140 @@ function AgentCard({
   const channelsText = boundChannelAccounts.length > 0
     ? boundChannelAccounts.join(', ')
     : t('none');
+  const triggerText = safeTriggerModes.length > 0
+    ? summarizeNames(
+        safeTriggerModes.map((mode) =>
+          ['manual', 'channel', 'schedule', 'webhook'].includes(mode)
+            ? t(`settingsDialog.triggerModes.${mode}.label`)
+            : mode
+        ),
+        t('none'),
+      )
+    : t('none');
+  const summaryText = safeObjective || safeDescription || t('settingsDialog.description');
 
   return (
     <div
       className={cn(
-        'group flex items-start gap-4 p-4 rounded-2xl transition-all text-left border relative overflow-hidden bg-transparent border-transparent hover:bg-black/5 dark:hover:bg-white/5',
-        agent.isDefault && 'bg-black/[0.04] dark:bg-white/[0.06]'
+        'group relative overflow-hidden rounded-[28px] border p-5 transition-all',
+        'border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.03)_0%,rgba(255,255,255,0.02)_100%)] shadow-[0_12px_32px_rgba(0,0,0,0.12)]',
+        'hover:border-white/10 hover:bg-white/[0.04] dark:border-white/8 dark:hover:bg-white/[0.05]',
+        agent.isDefault && 'ring-1 ring-primary/30'
       )}
     >
-      <div className="h-[46px] w-[46px] shrink-0 flex items-center justify-center text-primary bg-primary/10 rounded-full shadow-sm mb-3">
-        <Bot className="h-[22px] w-[22px]" />
-      </div>
-      <div className="flex flex-col flex-1 min-w-0 py-0.5 mt-1">
-        <div className="flex items-center justify-between gap-3 mb-1">
-          <div className="flex items-center gap-2 min-w-0">
-            <h2 className="text-[16px] font-semibold text-foreground truncate">{agent.name}</h2>
-            {agent.isDefault && (
-              <Badge
-                variant="secondary"
-                className="flex items-center gap-1 font-mono text-[10px] font-medium px-2 py-0.5 rounded-full bg-black/[0.04] dark:bg-white/[0.08] border-0 shadow-none text-foreground/70"
-              >
-                <Check className="h-3 w-3" />
-                {t('defaultBadge')}
-              </Badge>
-            )}
+      <div className="flex items-start justify-between gap-4">
+        <div className="grid min-w-0 flex-1 grid-cols-[auto,minmax(0,1fr)] gap-4">
+          <div className="mt-1 flex h-[54px] w-[54px] shrink-0 items-center justify-center rounded-[20px] bg-primary/12 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+            <Bot className="h-[24px] w-[24px]" />
           </div>
-          <div className="flex items-center gap-1 shrink-0">
-            {!agent.isDefault && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="opacity-0 group-hover:opacity-100 h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
-                onClick={onDelete}
-                title={t('deleteAgent')}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h2 className="truncate text-[18px] font-semibold tracking-[-0.02em] text-foreground">{safeAgentName}</h2>
+              {agent.isDefault && (
+                <Badge
+                  variant="secondary"
+                  className="flex items-center gap-1 rounded-full border-0 bg-primary/14 px-2.5 py-1 text-[11px] font-medium text-primary shadow-none"
+                >
+                  <Check className="h-3 w-3" />
+                  {t('defaultBadge')}
+                </Badge>
+              )}
+            </div>
+            <p className="mt-1 max-w-2xl text-[14px] leading-6 text-foreground/70 line-clamp-2">
+              {summaryText}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <span className="rounded-full border border-white/6 bg-white/[0.04] px-3 py-1 text-[12px] text-foreground/76">
+                {safeProfileTypeLabel}
+              </span>
+              <span className="rounded-full border border-white/6 bg-white/[0.04] px-3 py-1 text-[12px] text-foreground/76">
+                {t('modelLine', {
+                  model: safeModelDisplay,
+                  suffix: agent.inheritedModel ? ` (${t('inherited')})` : '',
+                })}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          {!agent.isDefault && (
             <Button
               variant="ghost"
               size="icon"
-              className={cn(
-                'h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/10 transition-all',
-                !agent.isDefault && 'opacity-0 group-hover:opacity-100',
-              )}
-              onClick={onOpenSettings}
-              title={t('settings')}
+              className="h-9 w-9 rounded-xl text-muted-foreground transition-all hover:bg-destructive/10 hover:text-destructive"
+              onClick={onDelete}
+              title={t('deleteAgent')}
             >
-              <Settings2 className="h-4 w-4" />
+              <Trash2 className="h-4 w-4" />
             </Button>
-          </div>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 rounded-xl text-muted-foreground transition-all hover:bg-white/6 hover:text-foreground"
+            onClick={onOpenSettings}
+            title={t('settings')}
+          >
+            <Settings2 className="h-4 w-4" />
+          </Button>
         </div>
-        <p className="text-[13.5px] text-muted-foreground line-clamp-2 leading-[1.5]">
-          {t('modelLine', {
-            model: agent.modelDisplay,
-            suffix: agent.inheritedModel ? ` (${t('inherited')})` : '',
-          })}
-        </p>
-        <p className="text-[13.5px] text-muted-foreground line-clamp-2 leading-[1.5]">
-          {t('channelsLine', { channels: channelsText })}
-        </p>
       </div>
+
+      <div className="mt-5 grid gap-3 border-t border-white/6 pt-4 md:grid-cols-4">
+        <AgentMetric
+          label={t('settingsDialog.profileTypeLabel')}
+          value={safeProfileTypeLabel}
+          tone="neutral"
+        />
+        <AgentMetric
+          label={t('channelsLine', { channels: '' }).replace(/：?\s*$/, '')}
+          value={channelsText}
+          tone={boundChannelAccounts.length > 0 ? 'primary' : 'muted'}
+        />
+        <AgentMetric
+          label={t('settingsDialog.runtimeSummaryTitle')}
+          value={triggerText}
+          tone={safeTriggerModes.length > 0 ? 'primary' : 'muted'}
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <StatPill label={t('skillCount', { count: safeSkillIds.length })} value={String(safeSkillIds.length)} />
+          <StatPill label={t('workflowCount', { count: safeWorkflowSteps.length })} value={String(safeWorkflowSteps.length)} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AgentMetric({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: 'neutral' | 'primary' | 'muted';
+}) {
+  return (
+    <div
+      className={cn(
+        'rounded-2xl border px-3.5 py-3',
+        tone === 'primary' && 'border-primary/18 bg-primary/[0.08]',
+        tone === 'neutral' && 'border-white/6 bg-white/[0.03]',
+        tone === 'muted' && 'border-white/5 bg-black/10',
+      )}
+    >
+      <p className="text-[11px] uppercase tracking-[0.16em] text-foreground/42">{label}</p>
+      <p className="mt-2 line-clamp-2 text-[14px] leading-6 text-foreground/82">{value}</p>
+    </div>
+  );
+}
+
+function StatPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-white/6 bg-white/[0.03] px-3.5 py-3">
+      <p className="text-[11px] uppercase tracking-[0.14em] text-foreground/42">{label}</p>
+      <p className="mt-2 text-[20px] font-semibold tracking-[-0.02em] text-foreground">{value}</p>
     </div>
   );
 }
@@ -410,18 +649,58 @@ function AddAgentDialog({
   onCreate,
 }: {
   onClose: () => void;
-  onCreate: (name: string, options: { inheritWorkspace: boolean }) => Promise<void>;
+  onCreate: (
+    name: string,
+    options: {
+      inheritWorkspace: boolean;
+      studio?: {
+        profileType?: AgentProfileType | null;
+        description?: string | null;
+        objective?: string | null;
+        boundaries?: string | null;
+        outputContract?: string | null;
+      };
+    },
+  ) => Promise<void>;
 }) {
   const { t } = useTranslation('agents');
   const [name, setName] = useState('');
   const [inheritWorkspace, setInheritWorkspace] = useState(false);
+  const [profileType, setProfileType] = useState<AgentProfileType>('specialist');
+  const [objective, setObjective] = useState('');
+  const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const profileOptions = useMemo<AgentProfileOption[]>(() => ([
+    {
+      id: 'specialist',
+      label: t('profileTypes.specialist.label'),
+      description: t('profileTypes.specialist.description'),
+    },
+    {
+      id: 'executor',
+      label: t('profileTypes.executor.label'),
+      description: t('profileTypes.executor.description'),
+    },
+    {
+      id: 'coordinator',
+      label: t('profileTypes.coordinator.label'),
+      description: t('profileTypes.coordinator.description'),
+    },
+  ]), [t]);
 
   const handleSubmit = async () => {
     if (!name.trim()) return;
     setSaving(true);
     try {
-      await onCreate(name.trim(), { inheritWorkspace });
+      await onCreate(name.trim(), {
+        inheritWorkspace,
+        studio: {
+          profileType,
+          objective: objective.trim() || null,
+          description: description.trim() || null,
+        },
+      });
     } catch (error) {
       toast.error(t('toast.agentCreateFailed', { error: String(error) }));
       setSaving(false);
@@ -450,6 +729,44 @@ function AddAgentDialog({
               onChange={(event) => setName(event.target.value)}
               placeholder={t('createDialog.namePlaceholder')}
               className={inputClasses}
+            />
+          </div>
+          <div className="space-y-2.5">
+            <Label htmlFor="agent-profile-type" className={labelClasses}>{t('createDialog.profileTypeLabel')}</Label>
+            <select
+              id="agent-profile-type"
+              value={profileType}
+              onChange={(event) => setProfileType(event.target.value as AgentProfileType)}
+              className={selectClasses}
+            >
+              {profileOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-[13px] text-foreground/60">
+              {profileOptions.find((option) => option.id === profileType)?.description}
+            </p>
+          </div>
+          <div className="space-y-2.5">
+            <Label htmlFor="agent-objective" className={labelClasses}>{t('createDialog.objectiveLabel')}</Label>
+            <textarea
+              id="agent-objective"
+              value={objective}
+              onChange={(event) => setObjective(event.target.value)}
+              placeholder={t('createDialog.objectivePlaceholder')}
+              className="min-h-24 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+            />
+          </div>
+          <div className="space-y-2.5">
+            <Label htmlFor="agent-role" className={labelClasses}>{t('createDialog.roleLabel')}</Label>
+            <textarea
+              id="agent-role"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder={t('createDialog.rolePlaceholder')}
+              className="min-h-24 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
             />
           </div>
           <div className="flex items-center justify-between">
@@ -501,21 +818,161 @@ function AgentSettingsModal({
   channelGroups: ChannelGroupItem[];
   onClose: () => void;
 }) {
-  const { t } = useTranslation('agents');
-  const { updateAgent, defaultModelRef } = useAgentsStore();
-  const [name, setName] = useState(agent.name);
+  const translation = useTranslation('agents');
+  const { t } = translation;
+  const currentLanguage = translation.i18n?.language || 'zh-CN';
+  const navigate = useNavigate();
+  const { updateAgent, updateAgentStudio, defaultModelRef, agents } = useAgentsStore();
+  const gatewayRpc = useGatewayStore((state) => state.rpc);
+  const switchSession = useChatStore((state) => state.switchSession);
+  const loadHistory = useChatStore((state) => state.loadHistory);
+  const sessionLabels = useChatStore((state) => state.sessionLabels);
+  const providerAccounts = useProviderStore((state) => state.accounts);
+  const providerStatuses = useProviderStore((state) => state.statuses);
+  const providerVendors = useProviderStore((state) => state.vendors);
+  const providerDefaultAccountId = useProviderStore((state) => state.defaultAccountId);
+  const skills = useSkillsStore((state) => state.skills);
+  const fetchSkills = useSkillsStore((state) => state.fetchSkills);
+  const safeAgentName = useMemo(() => toSafeText(agent.name, agent.id), [agent.id, agent.name]);
+  const safeModelDisplay = useMemo(() => toSafeText(agent.modelDisplay, t('none')), [agent.modelDisplay, t]);
+  const safeChannelTypes = useMemo(() => toSafeStringArray(agent.channelTypes), [agent.channelTypes]);
+  const safeSkillIds = useMemo(() => toSafeStringArray(agent.skillIds), [agent.skillIds]);
+  const safeWorkflowSteps = useMemo(() => toSafeStringArray(agent.workflowSteps), [agent.workflowSteps]);
+  const safeWorkflowNodes = useMemo(() => normalizeWorkflowNodesFromAgent(agent), [agent.workflowNodes, agent.workflowSteps]);
+  const safeTriggerModes = useMemo(() => toSafeStringArray(agent.triggerModes), [agent.triggerModes]);
+  const safeDescription = useMemo(() => toSafeText(agent.description), [agent.description]);
+  const safeObjective = useMemo(() => toSafeText(agent.objective), [agent.objective]);
+  const safeBoundaries = useMemo(() => toSafeText(agent.boundaries), [agent.boundaries]);
+  const safeOutputContract = useMemo(() => toSafeText(agent.outputContract), [agent.outputContract]);
+  const safeProfileType = useMemo<AgentProfileType>(() => {
+    if (agent.profileType === 'executor' || agent.profileType === 'coordinator') return agent.profileType;
+    return 'specialist';
+  }, [agent.profileType]);
+  const safeSkillIdsKey = useMemo(() => safeSkillIds.join('|'), [safeSkillIds]);
+  const safeWorkflowStepsKey = useMemo(() => safeWorkflowSteps.join('|'), [safeWorkflowSteps]);
+  const safeTriggerModesKey = useMemo(() => safeTriggerModes.join('|'), [safeTriggerModes]);
+  const [name, setName] = useState(safeAgentName);
+  const [profileType, setProfileType] = useState<AgentProfileType>(safeProfileType);
+  const [description, setDescription] = useState(safeDescription);
+  const [objective, setObjective] = useState(safeObjective);
+  const [boundaries, setBoundaries] = useState(safeBoundaries);
+  const [outputContract, setOutputContract] = useState(safeOutputContract);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(safeSkillIds);
+  const [workflowNodes, setWorkflowNodes] = useState<AgentWorkflowNode[]>(safeWorkflowNodes);
+  const [selectedTriggerModes, setSelectedTriggerModes] = useState<string[]>(safeTriggerModes.length > 0 ? safeTriggerModes : ['manual']);
+  const [skillQuery, setSkillQuery] = useState('');
+  const [runtimeSummary, setRuntimeSummary] = useState<AgentRuntimeSummary>({
+    lastActiveAt: null,
+    sessionCount: 0,
+    latestModel: null,
+    recentSessions: [],
+  });
+  const [loadingRuntime, setLoadingRuntime] = useState(false);
   const [savingName, setSavingName] = useState(false);
+  const [savingStudio, setSavingStudio] = useState(false);
   const [showModelModal, setShowModelModal] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
   useEffect(() => {
-    setName(agent.name);
-  }, [agent.name]);
+    setName(safeAgentName);
+    setProfileType(safeProfileType);
+    setDescription(safeDescription);
+    setObjective(safeObjective);
+    setBoundaries(safeBoundaries);
+    setOutputContract(safeOutputContract);
+    setSelectedSkillIds(safeSkillIds);
+    setWorkflowNodes(safeWorkflowNodes);
+    setSelectedTriggerModes(safeTriggerModes.length > 0 ? safeTriggerModes : ['manual']);
+    setSkillQuery('');
+  }, [agent.id]);
 
-  const hasNameChanges = name.trim() !== agent.name;
+  useEffect(() => {
+    void fetchSkills();
+  }, [fetchSkills]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadRuntimeSummary = async () => {
+      setLoadingRuntime(true);
+      try {
+        const result = await gatewayRpc<{ sessions?: Array<Record<string, unknown>> }>('sessions.list', {});
+        if (cancelled) return;
+        const agentSessionPrefix = `agent:${agent.id}:`;
+        const matchingSessions = (Array.isArray(result.sessions) ? result.sessions : [])
+          .map((session) => ({
+            key: toSafeText(session.key),
+            model: toSafeText(session.model) || null,
+            updatedAt: typeof session.updatedAt === 'number'
+              ? session.updatedAt
+              : (typeof session.updatedAt === 'string' ? Number(new Date(session.updatedAt)) : undefined),
+          }))
+          .filter((session) => Boolean(session.key) && session.key.startsWith(agentSessionPrefix));
+
+        const sortedByUpdatedAt = [...matchingSessions].sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0));
+        setRuntimeSummary({
+          lastActiveAt: sortedByUpdatedAt[0]?.updatedAt ?? null,
+          sessionCount: matchingSessions.length,
+          latestModel: sortedByUpdatedAt.find((session) => session.model)?.model || null,
+          recentSessions: sortedByUpdatedAt.slice(0, 6).map((session) => ({
+            key: session.key,
+            label: sessionLabels[session.key] || session.key.split(':').slice(2).join(':') || session.key,
+            preview: sessionLabels[session.key] || null,
+            updatedAt: session.updatedAt ?? null,
+            model: session.model,
+            triggerSource: inferTriggerSourceFromSessionKey(session.key),
+            status: inferRuntimeStatus(session.updatedAt ?? null),
+          })),
+        });
+      } catch {
+        if (!cancelled) {
+          setRuntimeSummary({
+            lastActiveAt: null,
+            sessionCount: 0,
+            latestModel: null,
+            recentSessions: [],
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingRuntime(false);
+        }
+      }
+    };
+
+    void loadRuntimeSummary();
+    return () => {
+      cancelled = true;
+    };
+  }, [agent.id, gatewayRpc, sessionLabels]);
+
+  const hasNameChanges = name.trim() !== safeAgentName;
+  const normalizedWorkflowNodes = workflowNodes
+    .map((node, index) => createWorkflowNode({
+      ...node,
+      title: node.title.trim(),
+      target: node.target?.trim() || null,
+      inputSpec: node.inputSpec?.trim() || null,
+      outputSpec: node.outputSpec?.trim() || null,
+      modelRef: node.modelRef?.trim() || null,
+      code: node.code?.trim() || null,
+    }, index))
+    .filter((node) => node.title);
+  const normalizedWorkflowSteps = normalizedWorkflowNodes.map((node) => (
+    node.target ? `${node.title} · ${node.target}` : node.title
+  ));
+  const normalizedTriggerModes = Array.from(new Set(selectedTriggerModes.map((mode) => mode.trim()).filter(Boolean)));
+  const hasStudioChanges = profileType !== safeProfileType
+    || description.trim() !== safeDescription.trim()
+    || objective.trim() !== safeObjective.trim()
+    || boundaries.trim() !== safeBoundaries.trim()
+    || outputContract.trim() !== safeOutputContract.trim()
+    || selectedSkillIds.join('|') !== safeSkillIdsKey
+    || normalizedWorkflowSteps.join('|') !== safeWorkflowStepsKey
+    || normalizedTriggerModes.join('|') !== safeTriggerModesKey;
 
   const handleRequestClose = () => {
-    if (savingName || hasNameChanges) {
+    if (savingName || savingStudio || hasNameChanges || hasStudioChanges) {
       setShowCloseConfirm(true);
       return;
     }
@@ -523,7 +980,7 @@ function AgentSettingsModal({
   };
 
   const handleSaveName = async () => {
-    if (!name.trim() || name.trim() === agent.name) return;
+    if (!name.trim() || name.trim() === safeAgentName) return;
     setSavingName(true);
     try {
       await updateAgent(agent.id, name.trim());
@@ -532,6 +989,80 @@ function AgentSettingsModal({
       toast.error(t('toast.agentUpdateFailed', { error: String(error) }));
     } finally {
       setSavingName(false);
+    }
+  };
+
+  const handleToggleSkill = (skillId: string) => {
+    setSelectedSkillIds((current) => (
+      current.includes(skillId)
+        ? current.filter((id) => id !== skillId)
+        : [...current, skillId]
+    ));
+  };
+
+  const handleWorkflowNodeChange = <K extends keyof AgentWorkflowNode>(
+    index: number,
+    field: K,
+    value: AgentWorkflowNode[K],
+  ) => {
+    setWorkflowNodes((current) => current.map((node, nodeIndex) => (
+      nodeIndex === index ? { ...node, [field]: value } : node
+    )));
+  };
+
+  const handleAddWorkflowStep = () => {
+    setWorkflowNodes((current) => [...current, createWorkflowNode(undefined, current.length)]);
+  };
+
+  const handleRemoveWorkflowStep = (index: number) => {
+    setWorkflowNodes((current) => {
+      const next = current.filter((_, stepIndex) => stepIndex !== index);
+      return next.length > 0 ? next : [createWorkflowNode(undefined, 0)];
+    });
+  };
+
+  const handleMoveWorkflowStep = (index: number, direction: 'up' | 'down') => {
+    setWorkflowNodes((current) => {
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= current.length) {
+        return current;
+      }
+      const next = [...current];
+      const [item] = next.splice(index, 1);
+      next.splice(targetIndex, 0, item);
+      return next;
+    });
+  };
+
+  const handleToggleTriggerMode = (mode: AgentTriggerMode) => {
+    setSelectedTriggerModes((current) => {
+      if (current.includes(mode)) {
+        if (current.length === 1) return current;
+        return current.filter((item) => item !== mode);
+      }
+      return [...current, mode];
+    });
+  };
+
+  const handleSaveStudio = async () => {
+    setSavingStudio(true);
+    try {
+      await updateAgentStudio(agent.id, {
+        description: description.trim() || null,
+        profileType,
+        objective: objective.trim() || null,
+        boundaries: boundaries.trim() || null,
+        outputContract: outputContract.trim() || null,
+        skillIds: selectedSkillIds,
+        workflowSteps: normalizedWorkflowSteps,
+        workflowNodes: normalizedWorkflowNodes,
+        triggerModes: normalizedTriggerModes,
+      });
+      toast.success(t('toast.agentStudioUpdated'));
+    } catch (error) {
+      toast.error(t('toast.agentStudioUpdateFailed', { error: String(error) }));
+    } finally {
+      setSavingStudio(false);
     }
   };
 
@@ -548,19 +1079,236 @@ function AgentSettingsModal({
         error: account.lastError,
       })),
   );
+  const assignedSkillDetails = selectedSkillIds
+    .map((skillId) => skills.find((skill) => skill.id === skillId))
+    .filter(Boolean) as Skill[];
+  const enabledSkills = skills.filter((skill) => !skill.isCore);
+  const recommendedSkills = enabledSkills.filter((skill) => skill.enabled);
+  const runtimeProviderOptions = useMemo(
+    () => buildRuntimeProviderOptions(
+      providerAccounts,
+      providerStatuses,
+      providerVendors,
+      providerDefaultAccountId,
+    ),
+    [providerAccounts, providerDefaultAccountId, providerStatuses, providerVendors],
+  );
+  const visibleSkills = recommendedSkills.length > 0 ? recommendedSkills : skills;
+  const normalizedSkillQuery = skillQuery.trim().toLowerCase();
+  const filteredSkills = visibleSkills
+    .filter((skill) => {
+      if (!normalizedSkillQuery) return true;
+      const haystack = [skill.name, skill.description, skill.id]
+        .map((value) => toSafeText(value).toLowerCase())
+        .join(' ');
+      return haystack.includes(normalizedSkillQuery);
+    })
+    .sort((left, right) => {
+      const leftSelected = selectedSkillIds.includes(left.id) ? 1 : 0;
+      const rightSelected = selectedSkillIds.includes(right.id) ? 1 : 0;
+      if (leftSelected !== rightSelected) {
+        return rightSelected - leftSelected;
+      }
+      return left.name.localeCompare(right.name, 'zh-CN');
+    });
+  const channelSummary = assignedChannels.map((channel) => `${CHANNEL_NAMES[channel.channelType]} · ${channel.name}`);
+  const workflowTemplates = useMemo<WorkflowTemplate[]>(() => [
+    {
+      id: 'support',
+      label: t('settingsDialog.workflowTemplates.support.label'),
+      description: t('settingsDialog.workflowTemplates.support.description'),
+      steps: [
+        createWorkflowNode({ type: 'instruction', title: t('settingsDialog.workflowTemplates.support.steps.0') }, 0),
+        createWorkflowNode({ type: 'skill', title: t('settingsDialog.workflowTemplates.support.steps.1') }, 1),
+        createWorkflowNode({ type: 'model', title: t('settingsDialog.workflowTemplates.support.steps.2') }, 2),
+        createWorkflowNode({ type: 'channel', title: t('settingsDialog.workflowTemplates.support.steps.3') }, 3),
+      ],
+    },
+    {
+      id: 'ops',
+      label: t('settingsDialog.workflowTemplates.ops.label'),
+      description: t('settingsDialog.workflowTemplates.ops.description'),
+      steps: [
+        createWorkflowNode({ type: 'instruction', title: t('settingsDialog.workflowTemplates.ops.steps.0') }, 0),
+        createWorkflowNode({ type: 'skill', title: t('settingsDialog.workflowTemplates.ops.steps.1') }, 1),
+        createWorkflowNode({ type: 'model', title: t('settingsDialog.workflowTemplates.ops.steps.2') }, 2),
+        createWorkflowNode({ type: 'channel', title: t('settingsDialog.workflowTemplates.ops.steps.3') }, 3),
+      ],
+    },
+    {
+      id: 'research',
+      label: t('settingsDialog.workflowTemplates.research.label'),
+      description: t('settingsDialog.workflowTemplates.research.description'),
+      steps: [
+        createWorkflowNode({ type: 'instruction', title: t('settingsDialog.workflowTemplates.research.steps.0') }, 0),
+        createWorkflowNode({ type: 'skill', title: t('settingsDialog.workflowTemplates.research.steps.1') }, 1),
+        createWorkflowNode({ type: 'model', title: t('settingsDialog.workflowTemplates.research.steps.2') }, 2),
+        createWorkflowNode({ type: 'instruction', title: t('settingsDialog.workflowTemplates.research.steps.3') }, 3),
+      ],
+    },
+    {
+      id: 'multiAgent',
+      label: t('settingsDialog.workflowTemplates.multiAgent.label'),
+      description: t('settingsDialog.workflowTemplates.multiAgent.description'),
+      steps: [
+        createWorkflowNode({ type: 'instruction', title: t('settingsDialog.workflowTemplates.multiAgent.steps.0'), outputSpec: 'taskBrief' }, 0),
+        createWorkflowNode({ type: 'agent', title: t('settingsDialog.workflowTemplates.multiAgent.steps.1'), inputSpec: 'taskBrief', outputSpec: 'specialistDraft' }, 1),
+        createWorkflowNode({ type: 'skill', title: t('settingsDialog.workflowTemplates.multiAgent.steps.2'), inputSpec: 'specialistDraft', outputSpec: 'validatedDraft' }, 2),
+        createWorkflowNode({ type: 'model', title: t('settingsDialog.workflowTemplates.multiAgent.steps.3'), inputSpec: 'validatedDraft', outputSpec: 'finalAnswer' }, 3),
+      ],
+    },
+  ], [t]);
+  const workflowStepTypeOptions = useMemo<WorkflowStepTypeOption[]>(() => ([
+    {
+      id: 'instruction',
+      label: t('settingsDialog.workflowStepTypes.instruction.label'),
+      description: t('settingsDialog.workflowStepTypes.instruction.description'),
+    },
+    {
+      id: 'skill',
+      label: t('settingsDialog.workflowStepTypes.skill.label'),
+      description: t('settingsDialog.workflowStepTypes.skill.description'),
+    },
+    {
+      id: 'model',
+      label: t('settingsDialog.workflowStepTypes.model.label'),
+      description: t('settingsDialog.workflowStepTypes.model.description'),
+    },
+    {
+      id: 'channel',
+      label: t('settingsDialog.workflowStepTypes.channel.label'),
+      description: t('settingsDialog.workflowStepTypes.channel.description'),
+    },
+    {
+      id: 'agent',
+      label: t('settingsDialog.workflowStepTypes.agent.label'),
+      description: t('settingsDialog.workflowStepTypes.agent.description'),
+    },
+  ]), [t]);
+  const workflowFailureOptions = useMemo<WorkflowFailureOption[]>(() => ([
+    {
+      id: 'continue',
+      label: t('settingsDialog.workflowFailureModes.continue.label'),
+      description: t('settingsDialog.workflowFailureModes.continue.description'),
+    },
+    {
+      id: 'retry',
+      label: t('settingsDialog.workflowFailureModes.retry.label'),
+      description: t('settingsDialog.workflowFailureModes.retry.description'),
+    },
+    {
+      id: 'handoff',
+      label: t('settingsDialog.workflowFailureModes.handoff.label'),
+      description: t('settingsDialog.workflowFailureModes.handoff.description'),
+    },
+  ]), [t]);
+  const profileOptions = useMemo<AgentProfileOption[]>(() => ([
+    {
+      id: 'specialist',
+      label: t('profileTypes.specialist.label'),
+      description: t('profileTypes.specialist.description'),
+    },
+    {
+      id: 'executor',
+      label: t('profileTypes.executor.label'),
+      description: t('profileTypes.executor.description'),
+    },
+    {
+      id: 'coordinator',
+      label: t('profileTypes.coordinator.label'),
+      description: t('profileTypes.coordinator.description'),
+    },
+  ]), [t]);
+  const workflowModelSuggestionsByProvider = useMemo(() => {
+    const suggestions = new Map<string, string[]>();
+    for (const option of runtimeProviderOptions) {
+      const current = suggestions.get(option.runtimeProviderKey) || [];
+      const next = new Set(current);
+      if (option.configuredModelId) next.add(option.configuredModelId);
+      const parsedDefault = splitModelRef(defaultModelRef);
+      if (parsedDefault && parsedDefault.providerKey === option.runtimeProviderKey && parsedDefault.modelId) {
+        next.add(parsedDefault.modelId);
+      }
+      const parsedAgent = splitModelRef(agent.modelRef);
+      if (parsedAgent && parsedAgent.providerKey === option.runtimeProviderKey && parsedAgent.modelId) {
+        next.add(parsedAgent.modelId);
+      }
+      suggestions.set(option.runtimeProviderKey, [...next]);
+    }
+    return suggestions;
+  }, [agent.modelRef, defaultModelRef, runtimeProviderOptions]);
+  const triggerModeOptions = useMemo<Array<{ id: AgentTriggerMode; label: string; description: string }>>(() => ([
+    {
+      id: 'manual',
+      label: t('settingsDialog.triggerModes.manual.label'),
+      description: t('settingsDialog.triggerModes.manual.description'),
+    },
+    {
+      id: 'channel',
+      label: t('settingsDialog.triggerModes.channel.label'),
+      description: t('settingsDialog.triggerModes.channel.description'),
+    },
+    {
+      id: 'schedule',
+      label: t('settingsDialog.triggerModes.schedule.label'),
+      description: t('settingsDialog.triggerModes.schedule.description'),
+    },
+    {
+      id: 'webhook',
+      label: t('settingsDialog.triggerModes.webhook.label'),
+      description: t('settingsDialog.triggerModes.webhook.description'),
+    },
+  ]), [t]);
+  const triggerSourceLabel = useCallback((mode: AgentTriggerMode | 'unknown') => {
+    if (mode === 'unknown') return t('settingsDialog.triggerModes.unknown.label');
+    return t(`settingsDialog.triggerModes.${mode}.label`);
+  }, [t]);
+  const runtimeStatusLabel = useCallback((status: 'active' | 'idle') => (
+    t(`settingsDialog.runtimeStatuses.${status}`)
+  ), [t]);
+
+  const handleOpenRuntimeSession = useCallback(async (sessionKey: string) => {
+    switchSession(sessionKey);
+    navigate('/');
+    await loadHistory(true);
+  }, [loadHistory, navigate, switchSession]);
+
+  const handleApplyWorkflowTemplate = (template: WorkflowTemplate) => {
+    setWorkflowNodes(template.steps.map((step, index) => createWorkflowNode(step, index)));
+  };
+
+  const handleWorkflowModelProviderChange = (index: number, providerKey: string) => {
+    const currentNode = workflowNodes[index];
+    const currentModel = splitModelRef(currentNode?.target || '');
+    const suggestedModelId = workflowModelSuggestionsByProvider.get(providerKey)?.[0]
+      || runtimeProviderOptions.find((option) => option.runtimeProviderKey === providerKey)?.configuredModelId
+      || '';
+    const nextModelId = currentModel?.providerKey === providerKey
+      ? currentModel.modelId
+      : suggestedModelId;
+    handleWorkflowNodeChange(index, 'target', providerKey && nextModelId ? `${providerKey}/${nextModelId}` : '');
+  };
+
+  const handleWorkflowModelIdChange = (index: number, modelId: string) => {
+    const currentNode = workflowNodes[index];
+    const parsed = splitModelRef(currentNode?.target || '');
+    const providerKey = parsed?.providerKey || runtimeProviderOptions[0]?.runtimeProviderKey || '';
+    handleWorkflowNodeChange(index, 'target', providerKey && modelId.trim() ? `${providerKey}/${modelId.trim()}` : modelId.trim());
+  };
+  const availableAgentTargets = agents.filter((candidate) => candidate.id !== agent.id);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-3xl border-0 shadow-2xl bg-[#f3f1e9] dark:bg-card overflow-hidden">
+      <Card className="w-full max-w-5xl max-h-[90vh] flex flex-col rounded-3xl border-0 shadow-2xl bg-[#f3f1e9] dark:bg-card overflow-hidden">
         <CardHeader className="flex flex-row items-start justify-between pb-2 shrink-0">
           <div>
             <CardTitle className="text-2xl font-serif font-normal tracking-tight">
-              {t('settingsDialog.title', { name: agent.name })}
+              {t('settingsDialog.title', { name: safeAgentName })}
             </CardTitle>
             <CardDescription className="text-[15px] mt-1 text-foreground/70">
-              {t('settingsDialog.description')}
-            </CardDescription>
-          </div>
+            {t('settingsDialog.description')}
+          </CardDescription>
+        </div>
           <Button
             variant="ghost"
             size="icon"
@@ -570,105 +1318,702 @@ function AgentSettingsModal({
             <X className="h-4 w-4" />
           </Button>
         </CardHeader>
-        <CardContent className="space-y-6 pt-4 overflow-y-auto flex-1 p-6">
-          <div className="space-y-4">
-            <div className="space-y-2.5">
-              <Label htmlFor="agent-settings-name" className={labelClasses}>{t('settingsDialog.nameLabel')}</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="agent-settings-name"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  readOnly={agent.isDefault}
-                  className={inputClasses}
-                />
-                {!agent.isDefault && (
+        <CardContent className="pt-4 overflow-y-auto flex-1 p-6">
+          <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+            <div className="space-y-6">
+              <div className="space-y-2.5">
+                <Label htmlFor="agent-settings-name" className={labelClasses}>{t('settingsDialog.nameLabel')}</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="agent-settings-name"
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    className={inputClasses}
+                  />
                   <Button
                     variant="outline"
                     onClick={() => void handleSaveName()}
-                    disabled={savingName || !name.trim() || name.trim() === agent.name}
+                    disabled={savingName || !name.trim() || name.trim() === safeAgentName}
                     className="h-[44px] text-[13px] font-medium rounded-xl px-4 border-black/10 dark:border-white/10 bg-[#eeece3] dark:bg-muted hover:bg-black/5 dark:hover:bg-white/5 shadow-none text-foreground/80 hover:text-foreground"
                   >
-                    {savingName ? (
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                    ) : (
-                      t('common:actions.save')
-                    )}
+                    {savingName ? <RefreshCw className="h-4 w-4 animate-spin" /> : t('common:actions.save')}
                   </Button>
-                )}
+                </div>
               </div>
-            </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-1 rounded-2xl bg-black/5 dark:bg-white/5 border border-transparent p-4">
-                <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground/80 font-medium">
-                  {t('settingsDialog.agentIdLabel')}
-                </p>
-                <p className="font-mono text-[13px] text-foreground">{agent.id}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowModelModal(true)}
-                className="space-y-1 rounded-2xl bg-black/5 dark:bg-white/5 border border-transparent p-4 text-left hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
-              >
-                <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground/80 font-medium">
-                  {t('settingsDialog.modelLabel')}
-                </p>
-                <p className="text-[13.5px] text-foreground">
-                  {agent.modelDisplay}
-                  {agent.inheritedModel ? ` (${t('inherited')})` : ''}
-                </p>
-                <p className="font-mono text-[12px] text-foreground/70 break-all">
-                  {agent.modelRef || defaultModelRef || '-'}
-                </p>
-              </button>
-            </div>
-          </div>
+              <Tabs defaultValue="overview" className="space-y-4">
+                <TabsList className="h-auto rounded-2xl bg-black/[0.04] p-1 dark:bg-white/[0.08]">
+                  <TabsTrigger value="overview" className="rounded-xl px-4 py-2">{t('settingsDialog.tabs.overview')}</TabsTrigger>
+                  <TabsTrigger value="skills" className="rounded-xl px-4 py-2">{t('settingsDialog.tabs.skills')}</TabsTrigger>
+                  <TabsTrigger value="workflow" className="rounded-xl px-4 py-2">{t('settingsDialog.tabs.workflow')}</TabsTrigger>
+                  <TabsTrigger value="runtime" className="rounded-xl px-4 py-2">{t('settingsDialog.tabs.runtime')}</TabsTrigger>
+                  <TabsTrigger value="channels" className="rounded-xl px-4 py-2">{t('settingsDialog.tabs.channels')}</TabsTrigger>
+                </TabsList>
 
-          <div className="space-y-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-xl font-serif text-foreground font-normal tracking-tight">
-                  {t('settingsDialog.channelsTitle')}
-                </h3>
-                <p className="text-[14px] text-foreground/70 mt-1">{t('settingsDialog.channelsDescription')}</p>
-              </div>
-            </div>
-
-            {assignedChannels.length === 0 && agent.channelTypes.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 p-4 text-[13.5px] text-muted-foreground">
-                {t('settingsDialog.noChannels')}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {assignedChannels.map((channel) => (
-                  <div key={`${channel.channelType}-${channel.accountId}`} className="flex items-center justify-between rounded-2xl bg-black/5 dark:bg-white/5 border border-transparent p-4">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="h-[40px] w-[40px] shrink-0 flex items-center justify-center text-foreground bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 rounded-full shadow-sm">
-                        <ChannelLogo type={channel.channelType} />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-[15px] font-semibold text-foreground">{channel.name}</p>
-                        <p className="text-[13.5px] text-muted-foreground">
-                          {CHANNEL_NAMES[channel.channelType]} · {channel.accountId === 'default' ? t('settingsDialog.mainAccount') : channel.accountId}
-                        </p>
-                        {channel.error && (
-                          <p className="text-xs text-destructive mt-1">{channel.error}</p>
-                        )}
-                      </div>
+                <TabsContent value="overview" className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-1 rounded-2xl bg-black/5 dark:bg-white/5 border border-transparent p-4">
+                      <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground/80 font-medium">
+                        {t('settingsDialog.agentIdLabel')}
+                      </p>
+                      <p className="font-mono text-[13px] text-foreground">{agent.id}</p>
                     </div>
-                    <div className="shrink-0" />
+                    <button
+                      type="button"
+                      onClick={() => setShowModelModal(true)}
+                      data-testid="agent-model-summary-card"
+                      className="space-y-1 rounded-2xl bg-black/5 dark:bg-white/5 border border-transparent p-4 text-left hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                    >
+                      <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground/80 font-medium">
+                        {t('settingsDialog.modelLabel')}
+                      </p>
+                      <p className="text-[13.5px] text-foreground">
+                        {safeModelDisplay}
+                        {agent.inheritedModel ? ` (${t('inherited')})` : ''}
+                      </p>
+                      <p className="font-mono text-[12px] text-foreground/70 break-all">
+                        {agent.modelRef || defaultModelRef || '-'}
+                      </p>
+                    </button>
                   </div>
-                ))}
-                {assignedChannels.length === 0 && agent.channelTypes.length > 0 && (
-                  <div className="rounded-2xl border border-dashed border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 p-4 text-[13.5px] text-muted-foreground">
-                    {t('settingsDialog.channelsManagedInChannels')}
+
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div className="rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+                      <p className="text-[12px] text-muted-foreground">{t('settingsDialog.overview.skills')}</p>
+                      <p className="mt-2 text-2xl font-semibold text-foreground">{selectedSkillIds.length}</p>
+                      <p className="mt-1 text-[12px] text-muted-foreground">
+                        {summarizeNames(assignedSkillDetails.map((skill) => skill.name), t('none'))}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+                      <p className="text-[12px] text-muted-foreground">{t('settingsDialog.overview.workflow')}</p>
+                      <p className="mt-2 text-2xl font-semibold text-foreground">{normalizedWorkflowSteps.length}</p>
+                      <p className="mt-1 text-[12px] text-muted-foreground">
+                        {normalizedWorkflowSteps[0] || t('settingsDialog.workflowEmpty')}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+                      <p className="text-[12px] text-muted-foreground">{t('settingsDialog.overview.channels')}</p>
+                      <p className="mt-2 text-2xl font-semibold text-foreground">{assignedChannels.length || safeChannelTypes.length}</p>
+                      <p className="mt-1 text-[12px] text-muted-foreground">
+                        {summarizeNames(channelSummary, t('none'))}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+                      <p className="text-[12px] text-muted-foreground">{t('settingsDialog.overview.triggers')}</p>
+                      <p className="mt-2 text-2xl font-semibold text-foreground">{normalizedTriggerModes.length}</p>
+                      <p className="mt-1 text-[12px] text-muted-foreground">
+                        {summarizeNames(normalizedTriggerModes.map((mode) => t(`settingsDialog.triggerModes.${mode}.label`)), t('none'))}
+                      </p>
+                    </div>
                   </div>
-                )}
+
+                  <div className="space-y-2.5">
+                    <Label htmlFor="agent-profile-type" className={labelClasses}>{t('settingsDialog.profileTypeLabel')}</Label>
+                    <select
+                      id="agent-profile-type"
+                      value={profileType}
+                      onChange={(event) => setProfileType(event.target.value as AgentProfileType)}
+                      className={selectClasses}
+                    >
+                      {profileOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[13px] text-foreground/60">
+                      {profileOptions.find((option) => option.id === profileType)?.description}
+                    </p>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2.5">
+                      <Label htmlFor="agent-objective" className={labelClasses}>{t('settingsDialog.objectiveLabel')}</Label>
+                      <textarea
+                        id="agent-objective"
+                        value={objective}
+                        onChange={(event) => setObjective(event.target.value)}
+                        placeholder={t('settingsDialog.objectivePlaceholder')}
+                        className="min-h-28 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                      />
+                    </div>
+                    <div className="space-y-2.5">
+                      <Label htmlFor="agent-output-contract" className={labelClasses}>{t('settingsDialog.outputContractLabel')}</Label>
+                      <textarea
+                        id="agent-output-contract"
+                        value={outputContract}
+                        onChange={(event) => setOutputContract(event.target.value)}
+                        placeholder={t('settingsDialog.outputContractPlaceholder')}
+                        className="min-h-28 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    <Label htmlFor="agent-description" className={labelClasses}>{t('settingsDialog.descriptionLabel')}</Label>
+                    <textarea
+                      id="agent-description"
+                      value={description}
+                      onChange={(event) => setDescription(event.target.value)}
+                      placeholder={t('settingsDialog.descriptionPlaceholder')}
+                      className="min-h-28 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                    />
+                  </div>
+                  <div className="space-y-2.5">
+                    <Label htmlFor="agent-boundaries" className={labelClasses}>{t('settingsDialog.boundariesLabel')}</Label>
+                    <textarea
+                      id="agent-boundaries"
+                      value={boundaries}
+                      onChange={(event) => setBoundaries(event.target.value)}
+                      placeholder={t('settingsDialog.boundariesPlaceholder')}
+                      className="min-h-28 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                    />
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="skills" className="space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-xl font-serif text-foreground font-normal tracking-tight">{t('settingsDialog.skillsTitle')}</h3>
+                      <p className="mt-1 text-[14px] text-foreground/70">{t('settingsDialog.skillsDescription')}</p>
+                    </div>
+                    <Badge variant="secondary" className="rounded-full px-3 py-1">
+                      {t('skillCount', { count: selectedSkillIds.length })}
+                    </Badge>
+                  </div>
+                  <div className="grid gap-3">
+                    {recommendedSkills.length === 0 && skills.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-black/10 bg-black/5 p-4 text-[13px] text-muted-foreground dark:border-white/10 dark:bg-white/5">
+                        {t('settingsDialog.skillsEmpty')}
+                      </div>
+                    ) : filteredSkills.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-black/10 bg-black/5 p-4 text-[13px] text-muted-foreground dark:border-white/10 dark:bg-white/5">
+                        {t('settingsDialog.skillsNoMatch')}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="rounded-2xl border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                          <Label htmlFor="agent-skill-search" className={labelClasses}>
+                            {t('settingsDialog.skillsSearchLabel')}
+                          </Label>
+                          <Input
+                            id="agent-skill-search"
+                            value={skillQuery}
+                            onChange={(event) => setSkillQuery(event.target.value)}
+                            placeholder={t('settingsDialog.skillsSearchPlaceholder')}
+                            className={cn(inputClasses, 'mt-2')}
+                          />
+                        </div>
+                        {filteredSkills.map((skill) => {
+                          const selected = selectedSkillIds.includes(skill.id);
+                          return (
+                            <label key={skill.id} className="flex items-start gap-3 rounded-2xl border border-black/5 bg-white/70 p-4 transition-colors hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]">
+                              <Switch checked={selected} onCheckedChange={() => handleToggleSkill(skill.id)} />
+                              <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-lg">{skill.icon || '🧩'}</span>
+                                <p className="text-[15px] font-semibold text-foreground">{skill.name}</p>
+                                {!skill.enabled && (
+                                  <Badge variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px]">
+                                    {t('settingsDialog.skillDisabled')}
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="mt-1 text-[13px] text-muted-foreground">{skill.description || skill.id}</p>
+                              <p className="mt-2 font-mono text-[12px] text-foreground/60">{skill.id}</p>
+                            </div>
+                          </label>
+                          );
+                        })}
+                      </>
+                    )}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="workflow" className="space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-xl font-serif text-foreground font-normal tracking-tight">{t('settingsDialog.workflowTitle')}</h3>
+                      <p className="mt-1 text-[14px] text-foreground/70">{t('settingsDialog.workflowDescription')}</p>
+                    </div>
+                    <Button variant="outline" onClick={handleAddWorkflowStep} className="rounded-full px-4">
+                      <Plus className="mr-2 h-4 w-4" />
+                      {t('settingsDialog.addWorkflowStep')}
+                    </Button>
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-[13px] font-medium text-foreground">{t('settingsDialog.workflowTemplatesTitle')}</p>
+                      <p className="mt-1 text-[13px] text-muted-foreground">{t('settingsDialog.workflowTemplatesDescription')}</p>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      {workflowTemplates.map((template) => (
+                        <button
+                          key={template.id}
+                          type="button"
+                          onClick={() => handleApplyWorkflowTemplate(template)}
+                          className="rounded-2xl border border-black/5 bg-white/70 p-4 text-left transition-colors hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]"
+                        >
+                          <p className="text-[14px] font-semibold text-foreground">{template.label}</p>
+                          <p className="mt-1 text-[12px] text-muted-foreground">{template.description}</p>
+                          <p className="mt-3 text-[12px] text-foreground/70">
+                            {template.steps.slice(0, 2).map((step) => step.title).join(' → ')}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    {workflowNodes.map((step, index) => (
+                      <div key={`${agent.id}-workflow-${index}`} className="flex items-start gap-3 rounded-2xl border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/5 text-[13px] font-semibold text-foreground dark:bg-white/[0.08]">
+                          {index + 1}
+                        </div>
+                        <div className="flex-1 space-y-3">
+                          <div className="grid gap-3 md:grid-cols-[180px_1fr]">
+                            <div>
+                              <Label className="text-[12px] text-foreground/70">{t('settingsDialog.workflowStepTypeLabel')}</Label>
+                              <select
+                                value={step.type}
+                                onChange={(event) => handleWorkflowNodeChange(index, 'type', event.target.value as AgentWorkflowNode['type'])}
+                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-[#eeece3] px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                              >
+                                {workflowStepTypeOptions.map((option) => (
+                                  <option key={option.id} value={option.id}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <Label className="text-[12px] text-foreground/70">{t('settingsDialog.workflowStepTitleLabel')}</Label>
+                              <Input
+                                value={step.title}
+                                onChange={(event) => handleWorkflowNodeChange(index, 'title', event.target.value)}
+                                placeholder={t('settingsDialog.workflowStepPlaceholder', { index: index + 1 })}
+                                className={cn(inputClasses, 'mt-2')}
+                              />
+                            </div>
+                          </div>
+                          <p className="text-[12px] text-muted-foreground">
+                            {workflowStepTypeOptions.find((option) => option.id === step.type)?.description}
+                          </p>
+                          {step.type === 'skill' ? (
+                            <div>
+                              <Label className="text-[12px] text-foreground/70">{t('settingsDialog.workflowStepTargetLabel')}</Label>
+                              <select
+                                value={step.target || ''}
+                                onChange={(event) => handleWorkflowNodeChange(index, 'target', event.target.value)}
+                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-[#eeece3] px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                              >
+                                <option value="">{t('settingsDialog.workflowTargetPlaceholders.skill')}</option>
+                                {assignedSkillDetails.map((skill) => (
+                                  <option key={skill.id} value={skill.id}>
+                                    {skill.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ) : null}
+                          {step.type === 'agent' ? (
+                            <div>
+                              <Label className="text-[12px] text-foreground/70">{t('settingsDialog.workflowStepTargetLabel')}</Label>
+                              <select
+                                value={step.target || ''}
+                                onChange={(event) => handleWorkflowNodeChange(index, 'target', event.target.value)}
+                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-[#eeece3] px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                              >
+                                <option value="">{t('settingsDialog.workflowTargetPlaceholders.agent')}</option>
+                                {availableAgentTargets.map((candidate) => (
+                                  <option key={candidate.id} value={candidate.id}>
+                                    {candidate.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ) : null}
+                          {step.type === 'model' ? (
+                            (() => {
+                              const selectedModel = splitModelRef(step.target || agent.modelRef || defaultModelRef || '');
+                              const selectedProviderKey = selectedModel?.providerKey || runtimeProviderOptions[0]?.runtimeProviderKey || '';
+                              const suggestedModels = selectedProviderKey
+                                ? (workflowModelSuggestionsByProvider.get(selectedProviderKey) || [])
+                                : [];
+                              return (
+                                <div className="space-y-3">
+                                  <div className="grid gap-3 md:grid-cols-2">
+                                    <div>
+                                      <Label className="text-[12px] text-foreground/70">{t('settingsDialog.modelProviderLabel')}</Label>
+                                      <select
+                                        value={selectedProviderKey}
+                                        onChange={(event) => handleWorkflowModelProviderChange(index, event.target.value)}
+                                        className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-[#eeece3] px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                                      >
+                                        <option value="">{t('settingsDialog.modelProviderPlaceholder')}</option>
+                                        {runtimeProviderOptions.map((option) => (
+                                          <option key={option.runtimeProviderKey} value={option.runtimeProviderKey}>
+                                            {option.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <Label className="text-[12px] text-foreground/70">{t('settingsDialog.workflowStepTargetLabel')}</Label>
+                                      <Input
+                                        value={selectedModel?.modelId || ''}
+                                        onChange={(event) => handleWorkflowModelIdChange(index, event.target.value)}
+                                        placeholder={
+                                          runtimeProviderOptions.find((option) => option.runtimeProviderKey === selectedProviderKey)?.modelIdPlaceholder
+                                          || agent.modelRef
+                                          || defaultModelRef
+                                          || t('settingsDialog.workflowTargetPlaceholders.model')
+                                        }
+                                        className={cn(inputClasses, 'mt-2')}
+                                      />
+                                    </div>
+                                  </div>
+                                  {suggestedModels.length > 0 ? (
+                                    <div>
+                                      <Label className="text-[12px] text-foreground/70">{t('settingsDialog.workflowSuggestedModelsLabel')}</Label>
+                                      <div className="mt-2 flex flex-wrap gap-2">
+                                        {suggestedModels.map((modelId) => (
+                                          <button
+                                            key={modelId}
+                                            type="button"
+                                            onClick={() => handleWorkflowModelIdChange(index, modelId)}
+                                            className={cn(
+                                              'rounded-full border px-3 py-1.5 text-[12px] transition-colors',
+                                              selectedModel?.modelId === modelId
+                                                ? 'border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-300'
+                                                : 'border-black/10 bg-white/70 text-foreground/70 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]',
+                                            )}
+                                          >
+                                            {modelId}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })()
+                          ) : null}
+                          {step.type !== 'model' ? (
+                            <div>
+                              <Label className="text-[12px] text-foreground/70">{t('settingsDialog.workflowStepModelRefLabel')}</Label>
+                              <Input
+                                value={step.modelRef || ''}
+                                onChange={(event) => handleWorkflowNodeChange(index, 'modelRef', event.target.value)}
+                                placeholder={t('settingsDialog.workflowTargetPlaceholders.modelRef')}
+                                className={cn(inputClasses, 'mt-2')}
+                              />
+                              <p className="mt-2 text-[12px] text-muted-foreground">{t('settingsDialog.workflowStepModelRefDescription')}</p>
+                            </div>
+                          ) : null}
+                          {step.type === 'channel' ? (
+                            <div>
+                              <Label className="text-[12px] text-foreground/70">{t('settingsDialog.workflowStepTargetLabel')}</Label>
+                              <select
+                                value={step.target || ''}
+                                onChange={(event) => handleWorkflowNodeChange(index, 'target', event.target.value)}
+                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-[#eeece3] px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                              >
+                                <option value="">{t('settingsDialog.workflowTargetPlaceholders.channel')}</option>
+                                {assignedChannels.map((channel) => {
+                                  const value = `${channel.channelType}:${channel.accountId}`;
+                                  return (
+                                    <option key={value} value={value}>
+                                      {CHANNEL_NAMES[channel.channelType]} · {channel.name}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </div>
+                          ) : null}
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div>
+                              <Label className="text-[12px] text-foreground/70">{t('settingsDialog.workflowInputSpecLabel')}</Label>
+                              <textarea
+                                value={step.inputSpec || ''}
+                                onChange={(event) => handleWorkflowNodeChange(index, 'inputSpec', event.target.value)}
+                                placeholder={t('settingsDialog.workflowInputSpecPlaceholder')}
+                                className="mt-2 min-h-24 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-[12px] text-foreground/70">{t('settingsDialog.workflowOutputSpecLabel')}</Label>
+                              <textarea
+                                value={step.outputSpec || ''}
+                                onChange={(event) => handleWorkflowNodeChange(index, 'outputSpec', event.target.value)}
+                                placeholder={t('settingsDialog.workflowOutputSpecPlaceholder')}
+                                className="mt-2 min-h-24 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <Label className="text-[12px] text-foreground/70">{t('settingsDialog.workflowCodeLabel')}</Label>
+                            <textarea
+                              value={step.code || ''}
+                              onChange={(event) => handleWorkflowNodeChange(index, 'code', event.target.value)}
+                              placeholder={t('settingsDialog.workflowCodePlaceholder')}
+                              className="mt-2 min-h-24 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 font-mono text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                            />
+                            <p className="mt-2 text-[12px] text-muted-foreground">{t('settingsDialog.workflowCodeDescription')}</p>
+                          </div>
+                          <div>
+                            <Label className="text-[12px] text-foreground/70">{t('settingsDialog.workflowFailureModeLabel')}</Label>
+                            <select
+                              value={step.onFailure || 'continue'}
+                              onChange={(event) => handleWorkflowNodeChange(index, 'onFailure', event.target.value as NonNullable<AgentWorkflowNode['onFailure']>)}
+                              className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-[#eeece3] px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                            >
+                              {workflowFailureOptions.map((option) => (
+                                <option key={option.id} value={option.id}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                            <p className="mt-2 text-[12px] text-muted-foreground">
+                              {workflowFailureOptions.find((option) => option.id === (step.onFailure || 'continue'))?.description}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleMoveWorkflowStep(index, 'up')}
+                            disabled={index === 0}
+                            className="rounded-full"
+                          >
+                            <ArrowUp className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleMoveWorkflowStep(index, 'down')}
+                            disabled={index === workflowNodes.length - 1}
+                            className="rounded-full"
+                          >
+                            <ArrowDown className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => handleRemoveWorkflowStep(index)} className="rounded-full">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="runtime" className="space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-xl font-serif text-foreground font-normal tracking-tight">{t('settingsDialog.runtimeTitle')}</h3>
+                      <p className="mt-1 text-[14px] text-foreground/70">{t('settingsDialog.runtimeDescription')}</p>
+                    </div>
+                    <Badge variant="secondary" className="rounded-full px-3 py-1">
+                      {t('triggerCount', { count: normalizedTriggerModes.length })}
+                    </Badge>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {triggerModeOptions.map((option) => {
+                      const selected = normalizedTriggerModes.includes(option.id);
+                      return (
+                        <label key={option.id} className="flex items-start gap-3 rounded-2xl border border-black/5 bg-white/70 p-4 transition-colors hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]">
+                          <Switch checked={selected} onCheckedChange={() => handleToggleTriggerMode(option.id)} />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[15px] font-semibold text-foreground">{option.label}</p>
+                            <p className="mt-1 text-[13px] text-muted-foreground">{option.description}</p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div className="rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+                      <p className="text-[12px] text-muted-foreground">{t('settingsDialog.runtimeCards.lastActive')}</p>
+                      <p className="mt-2 text-[18px] font-semibold text-foreground">
+                        {loadingRuntime ? t('settingsDialog.runtimeLoading') : formatRelativeTime(runtimeSummary.lastActiveAt, currentLanguage)}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+                      <p className="text-[12px] text-muted-foreground">{t('settingsDialog.runtimeCards.sessionCount')}</p>
+                      <p className="mt-2 text-[18px] font-semibold text-foreground">{runtimeSummary.sessionCount}</p>
+                    </div>
+                    <div className="rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+                      <p className="text-[12px] text-muted-foreground">{t('settingsDialog.runtimeCards.latestModel')}</p>
+                      <p className="mt-2 text-[18px] font-semibold text-foreground break-all">
+                        {runtimeSummary.latestModel || agent.modelRef || defaultModelRef || '-'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                    <p className="text-[13px] font-medium text-foreground">{t('settingsDialog.runtimeChecklistTitle')}</p>
+                    <div className="mt-3 space-y-2 text-[13px] text-muted-foreground">
+                      <p>{selectedSkillIds.length > 0 ? '-' : 'o'} {t('settingsDialog.runtimeChecklist.skillsReady', { count: selectedSkillIds.length })}</p>
+                      <p>{normalizedWorkflowSteps.length > 0 ? '-' : 'o'} {t('settingsDialog.runtimeChecklist.workflowReady', { count: normalizedWorkflowSteps.length })}</p>
+                      <p>{assignedChannels.length > 0 ? '-' : 'o'} {t('settingsDialog.runtimeChecklist.channelsReady', { count: assignedChannels.length || safeChannelTypes.length })}</p>
+                      <p>{normalizedTriggerModes.length > 0 ? '-' : 'o'} {t('settingsDialog.runtimeChecklist.triggersReady', { count: normalizedTriggerModes.length })}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-[13px] font-medium text-foreground">{t('settingsDialog.runtimeRecentTitle')}</p>
+                      <p className="mt-1 text-[13px] text-muted-foreground">{t('settingsDialog.runtimeRecentDescription')}</p>
+                    </div>
+                    {runtimeSummary.recentSessions.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-black/10 bg-black/5 p-4 text-[13px] text-muted-foreground dark:border-white/10 dark:bg-white/5">
+                        {t('settingsDialog.runtimeRecentEmpty')}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {runtimeSummary.recentSessions.map((session) => (
+                          <div
+                            key={session.key}
+                            className="rounded-2xl border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.04]"
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="min-w-0">
+                                <p className="text-[14px] font-semibold text-foreground truncate">{session.label}</p>
+                                <p className="mt-1 text-[12px] text-foreground/70 line-clamp-2">
+                                  {session.preview || session.key}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap items-center justify-end gap-2">
+                                <Badge variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px]">
+                                  {triggerSourceLabel(session.triggerSource)}
+                                </Badge>
+                                <Badge
+                                  variant="secondary"
+                                  className={cn(
+                                    'rounded-full px-2.5 py-0.5 text-[11px]',
+                                    session.status === 'active'
+                                      ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                                      : 'bg-black/5 text-foreground/70 dark:bg-white/[0.08]',
+                                  )}
+                                >
+                                  {runtimeStatusLabel(session.status)}
+                                </Badge>
+                              </div>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-[12px] text-muted-foreground">
+                              <span>{t('settingsDialog.runtimeRecentFields.time')}: {formatRelativeTime(session.updatedAt, currentLanguage)}</span>
+                              <span>{t('settingsDialog.runtimeRecentFields.model')}: {session.model || '-'}</span>
+                            </div>
+                            <div className="mt-4 flex justify-end">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void handleOpenRuntimeSession(session.key)}
+                                className="rounded-full"
+                              >
+                                {t('settingsDialog.runtimeOpenSession')}
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="channels" className="space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                    <h3 className="text-xl font-serif text-foreground font-normal tracking-tight">{t('settingsDialog.channelsTitle')}</h3>
+                    <p className="text-[14px] text-foreground/70 mt-1">{t('settingsDialog.channelsDescription')}</p>
+                    </div>
+                    <Button variant="outline" onClick={() => navigate('/channels')} className="rounded-full px-4">
+                      {t('settingsDialog.openChannels')}
+                    </Button>
+                  </div>
+                  {assignedChannels.length === 0 && safeChannelTypes.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 p-4 text-[13.5px] text-muted-foreground">
+                      {t('settingsDialog.noChannels')}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {assignedChannels.map((channel) => (
+                        <div key={`${channel.channelType}-${channel.accountId}`} className="flex items-center justify-between rounded-2xl bg-black/5 dark:bg-white/5 border border-transparent p-4">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="h-[40px] w-[40px] shrink-0 flex items-center justify-center text-foreground bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 rounded-full shadow-sm">
+                              <ChannelLogo type={channel.channelType} />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-[15px] font-semibold text-foreground">{channel.name}</p>
+                              <p className="text-[13.5px] text-muted-foreground">
+                                {CHANNEL_NAMES[channel.channelType]} · {channel.accountId === 'default' ? t('settingsDialog.mainAccount') : channel.accountId}
+                              </p>
+                              {channel.error && <p className="text-xs text-destructive mt-1">{channel.error}</p>}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {assignedChannels.length === 0 && safeChannelTypes.length > 0 && (
+                        <div className="rounded-2xl border border-dashed border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 p-4 text-[13.5px] text-muted-foreground">
+                          {t('settingsDialog.channelsManagedInChannels')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-3xl border border-black/5 bg-white/70 p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+                <p className="text-[12px] uppercase tracking-[0.08em] text-muted-foreground">{t('settingsDialog.rightRailTitle')}</p>
+                <div className="mt-4 space-y-4">
+                  <div>
+                    <p className="text-[12px] text-muted-foreground">{t('settingsDialog.modelLabel')}</p>
+                    <p className="mt-1 text-[14px] font-semibold text-foreground">{safeModelDisplay}</p>
+                    <p className="mt-1 font-mono text-[12px] text-foreground/60 break-all">{agent.modelRef || defaultModelRef || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[12px] text-muted-foreground">{t('settingsDialog.profileTypeLabel')}</p>
+                    <p className="mt-1 text-[14px] font-semibold text-foreground">
+                      {profileOptions.find((option) => option.id === profileType)?.label || '-'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[12px] text-muted-foreground">{t('settingsDialog.skillsTitle')}</p>
+                    <p className="mt-1 text-[14px] font-semibold text-foreground">{selectedSkillIds.length}</p>
+                  </div>
+                  <div>
+                    <p className="text-[12px] text-muted-foreground">{t('settingsDialog.workflowTitle')}</p>
+                    <p className="mt-1 text-[14px] font-semibold text-foreground">{normalizedWorkflowSteps.length}</p>
+                  </div>
+                  <div>
+                    <p className="text-[12px] text-muted-foreground">{t('settingsDialog.runtimeTitle')}</p>
+                    <p className="mt-1 text-[14px] font-semibold text-foreground">{normalizedTriggerModes.length}</p>
+                  </div>
+                </div>
               </div>
-            )}
+            </div>
           </div>
         </CardContent>
+        <CardFooter className="shrink-0 border-t border-black/5 dark:border-white/10 bg-[#f3f1e9]/95 dark:bg-card/95 backdrop-blur px-6 py-4">
+          <div className="flex w-full items-center justify-between gap-3">
+            <p className="text-[13px] text-foreground/60">
+              {hasStudioChanges ? t('settingsDialog.pendingStudioChanges') : t('settingsDialog.studioSavedHint')}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => setShowModelModal(true)} className="rounded-full">
+                {t('settingsDialog.saveModelOverride')}
+              </Button>
+              <Button onClick={() => void handleSaveStudio()} disabled={savingStudio || !hasStudioChanges} className="rounded-full">
+                {savingStudio ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
+                {t('settingsDialog.saveStudio')}
+              </Button>
+            </div>
+          </div>
+        </CardFooter>
       </Card>
       {showModelModal && (
         <AgentModelModal
@@ -684,7 +2029,12 @@ function AgentSettingsModal({
         cancelLabel={t('common:actions.cancel')}
         onConfirm={() => {
           setShowCloseConfirm(false);
-          setName(agent.name);
+          setName(safeAgentName);
+          setProfileType(safeProfileType);
+          setDescription(safeDescription);
+          setObjective(safeObjective);
+          setBoundaries(safeBoundaries);
+          setOutputContract(safeOutputContract);
           onClose();
         }}
         onCancel={() => setShowCloseConfirm(false)}

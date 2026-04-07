@@ -1,8 +1,8 @@
 {
     "steps": {
         "welcome": {
-            "title": "欢迎使用 Deep AI Worker",
-            "description": "您的 AI 助手已准备好进行配置"
+            "title": "欢迎使用 {{appName}}",
+            "description": "开始配置您的企业智能体中枢"
         },
         "runtime": {
             "title": "环境检查",
@@ -22,12 +22,12 @@
         },
         "complete": {
             "title": "准备就绪！",
-            "description": "Deep AI Worker 已准备好使用"
+            "description": "应用已准备好使用"
         }
     },
     "welcome": {
-        "title": "欢迎使用 Deep AI Worker",
-        "description": "Deep AI Worker 是 OpenClaw 的图形界面，让您可以在喜爱的消息平台上轻松使用 AI 助手。",
+        "title": "欢迎使用 {{appName}}",
+        "description": "{{appName}} 是企业智能体的运行、协同与治理中枢。{{slogan}}。",
         "features": {
             "noCommand": "无需命令行",
             "modernUI": "现代美观的界面",
@@ -66,6 +66,8 @@
         "selectPlaceholder": "选择提供商...",
         "baseUrl": "基础 URL",
         "modelId": "模型 ID",
+        "modelPreset": "推荐模型",
+        "modelPresetCustom": "自定义输入",
         "modelIdDesc": "提供商的模型标识符（例如 deepseek-ai/DeepSeek-V3）",
         "codePlanPreset": "Code Plan 预设",
         "codePlanMode": "Code Plan",
@@ -113,7 +115,7 @@
     },
     "complete": {
         "title": "设置完成！",
-        "subtitle": "Deep AI Worker 已配置并准备就绪。您现在可以开始与您的 AI 助手聊天了。",
+        "subtitle": "系统已配置完成。您现在可以开始连接模型、渠道与智能体。",
         "provider": "AI 提供商",
         "components": "组件",
         "gateway": "网关",

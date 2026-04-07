@@ -26,9 +26,9 @@
             ]
         }
     },
-    "description": "Deep AI Worker - Graphical AI Assistant based on OpenClaw",
+    "description": "Deep AI Worker - Enterprise AI workspace based on OpenClaw",
     "main": "dist-electron/main/index.js",
-    "author": "ClawX Team",
+    "author": "DeepData",
     "license": "MIT",
     "private": true,
     "scripts": {

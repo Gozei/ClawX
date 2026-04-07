@@ -1,6 +1,6 @@
 appId: app.clawx.desktop
 productName: Deep AI Worker
-copyright: Copyright © 2026 ClawX
+copyright: Copyright © 2026 DeepData
 compression: maximum
 artifactName: Deep-AI-Worker-${version}-${os}-${arch}.${ext}
 
@@ -157,10 +157,10 @@ linux:
       arch:
         - x64
   category: Utility
-  maintainer: ClawX Team <public@valuecell.ai>
-  vendor: Deepdata
+  maintainer: DeepData <public@valuecell.ai>
+  vendor: DeepData
   synopsis: AI Assistant powered by OpenClaw
-  description: ClawX is a graphical AI assistant application that integrates with OpenClaw Gateway to provide intelligent automation and assistance across multiple messaging platforms.
+  description: Deep AI Worker is an enterprise AI workspace built on OpenClaw for operational intelligence, automation, and assisted execution.
   desktop:
     entry:
       Name: Deep AI Worker

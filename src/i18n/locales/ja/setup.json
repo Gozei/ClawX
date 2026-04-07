@@ -1,8 +1,8 @@
 {
     "steps": {
         "welcome": {
-            "title": "Deep AI Workerへようこそ",
-            "description": "AIアシスタントの設定準備が整いました"
+            "title": "{{appName}}へようこそ",
+            "description": "{{slogan}}"
         },
         "runtime": {
             "title": "環境チェック",
@@ -22,12 +22,12 @@
         },
         "complete": {
             "title": "完了！",
-            "description": "Deep AI Workerを使用する準備が整いました"
+            "description": "アプリを使用する準備が整いました"
         }
     },
     "welcome": {
-        "title": "Deep AI Workerへようこそ",
-        "description": "Deep AI WorkerはOpenClawのグラフィカルインターフェースで、お気に入りのメッセージングプラットフォームでAIアシスタントを簡単に使用できます。",
+        "title": "{{appName}}へようこそ",
+        "description": "{{appName}} は OpenClaw のグラフィカルインターフェースで、お気に入りのメッセージングプラットフォーム上で AI アシスタントを簡単に使えるようにします。",
         "features": {
             "noCommand": "コマンドライン不要",
             "modernUI": "モダンで美しいインターフェース",
@@ -66,6 +66,8 @@
         "selectPlaceholder": "プロバイダーを選択...",
         "baseUrl": "ベース URL",
         "modelId": "モデル ID",
+        "modelPreset": "おすすめモデル",
+        "modelPresetCustom": "手動入力",
         "modelIdDesc": "プロバイダーのモデル識別子（例：deepseek-ai/DeepSeek-V3）",
         "codePlanPreset": "Code Plan プリセット",
         "codePlanMode": "Code Plan",
@@ -113,7 +115,7 @@
     },
     "complete": {
         "title": "セットアップ完了！",
-        "subtitle": "Deep AI Workerの構成が完了し、使用準備が整いました。AIアシスタントとのチャットを開始できます。",
+        "subtitle": "システムの構成が完了し、使用準備が整いました。AI アシスタントとのチャットを開始できます。",
         "provider": "AI プロバイダー",
         "components": "コンポーネント",
         "gateway": "ゲートウェイ",

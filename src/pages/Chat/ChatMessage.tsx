@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { invokeIpc } from '@/lib/api-client';
 import type { RawMessage, AttachedFileMeta } from '@/stores/chat';
+import { useSettingsStore } from '@/stores/settings';
 import { extractText, extractThinking, extractImages, extractToolUse, formatTimestamp } from './message-utils';
 
 interface ChatMessageProps {
@@ -51,8 +52,12 @@ export const ChatMessage = memo(function ChatMessage({
   const thinking = extractThinking(message);
   const images = extractImages(message);
   const tools = extractToolUse(message);
+  const chatProcessDisplayMode = useSettingsStore((state) => state.chatProcessDisplayMode);
+  const chatFontScale = useSettingsStore((state) => state.chatFontScale);
   const visibleThinking = showThinking ? thinking : null;
-  const visibleTools = tools;
+  const visibleTools = chatProcessDisplayMode === 'all' ? tools : [];
+  const bodyFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
+  const metaFontSize = `${Math.round(12 * (chatFontScale / 100) * 10) / 10}px`;
 
   const attachedFiles = message._attachedFiles || [];
   const [lightboxImg, setLightboxImg] = useState<{ src: string; fileName: string; filePath?: string; base64?: string; mimeType?: string } | null>(null);
@@ -60,7 +65,7 @@ export const ChatMessage = memo(function ChatMessage({
   // Never render tool result messages in chat UI
   if (isToolResult) return null;
 
-  const hasStreamingToolStatus = isStreaming && streamingTools.length > 0;
+  const hasStreamingToolStatus = isStreaming && chatProcessDisplayMode === 'all' && streamingTools.length > 0;
   if (!hasText && !visibleThinking && images.length === 0 && visibleTools.length === 0 && attachedFiles.length === 0 && !hasStreamingToolStatus) return null;
 
   return (
@@ -69,6 +74,7 @@ export const ChatMessage = memo(function ChatMessage({
         'flex gap-3 group',
         isUser ? 'flex-row-reverse' : 'flex-row',
       )}
+      style={isStreaming ? undefined : { contentVisibility: 'auto', containIntrinsicSize: '160px' }}
     >
       {/* Avatar */}
       {!isUser && (
@@ -161,6 +167,7 @@ export const ChatMessage = memo(function ChatMessage({
             text={text}
             isUser={isUser}
             isStreaming={isStreaming}
+            fontSize={bodyFontSize}
           />
         )}
 
@@ -216,18 +223,14 @@ export const ChatMessage = memo(function ChatMessage({
 
         {/* Hover row for user messages — timestamp only */}
         {isUser && message.timestamp && (
-          hasText ? (
-            <UserHoverBar text={text} timestamp={message.timestamp} />
-          ) : (
-            <span className="text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-200 select-none">
-              {formatTimestamp(message.timestamp)}
-            </span>
-          )
+          <span className="text-muted-foreground opacity-0 transition-opacity duration-200 select-none group-hover:opacity-100" style={{ fontSize: metaFontSize }}>
+            {formatTimestamp(message.timestamp)}
+          </span>
         )}
 
         {/* Hover row for assistant messages — only when there is real text content */}
         {!isUser && hasText && (
-          <AssistantHoverBar text={text} timestamp={message.timestamp} />
+          <AssistantHoverBar text={text} timestamp={message.timestamp} metaFontSize={metaFontSize} />
         )}
       </div>
 
@@ -298,7 +301,7 @@ function ToolStatusBar({
 
 // ── Assistant hover bar (timestamp + copy, shown on group hover) ─
 
-function AssistantHoverBar({ text, timestamp }: { text: string; timestamp?: number }) {
+function AssistantHoverBar({ text, timestamp, metaFontSize }: { text: string; timestamp?: number; metaFontSize: string }) {
   const [copied, setCopied] = useState(false);
 
   const copyContent = useCallback(() => {
@@ -309,7 +312,7 @@ function AssistantHoverBar({ text, timestamp }: { text: string; timestamp?: numb
 
   return (
     <div className="flex items-center justify-between w-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 select-none px-1">
-      <span className="text-xs text-muted-foreground">
+      <span className="text-muted-foreground" style={{ fontSize: metaFontSize }}>
         {timestamp ? formatTimestamp(timestamp) : ''}
       </span>
       <Button
@@ -317,34 +320,6 @@ function AssistantHoverBar({ text, timestamp }: { text: string; timestamp?: numb
         size="icon"
         className="h-6 w-6"
         onClick={copyContent}
-        data-testid="chat-message-copy-assistant"
-      >
-        {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-      </Button>
-    </div>
-  );
-}
-
-function UserHoverBar({ text, timestamp }: { text: string; timestamp?: number }) {
-  const [copied, setCopied] = useState(false);
-
-  const copyContent = useCallback(() => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [text]);
-
-  return (
-    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 select-none">
-      <span className="text-xs text-muted-foreground">
-        {timestamp ? formatTimestamp(timestamp) : ''}
-      </span>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-6 w-6"
-        onClick={copyContent}
-        data-testid="chat-message-copy-user"
       >
         {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
       </Button>
@@ -358,25 +333,32 @@ function MessageBubble({
   text,
   isUser,
   isStreaming,
+  fontSize,
 }: {
   text: string;
   isUser: boolean;
   isStreaming: boolean;
+  fontSize: string;
 }) {
   return (
     <div
       className={cn(
-        'relative rounded-2xl px-4 py-3',
+        'relative rounded-[24px] px-4 py-3.5',
         !isUser && 'w-full',
         isUser
-          ? 'bg-[#0a84ff] text-white shadow-sm'
-          : 'bg-black/5 dark:bg-white/5 text-foreground',
+          ? 'bg-[linear-gradient(135deg,#4f8df7_0%,#2f6fe4_100%)] text-white shadow-[0_12px_28px_rgba(47,111,228,0.24)]'
+          : 'border border-black/6 bg-white/54 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.06)] backdrop-blur-sm dark:border-white/8 dark:bg-white/[0.045]',
       )}
     >
       {isUser ? (
-        <p className="whitespace-pre-wrap break-words break-all text-sm">{text}</p>
+        <p className="whitespace-pre-wrap break-words break-all leading-[1.82]" style={{ fontSize }}>{text}</p>
+      ) : isStreaming ? (
+        <div className="whitespace-pre-wrap break-words break-all leading-[1.82]" style={{ fontSize }}>
+          {text}
+          <span className="inline-block w-2 h-4 bg-foreground/50 animate-pulse ml-0.5 align-[-2px]" />
+        </div>
       ) : (
-        <div className="prose prose-sm dark:prose-invert max-w-none break-words break-all">
+        <div className="prose prose-sm dark:prose-invert max-w-none break-words break-all leading-[1.82]" style={{ fontSize }}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -409,9 +391,6 @@ function MessageBubble({
           >
             {text}
           </ReactMarkdown>
-          {isStreaming && (
-            <span className="inline-block w-2 h-4 bg-foreground/50 animate-pulse ml-0.5" />
-          )}
         </div>
       )}
 

@@ -6,10 +6,12 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import i18n from '@/i18n';
 import { hostApiFetch } from '@/lib/host-api';
+import type { BrandingOverrides } from '../../shared/branding';
 import { resolveSupportedLanguage } from '../../shared/language';
 
 type Theme = 'light' | 'dark' | 'system';
 type UpdateChannel = 'stable' | 'beta' | 'dev';
+export type ChatProcessDisplayMode = 'all' | 'files' | 'hidden';
 
 interface SettingsState {
   // General
@@ -18,6 +20,9 @@ interface SettingsState {
   startMinimized: boolean;
   launchAtStartup: boolean;
   telemetryEnabled: boolean;
+  brandingOverrides: BrandingOverrides;
+  chatProcessDisplayMode: ChatProcessDisplayMode;
+  chatFontScale: number;
 
   // Gateway
   gatewayAutoStart: boolean;
@@ -48,6 +53,8 @@ interface SettingsState {
   setStartMinimized: (value: boolean) => void;
   setLaunchAtStartup: (value: boolean) => void;
   setTelemetryEnabled: (value: boolean) => void;
+  setChatProcessDisplayMode: (value: ChatProcessDisplayMode) => void;
+  setChatFontScale: (value: number) => void;
   setGatewayAutoStart: (value: boolean) => void;
   setGatewayPort: (port: number) => void;
   setProxyEnabled: (value: boolean) => void;
@@ -67,10 +74,13 @@ interface SettingsState {
 
 const defaultSettings = {
   theme: 'system' as Theme,
-  language: resolveSupportedLanguage(typeof navigator !== 'undefined' ? navigator.language : undefined),
+  language: resolveSupportedLanguage('zh'),
   startMinimized: false,
   launchAtStartup: false,
   telemetryEnabled: true,
+  brandingOverrides: {},
+  chatProcessDisplayMode: 'files' as ChatProcessDisplayMode,
+  chatFontScale: 100,
   gatewayAutoStart: true,
   gatewayPort: 18789,
   proxyEnabled: false,
@@ -141,6 +151,21 @@ export const useSettingsStore = create<SettingsState>()(
         void hostApiFetch('/api/settings/telemetryEnabled', {
           method: 'PUT',
           body: JSON.stringify({ value: telemetryEnabled }),
+        }).catch(() => { });
+      },
+      setChatProcessDisplayMode: (chatProcessDisplayMode) => {
+        set({ chatProcessDisplayMode });
+        void hostApiFetch('/api/settings/chatProcessDisplayMode', {
+          method: 'PUT',
+          body: JSON.stringify({ value: chatProcessDisplayMode }),
+        }).catch(() => { });
+      },
+      setChatFontScale: (chatFontScale) => {
+        const normalized = Math.max(85, Math.min(120, Math.round(chatFontScale)));
+        set({ chatFontScale: normalized });
+        void hostApiFetch('/api/settings/chatFontScale', {
+          method: 'PUT',
+          body: JSON.stringify({ value: normalized }),
         }).catch(() => { });
       },
       setGatewayAutoStart: (gatewayAutoStart) => {

@@ -23,6 +23,16 @@ const GOOGLE_OAUTH_DEFAULT_MODEL_REF = `${GOOGLE_OAUTH_RUNTIME_PROVIDER}/gemini-
 const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
 const OPENAI_OAUTH_DEFAULT_MODEL_REF = `${OPENAI_OAUTH_RUNTIME_PROVIDER}/gpt-5.4`;
 
+function getProviderDeletionAliases(config: ProviderConfig): string[] {
+  if (config.type === 'openai') {
+    return [OPENAI_OAUTH_RUNTIME_PROVIDER];
+  }
+  if (config.type === 'google') {
+    return [GOOGLE_OAUTH_RUNTIME_PROVIDER];
+  }
+  return [];
+}
+
 /**
  * Provider types that are not in the built-in provider registry (no `providerConfig.api`).
  * They require explicit api-protocol defaulting to `openai-completions`.
@@ -368,6 +378,9 @@ async function removeDeletedProviderFromOpenClaw(
     keys.add(await resolveRuntimeProviderKey({ ...provider, id: providerId }));
   }
   keys.add(providerId);
+  for (const alias of getProviderDeletionAliases(provider)) {
+    keys.add(alias);
+  }
 
   for (const key of keys) {
     await removeProviderFromOpenClaw(key);

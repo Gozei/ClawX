@@ -1,6 +1,6 @@
 {
-    "title": "岗位专家",
-    "subtitle": "创建新的 Agent，可以将特定频道路由到不同的人格配置或工作区。",
+    "title": "智能体",
+    "subtitle": "定义智能体、装配技能、组织流程，并管理它在业务中的运行方式。",
     "refresh": "刷新",
     "addAgent": "添加 Agent",
     "gatewayWarning": "Gateway 服务未运行。Agent 或频道变更可能需要一点时间生效。",
@@ -8,27 +8,66 @@
     "inherited": "继承",
     "none": "无",
     "modelLine": "Model: {{model}}{{suffix}}",
+    "profileLine": "类型: {{profile}}",
     "channelsLine": "频道: {{channels}}",
+    "skillCount": "{{count}} 个技能",
+    "workflowCount": "{{count}} 个流程步骤",
+    "triggerCount": "{{count}} 种触发方式",
     "deleteAgent": "删除 Agent",
     "settings": "设置",
     "creating": "创建中...",
     "createDialog": {
         "title": "添加 Agent",
-        "description": "输入名称即可创建新 Agent，可选择是否继承主 Agent 的工作区引导文件。",
+        "description": "先定义这个智能体的岗位类型、业务目标和角色说明，再决定是否继承主 Agent 的工作区引导文件。",
         "nameLabel": "Agent 名称",
         "namePlaceholder": "Coding Helper",
+        "profileTypeLabel": "智能体类型",
+        "objectiveLabel": "业务目标",
+        "objectivePlaceholder": "说明这个智能体最终要完成什么业务结果，例如：产出正式公文草稿、完成客服分流、生成日报。",
+        "roleLabel": "角色说明",
+        "rolePlaceholder": "说明它是谁、服务谁、擅长什么，形成清晰岗位定位。",
         "inheritWorkspaceLabel": "继承主 Agent 工作区",
         "inheritWorkspaceDescription": "从主 Agent 复制 SOUL.md、AGENTS.md 等引导文件"
     },
+    "profileTypes": {
+        "specialist": {
+            "label": "专家型",
+            "description": "聚焦单一领域，负责高质量完成专业内容或分析任务。"
+        },
+        "executor": {
+            "label": "执行型",
+            "description": "以调用技能和系统动作见长，适合执行明确流程。"
+        },
+        "coordinator": {
+            "label": "协调型",
+            "description": "负责拆解任务、调度下游智能体和整合最终结果。"
+        }
+    },
     "deleteDialog": {
         "title": "删除 Agent",
-        "message": "确认从 Deep AI Worker 删除 “{{name}}”？这会永久删除该 Agent 及其由 Deep AI Worker 管理的工作区、运行时和会话文件。"
+        "message": "确认从 {{appName}} 删除 “{{name}}”？这会永久删除该 Agent 及其由 {{appName}} 管理的工作区、运行时和会话文件。"
     },
     "settingsDialog": {
         "title": "{{name}} 设置",
         "description": "更新 Agent 名称，并管理哪些频道归属于这个 Agent。",
+        "tabs": {
+            "overview": "概览",
+            "skills": "技能",
+            "workflow": "流程",
+            "runtime": "运行",
+            "channels": "频道"
+        },
         "nameLabel": "Agent 名称",
         "agentIdLabel": "Agent ID",
+        "profileTypeLabel": "智能体类型",
+        "descriptionLabel": "角色说明",
+        "descriptionPlaceholder": "说明这个智能体负责什么工作、面向谁服务、输出什么结果。",
+        "objectiveLabel": "业务目标",
+        "objectivePlaceholder": "写清楚这个智能体最终要达成什么业务目标和交付物。",
+        "boundariesLabel": "执行边界",
+        "boundariesPlaceholder": "写清楚哪些情况必须澄清、转交、停止，不能自行编造或越权处理。",
+        "outputContractLabel": "输出要求",
+        "outputContractPlaceholder": "写清楚输出格式、结构、质量标准，以及必须包含哪些字段或结论。",
         "modelLabel": "Model",
         "modelOverrideLabel": "模型覆盖",
         "modelProviderLabel": "Provider",
@@ -45,11 +84,183 @@
         "saveModelOverride": "保存模型",
         "useDefaultModel": "使用默认模型",
         "channelsTitle": "频道",
-        "channelsDescription": "该列表为只读。频道账号与绑定关系请在 Channels 页面管理。",
+        "channelsDescription": "这里展示当前智能体承接的频道关系。账号登录、绑定和路由规则请在渠道页面配置。",
+        "openChannels": "前往渠道配置",
         "mainAccount": "主账号",
         "channelsManagedInChannels": "该 Agent 绑定了频道类型，但具体账号绑定请在 Channels 页面查看。",
         "addChannel": "添加频道",
-        "noChannels": "这个 Agent 还没有分配任何频道。"
+        "noChannels": "这个 Agent 还没有分配任何频道。",
+        "skillsTitle": "技能装配",
+        "skillsDescription": "为这个智能体选择可调用的技能，让它具备真实的执行能力。",
+        "skillsSearchLabel": "筛选技能",
+        "skillsSearchPlaceholder": "按名称、说明或 ID 搜索技能",
+        "skillsEmpty": "还没有可用技能。请先到 Skills 页面安装或启用技能。",
+        "skillsNoMatch": "没有找到匹配的技能，换个关键词试试。",
+        "skillDisabled": "未启用",
+        "workflowTitle": "业务流程",
+        "workflowDescription": "先用轻量步骤定义这个智能体如何接收输入、调用能力并产出结果。",
+        "workflowTemplatesTitle": "常用流程模板",
+        "workflowTemplatesDescription": "先套用一个常见工作流，再按你的业务场景调整步骤。",
+        "workflowTemplates": {
+            "support": {
+                "label": "客服接待",
+                "description": "适合渠道问答、售前咨询和人工接力。",
+                "steps": [
+                    "接收渠道消息并识别用户意图",
+                    "调用已挂载技能查询用户或订单信息",
+                    "使用当前模型生成清晰答复",
+                    "无法处理时转人工并记录上下文"
+                ]
+            },
+            "ops": {
+                "label": "运营播报",
+                "description": "适合定时摘要、日报、监控结果播报。",
+                "steps": [
+                    "收集当天关键业务数据",
+                    "调用数据技能生成结构化摘要",
+                    "使用当前模型整理成运营播报",
+                    "发送到指定渠道并归档结果"
+                ]
+            },
+            "research": {
+                "label": "研究分析",
+                "description": "适合资料汇总、竞品分析和结论输出。",
+                "steps": [
+                    "接收研究主题并拆解问题",
+                    "调用检索或文件技能收集材料",
+                    "使用当前模型归纳观点和证据",
+                    "输出结论、风险和下一步建议"
+                ]
+            },
+            "multiAgent": {
+                "label": "多智能体协作",
+                "description": "适合主控智能体拆解任务，再把子任务交给专家智能体和技能协同处理。",
+                "steps": [
+                    "接收业务目标并拆成标准任务说明",
+                    "调用下游智能体完成专项处理",
+                    "使用技能校验中间结果并补齐数据",
+                    "用当前模型汇总为最终业务输出"
+                ]
+            }
+        },
+        "workflowEmpty": "尚未定义流程步骤",
+        "workflowStepPlaceholder": "第 {{index}} 步，例如：读取客户资料并提取关键字段",
+        "workflowStepTypeLabel": "步骤类型",
+        "workflowStepTitleLabel": "步骤说明",
+        "workflowStepTargetLabel": "执行目标",
+        "workflowStepModelRefLabel": "步骤模型覆盖",
+        "workflowStepModelRefDescription": "可选。为当前步骤指定不同模型，不影响整个智能体的默认模型。",
+        "workflowFailureModeLabel": "失败处理",
+        "workflowSuggestedModelsLabel": "建议模型",
+        "workflowInputSpecLabel": "标准输入",
+        "workflowInputSpecPlaceholder": "说明这个步骤接收什么输入，字段如何组织。",
+        "workflowOutputSpecLabel": "标准输出",
+        "workflowOutputSpecPlaceholder": "说明这个步骤输出什么结果，给下一个步骤什么结构。",
+        "workflowCodeLabel": "步骤代码 / 指令",
+        "workflowCodePlaceholder": "可选。填写脚本片段、提示词模板或执行说明。",
+        "workflowCodeDescription": "适合保存步骤级别的执行模板、提示词或代码片段。",
+        "workflowStepTypes": {
+            "instruction": {
+                "label": "说明步骤",
+                "description": "用于描述准备动作、判断逻辑或通用处理要求。"
+            },
+            "skill": {
+                "label": "调用技能",
+                "description": "明确指定这个步骤调用哪个技能来完成工作。"
+            },
+            "model": {
+                "label": "调用模型",
+                "description": "在这个步骤里使用指定模型生成、总结或判断。"
+            },
+            "channel": {
+                "label": "输出到渠道",
+                "description": "将结果发送到指定渠道或账号。"
+            },
+            "agent": {
+                "label": "调用智能体",
+                "description": "把当前上下文交给另一个智能体继续处理，适合多人协作式流程。"
+            }
+        },
+        "workflowTargetPlaceholders": {
+            "skill": "选择一个已装配技能",
+            "model": "填写要使用的模型 ID",
+            "channel": "选择一个已绑定渠道",
+            "agent": "选择一个下游智能体",
+            "modelRef": "可选，填写 provider/model"
+        },
+        "workflowFailureModes": {
+            "continue": {
+                "label": "继续下一步",
+                "description": "即使当前步骤失败，也让流程继续往后执行。"
+            },
+            "retry": {
+                "label": "自动重试",
+                "description": "当前步骤失败后优先再试一次，适合不稳定的模型或接口。"
+            },
+            "handoff": {
+                "label": "转人工处理",
+                "description": "当前步骤失败后停止自动流程，并交给人工或主控智能体接管。"
+            }
+        },
+        "addWorkflowStep": "添加步骤",
+        "runtimeTitle": "运行",
+        "runtimeDescription": "定义这个智能体如何被触发，并查看最近的运行活跃度。",
+        "runtimeLoading": "加载中...",
+        "triggerModes": {
+            "manual": {
+                "label": "手动触发",
+                "description": "适合在工作台中手动发起对话、调试或临时执行。"
+            },
+            "channel": {
+                "label": "渠道消息",
+                "description": "接收来自企业微信、Telegram 等渠道的新消息时自动触发。"
+            },
+            "schedule": {
+                "label": "定时任务",
+                "description": "由 Cron 或计划任务按固定时间驱动执行。"
+            },
+            "webhook": {
+                "label": "Webhook",
+                "description": "由外部系统回调或业务事件推送时触发。"
+            },
+            "unknown": {
+                "label": "未知来源"
+            }
+        },
+        "runtimeCards": {
+            "lastActive": "最近活跃",
+            "sessionCount": "会话数",
+            "latestModel": "最近模型"
+        },
+        "runtimeChecklistTitle": "运行准备检查",
+        "runtimeChecklist": {
+            "skillsReady": "已装配 {{count}} 个技能",
+            "workflowReady": "已配置 {{count}} 个流程步骤",
+            "channelsReady": "已绑定 {{count}} 个频道",
+            "triggersReady": "已启用 {{count}} 种触发方式"
+        },
+        "runtimeRecentTitle": "最近运行记录",
+        "runtimeRecentDescription": "基于最近会话整理这个智能体的活跃记录，方便快速判断是否在持续工作。",
+        "runtimeRecentEmpty": "还没有找到最近运行记录。等这个智能体开始接单后，这里会逐步出现。",
+        "runtimeRecentFields": {
+            "time": "时间",
+            "model": "模型"
+        },
+        "runtimeStatuses": {
+            "active": "活跃",
+            "idle": "待机"
+        },
+        "runtimeOpenSession": "进入对话",
+        "saveStudio": "保存工作台配置",
+        "pendingStudioChanges": "当前智能体定义有未保存修改，请先保存再关闭。",
+        "studioSavedHint": "工作台定义会同步到 OpenClaw 配置和对应工作区。",
+        "rightRailTitle": "工作台摘要",
+        "overview": {
+            "skills": "已装配技能",
+            "workflow": "流程步骤",
+            "channels": "绑定频道",
+            "triggers": "触发方式"
+        }
     },
     "removeChannelDialog": {
         "title": "移除频道",
@@ -69,6 +280,8 @@
         "agentModelUpdateFailed": "更新 Agent 模型失败：{{error}}",
         "agentModelReset": "Agent 模型已恢复为默认",
         "agentModelResetFailed": "恢复 Agent 默认模型失败：{{error}}",
+        "agentStudioUpdated": "智能体工作台已更新",
+        "agentStudioUpdateFailed": "更新智能体工作台失败：{{error}}",
         "channelAssigned": "{{channel}} 已分配给 Agent",
         "channelAssignFailed": "分配频道失败：{{error}}",
         "channelRemoved": "{{channel}} 已移除",

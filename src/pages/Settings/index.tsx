@@ -40,6 +40,7 @@ import { useTranslation } from 'react-i18next';
 import { SUPPORTED_LANGUAGES } from '@/i18n';
 import { hostApiFetch } from '@/lib/host-api';
 import { cn } from '@/lib/utils';
+import { useBranding } from '@/lib/branding';
 type ControlUiInfo = {
   url: string;
   token: string;
@@ -48,6 +49,7 @@ type ControlUiInfo = {
 
 export function Settings() {
   const { t } = useTranslation('settings');
+  const branding = useBranding();
   const {
     theme,
     setTheme,
@@ -77,6 +79,10 @@ export function Settings() {
     setDevModeUnlocked,
     telemetryEnabled,
     setTelemetryEnabled,
+    chatProcessDisplayMode,
+    setChatProcessDisplayMode,
+    chatFontScale,
+    setChatFontScale,
   } = useSettingsStore();
 
   const { status: gatewayStatus, restart: restartGateway } = useGatewayStore();
@@ -482,7 +488,11 @@ export function Settings() {
               {t('title')}
             </h1>
             <p className="text-[17px] text-foreground/70 font-medium">
-              {t('subtitle')}
+              {t('subtitle', {
+                appName: branding.productName,
+                slogan: branding.slogan,
+                userAgentProduct: branding.userAgentProduct,
+              })}
             </p>
           </div>
         </div>
@@ -544,7 +554,9 @@ export function Settings() {
                 <div>
                   <Label className="text-[15px] font-medium text-foreground/80">{t('appearance.launchAtStartup')}</Label>
                   <p className="text-[13px] text-muted-foreground mt-1">
-                    {t('appearance.launchAtStartupDesc')}
+                    {t('appearance.launchAtStartupDesc', {
+                      appName: branding.productName,
+                    })}
                   </p>
                 </div>
                 <Switch
@@ -618,7 +630,9 @@ export function Settings() {
                 <div>
                   <Label className="text-[15px] font-medium text-foreground">{t('gateway.autoStart')}</Label>
                   <p className="text-[13px] text-muted-foreground mt-1">
-                    {t('gateway.autoStartDesc')}
+                    {t('gateway.autoStartDesc', {
+                      appName: branding.productName,
+                    })}
                   </p>
                 </div>
                 <Switch
@@ -646,13 +660,65 @@ export function Settings() {
                 <div>
                   <Label className="text-[15px] font-medium text-foreground">{t('advanced.telemetry')}</Label>
                   <p className="text-[13px] text-muted-foreground mt-1">
-                    {t('advanced.telemetryDesc')}
+                    {t('advanced.telemetryDesc', {
+                      appName: branding.productName,
+                    })}
                   </p>
                 </div>
                 <Switch
                   checked={telemetryEnabled}
                   onCheckedChange={setTelemetryEnabled}
                 />
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <Label className="text-[15px] font-medium text-foreground">{t('advanced.chatProcessDisplay')}</Label>
+                  <p className="text-[13px] text-muted-foreground mt-1">
+                    {t('advanced.chatProcessDisplayDesc')}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(['all', 'files', 'hidden'] as const).map((mode) => (
+                    <Button
+                      key={mode}
+                      type="button"
+                      variant={chatProcessDisplayMode === mode ? 'default' : 'outline'}
+                      onClick={() => setChatProcessDisplayMode(mode)}
+                      className={cn(
+                        'rounded-full px-4 h-9',
+                        chatProcessDisplayMode !== mode && 'bg-transparent border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5',
+                      )}
+                    >
+                      {t(`advanced.chatProcessDisplayOptions.${mode}`)}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <Label className="text-[15px] font-medium text-foreground">{t('advanced.chatFontScale')}</Label>
+                  <p className="text-[13px] text-muted-foreground mt-1">
+                    {t('advanced.chatFontScaleDesc')}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {[85, 95, 100, 110, 120].map((scale) => (
+                    <Button
+                      key={scale}
+                      type="button"
+                      variant={chatFontScale === scale ? 'default' : 'outline'}
+                      onClick={() => setChatFontScale(scale)}
+                      className={cn(
+                        'rounded-full px-4 h-9',
+                        chatFontScale !== scale && 'bg-transparent border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5',
+                      )}
+                    >
+                      {t('advanced.chatFontScaleOption', { value: scale })}
+                    </Button>
+                  ))}
+                </div>
               </div>
 
             </div>
@@ -1083,7 +1149,10 @@ export function Settings() {
             </h2>
             <div className="space-y-3 text-[14px] text-muted-foreground">
               <p>
-                <strong className="text-foreground font-semibold">{t('about.appName')}</strong> - {t('about.tagline')}
+                <strong className="text-foreground font-semibold">
+                  {t('about.appName', { appName: branding.productName })}
+                </strong>{' '}
+                - {t('about.tagline', { slogan: branding.slogan })}
               </p>
               <p>{t('about.basedOn')}</p>
               <p>{t('about.version', { version: currentVersion })}</p>
@@ -1098,7 +1167,7 @@ export function Settings() {
                 <Button
                   variant="link"
                   className="h-auto p-0 text-[14px] text-blue-500 hover:text-blue-600 font-medium"
-                  onClick={() => window.electron.openExternal('https://github.com/ValueCell-ai/ClawX')}
+                  onClick={() => window.electron.openExternal('https://github.com/ValueCell-ai')}
                 >
                   {t('about.github')}
                 </Button>

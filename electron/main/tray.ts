@@ -4,6 +4,7 @@
  */
 import { Tray, Menu, BrowserWindow, app, nativeImage } from 'electron';
 import { join } from 'path';
+import { getResolvedBranding } from '../utils/branding';
 
 let tray: Tray | null = null;
 
@@ -20,7 +21,8 @@ function getIconsDir(): string {
 /**
  * Create system tray icon and menu
  */
-export function createTray(mainWindow: BrowserWindow): Tray {
+export async function createTray(mainWindow: BrowserWindow): Promise<Tray> {
+  const branding = await getResolvedBranding();
   // Use platform-appropriate icon for system tray
   const iconsDir = getIconsDir();
   let iconPath: string;
@@ -57,7 +59,7 @@ export function createTray(mainWindow: BrowserWindow): Tray {
   tray = new Tray(icon);
   
   // Set tooltip
-  tray.setToolTip('Deep AI Worker - AI Assistant');
+  tray.setToolTip(`${branding.trayTitle} - ${branding.slogan}`);
   
   const showWindow = () => {
     if (mainWindow.isDestroyed()) return;
@@ -68,7 +70,7 @@ export function createTray(mainWindow: BrowserWindow): Tray {
   // Create context menu
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Show Deep AI Worker',
+      label: `Show ${branding.productName}`,
       click: showWindow,
     },
     {
@@ -122,7 +124,7 @@ export function createTray(mainWindow: BrowserWindow): Tray {
       type: 'separator',
     },
     {
-      label: 'Quit Deep AI Worker',
+      label: `Quit ${branding.productName}`,
       click: () => {
         app.quit();
       },
@@ -155,9 +157,10 @@ export function createTray(mainWindow: BrowserWindow): Tray {
 /**
  * Update tray tooltip with Gateway status
  */
-export function updateTrayStatus(status: string): void {
+export async function updateTrayStatus(status: string): Promise<void> {
   if (tray) {
-    tray.setToolTip(`Deep AI Worker - ${status}`);
+    const branding = await getResolvedBranding();
+    tray.setToolTip(`${branding.trayTitle} - ${status}`);
   }
 }
 

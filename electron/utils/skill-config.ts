@@ -5,7 +5,7 @@
  *
  * All file I/O uses async fs/promises to avoid blocking the main thread.
  */
-import { readFile, writeFile, access, mkdir } from 'fs/promises';
+import { readFile, access, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { constants } from 'fs';
 import { join } from 'path';
@@ -14,6 +14,11 @@ import { getOpenClawDir, getResourcesDir } from './paths';
 import { logger } from './logger';
 import { cpAsyncSafe } from './plugin-install';
 import { withConfigLock } from './config-mutex';
+import {
+    readManagedSkillsState,
+    syncManagedSkillsToOpenClawConfig,
+    writeManagedSkillsState,
+} from './openclaw-config-assembler';
 
 const OPENCLAW_CONFIG_PATH = join(homedir(), '.openclaw', 'openclaw.json');
 
@@ -61,48 +66,20 @@ async function fileExists(p: string): Promise<boolean> {
     try { await access(p, constants.F_OK); return true; } catch { return false; }
 }
 
-/**
- * Read the current OpenClaw config
- */
-async function readConfig(): Promise<OpenClawConfig> {
-    if (!(await fileExists(OPENCLAW_CONFIG_PATH))) {
-        return {};
-    }
-    try {
-        const raw = await readFile(OPENCLAW_CONFIG_PATH, 'utf-8');
-        return JSON.parse(raw);
-    } catch (err) {
-        console.error('Failed to read openclaw config:', err);
-        return {};
-    }
-}
-
-/**
- * Write the OpenClaw config
- */
-async function writeConfig(config: OpenClawConfig): Promise<void> {
-    const json = JSON.stringify(config, null, 2);
-    await writeFile(OPENCLAW_CONFIG_PATH, json, 'utf-8');
-}
-
 async function setSkillsEnabled(skillKeys: string[], enabled: boolean): Promise<void> {
     if (skillKeys.length === 0) {
         return;
     }
     return withConfigLock(async () => {
-        const config = await readConfig();
-        if (!config.skills) {
-            config.skills = {};
-        }
-        if (!config.skills.entries) {
-            config.skills.entries = {};
-        }
+        const managedState = await readManagedSkillsState();
+        const nextEntries = { ...managedState.entries };
         for (const skillKey of skillKeys) {
-            const entry = config.skills.entries[skillKey] || {};
+            const entry = nextEntries[skillKey] || {};
             entry.enabled = enabled;
-            config.skills.entries[skillKey] = entry;
+            nextEntries[skillKey] = entry;
         }
-        await writeConfig(config);
+        const nextState = await writeManagedSkillsState(nextEntries);
+        await syncManagedSkillsToOpenClawConfig(nextState);
     });
 }
 
@@ -110,8 +87,8 @@ async function setSkillsEnabled(skillKeys: string[], enabled: boolean): Promise<
  * Get skill config
  */
 export async function getSkillConfig(skillKey: string): Promise<SkillEntry | undefined> {
-    const config = await readConfig();
-    return config.skills?.entries?.[skillKey];
+    const managedState = await readManagedSkillsState();
+    return managedState.entries[skillKey];
 }
 
 /**
@@ -123,18 +100,11 @@ export async function updateSkillConfig(
 ): Promise<{ success: boolean; error?: string }> {
     try {
         return await withConfigLock(async () => {
-            const config = await readConfig();
-
-            // Ensure skills.entries exists
-            if (!config.skills) {
-                config.skills = {};
-            }
-            if (!config.skills.entries) {
-                config.skills.entries = {};
-            }
+            const managedState = await readManagedSkillsState();
+            const nextEntries = { ...managedState.entries };
 
             // Get or create skill entry
-            const entry = config.skills.entries[skillKey] || {};
+            const entry = nextEntries[skillKey] || {};
 
             // Update apiKey
             if (updates.apiKey !== undefined) {
@@ -168,9 +138,9 @@ export async function updateSkillConfig(
             }
 
             // Save entry back
-            config.skills.entries[skillKey] = entry;
-
-            await writeConfig(config);
+            nextEntries[skillKey] = entry;
+            const nextState = await writeManagedSkillsState(nextEntries);
+            await syncManagedSkillsToOpenClawConfig(nextState);
             return { success: true };
         });
     } catch (err) {
@@ -183,8 +153,8 @@ export async function updateSkillConfig(
  * Get all skill configs (for syncing to frontend)
  */
 export async function getAllSkillConfigs(): Promise<Record<string, SkillEntry>> {
-    const config = await readConfig();
-    return config.skills?.entries || {};
+    const managedState = await readManagedSkillsState();
+    return managedState.entries;
 }
 
 /**

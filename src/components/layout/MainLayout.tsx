@@ -13,9 +13,12 @@ export function MainLayout() {
       <TitleBar />
 
       {/* Below the title bar: sidebar + content */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden bg-[#f7f9fc] dark:bg-background">
         <Sidebar />
-        <main data-testid="main-content" className="flex-1 overflow-auto p-6">
+        <main
+          data-testid="main-content"
+          className="flex-1 overflow-auto bg-[linear-gradient(180deg,rgba(255,255,255,0.76),rgba(247,249,252,0.94))] p-6 dark:bg-none"
+        >
           <Outlet />
         </main>
       </div>

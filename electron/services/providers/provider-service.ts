@@ -15,10 +15,13 @@ import {
   getDefaultProviderAccountId,
   getProviderAccount,
   listProviderAccounts,
+  listSuppressedProviderKeys,
   providerAccountToConfig,
   providerConfigToAccount,
   saveProviderAccount,
   setDefaultProviderAccount,
+  suppressProviderKeys,
+  unsuppressProviderKeys,
 } from './provider-store';
 import {
   deleteApiKey,
@@ -32,6 +35,30 @@ import { getActiveOpenClawProviders, getOpenClawProvidersConfig } from '../../ut
 import { getAliasSourceTypes, getOpenClawProviderKeyForType } from '../../utils/provider-keys';
 import type { ProviderWithKeyInfo } from '../../shared/providers/types';
 import { logger } from '../../utils/logger';
+
+const GOOGLE_OAUTH_RUNTIME_PROVIDER = 'google-gemini-cli';
+const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
+
+function getSuppressedProviderKeysForAccount(account: Pick<ProviderAccount, 'id' | 'vendorId'>): string[] {
+  const keys = new Set<string>([account.id]);
+  const runtimeKey = getOpenClawProviderKeyForType(account.vendorId, account.id);
+  if (runtimeKey) {
+    keys.add(runtimeKey);
+  }
+
+  if (account.vendorId === 'openai') {
+    keys.add(OPENAI_OAUTH_RUNTIME_PROVIDER);
+  }
+  if (account.vendorId === 'google') {
+    keys.add(GOOGLE_OAUTH_RUNTIME_PROVIDER);
+  }
+
+  for (const aliasSource of getAliasSourceTypes(account.vendorId)) {
+    keys.add(aliasSource);
+  }
+
+  return [...keys];
+}
 
 function maskApiKey(apiKey: string | null): string | null {
   if (!apiKey) return null;
@@ -67,6 +94,11 @@ export class ProviderService {
 
     const { providers: openClawProviders, defaultModel } = await getOpenClawProvidersConfig();
     const activeProviders = await getActiveOpenClawProviders();
+    const suppressedProviderKeys = new Set(await listSuppressedProviderKeys());
+
+    for (const suppressedKey of suppressedProviderKeys) {
+      activeProviders.delete(suppressedKey);
+    }
 
     if (activeProviders.size === 0) {
       return [];
@@ -180,6 +212,13 @@ export class ProviderService {
         model = defaultModel;
       } else if (definition?.defaultModelId) {
         model = definition.defaultModelId;
+      } else if (Array.isArray(entry.models) && entry.models.length > 0) {
+        const firstModel = entry.models[0];
+        if (typeof firstModel === 'string') {
+          model = firstModel;
+        } else if (firstModel && typeof firstModel === 'object' && typeof (firstModel as Record<string, unknown>).id === 'string') {
+          model = (firstModel as Record<string, unknown>).id as string;
+        }
       }
 
       const account: ProviderAccount = {
@@ -219,6 +258,7 @@ export class ProviderService {
     await ensureProviderStoreMigrated();
     // Only save to providerAccounts store — do NOT call saveProvider() which
     // writes to the legacy `providers` store and causes phantom/duplicate issues.
+    await unsuppressProviderKeys(getSuppressedProviderKeysForAccount(account));
     await saveProviderAccount(account);
     if (apiKey !== undefined && apiKey.trim()) {
       await storeApiKey(account.id, apiKey.trim());
@@ -245,6 +285,7 @@ export class ProviderService {
     };
 
     // Only save to providerAccounts store — skip legacy saveProvider().
+    await unsuppressProviderKeys(getSuppressedProviderKeysForAccount(nextAccount));
     await saveProviderAccount(nextAccount);
     if (apiKey !== undefined) {
       const trimmedKey = apiKey.trim();
@@ -260,7 +301,12 @@ export class ProviderService {
 
   async deleteAccount(accountId: string): Promise<boolean> {
     await ensureProviderStoreMigrated();
-    return deleteProvider(accountId);
+    const existing = await getProviderAccount(accountId);
+    const deleted = await deleteProvider(accountId);
+    if (deleted && existing) {
+      await suppressProviderKeys(getSuppressedProviderKeysForAccount(existing));
+    }
+    return deleted;
   }
 
   /**

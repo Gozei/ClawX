@@ -4,6 +4,7 @@
  * Communicates with OpenClaw Gateway via renderer WebSocket RPC.
  */
 import { create } from 'zustand';
+import { buildAgentExecutionMetadata } from '@/lib/agent-execution-context';
 import { hostApiFetch } from '@/lib/host-api';
 import { useGatewayStore } from './gateway';
 import { useAgentsStore } from './agents';
@@ -671,6 +672,20 @@ function ensureSessionEntry(sessions: ChatSession[], sessionKey: string): ChatSe
     return sessions;
   }
   return [...sessions, { key: sessionKey, displayName: sessionKey }];
+}
+
+function buildAgentExecutionMetadataForSession(sessionKey: string): string | null {
+  const agentId = getAgentIdFromSessionKey(sessionKey);
+  const agent = useAgentsStore.getState().agents.find((item) => item.id === agentId);
+  if (!agent) return null;
+  return buildAgentExecutionMetadata(agent);
+}
+
+function injectAgentExecutionMetadata(message: string, sessionKey: string, isFirstUserMessage: boolean): string {
+  if (!isFirstUserMessage) return message;
+  const metadata = buildAgentExecutionMetadataForSession(sessionKey);
+  if (!metadata) return message;
+  return message ? `${metadata}${message}` : metadata;
 }
 
 function clearSessionEntryFromMap<T extends Record<string, unknown>>(entries: T, sessionKey: string): T {
@@ -1526,12 +1541,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     const currentSessionKey = targetSessionKey;
+    const existingMessages = get().messages;
+    const isFirstUserMessage = !existingMessages.some((message) => message.role === 'user');
+    const baseMessage = trimmed || (attachments?.length ? 'Process the attached file(s).' : '');
+    const messageForGateway = injectAgentExecutionMetadata(baseMessage, currentSessionKey, isFirstUserMessage);
 
     // Add user message optimistically (with local file metadata for UI display)
     const nowMs = Date.now();
     const userMsg: RawMessage = {
       role: 'user',
-      content: trimmed || (attachments?.length ? '(file attached)' : ''),
+      content: messageForGateway || (attachments?.length ? '(file attached)' : ''),
       timestamp: nowMs / 1000,
       id: crypto.randomUUID(),
       _attachedFiles: attachments?.map(a => ({
@@ -1646,7 +1665,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             method: 'POST',
             body: JSON.stringify({
               sessionKey: currentSessionKey,
-              message: trimmed || 'Process the attached file(s).',
+              message: messageForGateway || 'Process the attached file(s).',
               deliver: false,
               idempotencyKey,
               media: attachments.map((a) => ({
@@ -1662,7 +1681,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           'chat.send',
           {
             sessionKey: currentSessionKey,
-            message: trimmed,
+            message: messageForGateway,
             deliver: false,
             idempotencyKey,
           },

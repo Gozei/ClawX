@@ -5,7 +5,10 @@
 
 import { randomBytes } from 'crypto';
 import { app } from 'electron';
+import type { BrandingOverrides } from '../../shared/branding';
 import { resolveSupportedLanguage } from '../../shared/language';
+
+type ChatProcessDisplayMode = 'all' | 'files' | 'hidden';
 
 // Lazy-load electron-store (ESM module)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -28,6 +31,9 @@ export interface AppSettings {
   startMinimized: boolean;
   launchAtStartup: boolean;
   telemetryEnabled: boolean;
+  brandingOverrides: BrandingOverrides;
+  chatProcessDisplayMode: ChatProcessDisplayMode;
+  chatFontScale: number;
   machineId: string;
   hasReportedInstall: boolean;
 
@@ -79,6 +85,9 @@ function createDefaultSettings(): AppSettings {
     startMinimized: false,
     launchAtStartup: false,
     telemetryEnabled: true,
+    brandingOverrides: {},
+    chatProcessDisplayMode: 'files',
+    chatFontScale: 100,
     machineId: '',
     hasReportedInstall: false,
 

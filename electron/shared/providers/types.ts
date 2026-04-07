@@ -132,6 +132,7 @@ export interface ProviderAccount {
     email?: string;
     resourceUrl?: string;
     customModels?: string[];
+    modelUsageTags?: Record<string, string[]>;
   };
   createdAt: string;
   updatedAt: string;

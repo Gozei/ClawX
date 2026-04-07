@@ -25,6 +25,13 @@ import {
   isOpenClawOAuthPluginProviderKey,
 } from './provider-keys';
 import { withConfigLock } from './config-mutex';
+import {
+  applyManagedProvidersToRuntimeConfig,
+  readManagedProvidersState,
+  readOpenClawRuntimeConfig,
+  writeManagedProvidersState,
+  writeOpenClawRuntimeConfig,
+} from './openclaw-config-assembler';
 
 const AUTH_STORE_VERSION = 1;
 const AUTH_PROFILE_FILENAME = 'auth-profiles.json';
@@ -199,7 +206,8 @@ async function discoverAgentIds(): Promise<string[]> {
   const agentsDir = join(homedir(), '.openclaw', 'agents');
   try {
     if (!(await fileExists(agentsDir))) return ['main'];
-    return await listConfiguredAgentIds();
+    const configured = await listConfiguredAgentIds();
+    return Array.from(new Set(['main', ...configured]));
   } catch {
     return ['main'];
   }
@@ -209,7 +217,6 @@ async function discoverAgentIds(): Promise<string[]> {
 
 const OPENCLAW_CONFIG_PATH = join(homedir(), '.openclaw', 'openclaw.json');
 const FEISHU_PLUGIN_ID_CANDIDATES = ['openclaw-lark', 'feishu-openclaw-plugin'] as const;
-const VALID_COMPACTION_MODES = new Set(['default', 'safeguard']);
 const BUILTIN_CHANNEL_IDS = new Set([
   'discord',
   'telegram',
@@ -310,7 +317,7 @@ async function getProvidersFromAuthProfileStores(): Promise<Set<string>> {
 }
 
 async function readOpenClawJson(): Promise<Record<string, unknown>> {
-  return (await readJsonFile<Record<string, unknown>>(OPENCLAW_CONFIG_PATH)) ?? {};
+  return await readOpenClawRuntimeConfig();
 }
 
 async function resolveInstalledFeishuPluginId(): Promise<string | null> {
@@ -325,41 +332,8 @@ async function resolveInstalledFeishuPluginId(): Promise<string | null> {
   return null;
 }
 
-function normalizeAgentsDefaultsCompactionMode(config: Record<string, unknown>): void {
-  const agents = (config.agents && typeof config.agents === 'object'
-    ? config.agents as Record<string, unknown>
-    : null);
-  if (!agents) return;
-
-  const defaults = (agents.defaults && typeof agents.defaults === 'object'
-    ? agents.defaults as Record<string, unknown>
-    : null);
-  if (!defaults) return;
-
-  const compaction = (defaults.compaction && typeof defaults.compaction === 'object'
-    ? defaults.compaction as Record<string, unknown>
-    : null);
-  if (!compaction) return;
-
-  const mode = compaction.mode;
-  if (typeof mode === 'string' && mode.length > 0 && !VALID_COMPACTION_MODES.has(mode)) {
-    compaction.mode = 'default';
-  }
-}
-
 async function writeOpenClawJson(config: Record<string, unknown>): Promise<void> {
-  normalizeAgentsDefaultsCompactionMode(config);
-
-  // Ensure SIGUSR1 graceful reload is authorized by OpenClaw config.
-  const commands = (
-    config.commands && typeof config.commands === 'object'
-      ? { ...(config.commands as Record<string, unknown>) }
-      : {}
-  ) as Record<string, unknown>;
-  commands.restart = true;
-  config.commands = commands;
-
-  await writeJsonFile(OPENCLAW_CONFIG_PATH, config);
+  await writeOpenClawRuntimeConfig(config);
 }
 
 // ── Exported Functions (all async) ───────────────────────────────
@@ -521,6 +495,8 @@ export async function removeProviderFromOpenClaw(provider: string): Promise<void
     await withConfigLock(async () => {
       const config = await readOpenClawJson();
       let modified = false;
+      const managedProviders = await readManagedProvidersState();
+      const nextProviders = { ...managedProviders.providers };
 
       // Disable plugin (for OAuth like minimax-portal-auth)
       const plugins = config.plugins as Record<string, unknown> | undefined;
@@ -536,7 +512,7 @@ export async function removeProviderFromOpenClaw(provider: string): Promise<void
       const models = config.models as Record<string, unknown> | undefined;
       const providers = (models?.providers ?? {}) as Record<string, unknown>;
       if (providers[provider]) {
-        delete providers[provider];
+        delete nextProviders[provider];
         modified = true;
         console.log(`Removed OpenClaw provider config: ${provider}`);
       }
@@ -571,24 +547,53 @@ export async function removeProviderFromOpenClaw(provider: string): Promise<void
         const modelCfg = agentDefaults.model as Record<string, unknown>;
         const prefix = `${provider}/`;
 
-        if (typeof modelCfg.primary === 'string' && modelCfg.primary.startsWith(prefix)) {
-          delete modelCfg.primary;
+        if (
+          (typeof managedProviders.defaultModel === 'string' && managedProviders.defaultModel.startsWith(prefix))
+          || (typeof modelCfg.primary === 'string' && modelCfg.primary.startsWith(prefix))
+        ) {
+          managedProviders.defaultModel = undefined;
           modified = true;
           console.log(`Removed deleted provider "${provider}" from agents.defaults.model.primary`);
         }
 
-        if (Array.isArray(modelCfg.fallbacks)) {
-          const filtered = (modelCfg.fallbacks as string[]).filter((fb) => !fb.startsWith(prefix));
-          if (filtered.length !== modelCfg.fallbacks.length) {
-            modelCfg.fallbacks = filtered.length > 0 ? filtered : undefined;
+        const currentFallbacks = (managedProviders.defaultFallbacks ?? []).length > 0
+          ? managedProviders.defaultFallbacks
+          : (Array.isArray(modelCfg.fallbacks) ? (modelCfg.fallbacks as string[]) : []);
+        const filtered = currentFallbacks.filter((fb) => !fb.startsWith(prefix));
+        if (filtered.length !== currentFallbacks.length) {
+            managedProviders.defaultFallbacks = filtered;
             modified = true;
             console.log(`Removed deleted provider "${provider}" from agents.defaults.model.fallbacks`);
+        }
+      }
+
+      const agentList = Array.isArray(agents?.list)
+        ? (agents?.list as Array<Record<string, unknown>>)
+        : [];
+      if (agentList.length > 0) {
+        const prefix = `${provider}/`;
+        for (const agentEntry of agentList) {
+          const agentModel = (
+            agentEntry.model && typeof agentEntry.model === 'object'
+              ? (agentEntry.model as Record<string, unknown>)
+              : null
+          );
+          if (!agentModel) continue;
+          const primary = typeof agentModel.primary === 'string' ? agentModel.primary : '';
+          if (primary.startsWith(prefix)) {
+            delete agentEntry.model;
+            modified = true;
+            console.log(`Removed deleted provider "${provider}" from agent "${String(agentEntry.id || 'unknown')}" model.primary`);
           }
         }
       }
 
       if (modified) {
-        await writeOpenClawJson(config);
+        const nextManagedState = await writeManagedProvidersState(nextProviders, {
+          defaultModel: managedProviders.defaultModel,
+          defaultFallbacks: managedProviders.defaultFallbacks,
+        });
+        await writeOpenClawJson(applyManagedProvidersToRuntimeConfig(config, nextManagedState));
       }
     });
   } catch (err) {
@@ -623,6 +628,8 @@ export async function setOpenClawDefaultModel(
   return withConfigLock(async () => {
     const config = await readOpenClawJson();
     ensureMoonshotKimiWebSearchCnBaseUrl(config, provider);
+    const managedProviders = await readManagedProvidersState();
+    let nextProviders = { ...managedProviders.providers };
 
     const model = normalizeModelRef(provider, modelOverride);
     if (!model) {
@@ -634,14 +641,8 @@ export async function setOpenClawDefaultModel(
     const fallbackModelIds = extractFallbackModelIds(provider, fallbackModels);
 
     // Set the default model for the agents
-    const agents = (config.agents || {}) as Record<string, unknown>;
-    const defaults = (agents.defaults || {}) as Record<string, unknown>;
-    defaults.model = {
-      primary: model,
-      fallbacks: fallbackModels,
-    };
-    agents.defaults = defaults;
-    config.agents = agents;
+    managedProviders.defaultModel = model;
+    managedProviders.defaultFallbacks = fallbackModels;
 
     // Configure models.providers for providers that need explicit registration.
     const providerCfg = getProviderConfig(provider);
@@ -655,16 +656,17 @@ export async function setOpenClawDefaultModel(
         includeRegistryModels: true,
         mergeExistingModels: true,
       });
+      nextProviders = (
+        (config.models as Record<string, unknown> | undefined)?.providers as Record<string, Record<string, unknown>> | undefined
+      ) ?? nextProviders;
       console.log(`Configured models.providers.${provider} with baseUrl=${providerCfg.baseUrl}, model=${modelId}`);
     } else {
       // Built-in provider: remove any stale models.providers entry
       const models = (config.models || {}) as Record<string, unknown>;
       const providers = (models.providers || {}) as Record<string, unknown>;
       if (providers[provider]) {
-        delete providers[provider];
+        delete nextProviders[provider];
         console.log(`Removed stale models.providers.${provider} (built-in provider)`);
-        models.providers = providers;
-        config.models = models;
       }
     }
 
@@ -673,7 +675,11 @@ export async function setOpenClawDefaultModel(
     if (!gateway.mode) gateway.mode = 'local';
     config.gateway = gateway;
 
-    await writeOpenClawJson(config);
+    const nextManagedState = await writeManagedProvidersState(nextProviders, {
+      defaultModel: managedProviders.defaultModel,
+      defaultFallbacks: managedProviders.defaultFallbacks,
+    });
+    await writeOpenClawJson(applyManagedProvidersToRuntimeConfig(config, nextManagedState));
     console.log(`Set OpenClaw default model to "${model}" for provider "${provider}"`);
   });
 }
@@ -819,6 +825,8 @@ export async function syncProviderConfigToOpenClaw(
   return withConfigLock(async () => {
     const config = await readOpenClawJson();
     ensureMoonshotKimiWebSearchCnBaseUrl(config, provider);
+    const managedProviders = await readManagedProvidersState();
+    let nextProviders = { ...managedProviders.providers };
 
     if (override.baseUrl && override.api) {
       upsertOpenClawProviderEntry(config, provider, {
@@ -828,6 +836,9 @@ export async function syncProviderConfigToOpenClaw(
         headers: override.headers,
         modelIds: modelId ? [modelId] : [],
       });
+      nextProviders = (
+        (config.models as Record<string, unknown> | undefined)?.providers as Record<string, Record<string, unknown>> | undefined
+      ) ?? nextProviders;
     }
 
     // Ensure extension is enabled for oauth providers to prevent gateway wiping config
@@ -845,7 +856,11 @@ export async function syncProviderConfigToOpenClaw(
       config.plugins = plugins;
     }
 
-    await writeOpenClawJson(config);
+    const nextManagedState = await writeManagedProvidersState(nextProviders, {
+      defaultModel: managedProviders.defaultModel,
+      defaultFallbacks: managedProviders.defaultFallbacks,
+    });
+    await writeOpenClawJson(applyManagedProvidersToRuntimeConfig(config, nextManagedState));
   });
 }
 
@@ -861,6 +876,8 @@ export async function setOpenClawDefaultModelWithOverride(
   return withConfigLock(async () => {
     const config = await readOpenClawJson();
     ensureMoonshotKimiWebSearchCnBaseUrl(config, provider);
+    const managedProviders = await readManagedProvidersState();
+    let nextProviders = { ...managedProviders.providers };
 
     const model = normalizeModelRef(provider, modelOverride);
     if (!model) {
@@ -871,14 +888,8 @@ export async function setOpenClawDefaultModelWithOverride(
     const modelId = extractModelId(provider, model);
     const fallbackModelIds = extractFallbackModelIds(provider, fallbackModels);
 
-    const agents = (config.agents || {}) as Record<string, unknown>;
-    const defaults = (agents.defaults || {}) as Record<string, unknown>;
-    defaults.model = {
-      primary: model,
-      fallbacks: fallbackModels,
-    };
-    agents.defaults = defaults;
-    config.agents = agents;
+    managedProviders.defaultModel = model;
+    managedProviders.defaultFallbacks = fallbackModels;
 
     if (override.baseUrl && override.api) {
       upsertOpenClawProviderEntry(config, provider, {
@@ -889,6 +900,9 @@ export async function setOpenClawDefaultModelWithOverride(
         authHeader: override.authHeader,
         modelIds: [modelId, ...fallbackModelIds],
       });
+      nextProviders = (
+        (config.models as Record<string, unknown> | undefined)?.providers as Record<string, Record<string, unknown>> | undefined
+      ) ?? nextProviders;
     }
 
     const gateway = (config.gateway || {}) as Record<string, unknown>;
@@ -910,7 +924,11 @@ export async function setOpenClawDefaultModelWithOverride(
       config.plugins = plugins;
     }
 
-    await writeOpenClawJson(config);
+    const nextManagedState = await writeManagedProvidersState(nextProviders, {
+      defaultModel: managedProviders.defaultModel,
+      defaultFallbacks: managedProviders.defaultFallbacks,
+    });
+    await writeOpenClawJson(applyManagedProvidersToRuntimeConfig(config, nextManagedState));
     console.log(
       `Set OpenClaw default model to "${model}" for provider "${provider}" (runtime override)`
     );
@@ -993,24 +1011,9 @@ export async function getOpenClawProvidersConfig(): Promise<{
 }> {
   try {
     const config = await readOpenClawJson();
-
-    const models = config.models as Record<string, unknown> | undefined;
-    const providers =
-      models?.providers && typeof models.providers === 'object'
-        ? (models.providers as Record<string, Record<string, unknown>>)
-        : {};
-
-    const agents = config.agents as Record<string, unknown> | undefined;
-    const defaults =
-      agents?.defaults && typeof agents.defaults === 'object'
-        ? (agents.defaults as Record<string, unknown>)
-        : undefined;
-    const modelConfig =
-      defaults?.model && typeof defaults.model === 'object'
-        ? (defaults.model as Record<string, unknown>)
-        : undefined;
-    const defaultModel =
-      typeof modelConfig?.primary === 'string' ? modelConfig.primary : undefined;
+    const managedProviders = await readManagedProvidersState();
+    const providers = { ...managedProviders.providers };
+    const defaultModel = managedProviders.defaultModel;
 
     const authProviders = new Set<string>();
     const auth = config.auth as Record<string, unknown> | undefined;
@@ -1420,7 +1423,7 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
       execConfig.ask = 'off';
       toolsConfig.exec = execConfig;
       toolsModified = true;
-      console.log('[sanitize] Set tools.exec.security="full" and tools.exec.ask="off" to disable exec approvals for ClawX desktop');
+      console.log('[sanitize] Set tools.exec.security="full" and tools.exec.ask="off" to disable exec approvals for Deep AI Worker desktop');
     }
 
     if (toolsModified) {

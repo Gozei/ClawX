@@ -1,4 +1,5 @@
 import { trackUiEvent } from './telemetry';
+import { getBrandingSnapshot } from './branding';
 import {
   AppError,
   type AppErrorCode,
@@ -147,6 +148,10 @@ function normalizeGatewayRpcEnvelope(value: unknown): { success: boolean; result
 let cachedGatewayPort: { port: number; expiresAt: number } | null = null;
 const transportBackoffUntil: Partial<Record<Exclude<TransportKind, 'ipc'>, number>> = {};
 const SLOW_REQUEST_THRESHOLD_MS = 800;
+
+function getUiDisplayName(): string {
+  return getBrandingSnapshot().uiDisplayName;
+}
 
 async function resolveGatewayPort(): Promise<number> {
   const now = Date.now();
@@ -707,7 +712,7 @@ export function createGatewayWsTransportInvoker(options: GatewayWsTransportOptio
         maxProtocol: 3,
         client: {
           id: 'openclaw-control-ui',
-          displayName: 'Deep AI Worker UI',
+          displayName: getUiDisplayName(),
           version: '1.0.0',
           platform: window.electron?.platform ?? 'unknown',
           mode: 'webchat',

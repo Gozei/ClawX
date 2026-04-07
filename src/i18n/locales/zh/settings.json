@@ -1,6 +1,6 @@
 {
   "title": "设置",
-  "subtitle": "配置您的 Deep AI Worker 使用体验",
+  "subtitle": "配置您的 {{appName}} 体验",
   "appearance": {
     "title": "通用",
     "description": "自定义外观和风格",
@@ -10,7 +10,7 @@
     "system": "跟随系统",
     "language": "语言",
     "launchAtStartup": "开机自动启动",
-    "launchAtStartupDesc": "登录系统后自动启动 Deep AI Worker"
+    "launchAtStartupDesc": "登录系统后自动启动 {{appName}}"
   },
   "aiProviders": {
     "title": "AI 模型提供商",
@@ -37,7 +37,7 @@
     "notRequired": "非必填",
     "empty": {
       "title": "未配置提供商",
-      "desc": "添加 AI 提供商以开始使用 Deep AI Worker",
+      "desc": "添加 AI 提供商以开始使用 {{appName}}",
       "cta": "添加您的第一个提供商"
     },
     "dialog": {
@@ -49,9 +49,11 @@
       "apiKeyMissing": "这个 provider 还没有保存 API key。",
       "apiKeyStored": "您的 API 密钥存储在本地机器上。",
       "replaceApiKey": "替换 API Key",
-      "replaceApiKeyHelp": "如果想保留当前已保存的 API key，这里留空即可。",
+      "replaceApiKeyHelp": "这里会直接回填当前已保存的 API key。修改后保存即可。",
       "baseUrl": "基础 URL",
       "modelId": "模型 ID",
+      "modelPreset": "推荐模型",
+      "modelPresetCustom": "自定义输入",
       "codePlanPreset": "Code Plan 预设",
       "codePlanMode": "Code Plan",
       "useCodePlanPreset": "使用 Ark Code Plan 预设",
@@ -60,7 +62,7 @@
       "protocol": "协议",
       "advancedConfig": "高级配置",
       "userAgent": "User-Agent",
-      "userAgentPlaceholder": "Deep AI Worker/1.0",
+      "userAgentPlaceholder": "{{userAgentProduct}}",
       "fallbackModels": "回退模型",
       "fallbackProviders": "跨 Provider 回退",
       "fallbackModelIds": "同 Provider 回退模型 ID",
@@ -79,6 +81,19 @@
       "configured": "已配置",
       "noKey": "未设置 API 密钥",
       "none": "无",
+      "testButton": "测试",
+      "testDetails": "测试详情",
+      "hideTestDetails": "收起结果",
+      "testResult": "测试结果",
+      "testPassed": "最近测试成功",
+      "testFailed": "最近测试失败",
+      "testStatus": "状态",
+      "testBaseUrl": "请求地址",
+      "testProtocol": "协议",
+      "testOutput": "返回内容",
+      "testError": "错误信息",
+      "testConnection": "测试连接",
+      "mergedAliases": "已合并 {{count}} 个重复配置",
       "fallbacks_one": "回退：{{names}}",
       "fallbacks_other": "回退（{{count}} 个）：{{names}}",
       "setDefault": "设为默认",
@@ -102,7 +117,12 @@
       "failedUpdate": "更新提供商失败",
       "invalidKey": "无效的 API 密钥",
       "modelRequired": "需要模型 ID",
-      "minimaxConflict": "不能同时添加 MiniMax 国际站和国内站的服务商。"
+      "minimaxConflict": "不能同时添加 MiniMax 国际站和国内站的服务商。",
+      "testSuccess": "连接测试成功",
+      "testFailed": "连接测试失败",
+      "testModel": "模型",
+      "testLatency": "耗时",
+      "testOutput": "输出"
     },
     "oauth": {
       "loginMode": "OAuth 登录",
@@ -134,7 +154,7 @@
     "appLogs": "应用日志",
     "openFolder": "打开文件夹",
     "autoStart": "自动启动网关",
-    "autoStartDesc": "Deep AI Worker 启动时自动启动网关",
+    "autoStartDesc": "{{appName}} 启动时自动启动网关",
     "proxyTitle": "代理",
     "proxyDesc": "让 Electron 和 Gateway 的网络请求都走本地代理客户端。",
     "proxyServer": "代理服务器",
@@ -155,7 +175,7 @@
   },
   "updates": {
     "title": "更新",
-    "description": "保持 Deep AI Worker 为最新版本",
+    "description": "保持 {{appName}} 最新",
     "autoCheck": "自动检查更新",
     "autoCheckDesc": "启动时检查更新",
     "autoDownload": "自动更新",
@@ -208,13 +228,23 @@
     },
     "devMode": "开发者模式",
     "devModeDesc": "显示开发者工具和快捷方式",
+    "chatProcessDisplay": "聊天过程提示",
+    "chatProcessDisplayDesc": "控制对话中的工具执行、读取等过程提示卡片是否显示。",
+    "chatFontScale": "聊天字号",
+    "chatFontScaleDesc": "调节聊天消息和输入区字号，阅读更轻松。",
+    "chatFontScaleOption": "{{value}}%",
+    "chatProcessDisplayOptions": {
+      "all": "全部显示",
+      "files": "仅显示文件",
+      "hidden": "全部隐藏"
+    },
     "telemetry": "匿名使用数据",
-    "telemetryDesc": "允许提供匿名的基础使用数据，用于改进 Deep AI Worker"
+    "telemetryDesc": "允许提供匿名的基础使用数据，用于改进 {{appName}}"
   },
   "developer": {
     "title": "开发者",
     "description": "开发者高级选项",
-    "console": "OpenClaw 控制台",
+    "console": "{{appName}} 控制台",
     "consoleDesc": "访问原生 OpenClaw 管理界面",
     "openConsole": "打开开发者控制台",
     "consoleNote": "使用注入的网关令牌打开控制台",
@@ -271,8 +301,8 @@
   },
   "about": {
     "title": "关于",
-    "appName": "Deep AI Worker",
-    "tagline": "图形化 AI 助手",
+    "appName": "{{appName}}",
+    "tagline": "{{slogan}}",
     "basedOn": "基于 OpenClaw",
     "version": "版本 {{version}}",
     "docs": "官网",

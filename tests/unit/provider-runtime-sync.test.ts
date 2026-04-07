@@ -170,6 +170,21 @@ describe('provider-runtime-sync refresh strategy', () => {
     expect(mocks.removeProviderFromOpenClaw).not.toHaveBeenCalled();
   });
 
+  it('removes browser-oauth runtime aliases when deleting a built-in OpenAI provider', async () => {
+    const gateway = createGateway('running');
+    const openaiProvider = createProvider({
+      id: 'openai',
+      type: 'openai',
+      model: 'gpt-5.4',
+    });
+
+    await syncDeletedProviderToRuntime(openaiProvider, 'openai', gateway as GatewayManager);
+
+    expect(mocks.removeProviderFromOpenClaw).toHaveBeenCalledWith('openai');
+    expect(mocks.removeProviderFromOpenClaw).toHaveBeenCalledWith('openai-codex');
+    expect(gateway.debouncedRestart).toHaveBeenCalledTimes(1);
+  });
+
   it('uses debouncedReload after switching default provider when gateway is running', async () => {
     const gateway = createGateway('running');
     await syncDefaultProviderToRuntime('moonshot', gateway as GatewayManager);
