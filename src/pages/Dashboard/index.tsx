@@ -125,15 +125,17 @@ export function Dashboard() {
     degraded: channels.filter((channel) => channel.status === 'error').length,
   }), [channels]);
 
+  const safeJobs = Array.isArray(jobs) ? jobs : [];
+
   const cronSummary = useMemo(() => ({
-    total: jobs.length,
-    enabled: jobs.filter((job) => job.enabled).length,
-    failed: jobs.filter((job) => job.lastRun && !job.lastRun.success).length,
-    nextRun: jobs
+    total: safeJobs.length,
+    enabled: safeJobs.filter((job) => job.enabled).length,
+    failed: safeJobs.filter((job) => job.lastRun && !job.lastRun.success).length,
+    nextRun: safeJobs
       .map((job) => job.nextRun)
       .filter((value): value is string => Boolean(value))
       .sort()[0],
-  }), [jobs]);
+  }), [safeJobs]);
 
   const issueList = useMemo<DashboardIssue[]>(() => {
     const issues: DashboardIssue[] = [];
