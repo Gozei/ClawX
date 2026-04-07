@@ -13,7 +13,7 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { ChatToolbar } from './ChatToolbar';
-import { extractImages, extractText, extractThinking, extractToolUse } from './message-utils';
+import { extractImages, extractText, extractThinking, extractToolUse, mergeThinkingMessages } from './message-utils';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { useStickToBottomInstant } from '@/hooks/use-stick-to-bottom-instant';
@@ -39,6 +39,7 @@ export function Chat() {
   const fetchAgents = useAgentsStore((s) => s.fetchAgents);
 
   const cleanupEmptySession = useChatStore((s) => s.cleanupEmptySession);
+  const displayMessages = mergeThinkingMessages(messages);
 
   const [streamingTimestamp, setStreamingTimestamp] = useState<number>(0);
   const minLoading = useMinLoading(loading && messages.length > 0);
@@ -88,7 +89,7 @@ export function Chat() {
   const shouldRenderStreaming = sending && (hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus);
   const hasAnyStreamContent = hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus;
 
-  const isEmpty = messages.length === 0 && !sending;
+  const isEmpty = displayMessages.length === 0 && !sending;
 
   return (
     <div className={cn("relative flex flex-col -m-6 transition-colors duration-500 dark:bg-background")} style={{ height: 'calc(100vh - 2.5rem)' }}>
@@ -104,7 +105,7 @@ export function Chat() {
             <WelcomeScreen />
           ) : (
             <>
-              {messages.map((msg, idx) => (
+              {displayMessages.map((msg, idx) => (
                 <ChatMessage
                   key={msg.id || `msg-${idx}`}
                   message={msg}
