@@ -79,11 +79,11 @@ try {
 
   // 5. Generate macOS Tray Icon Template
   echo`📍 Generating macOS tray icon template...`;
-  const TRAY_SVG_SOURCE = path.join(ICONS_DIR, 'tray-icon-template.svg');
+  const TRAY_SVG_SOURCE = path.join(ICONS_DIR, 'whale_22x22.svg');
   
   if (fs.existsSync(TRAY_SVG_SOURCE)) {
     await sharp(TRAY_SVG_SOURCE)
-      .resize(22, 22)
+      .resize(18, 18)
       .png()
       .toFile(path.join(ICONS_DIR, 'tray-icon-Template.png'));
     echo`  ✅ Created tray-icon-Template.png (22x22)`;
