@@ -55,6 +55,29 @@ export function createSessionActions(
         if (result.success && result.result) {
           const data = result.result;
           const rawSessions = Array.isArray(data.sessions) ? data.sessions : [];
+          const sessionKeys = rawSessions
+            .map((session) => (typeof (session as Record<string, unknown>).key === 'string' ? String((session as Record<string, unknown>).key) : ''))
+            .filter(Boolean);
+
+          let persistedMetadata: Record<string, { pinned?: boolean; pinOrder?: number }> = {};
+          if (sessionKeys.length > 0) {
+            try {
+              const metadataResult = await hostApiFetch<{
+                success: boolean;
+                metadata?: Record<string, { pinned?: boolean; pinOrder?: number }>;
+              }>('/api/sessions/metadata', {
+                method: 'POST',
+                body: JSON.stringify({ sessionKeys }),
+              });
+
+              if (metadataResult?.success && metadataResult.metadata) {
+                persistedMetadata = metadataResult.metadata;
+              }
+            } catch {
+              // Fall back to gateway-provided fields when local metadata is unavailable.
+            }
+          }
+
           const sessions: ChatSession[] = rawSessions.map((s: Record<string, unknown>) => ({
             key: String(s.key || ''),
             label: s.label ? String(s.label) : undefined,
@@ -62,8 +85,8 @@ export function createSessionActions(
             thinkingLevel: s.thinkingLevel ? String(s.thinkingLevel) : undefined,
             model: s.model ? String(s.model) : undefined,
             updatedAt: parseSessionUpdatedAtMs(s.updatedAt),
-            pinned: parseSessionPinned(s.pinned),
-            pinOrder: parseSessionPinOrder(s.pinOrder),
+            pinned: parseSessionPinned(persistedMetadata[String(s.key || '')]?.pinned ?? s.pinned),
+            pinOrder: parseSessionPinOrder(persistedMetadata[String(s.key || '')]?.pinOrder ?? s.pinOrder),
           })).filter((s: ChatSession) => s.key);
 
           const canonicalBySuffix = new Map<string, string>();

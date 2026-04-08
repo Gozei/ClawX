@@ -162,4 +162,39 @@ describe('handleSessionRoutes', () => {
     expect(stored.sessions[0]?.pinned).toBeUndefined();
     expect(stored.sessions[0]?.pinOrder).toBeUndefined();
   });
+
+  it('returns persisted session metadata for requested session keys', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      JSON.stringify({
+        sessions: [
+          { key: 'agent:main:session-1', label: 'Pinned me', pinned: true, pinOrder: 2, updatedAt: 1 },
+          { key: 'agent:main:session-2', label: 'Normal', updatedAt: 2 },
+        ],
+      }, null, 2),
+      'utf8',
+    );
+    parseJsonBodyMock.mockResolvedValueOnce({
+      sessionKeys: ['agent:main:session-1', 'agent:main:session-2', 'agent:main:missing'],
+    });
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    const handled = await handleSessionRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/metadata'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
+      success: true,
+      metadata: {
+        'agent:main:session-1': { pinned: true, pinOrder: 2 },
+        'agent:main:session-2': { pinned: undefined, pinOrder: undefined },
+      },
+    });
+  });
 });

@@ -242,5 +242,47 @@ describe('chat session actions', () => {
       pinOrder: 4,
     });
   });
+
+  it('loadSessions merges persisted pin metadata from the host session store', async () => {
+    const { createSessionActions } = await import('@/stores/chat/session-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:main:main',
+      sessions: [],
+    });
+    const actions = createSessionActions(h.set as never, h.get as never);
+
+    invokeIpcMock.mockResolvedValueOnce({
+      success: true,
+      result: {
+        sessions: [
+          {
+            key: 'agent:main:session-1',
+            label: 'Pinned from disk',
+            updatedAt: 1773281700000,
+          },
+        ],
+      },
+    });
+    hostApiFetchMock.mockResolvedValueOnce({
+      success: true,
+      metadata: {
+        'agent:main:session-1': {
+          pinned: true,
+          pinOrder: 7,
+        },
+      },
+    });
+
+    await actions.loadSessions();
+
+    expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/metadata', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKeys: ['agent:main:session-1'] }),
+    });
+    expect(h.read().sessions.find((session) => session.key === 'agent:main:session-1')).toMatchObject({
+      pinned: true,
+      pinOrder: 7,
+    });
+  });
 });
 
