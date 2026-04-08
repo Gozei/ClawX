@@ -41,6 +41,42 @@ function detectChannel(version: string): string {
   return match ? match[1] : 'latest';
 }
 
+function compareReleaseVersions(left: string, right: string): number {
+  const normalize = (value: string) => value.trim().replace(/^v/i, '').split(/[.-]/);
+  const leftParts = normalize(left);
+  const rightParts = normalize(right);
+  const maxLength = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < maxLength; index += 1) {
+    const leftPart = leftParts[index] ?? '0';
+    const rightPart = rightParts[index] ?? '0';
+    const leftNumber = Number(leftPart);
+    const rightNumber = Number(rightPart);
+    const bothNumeric = Number.isFinite(leftNumber) && Number.isFinite(rightNumber);
+
+    if (bothNumeric) {
+      if (leftNumber !== rightNumber) return leftNumber - rightNumber;
+      continue;
+    }
+
+    const comparison = leftPart.localeCompare(rightPart);
+    if (comparison !== 0) return comparison;
+  }
+
+  return 0;
+}
+
+function isMissingUpdateMetadataError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('cannot find channel') ||
+    normalized.includes('update info') ||
+    normalized.includes('.yml') ||
+    normalized.includes('404')
+  );
+}
+
 export class AppUpdater extends EventEmitter {
   private mainWindow: BrowserWindow | null = null;
   private status: UpdateStatus = { status: 'idle' };
@@ -188,13 +224,32 @@ export class AppUpdater extends EventEmitter {
         return null;
       }
 
+      const updateInfo = result.updateInfo || null;
+      const currentVersion = app.getVersion();
+      const remoteVersion = updateInfo?.version;
+
+      // Guard against accidental downgrade if the update feed points at an
+      // older package. We only surface an update when the remote version is
+      // strictly newer than the installed version.
+      if (remoteVersion && compareReleaseVersions(remoteVersion, currentVersion) <= 0) {
+        logger.info(`[Updater] Ignoring non-newer version from feed. current=${currentVersion}, remote=${remoteVersion}`);
+        this.updateStatus({ status: 'not-available', info: undefined, progress: undefined, error: undefined });
+        return null;
+      }
+
       // Safety net: if events somehow didn't fire, force a final state.
       if (this.status.status === 'checking' || this.status.status === 'idle') {
         this.updateStatus({ status: 'not-available' });
       }
 
-      return result.updateInfo || null;
+      return updateInfo;
     } catch (error) {
+      if (isMissingUpdateMetadataError(error)) {
+        logger.info(`[Updater] Update metadata missing, treating as no update: ${String(error)}`);
+        this.updateStatus({ status: 'not-available', info: undefined, progress: undefined, error: undefined });
+        return null;
+      }
+
       logger.error('[Updater] Check for updates failed:', error);
       this.updateStatus({ status: 'error', error: (error as Error).message || String(error) });
       throw error;
