@@ -68,11 +68,15 @@ test.describe('Session pin', () => {
 
       const bravoRow = page.getByTestId(`sidebar-session-${SESSION_B_KEY}`);
       await bravoRow.hover();
-      await page.getByTestId(`sidebar-session-pin-${SESSION_B_KEY}`).click();
+      await page.getByTestId(`sidebar-session-menu-trigger-${SESSION_B_KEY}`).click();
+      await expect(page.getByTestId(`sidebar-session-menu-pin-${SESSION_B_KEY}`)).toBeVisible();
+      await page.getByTestId(`sidebar-session-menu-pin-${SESSION_B_KEY}`).click();
 
       const charlieRow = page.getByTestId(`sidebar-session-${SESSION_C_KEY}`);
       await charlieRow.hover();
-      await page.getByTestId(`sidebar-session-pin-${SESSION_C_KEY}`).click();
+      await page.getByTestId(`sidebar-session-menu-trigger-${SESSION_C_KEY}`).click();
+      await expect(page.getByTestId(`sidebar-session-menu-pin-${SESSION_C_KEY}`)).toBeVisible();
+      await page.getByTestId(`sidebar-session-menu-pin-${SESSION_C_KEY}`).click();
 
       const pinnedSection = page.getByTestId('sidebar-pinned-sessions');
       await expect(pinnedSection.getByText('Bravo session', { exact: true })).toBeVisible();
@@ -83,7 +87,10 @@ test.describe('Session pin', () => {
       );
       expect(pinnedLabels.slice(0, 2)).toEqual(['Bravo session', 'Charlie session']);
 
-      await page.getByTestId(`sidebar-session-pin-${SESSION_B_KEY}`).click();
+      await bravoRow.hover();
+      await page.getByTestId(`sidebar-session-menu-trigger-${SESSION_B_KEY}`).click();
+      await expect(page.getByTestId(`sidebar-session-menu-pin-${SESSION_B_KEY}`)).toBeVisible();
+      await page.getByTestId(`sidebar-session-menu-pin-${SESSION_B_KEY}`).click();
       await expect(pinnedSection.getByText('Bravo session', { exact: true })).toHaveCount(0);
       await expect(pinnedSection.getByText('Charlie session', { exact: true })).toBeVisible();
     } finally {

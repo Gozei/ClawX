@@ -28,6 +28,14 @@ function getSessionPaths(sessionKey: string): { agentId: string; sessionsDir: st
   return { agentId, sessionsDir, sessionsJsonPath };
 }
 
+function parsePinnedMetadata(session: Record<string, unknown>): { pinned?: boolean; pinOrder?: number } {
+  const pinned = session.pinned === true ? true : undefined;
+  const pinOrder = typeof session.pinOrder === 'number' && Number.isFinite(session.pinOrder)
+    ? Math.max(1, Math.trunc(session.pinOrder))
+    : undefined;
+  return { pinned, pinOrder };
+}
+
 function updateSessionEntry(
   sessionsJson: Record<string, unknown>,
   sessionKey: string,
@@ -156,6 +164,60 @@ export async function handleSessionRoutes(
 
       await fsP.writeFile(resolved.sessionsJsonPath, JSON.stringify(sessionsJson, null, 2), 'utf8');
       sendJson(res, 200, { success: true, pinned, pinOrder: pinned ? pinOrder ?? 1 : undefined });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === '/api/sessions/metadata' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{ sessionKeys?: string[] }>(req);
+      const sessionKeys = Array.isArray(body.sessionKeys)
+        ? body.sessionKeys.filter((value): value is string => typeof value === 'string' && value.startsWith('agent:'))
+        : [];
+
+      const fsP = await import('node:fs/promises');
+      const metadata: Record<string, { pinned?: boolean; pinOrder?: number }> = {};
+      const sessionsByPath = new Map<string, string[]>();
+
+      for (const sessionKey of sessionKeys) {
+        const resolved = getSessionPaths(sessionKey);
+        if (!resolved) continue;
+        const current = sessionsByPath.get(resolved.sessionsJsonPath) ?? [];
+        current.push(sessionKey);
+        sessionsByPath.set(resolved.sessionsJsonPath, current);
+      }
+
+      for (const [sessionsJsonPath, keys] of sessionsByPath.entries()) {
+        let sessionsJson: Record<string, unknown>;
+        try {
+          const raw = await fsP.readFile(sessionsJsonPath, 'utf8');
+          sessionsJson = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+
+        if (Array.isArray(sessionsJson.sessions)) {
+          const sessionEntries = sessionsJson.sessions as Array<Record<string, unknown>>;
+          for (const sessionKey of keys) {
+            const matched = sessionEntries.find((session) => session.key === sessionKey || session.sessionKey === sessionKey);
+            if (matched) {
+              metadata[sessionKey] = parsePinnedMetadata(matched);
+            }
+          }
+          continue;
+        }
+
+        for (const sessionKey of keys) {
+          const matched = sessionsJson[sessionKey];
+          if (typeof matched === 'object' && matched !== null) {
+            metadata[sessionKey] = parsePinnedMetadata(matched as Record<string, unknown>);
+          }
+        }
+      }
+
+      sendJson(res, 200, { success: true, metadata });
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
     }
