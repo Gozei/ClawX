@@ -45,6 +45,8 @@ export interface ChatSession {
   thinkingLevel?: string;
   model?: string;
   updatedAt?: number;
+  pinned?: boolean;
+  pinOrder?: number;
 }
 
 export interface ToolStatus {
@@ -92,6 +94,7 @@ export interface ChatState {
   switchSession: (key: string) => void;
   newSession: () => void;
   renameSession: (key: string, label: string) => Promise<void>;
+  toggleSessionPin: (key: string) => Promise<void>;
   deleteSession: (key: string) => Promise<void>;
   cleanupEmptySession: () => void;
   loadHistory: (quiet?: boolean) => Promise<void>;

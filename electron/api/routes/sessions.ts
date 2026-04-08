@@ -28,6 +28,40 @@ function getSessionPaths(sessionKey: string): { agentId: string; sessionsDir: st
   return { agentId, sessionsDir, sessionsJsonPath };
 }
 
+function updateSessionEntry(
+  sessionsJson: Record<string, unknown>,
+  sessionKey: string,
+  updater: (session: Record<string, unknown>) => Record<string, unknown>,
+): boolean {
+  let found = false;
+
+  if (Array.isArray(sessionsJson.sessions)) {
+    sessionsJson.sessions = (sessionsJson.sessions as Array<Record<string, unknown>>).map((session) => {
+      if (session.key !== sessionKey && session.sessionKey !== sessionKey) {
+        return session;
+      }
+      found = true;
+      return updater({
+        ...session,
+        key: typeof session.key === 'string' ? session.key : sessionKey,
+      });
+    });
+    return found;
+  }
+
+  if (sessionsJson[sessionKey] != null) {
+    found = true;
+    const existing = sessionsJson[sessionKey];
+    sessionsJson[sessionKey] = updater(
+      typeof existing === 'object' && existing !== null
+        ? existing as Record<string, unknown>
+        : { file: existing },
+    );
+  }
+
+  return found;
+}
+
 export async function handleSessionRoutes(
   req: IncomingMessage,
   res: ServerResponse,
@@ -58,33 +92,14 @@ export async function handleSessionRoutes(
       const fsP = await import('node:fs/promises');
       const raw = await fsP.readFile(resolved.sessionsJsonPath, 'utf8');
       const sessionsJson = JSON.parse(raw) as Record<string, unknown>;
-      let found = false;
-
-      if (Array.isArray(sessionsJson.sessions)) {
-        sessionsJson.sessions = (sessionsJson.sessions as Array<Record<string, unknown>>).map((session) => {
-          if (session.key !== sessionKey && session.sessionKey !== sessionKey) {
-            return session;
-          }
-          found = true;
-          return {
-            ...session,
-            key: typeof session.key === 'string' ? session.key : sessionKey,
-            label: truncateUnicode(trimmed, SESSION_NAME_MAX_CHARS),
-          };
-        });
-      } else if (sessionsJson[sessionKey] != null) {
-        found = true;
-        const existing = sessionsJson[sessionKey];
-        sessionsJson[sessionKey] = typeof existing === 'object'
-          ? {
-            ...(existing as Record<string, unknown>),
-            label: truncateUnicode(trimmed, SESSION_NAME_MAX_CHARS),
-          }
-          : {
-            file: existing,
-            label: truncateUnicode(trimmed, SESSION_NAME_MAX_CHARS),
-          };
-      }
+      const found = updateSessionEntry(
+        sessionsJson,
+        sessionKey,
+        (session) => ({
+          ...session,
+          label: truncateUnicode(trimmed, SESSION_NAME_MAX_CHARS),
+        }),
+      );
 
       if (!found) {
         sendJson(res, 404, { success: false, error: `Session not found: ${sessionKey}` });
@@ -93,6 +108,54 @@ export async function handleSessionRoutes(
 
       await fsP.writeFile(resolved.sessionsJsonPath, JSON.stringify(sessionsJson, null, 2), 'utf8');
       sendJson(res, 200, { success: true, label: truncateUnicode(trimmed, SESSION_NAME_MAX_CHARS) });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === '/api/sessions/pin' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{ sessionKey: string; pinned: boolean; pinOrder?: number }>(req);
+      const sessionKey = typeof body.sessionKey === 'string' ? body.sessionKey : '';
+      const resolved = getSessionPaths(sessionKey);
+      if (!resolved) {
+        sendJson(res, 400, { success: false, error: `Invalid sessionKey: ${sessionKey}` });
+        return true;
+      }
+
+      const pinned = body.pinned === true;
+      const pinOrder = typeof body.pinOrder === 'number' && Number.isFinite(body.pinOrder)
+        ? Math.max(1, Math.trunc(body.pinOrder))
+        : undefined;
+
+      const fsP = await import('node:fs/promises');
+      const raw = await fsP.readFile(resolved.sessionsJsonPath, 'utf8');
+      const sessionsJson = JSON.parse(raw) as Record<string, unknown>;
+
+      const found = updateSessionEntry(
+        sessionsJson,
+        sessionKey,
+        (session) => {
+          const nextSession = { ...session };
+          if (pinned) {
+            nextSession.pinned = true;
+            nextSession.pinOrder = pinOrder ?? 1;
+          } else {
+            delete nextSession.pinned;
+            delete nextSession.pinOrder;
+          }
+          return nextSession;
+        },
+      );
+
+      if (!found) {
+        sendJson(res, 404, { success: false, error: `Session not found: ${sessionKey}` });
+        return true;
+      }
+
+      await fsP.writeFile(resolved.sessionsJsonPath, JSON.stringify(sessionsJson, null, 2), 'utf8');
+      sendJson(res, 200, { success: true, pinned, pinOrder: pinned ? pinOrder ?? 1 : undefined });
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
     }

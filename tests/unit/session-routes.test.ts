@@ -97,4 +97,69 @@ describe('handleSessionRoutes', () => {
       expect.objectContaining({ success: false }),
     );
   });
+
+  it('persists pin and unpin metadata in sessions.json', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      JSON.stringify({
+        sessions: [
+          { key: 'agent:main:session-1', label: 'Pinned me', updatedAt: 1 },
+        ],
+      }, null, 2),
+      'utf8',
+    );
+
+    parseJsonBodyMock.mockResolvedValueOnce({
+      sessionKey: 'agent:main:session-1',
+      pinned: true,
+      pinOrder: 3,
+    });
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    let handled = await handleSessionRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/pin'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
+      success: true,
+      pinned: true,
+      pinOrder: 3,
+    });
+
+    let stored = JSON.parse(await readFile(join(sessionsDir, 'sessions.json'), 'utf8')) as {
+      sessions: Array<{ key: string; pinned?: boolean; pinOrder?: number }>;
+    };
+    expect(stored.sessions[0]).toMatchObject({ pinned: true, pinOrder: 3 });
+
+    parseJsonBodyMock.mockResolvedValueOnce({
+      sessionKey: 'agent:main:session-1',
+      pinned: false,
+    });
+
+    handled = await handleSessionRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/pin'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
+      success: true,
+      pinned: false,
+      pinOrder: undefined,
+    });
+
+    stored = JSON.parse(await readFile(join(sessionsDir, 'sessions.json'), 'utf8')) as {
+      sessions: Array<{ key: string; pinned?: boolean; pinOrder?: number }>;
+    };
+    expect(stored.sessions[0]?.pinned).toBeUndefined();
+    expect(stored.sessions[0]?.pinOrder).toBeUndefined();
+  });
 });

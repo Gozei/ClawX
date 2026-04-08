@@ -13,7 +13,7 @@ vi.mock('@/lib/host-api', () => ({
 
 type ChatLikeState = {
   currentSessionKey: string;
-  sessions: Array<{ key: string; displayName?: string; updatedAt?: number }>;
+  sessions: Array<{ key: string; label?: string; displayName?: string; updatedAt?: number; pinned?: boolean; pinOrder?: number }>;
   messages: Array<{ role: string; timestamp?: number; content?: unknown }>;
   sessionLabels: Record<string, string>;
   sessionLastActivity: Record<string, number>;
@@ -169,6 +169,41 @@ describe('chat session actions', () => {
     expect(h.read().sessions[0]?.label).toBe('123456789012345678901234567890');
   });
 
+  it('toggleSessionPin persists the pin state and appends pin order', async () => {
+    const { createSessionActions } = await import('@/stores/chat/session-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:foo:session-b',
+      sessions: [
+        { key: 'agent:foo:session-a', pinned: true, pinOrder: 1 },
+        { key: 'agent:foo:session-b', displayName: 'Session B' },
+      ],
+    });
+    const actions = createSessionActions(h.set as never, h.get as never);
+
+    hostApiFetchMock.mockResolvedValueOnce({ success: true, pinned: true, pinOrder: 2 });
+    await actions.toggleSessionPin('agent:foo:session-b');
+
+    expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/pin', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionKey: 'agent:foo:session-b',
+        pinned: true,
+        pinOrder: 2,
+      }),
+    });
+    expect(h.read().sessions.find((session) => session.key === 'agent:foo:session-b')).toMatchObject({
+      pinned: true,
+      pinOrder: 2,
+    });
+
+    hostApiFetchMock.mockResolvedValueOnce({ success: true, pinned: false });
+    await actions.toggleSessionPin('agent:foo:session-b');
+    expect(h.read().sessions.find((session) => session.key === 'agent:foo:session-b')).toMatchObject({
+      pinned: false,
+      pinOrder: undefined,
+    });
+  });
+
   it('seeds sessionLastActivity from backend updatedAt metadata', async () => {
     const { createSessionActions } = await import('@/stores/chat/session-actions');
     const h = makeHarness({
@@ -190,6 +225,8 @@ describe('chat session actions', () => {
             key: 'agent:main:cron:job-1',
             label: 'Cron: Drink water',
             updatedAt: 1773281731621,
+            pinned: true,
+            pinOrder: 4,
           },
         ],
       },
@@ -199,7 +236,11 @@ describe('chat session actions', () => {
 
     expect(h.read().sessionLastActivity['agent:main:main']).toBe(1773281700000);
     expect(h.read().sessionLastActivity['agent:main:cron:job-1']).toBe(1773281731621);
-    expect(h.read().sessions.find((session) => session.key === 'agent:main:cron:job-1')?.updatedAt).toBe(1773281731621);
+    expect(h.read().sessions.find((session) => session.key === 'agent:main:cron:job-1')).toMatchObject({
+      updatedAt: 1773281731621,
+      pinned: true,
+      pinOrder: 4,
+    });
   });
 });
 

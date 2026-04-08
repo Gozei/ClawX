@@ -639,6 +639,17 @@ function parseSessionUpdatedAtMs(value: unknown): number | undefined {
   return undefined;
 }
 
+function parseSessionPinned(value: unknown): boolean {
+  return value === true;
+}
+
+function parseSessionPinOrder(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  return undefined;
+}
+
 async function loadCronFallbackMessages(sessionKey: string, limit = 200): Promise<RawMessage[]> {
   if (!isCronSessionKey(sessionKey)) return [];
   try {
@@ -1052,6 +1063,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             thinkingLevel: s.thinkingLevel ? String(s.thinkingLevel) : undefined,
             model: s.model ? String(s.model) : undefined,
             updatedAt: parseSessionUpdatedAtMs(s.updatedAt),
+            pinned: parseSessionPinned(s.pinned),
+            pinOrder: parseSessionPinOrder(s.pinOrder),
           })).filter((s: ChatSession) => s.key);
 
           const canonicalBySuffix = new Map<string, string>();
@@ -1306,6 +1319,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...s.sessionLabels,
         [key]: normalized,
       },
+    }));
+  },
+
+  toggleSessionPin: async (key: string) => {
+    const currentSession = get().sessions.find((session) => session.key === key);
+    if (!currentSession) return;
+
+    const nextPinned = !currentSession.pinned;
+    const normalizedPinOrder = nextPinned
+      ? Math.max(
+        0,
+        ...get().sessions
+          .map((session) => (session.pinned && typeof session.pinOrder === 'number' ? session.pinOrder : 0)),
+      ) + 1
+      : undefined;
+
+    await hostApiFetch<{ success: boolean; pinned: boolean; pinOrder?: number }>('/api/sessions/pin', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionKey: key,
+        pinned: nextPinned,
+        pinOrder: normalizedPinOrder,
+      }),
+    });
+
+    set((s) => ({
+      sessions: s.sessions.map((session) => (
+        session.key === key
+          ? {
+            ...session,
+            pinned: nextPinned,
+            pinOrder: nextPinned ? normalizedPinOrder : undefined,
+          }
+          : session
+      )),
     }));
   },
 

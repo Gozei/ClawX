@@ -23,6 +23,17 @@ function parseSessionUpdatedAtMs(value: unknown): number | undefined {
   return undefined;
 }
 
+function parseSessionPinned(value: unknown): boolean {
+  return value === true;
+}
+
+function parseSessionPinOrder(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  return undefined;
+}
+
 function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boolean {
   const session = sessions.find((entry) => entry.key === sessionKey);
   return typeof session?.label === 'string' && session.label.trim().length > 0;
@@ -31,7 +42,7 @@ function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boo
 export function createSessionActions(
   set: ChatSet,
   get: ChatGet,
-): Pick<SessionHistoryActions, 'loadSessions' | 'switchSession' | 'newSession' | 'renameSession' | 'deleteSession' | 'cleanupEmptySession'> {
+): Pick<SessionHistoryActions, 'loadSessions' | 'switchSession' | 'newSession' | 'renameSession' | 'toggleSessionPin' | 'deleteSession' | 'cleanupEmptySession'> {
   return {
     loadSessions: async () => {
       try {
@@ -51,6 +62,8 @@ export function createSessionActions(
             thinkingLevel: s.thinkingLevel ? String(s.thinkingLevel) : undefined,
             model: s.model ? String(s.model) : undefined,
             updatedAt: parseSessionUpdatedAtMs(s.updatedAt),
+            pinned: parseSessionPinned(s.pinned),
+            pinOrder: parseSessionPinOrder(s.pinOrder),
           })).filter((s: ChatSession) => s.key);
 
           const canonicalBySuffix = new Map<string, string>();
@@ -314,6 +327,41 @@ export function createSessionActions(
           ...s.sessionLabels,
           [key]: normalized,
         },
+      }));
+    },
+
+    toggleSessionPin: async (key: string) => {
+      const currentSession = get().sessions.find((session) => session.key === key);
+      if (!currentSession) return;
+
+      const nextPinned = !currentSession.pinned;
+      const normalizedPinOrder = nextPinned
+        ? Math.max(
+          0,
+          ...get().sessions
+            .map((session) => (session.pinned && typeof session.pinOrder === 'number' ? session.pinOrder : 0)),
+        ) + 1
+        : undefined;
+
+      await hostApiFetch<{ success: boolean; pinned: boolean; pinOrder?: number }>('/api/sessions/pin', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionKey: key,
+          pinned: nextPinned,
+          pinOrder: normalizedPinOrder,
+        }),
+      });
+
+      set((s) => ({
+        sessions: s.sessions.map((session) => (
+          session.key === key
+            ? {
+              ...session,
+              pinned: nextPinned,
+              pinOrder: nextPinned ? normalizedPinOrder : undefined,
+            }
+            : session
+        )),
       }));
     },
 

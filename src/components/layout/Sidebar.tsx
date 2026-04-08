@@ -19,6 +19,8 @@ import {
   ExternalLink,
   Trash2,
   Cpu,
+  Pin,
+  PinOff,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
@@ -132,6 +134,7 @@ export function Sidebar() {
   const newSession = useChatStore((s) => s.newSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
   const renameSession = useChatStore((s) => s.renameSession);
+  const toggleSessionPin = useChatStore((s) => s.toggleSessionPin);
   const loadSessions = useChatStore((s) => s.loadSessions);
   const loadHistory = useChatStore((s) => s.loadHistory);
 
@@ -252,9 +255,19 @@ export function Sidebar() {
     (typeof sessionBuckets)[number]
   >;
 
-  for (const session of [...sessions].sort((a, b) =>
-    (sessionLastActivity[b.key] ?? 0) - (sessionLastActivity[a.key] ?? 0)
-  )) {
+  const pinnedSessions = [...sessions]
+    .filter((session) => session.pinned)
+    .sort((a, b) => {
+      const pinOrderDiff = (a.pinOrder ?? Number.MAX_SAFE_INTEGER) - (b.pinOrder ?? Number.MAX_SAFE_INTEGER);
+      if (pinOrderDiff !== 0) return pinOrderDiff;
+      return (sessionLastActivity[b.key] ?? 0) - (sessionLastActivity[a.key] ?? 0);
+    });
+
+  const unpinnedSessions = [...sessions]
+    .filter((session) => !session.pinned)
+    .sort((a, b) => (sessionLastActivity[b.key] ?? 0) - (sessionLastActivity[a.key] ?? 0));
+
+  for (const session of unpinnedSessions) {
     const bucketKey = getSessionBucket(sessionLastActivity[session.key] ?? 0, nowMs);
     sessionBucketMap[bucketKey].sessions.push(session);
   }
@@ -341,6 +354,122 @@ export function Sidebar() {
       {/* Session list — below Settings, only when expanded */}
       {!sidebarCollapsed && sessions.length > 0 && (
         <div className="mt-3 flex-1 overflow-y-auto overflow-x-hidden px-2.5 space-y-1 pb-3">
+          {pinnedSessions.length > 0 && (
+            <div className="pt-2" data-testid="sidebar-pinned-sessions">
+              <div className="px-3 pb-1 text-[11px] font-medium text-muted-foreground/70 tracking-[0.01em]">
+                Pinned
+              </div>
+              {pinnedSessions.map((s) => {
+                const agentId = getAgentIdFromSessionKey(s.key);
+                const agentName = agentNameById[agentId] || agentId;
+                const sessionLabel = getSessionLabel(s.key, s.displayName, s.label);
+                const isEditing = editingSessionKey === s.key;
+                return (
+                  <div key={s.key} className="group relative flex items-center" data-testid={`sidebar-session-${s.key}`}>
+                    {isEditing ? (
+                      <div
+                        className={cn(
+                          'w-full rounded-xl px-3 py-2 pr-16 text-left text-[13px]',
+                          isOnChat && currentSessionKey === s.key
+                            ? 'bg-white text-foreground font-medium shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
+                            : 'text-foreground/75',
+                        )}
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-foreground/70 ring-1 ring-black/5 dark:bg-white/[0.08] dark:ring-white/10">
+                            {agentName}
+                          </span>
+                          <input
+                            ref={renameInputRef}
+                            value={editingSessionName}
+                            data-testid="sidebar-session-rename-input"
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => setEditingSessionName(limitSessionName(e.target.value))}
+                            onBlur={() => { void submitSessionRename(); }}
+                            onKeyDown={(e) => {
+                              e.stopPropagation();
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                void submitSessionRename();
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                cancelRenamingSession();
+                              }
+                            }}
+                            className="min-w-0 flex-1 bg-transparent text-foreground outline-none"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          switchSession(s.key);
+                          navigate('/');
+                        }}
+                        className={cn(
+                          'w-full rounded-xl px-3 py-2 pr-16 text-left text-[13px] transition-all duration-200',
+                          'hover:bg-[#eef3fb] dark:hover:bg-white/5',
+                          isOnChat && currentSessionKey === s.key
+                            ? 'bg-white text-foreground font-medium shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
+                            : 'text-foreground/75',
+                        )}
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-foreground/70 ring-1 ring-black/5 dark:bg-white/[0.08] dark:ring-white/10">
+                            {agentName}
+                          </span>
+                          <span
+                            className="truncate"
+                            title={sessionLabel}
+                            onDoubleClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              startRenamingSession(s.key, sessionLabel);
+                            }}
+                          >
+                            {sessionLabel}
+                          </span>
+                        </div>
+                      </button>
+                    )}
+                    <div className="absolute right-1 flex items-center gap-1">
+                      <button
+                        aria-label={s.pinned ? 'Unpin session' : 'Pin session'}
+                        data-testid={`sidebar-session-pin-${s.key}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void toggleSessionPin(s.key);
+                        }}
+                        className={cn(
+                          'flex items-center justify-center rounded p-0.5 transition-opacity',
+                          s.pinned ? 'opacity-100 text-primary bg-primary/10' : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary hover:bg-primary/10',
+                        )}
+                      >
+                        {s.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+                      </button>
+                      <button
+                        aria-label="Delete session"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSessionToDelete({
+                            key: s.key,
+                            label: sessionLabel,
+                          });
+                        }}
+                        className={cn(
+                          'flex items-center justify-center rounded p-0.5 transition-opacity',
+                          'opacity-0 group-hover:opacity-100',
+                          'text-muted-foreground hover:text-destructive hover:bg-destructive/10',
+                        )}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {sessionBuckets.map((bucket) => (
             bucket.sessions.length > 0 ? (
               <div key={bucket.key} className="pt-2">
@@ -357,7 +486,7 @@ export function Sidebar() {
                       {isEditing ? (
                         <div
                           className={cn(
-                            'w-full rounded-xl px-3 py-2 pr-8 text-left text-[13px]',
+                            'w-full rounded-xl px-3 py-2 pr-16 text-left text-[13px]',
                             isOnChat && currentSessionKey === s.key
                               ? 'bg-white text-foreground font-medium shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
                               : 'text-foreground/75',
@@ -395,7 +524,7 @@ export function Sidebar() {
                             navigate('/');
                           }}
                           className={cn(
-                            'w-full rounded-xl px-3 py-2 pr-8 text-left text-[13px] transition-all duration-200',
+                            'w-full rounded-xl px-3 py-2 pr-16 text-left text-[13px] transition-all duration-200',
                             'hover:bg-[#eef3fb] dark:hover:bg-white/5',
                             isOnChat && currentSessionKey === s.key
                               ? 'bg-white text-foreground font-medium shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
@@ -420,23 +549,39 @@ export function Sidebar() {
                           </div>
                         </button>
                       )}
-                      <button
-                        aria-label="Delete session"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSessionToDelete({
-                            key: s.key,
-                            label: sessionLabel,
-                          });
-                        }}
-                        className={cn(
-                          'absolute right-1 flex items-center justify-center rounded p-0.5 transition-opacity',
-                          'opacity-0 group-hover:opacity-100',
-                          'text-muted-foreground hover:text-destructive hover:bg-destructive/10',
-                        )}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="absolute right-1 flex items-center gap-1">
+                        <button
+                          aria-label={s.pinned ? 'Unpin session' : 'Pin session'}
+                          data-testid={`sidebar-session-pin-${s.key}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void toggleSessionPin(s.key);
+                          }}
+                          className={cn(
+                            'flex items-center justify-center rounded p-0.5 transition-opacity',
+                            s.pinned ? 'opacity-100 text-primary bg-primary/10' : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary hover:bg-primary/10',
+                          )}
+                        >
+                          {s.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+                        </button>
+                        <button
+                          aria-label="Delete session"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSessionToDelete({
+                              key: s.key,
+                              label: sessionLabel,
+                            });
+                          }}
+                          className={cn(
+                            'flex items-center justify-center rounded p-0.5 transition-opacity',
+                            'opacity-0 group-hover:opacity-100',
+                            'text-muted-foreground hover:text-destructive hover:bg-destructive/10',
+                          )}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
