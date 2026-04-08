@@ -47,9 +47,12 @@ test.describe('Session rename', () => {
       const page = await getStableWindow(app);
       await expect(page.getByTestId('main-layout')).toBeVisible();
 
-      const originalLabel = page.getByText(ORIGINAL_LABEL, { exact: true });
-      await expect(originalLabel).toBeVisible({ timeout: 60_000 });
-      await originalLabel.dblclick();
+      const sessionRow = page.getByTestId(`sidebar-session-${SESSION_KEY}`);
+      await expect(sessionRow.getByText(ORIGINAL_LABEL, { exact: true })).toBeVisible({ timeout: 60_000 });
+      await sessionRow.hover();
+      await page.getByTestId(`sidebar-session-menu-trigger-${SESSION_KEY}`).click();
+      await expect(page.getByTestId(`sidebar-session-menu-rename-${SESSION_KEY}`)).toBeVisible();
+      await page.getByTestId(`sidebar-session-menu-rename-${SESSION_KEY}`).click();
 
       const renameInput = page.getByTestId('sidebar-session-rename-input');
       await expect(renameInput).toBeVisible();
