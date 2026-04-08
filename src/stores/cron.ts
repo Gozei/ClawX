@@ -21,6 +21,10 @@ interface CronState {
   setJobs: (jobs: CronJob[]) => void;
 }
 
+function normalizeJobs(value: unknown): CronJob[] {
+  return Array.isArray(value) ? value : [];
+}
+
 export const useCronStore = create<CronState>((set) => ({
   jobs: [],
   loading: false,
@@ -31,7 +35,7 @@ export const useCronStore = create<CronState>((set) => ({
     
     try {
       const result = await hostApiFetch<CronJob[]>('/api/cron/jobs');
-      set({ jobs: result, loading: false });
+      set({ jobs: normalizeJobs(result), loading: false });
     } catch (error) {
       set({ error: String(error), loading: false });
     }
@@ -109,7 +113,7 @@ export const useCronStore = create<CronState>((set) => ({
       // Refresh jobs after trigger to update lastRun/nextRun state
       try {
         const jobs = await hostApiFetch<CronJob[]>('/api/cron/jobs');
-        set({ jobs });
+        set({ jobs: normalizeJobs(jobs) });
       } catch {
         // Ignore refresh error
       }
@@ -119,5 +123,5 @@ export const useCronStore = create<CronState>((set) => ({
     }
   },
   
-  setJobs: (jobs) => set({ jobs }),
+  setJobs: (jobs) => set({ jobs: normalizeJobs(jobs) }),
 }));
