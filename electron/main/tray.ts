@@ -131,7 +131,7 @@ export async function createTray(mainWindow: BrowserWindow): Promise<Tray> {
     // Windows: use .ico for best quality in system tray
     iconPath = join(iconsDir, 'icon.ico');
   } else if (process.platform === 'darwin') {
-    // macOS: use Template.png for proper status bar icon
+    // macOS: use tray-icon-Template.png.bak for proper status bar icon
     // The "Template" suffix tells macOS to treat it as a template image
     iconPath = join(iconsDir, 'tray-icon-Template.png');
   } else {

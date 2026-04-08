@@ -113,12 +113,18 @@ export function createHistoryActions(
           const firstUserMsg = finalMessages.find((m) => m.role === 'user');
           if (firstUserMsg) {
             const labelText = getMessageText(firstUserMsg.content).trim();
-            if (labelText) {
+            set((s) => {
+              const hasStoredLabel = s.sessions.some(
+                (session) => session.key === currentSessionKey && typeof session.label === 'string' && session.label.trim().length > 0,
+              );
+              if (!labelText || s.sessionLabels[currentSessionKey] || hasStoredLabel) {
+                return {};
+              }
               const truncated = labelText.length > 50 ? `${labelText.slice(0, 50)}…` : labelText;
-              set((s) => ({
+              return {
                 sessionLabels: { ...s.sessionLabels, [currentSessionKey]: truncated },
-              }));
-            }
+              };
+            });
           }
         }
 

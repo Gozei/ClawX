@@ -4,30 +4,237 @@ import { getOpenClawConfigDir } from '../../utils/paths';
 import type { HostApiContext } from '../context';
 import { parseJsonBody, sendJson } from '../route-utils';
 
+const SESSION_NAME_MAX_CHARS = 30;
+
+function countUnicodeChars(value: string): number {
+  return Array.from(value).length;
+}
+
+function truncateUnicode(value: string, maxChars: number): string {
+  return Array.from(value).slice(0, maxChars).join('');
+}
+
+function isValidSessionKey(sessionKey: string): boolean {
+  return !!sessionKey && sessionKey.startsWith('agent:');
+}
+
+function getSessionPaths(sessionKey: string): { agentId: string; sessionsDir: string; sessionsJsonPath: string } | null {
+  if (!isValidSessionKey(sessionKey)) return null;
+  const parts = sessionKey.split(':');
+  if (parts.length < 3) return null;
+  const agentId = parts[1];
+  const sessionsDir = join(getOpenClawConfigDir(), 'agents', agentId, 'sessions');
+  const sessionsJsonPath = join(sessionsDir, 'sessions.json');
+  return { agentId, sessionsDir, sessionsJsonPath };
+}
+
+function parsePinnedMetadata(session: Record<string, unknown>): { pinned?: boolean; pinOrder?: number } {
+  const pinned = session.pinned === true ? true : undefined;
+  const pinOrder = typeof session.pinOrder === 'number' && Number.isFinite(session.pinOrder)
+    ? Math.max(1, Math.trunc(session.pinOrder))
+    : undefined;
+  return { pinned, pinOrder };
+}
+
+function updateSessionEntry(
+  sessionsJson: Record<string, unknown>,
+  sessionKey: string,
+  updater: (session: Record<string, unknown>) => Record<string, unknown>,
+): boolean {
+  let found = false;
+
+  if (Array.isArray(sessionsJson.sessions)) {
+    sessionsJson.sessions = (sessionsJson.sessions as Array<Record<string, unknown>>).map((session) => {
+      if (session.key !== sessionKey && session.sessionKey !== sessionKey) {
+        return session;
+      }
+      found = true;
+      return updater({
+        ...session,
+        key: typeof session.key === 'string' ? session.key : sessionKey,
+      });
+    });
+    return found;
+  }
+
+  if (sessionsJson[sessionKey] != null) {
+    found = true;
+    const existing = sessionsJson[sessionKey];
+    sessionsJson[sessionKey] = updater(
+      typeof existing === 'object' && existing !== null
+        ? existing as Record<string, unknown>
+        : { file: existing },
+    );
+  }
+
+  return found;
+}
+
 export async function handleSessionRoutes(
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
   _ctx: HostApiContext,
 ): Promise<boolean> {
+  if (url.pathname === '/api/sessions/rename' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{ sessionKey: string; label: string }>(req);
+      const sessionKey = typeof body.sessionKey === 'string' ? body.sessionKey : '';
+      const resolved = getSessionPaths(sessionKey);
+      if (!resolved) {
+        sendJson(res, 400, { success: false, error: `Invalid sessionKey: ${sessionKey}` });
+        return true;
+      }
+
+      const rawLabel = typeof body.label === 'string' ? body.label : '';
+      const trimmed = rawLabel.trim();
+      if (!trimmed) {
+        sendJson(res, 400, { success: false, error: 'Session label cannot be empty' });
+        return true;
+      }
+      if (countUnicodeChars(trimmed) > SESSION_NAME_MAX_CHARS) {
+        sendJson(res, 400, { success: false, error: `Session label cannot exceed ${SESSION_NAME_MAX_CHARS} characters` });
+        return true;
+      }
+
+      const fsP = await import('node:fs/promises');
+      const raw = await fsP.readFile(resolved.sessionsJsonPath, 'utf8');
+      const sessionsJson = JSON.parse(raw) as Record<string, unknown>;
+      const found = updateSessionEntry(
+        sessionsJson,
+        sessionKey,
+        (session) => ({
+          ...session,
+          label: truncateUnicode(trimmed, SESSION_NAME_MAX_CHARS),
+        }),
+      );
+
+      if (!found) {
+        sendJson(res, 404, { success: false, error: `Session not found: ${sessionKey}` });
+        return true;
+      }
+
+      await fsP.writeFile(resolved.sessionsJsonPath, JSON.stringify(sessionsJson, null, 2), 'utf8');
+      sendJson(res, 200, { success: true, label: truncateUnicode(trimmed, SESSION_NAME_MAX_CHARS) });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === '/api/sessions/pin' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{ sessionKey: string; pinned: boolean; pinOrder?: number }>(req);
+      const sessionKey = typeof body.sessionKey === 'string' ? body.sessionKey : '';
+      const resolved = getSessionPaths(sessionKey);
+      if (!resolved) {
+        sendJson(res, 400, { success: false, error: `Invalid sessionKey: ${sessionKey}` });
+        return true;
+      }
+
+      const pinned = body.pinned === true;
+      const pinOrder = typeof body.pinOrder === 'number' && Number.isFinite(body.pinOrder)
+        ? Math.max(1, Math.trunc(body.pinOrder))
+        : undefined;
+
+      const fsP = await import('node:fs/promises');
+      const raw = await fsP.readFile(resolved.sessionsJsonPath, 'utf8');
+      const sessionsJson = JSON.parse(raw) as Record<string, unknown>;
+
+      const found = updateSessionEntry(
+        sessionsJson,
+        sessionKey,
+        (session) => {
+          const nextSession = { ...session };
+          if (pinned) {
+            nextSession.pinned = true;
+            nextSession.pinOrder = pinOrder ?? 1;
+          } else {
+            delete nextSession.pinned;
+            delete nextSession.pinOrder;
+          }
+          return nextSession;
+        },
+      );
+
+      if (!found) {
+        sendJson(res, 404, { success: false, error: `Session not found: ${sessionKey}` });
+        return true;
+      }
+
+      await fsP.writeFile(resolved.sessionsJsonPath, JSON.stringify(sessionsJson, null, 2), 'utf8');
+      sendJson(res, 200, { success: true, pinned, pinOrder: pinned ? pinOrder ?? 1 : undefined });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === '/api/sessions/metadata' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{ sessionKeys?: string[] }>(req);
+      const sessionKeys = Array.isArray(body.sessionKeys)
+        ? body.sessionKeys.filter((value): value is string => typeof value === 'string' && value.startsWith('agent:'))
+        : [];
+
+      const fsP = await import('node:fs/promises');
+      const metadata: Record<string, { pinned?: boolean; pinOrder?: number }> = {};
+      const sessionsByPath = new Map<string, string[]>();
+
+      for (const sessionKey of sessionKeys) {
+        const resolved = getSessionPaths(sessionKey);
+        if (!resolved) continue;
+        const current = sessionsByPath.get(resolved.sessionsJsonPath) ?? [];
+        current.push(sessionKey);
+        sessionsByPath.set(resolved.sessionsJsonPath, current);
+      }
+
+      for (const [sessionsJsonPath, keys] of sessionsByPath.entries()) {
+        let sessionsJson: Record<string, unknown>;
+        try {
+          const raw = await fsP.readFile(sessionsJsonPath, 'utf8');
+          sessionsJson = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+
+        if (Array.isArray(sessionsJson.sessions)) {
+          const sessionEntries = sessionsJson.sessions as Array<Record<string, unknown>>;
+          for (const sessionKey of keys) {
+            const matched = sessionEntries.find((session) => session.key === sessionKey || session.sessionKey === sessionKey);
+            if (matched) {
+              metadata[sessionKey] = parsePinnedMetadata(matched);
+            }
+          }
+          continue;
+        }
+
+        for (const sessionKey of keys) {
+          const matched = sessionsJson[sessionKey];
+          if (typeof matched === 'object' && matched !== null) {
+            metadata[sessionKey] = parsePinnedMetadata(matched as Record<string, unknown>);
+          }
+        }
+      }
+
+      sendJson(res, 200, { success: true, metadata });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
   if (url.pathname === '/api/sessions/delete' && req.method === 'POST') {
     try {
       const body = await parseJsonBody<{ sessionKey: string }>(req);
       const sessionKey = body.sessionKey;
-      if (!sessionKey || !sessionKey.startsWith('agent:')) {
+      const resolved = getSessionPaths(sessionKey);
+      if (!resolved) {
         sendJson(res, 400, { success: false, error: `Invalid sessionKey: ${sessionKey}` });
         return true;
       }
-      const parts = sessionKey.split(':');
-      if (parts.length < 3) {
-        sendJson(res, 400, { success: false, error: `sessionKey has too few parts: ${sessionKey}` });
-        return true;
-      }
-      const agentId = parts[1];
-      const sessionsDir = join(getOpenClawConfigDir(), 'agents', agentId, 'sessions');
-      const sessionsJsonPath = join(sessionsDir, 'sessions.json');
       const fsP = await import('node:fs/promises');
-      const raw = await fsP.readFile(sessionsJsonPath, 'utf8');
+      const raw = await fsP.readFile(resolved.sessionsJsonPath, 'utf8');
       const sessionsJson = JSON.parse(raw) as Record<string, unknown>;
 
       let uuidFileName: string | undefined;
@@ -67,7 +274,7 @@ export async function handleSessionRoutes(
       }
       if (!resolvedSrcPath) {
         if (!uuidFileName!.endsWith('.jsonl')) uuidFileName = `${uuidFileName}.jsonl`;
-        resolvedSrcPath = join(sessionsDir, uuidFileName!);
+        resolvedSrcPath = join(resolved.sessionsDir, uuidFileName!);
       }
       const dstPath = resolvedSrcPath.replace(/\.jsonl$/, '.deleted.jsonl');
       try {
@@ -76,7 +283,7 @@ export async function handleSessionRoutes(
       } catch {
         // Non-fatal; still try to update sessions.json.
       }
-      const raw2 = await fsP.readFile(sessionsJsonPath, 'utf8');
+      const raw2 = await fsP.readFile(resolved.sessionsJsonPath, 'utf8');
       const json2 = JSON.parse(raw2) as Record<string, unknown>;
       if (Array.isArray(json2.sessions)) {
         json2.sessions = (json2.sessions as Array<Record<string, unknown>>)
@@ -84,7 +291,7 @@ export async function handleSessionRoutes(
       } else if (json2[sessionKey]) {
         delete json2[sessionKey];
       }
-      await fsP.writeFile(sessionsJsonPath, JSON.stringify(json2, null, 2), 'utf8');
+      await fsP.writeFile(resolved.sessionsJsonPath, JSON.stringify(json2, null, 2), 'utf8');
       sendJson(res, 200, { success: true });
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });

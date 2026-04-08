@@ -639,6 +639,17 @@ function parseSessionUpdatedAtMs(value: unknown): number | undefined {
   return undefined;
 }
 
+function parseSessionPinned(value: unknown): boolean {
+  return value === true;
+}
+
+function parseSessionPinOrder(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  return undefined;
+}
+
 async function loadCronFallbackMessages(sessionKey: string, limit = 200): Promise<RawMessage[]> {
   if (!isCronSessionKey(sessionKey)) return [];
   try {
@@ -692,6 +703,11 @@ function clearSessionEntryFromMap<T extends Record<string, unknown>>(entries: T,
   return Object.fromEntries(Object.entries(entries).filter(([key]) => key !== sessionKey)) as T;
 }
 
+function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boolean {
+  const session = sessions.find((entry) => entry.key === sessionKey);
+  return typeof session?.label === 'string' && session.label.trim().length > 0;
+}
+
 function buildSessionSwitchPatch(
   state: Pick<
     ChatState,
@@ -699,9 +715,10 @@ function buildSessionSwitchPatch(
   >,
   nextSessionKey: string,
 ): Partial<ChatState> {
-  // 仅将没有任何历史记录且无活动时间的会话视为空会话。
-  // 单纯依赖 messages.length 是不可靠的，因为 switchSession 会在真正调用 loadHistory 前抢先清空当前 messages，
-  // 造成竞争条件，使得带有真实历史的会话被判定为空并从侧边栏移除。
+  // Only treat sessions with no history records and no activity timestamp as empty.
+  // Relying solely on messages.length is unreliable because switchSession clears
+  // the current messages before loadHistory runs, creating a race condition that
+  // could cause sessions with real history to be incorrectly removed from the sidebar.
   const leavingEmpty = !state.currentSessionKey.endsWith(':main')
     && state.messages.length === 0
     && !state.sessionLastActivity[state.currentSessionKey]
@@ -970,6 +987,15 @@ function upsertToolStatuses(current: ToolStatus[], updates: ToolStatus[]): ToolS
   return next;
 }
 
+/**
+ * Only treat an explicit chat.send ack timeout as recoverable.
+ * Gateway stopped / Gateway not connected are hard failures that
+ * should still terminate the send immediately.
+ */
+function isRecoverableChatSendTimeout(error: string): boolean {
+  return error.includes('RPC timeout: chat.send');
+}
+
 function collectToolUpdates(message: unknown, eventState: string): ToolStatus[] {
   const updates: ToolStatus[] = [];
   const toolResultUpdate = extractToolResultUpdate(message, eventState);
@@ -1040,6 +1066,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const data = await useGatewayStore.getState().rpc<Record<string, unknown>>('sessions.list', {});
         if (data) {
           const rawSessions = Array.isArray(data.sessions) ? data.sessions : [];
+          const sessionKeys = rawSessions
+            .map((session) => (typeof (session as Record<string, unknown>).key === 'string' ? String((session as Record<string, unknown>).key) : ''))
+            .filter(Boolean);
+
+          let persistedMetadata: Record<string, { pinned?: boolean; pinOrder?: number }> = {};
+          if (sessionKeys.length > 0) {
+            try {
+              const metadataResult = await hostApiFetch<{
+                success: boolean;
+                metadata?: Record<string, { pinned?: boolean; pinOrder?: number }>;
+              }>('/api/sessions/metadata', {
+                method: 'POST',
+                body: JSON.stringify({ sessionKeys }),
+              });
+
+              if (metadataResult?.success && metadataResult.metadata) {
+                persistedMetadata = metadataResult.metadata;
+              }
+            } catch {
+              // Fall back to gateway-provided fields when local metadata is unavailable.
+            }
+          }
+
           const sessions: ChatSession[] = rawSessions.map((s: Record<string, unknown>) => ({
             key: String(s.key || ''),
             label: s.label ? String(s.label) : undefined,
@@ -1047,6 +1096,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             thinkingLevel: s.thinkingLevel ? String(s.thinkingLevel) : undefined,
             model: s.model ? String(s.model) : undefined,
             updatedAt: parseSessionUpdatedAtMs(s.updatedAt),
+            pinned: parseSessionPinned(persistedMetadata[String(s.key || '')]?.pinned ?? s.pinned),
+            pinOrder: parseSessionPinOrder(persistedMetadata[String(s.key || '')]?.pinOrder ?? s.pinOrder),
           })).filter((s: ChatSession) => s.key);
 
           const canonicalBySuffix = new Map<string, string>();
@@ -1131,7 +1182,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     const next: Partial<typeof s> = {};
                     if (firstUser) {
                       const labelText = getMessageText(firstUser.content).trim();
-                      if (labelText) {
+                      if (labelText && !s.sessionLabels[session.key] && !hasStoredSessionLabel(s.sessions, session.key)) {
                         const truncated = labelText.length > 50 ? `${labelText.slice(0, 50)}…` : labelText;
                         next.sessionLabels = { ...s.sessionLabels, [session.key]: truncated };
                       }
@@ -1244,7 +1295,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // sessions.reset archives (renames) the session JSONL file, making old
     // conversation history inaccessible when the user switches back to it.
     const { currentSessionKey, messages, sessions, sessionLastActivity, sessionLabels } = get();
-    // 仅将没有任何历史记录且无活动时间的会话视为空会话
+    // Only treat sessions with no history records and no activity timestamp as empty
     const leavingEmpty = !currentSessionKey.endsWith(':main')
       && messages.length === 0
       && !sessionLastActivity[currentSessionKey]
@@ -1281,14 +1332,72 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ── Cleanup empty session on navigate away ──
 
+  renameSession: async (key: string, label: string) => {
+    const trimmed = label.trim();
+    const normalized = Array.from(trimmed).slice(0, 30).join('');
+    if (!normalized) return;
+
+    await hostApiFetch<{ success: boolean; label: string }>('/api/sessions/rename', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKey: key, label: normalized }),
+    });
+
+    set((s) => ({
+      sessions: s.sessions.map((session) => (
+        session.key === key
+          ? { ...session, label: normalized }
+          : session
+      )),
+      sessionLabels: {
+        ...s.sessionLabels,
+        [key]: normalized,
+      },
+    }));
+  },
+
+  toggleSessionPin: async (key: string) => {
+    const currentSession = get().sessions.find((session) => session.key === key);
+    if (!currentSession) return;
+
+    const nextPinned = !currentSession.pinned;
+    const normalizedPinOrder = nextPinned
+      ? Math.max(
+        0,
+        ...get().sessions
+          .map((session) => (session.pinned && typeof session.pinOrder === 'number' ? session.pinOrder : 0)),
+      ) + 1
+      : undefined;
+
+    await hostApiFetch<{ success: boolean; pinned: boolean; pinOrder?: number }>('/api/sessions/pin', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionKey: key,
+        pinned: nextPinned,
+        pinOrder: normalizedPinOrder,
+      }),
+    });
+
+    set((s) => ({
+      sessions: s.sessions.map((session) => (
+        session.key === key
+          ? {
+            ...session,
+            pinned: nextPinned,
+            pinOrder: nextPinned ? normalizedPinOrder : undefined,
+          }
+          : session
+      )),
+    }));
+  },
+
   cleanupEmptySession: () => {
     const { currentSessionKey, messages, sessionLastActivity, sessionLabels } = get();
     // Only remove non-main sessions that were never used (no messages sent).
     // This mirrors the "leavingEmpty" logic in switchSession so that creating
     // a new session and immediately navigating away doesn't leave a ghost entry
     // in the sidebar.
-    // 同样需要综合检查 sessionLastActivity 和 sessionLabels，
-    // 防止因为 switchSession 抢先清空 messages 而误判有历史的会话为空。
+    // Also check sessionLastActivity and sessionLabels comprehensively to prevent
+    // falsely treating sessions with history as empty due to switchSession clearing messages early.
     const isEmptyNonMain = !currentSessionKey.endsWith(':main')
       && messages.length === 0
       && !sessionLastActivity[currentSessionKey]
@@ -1322,8 +1431,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     if (!quiet) set({ loading: true, error: null });
 
-    // 安全保护：如果历史记录加载花费太多时间，则强制将 loading 设置为 false
-    // 防止 UI 永远卡在转圈状态。
+    // Safety guard: if history loading takes too long, force loading to false
+    // to prevent the UI from being stuck in a spinner forever.
     let loadingTimedOut = false;
     const loadingSafetyTimer = quiet ? null : setTimeout(() => {
       loadingTimedOut = true;
@@ -1411,12 +1520,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const firstUserMsg = finalMessages.find((m) => m.role === 'user');
         if (firstUserMsg) {
           const labelText = getMessageText(firstUserMsg.content).trim();
-          if (labelText) {
+          set((s) => {
+            const hasStoredLabel = hasStoredSessionLabel(s.sessions, currentSessionKey);
+            if (!labelText || s.sessionLabels[currentSessionKey] || hasStoredLabel) {
+              return {};
+            }
             const truncated = labelText.length > 50 ? `${labelText.slice(0, 50)}…` : labelText;
-            set((s) => ({
+            return {
               sessionLabels: { ...s.sessionLabels, [currentSessionKey]: truncated },
-            }));
-          }
+            };
+          });
         }
       }
 
@@ -1509,7 +1622,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       await loadPromise;
     } finally {
-      // 正常完成时清除安全定时器
+      // Clear the safety timer on normal completion
       if (loadingSafetyTimer) clearTimeout(loadingSafetyTimer);
       if (!loadingTimedOut) {
         // Only update load time if we actually didn't time out
@@ -1573,9 +1686,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     // Update session label with first user message text as soon as it's sent
-    const { sessionLabels, messages } = get();
+    const { sessionLabels, messages, sessions } = get();
     const isFirstMessage = !messages.slice(0, -1).some((m) => m.role === 'user');
-    if (!currentSessionKey.endsWith(':main') && isFirstMessage && !sessionLabels[currentSessionKey] && trimmed) {
+    const hasStoredLabel = hasStoredSessionLabel(sessions, currentSessionKey);
+    if (!currentSessionKey.endsWith(':main') && isFirstMessage && !sessionLabels[currentSessionKey] && !hasStoredLabel && trimmed) {
       const truncated = trimmed.length > 50 ? `${trimmed.slice(0, 50)}…` : trimmed;
       set((s) => ({ sessionLabels: { ...s.sessionLabels, [currentSessionKey]: truncated } }));
     }
@@ -1693,14 +1807,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
       console.log(`[sendMessage] RPC result: success=${result.success}, runId=${result.result?.runId || 'none'}`);
 
       if (!result.success) {
-        clearHistoryPoll();
-        set({ error: result.error || 'Failed to send message', sending: false });
+        const errorMsg = result.error || 'Failed to send message';
+        if (isRecoverableChatSendTimeout(errorMsg)) {
+          console.warn(`[sendMessage] Recoverable chat.send timeout, keeping poll alive: ${errorMsg}`);
+          set({ error: errorMsg });
+        } else {
+          clearHistoryPoll();
+          set({ error: errorMsg, sending: false });
+        }
       } else if (result.result?.runId) {
         set({ activeRunId: result.result.runId });
       }
     } catch (err) {
-      clearHistoryPoll();
-      set({ error: String(err), sending: false });
+      const errStr = String(err);
+      if (isRecoverableChatSendTimeout(errStr)) {
+        console.warn(`[sendMessage] Recoverable chat.send timeout, keeping poll alive: ${errStr}`);
+        set({ error: errStr });
+      } else {
+        clearHistoryPoll();
+        set({ error: errStr, sending: false });
+      }
     }
   },
 
@@ -1779,11 +1905,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         break;
       }
       case 'delta': {
-        // If we're receiving new deltas, the Gateway has recovered from any
-        // prior error — cancel the error finalization timer and clear the
-        // stale error banner so the user sees the live stream again.
+        // Clear any stale error (including RPC timeout) when new data arrives.
         if (_errorRecoveryTimer) {
           clearErrorRecoveryTimer();
+        }
+        if (get().error) {
           set({ error: null });
         }
         const updates = collectToolUpdates(event.message, resolvedState);

@@ -1,14 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeIpcMock = vi.fn();
+const hostApiFetchMock = vi.fn();
 
 vi.mock('@/lib/api-client', () => ({
   invokeIpc: (...args: unknown[]) => invokeIpcMock(...args),
 }));
 
+vi.mock('@/lib/host-api', () => ({
+  hostApiFetch: (...args: unknown[]) => hostApiFetchMock(...args),
+}));
+
 type ChatLikeState = {
   currentSessionKey: string;
-  sessions: Array<{ key: string; displayName?: string; updatedAt?: number }>;
+  sessions: Array<{ key: string; label?: string; displayName?: string; updatedAt?: number; pinned?: boolean; pinOrder?: number }>;
   messages: Array<{ role: string; timestamp?: number; content?: unknown }>;
   sessionLabels: Record<string, string>;
   sessionLastActivity: Record<string, number>;
@@ -53,6 +58,7 @@ describe('chat session actions', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     invokeIpcMock.mockResolvedValue({ success: true });
+    hostApiFetchMock.mockResolvedValue({ success: true, label: 'Renamed session' });
   });
 
   it('switchSession preserves non-main session that has activity history', async () => {
@@ -141,6 +147,63 @@ describe('chat session actions', () => {
     nowSpy.mockRestore();
   });
 
+  it('renameSession persists and updates the local label with a 30-character cap', async () => {
+    const { createSessionActions } = await import('@/stores/chat/session-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:foo:session-a',
+      sessions: [{ key: 'agent:foo:session-a', displayName: 'Session A' }],
+      sessionLabels: { 'agent:foo:session-a': 'Old name' },
+    });
+    const actions = createSessionActions(h.set as never, h.get as never);
+
+    await actions.renameSession('agent:foo:session-a', '123456789012345678901234567890XYZ');
+
+    expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/rename', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionKey: 'agent:foo:session-a',
+        label: '123456789012345678901234567890',
+      }),
+    });
+    expect(h.read().sessionLabels['agent:foo:session-a']).toBe('123456789012345678901234567890');
+    expect(h.read().sessions[0]?.label).toBe('123456789012345678901234567890');
+  });
+
+  it('toggleSessionPin persists the pin state and appends pin order', async () => {
+    const { createSessionActions } = await import('@/stores/chat/session-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:foo:session-b',
+      sessions: [
+        { key: 'agent:foo:session-a', pinned: true, pinOrder: 1 },
+        { key: 'agent:foo:session-b', displayName: 'Session B' },
+      ],
+    });
+    const actions = createSessionActions(h.set as never, h.get as never);
+
+    hostApiFetchMock.mockResolvedValueOnce({ success: true, pinned: true, pinOrder: 2 });
+    await actions.toggleSessionPin('agent:foo:session-b');
+
+    expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/pin', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionKey: 'agent:foo:session-b',
+        pinned: true,
+        pinOrder: 2,
+      }),
+    });
+    expect(h.read().sessions.find((session) => session.key === 'agent:foo:session-b')).toMatchObject({
+      pinned: true,
+      pinOrder: 2,
+    });
+
+    hostApiFetchMock.mockResolvedValueOnce({ success: true, pinned: false });
+    await actions.toggleSessionPin('agent:foo:session-b');
+    expect(h.read().sessions.find((session) => session.key === 'agent:foo:session-b')).toMatchObject({
+      pinned: false,
+      pinOrder: undefined,
+    });
+  });
+
   it('seeds sessionLastActivity from backend updatedAt metadata', async () => {
     const { createSessionActions } = await import('@/stores/chat/session-actions');
     const h = makeHarness({
@@ -162,6 +225,8 @@ describe('chat session actions', () => {
             key: 'agent:main:cron:job-1',
             label: 'Cron: Drink water',
             updatedAt: 1773281731621,
+            pinned: true,
+            pinOrder: 4,
           },
         ],
       },
@@ -171,7 +236,53 @@ describe('chat session actions', () => {
 
     expect(h.read().sessionLastActivity['agent:main:main']).toBe(1773281700000);
     expect(h.read().sessionLastActivity['agent:main:cron:job-1']).toBe(1773281731621);
-    expect(h.read().sessions.find((session) => session.key === 'agent:main:cron:job-1')?.updatedAt).toBe(1773281731621);
+    expect(h.read().sessions.find((session) => session.key === 'agent:main:cron:job-1')).toMatchObject({
+      updatedAt: 1773281731621,
+      pinned: true,
+      pinOrder: 4,
+    });
+  });
+
+  it('loadSessions merges persisted pin metadata from the host session store', async () => {
+    const { createSessionActions } = await import('@/stores/chat/session-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:main:main',
+      sessions: [],
+    });
+    const actions = createSessionActions(h.set as never, h.get as never);
+
+    invokeIpcMock.mockResolvedValueOnce({
+      success: true,
+      result: {
+        sessions: [
+          {
+            key: 'agent:main:session-1',
+            label: 'Pinned from disk',
+            updatedAt: 1773281700000,
+          },
+        ],
+      },
+    });
+    hostApiFetchMock.mockResolvedValueOnce({
+      success: true,
+      metadata: {
+        'agent:main:session-1': {
+          pinned: true,
+          pinOrder: 7,
+        },
+      },
+    });
+
+    await actions.loadSessions();
+
+    expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/metadata', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKeys: ['agent:main:session-1'] }),
+    });
+    expect(h.read().sessions.find((session) => session.key === 'agent:main:session-1')).toMatchObject({
+      pinned: true,
+      pinOrder: 7,
+    });
   });
 });
 

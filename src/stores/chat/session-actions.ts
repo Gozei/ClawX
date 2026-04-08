@@ -1,4 +1,5 @@
 import { invokeIpc } from '@/lib/api-client';
+import { hostApiFetch } from '@/lib/host-api';
 import { getCanonicalPrefixFromSessions, getMessageText, toMs } from './helpers';
 import { DEFAULT_CANONICAL_PREFIX, DEFAULT_SESSION_KEY, type ChatSession, type RawMessage } from './types';
 import type { ChatGet, ChatSet, SessionHistoryActions } from './store-api';
@@ -22,10 +23,26 @@ function parseSessionUpdatedAtMs(value: unknown): number | undefined {
   return undefined;
 }
 
+function parseSessionPinned(value: unknown): boolean {
+  return value === true;
+}
+
+function parseSessionPinOrder(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  return undefined;
+}
+
+function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boolean {
+  const session = sessions.find((entry) => entry.key === sessionKey);
+  return typeof session?.label === 'string' && session.label.trim().length > 0;
+}
+
 export function createSessionActions(
   set: ChatSet,
   get: ChatGet,
-): Pick<SessionHistoryActions, 'loadSessions' | 'switchSession' | 'newSession' | 'deleteSession' | 'cleanupEmptySession'> {
+): Pick<SessionHistoryActions, 'loadSessions' | 'switchSession' | 'newSession' | 'renameSession' | 'toggleSessionPin' | 'deleteSession' | 'cleanupEmptySession'> {
   return {
     loadSessions: async () => {
       try {
@@ -38,6 +55,29 @@ export function createSessionActions(
         if (result.success && result.result) {
           const data = result.result;
           const rawSessions = Array.isArray(data.sessions) ? data.sessions : [];
+          const sessionKeys = rawSessions
+            .map((session) => (typeof (session as Record<string, unknown>).key === 'string' ? String((session as Record<string, unknown>).key) : ''))
+            .filter(Boolean);
+
+          let persistedMetadata: Record<string, { pinned?: boolean; pinOrder?: number }> = {};
+          if (sessionKeys.length > 0) {
+            try {
+              const metadataResult = await hostApiFetch<{
+                success: boolean;
+                metadata?: Record<string, { pinned?: boolean; pinOrder?: number }>;
+              }>('/api/sessions/metadata', {
+                method: 'POST',
+                body: JSON.stringify({ sessionKeys }),
+              });
+
+              if (metadataResult?.success && metadataResult.metadata) {
+                persistedMetadata = metadataResult.metadata;
+              }
+            } catch {
+              // Fall back to gateway-provided fields when local metadata is unavailable.
+            }
+          }
+
           const sessions: ChatSession[] = rawSessions.map((s: Record<string, unknown>) => ({
             key: String(s.key || ''),
             label: s.label ? String(s.label) : undefined,
@@ -45,6 +85,8 @@ export function createSessionActions(
             thinkingLevel: s.thinkingLevel ? String(s.thinkingLevel) : undefined,
             model: s.model ? String(s.model) : undefined,
             updatedAt: parseSessionUpdatedAtMs(s.updatedAt),
+            pinned: parseSessionPinned(persistedMetadata[String(s.key || '')]?.pinned ?? s.pinned),
+            pinOrder: parseSessionPinOrder(persistedMetadata[String(s.key || '')]?.pinOrder ?? s.pinOrder),
           })).filter((s: ChatSession) => s.key);
 
           const canonicalBySuffix = new Map<string, string>();
@@ -130,7 +172,7 @@ export function createSessionActions(
                     const next: Partial<typeof s> = {};
                     if (firstUser) {
                       const labelText = getMessageText(firstUser.content).trim();
-                      if (labelText) {
+                      if (labelText && !s.sessionLabels[session.key] && !hasStoredSessionLabel(s.sessions, session.key)) {
                         const truncated = labelText.length > 50 ? `${labelText.slice(0, 50)}…` : labelText;
                         next.sessionLabels = { ...s.sessionLabels, [session.key]: truncated };
                       }
@@ -154,9 +196,10 @@ export function createSessionActions(
 
     switchSession: (key: string) => {
       const { currentSessionKey, messages, sessionLastActivity, sessionLabels } = get();
-      // 仅将没有任何历史记录且无活动时间的会话视为空会话。
-      // 单纯依赖 messages.length 是不可靠的，因为 switchSession 会在真正调用 loadHistory 前抢先清空当前 messages，
-      // 造成竞争条件，使得带有真实历史的会话被判定为空并从侧边栏移除。
+      // Only treat sessions with no history records and no activity timestamp as empty.
+      // Relying solely on messages.length is unreliable because switchSession clears
+      // the current messages before loadHistory runs, creating a race condition that
+      // could cause sessions with real history to be incorrectly removed from the sidebar.
       const leavingEmpty = !currentSessionKey.endsWith(':main')
         && messages.length === 0
         && !sessionLastActivity[currentSessionKey]
@@ -253,7 +296,7 @@ export function createSessionActions(
       // sessions.reset archives (renames) the session JSONL file, making old
       // conversation history inaccessible when the user switches back to it.
       const { currentSessionKey, messages, sessionLastActivity, sessionLabels } = get();
-      // 仅将没有任何历史记录且无活动时间的会话视为空会话
+      // Only treat sessions with no history records and no activity timestamp as empty
       const leavingEmpty = !currentSessionKey.endsWith(':main')
         && messages.length === 0
         && !sessionLastActivity[currentSessionKey]
@@ -288,14 +331,72 @@ export function createSessionActions(
 
     // ── Cleanup empty session on navigate away ──
 
+    renameSession: async (key: string, label: string) => {
+      const trimmed = label.trim();
+      const normalized = Array.from(trimmed).slice(0, 30).join('');
+      if (!normalized) return;
+
+      await hostApiFetch<{ success: boolean; label: string }>('/api/sessions/rename', {
+        method: 'POST',
+        body: JSON.stringify({ sessionKey: key, label: normalized }),
+      });
+
+      set((s) => ({
+        sessions: s.sessions.map((session) => (
+          session.key === key
+            ? { ...session, label: normalized }
+            : session
+        )),
+        sessionLabels: {
+          ...s.sessionLabels,
+          [key]: normalized,
+        },
+      }));
+    },
+
+    toggleSessionPin: async (key: string) => {
+      const currentSession = get().sessions.find((session) => session.key === key);
+      if (!currentSession) return;
+
+      const nextPinned = !currentSession.pinned;
+      const normalizedPinOrder = nextPinned
+        ? Math.max(
+          0,
+          ...get().sessions
+            .map((session) => (session.pinned && typeof session.pinOrder === 'number' ? session.pinOrder : 0)),
+        ) + 1
+        : undefined;
+
+      await hostApiFetch<{ success: boolean; pinned: boolean; pinOrder?: number }>('/api/sessions/pin', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionKey: key,
+          pinned: nextPinned,
+          pinOrder: normalizedPinOrder,
+        }),
+      });
+
+      set((s) => ({
+        sessions: s.sessions.map((session) => (
+          session.key === key
+            ? {
+              ...session,
+              pinned: nextPinned,
+              pinOrder: nextPinned ? normalizedPinOrder : undefined,
+            }
+            : session
+        )),
+      }));
+    },
+
     cleanupEmptySession: () => {
       const { currentSessionKey, messages, sessionLastActivity, sessionLabels } = get();
       // Only remove non-main sessions that were never used (no messages sent).
       // This mirrors the "leavingEmpty" logic in switchSession so that creating
       // a new session and immediately navigating away doesn't leave a ghost entry
       // in the sidebar.
-      // 同样需要综合检查 sessionLastActivity 和 sessionLabels，
-      // 防止因为 switchSession 抢先清空 messages 而误判有历史的会话为空。
+      // Also check sessionLastActivity and sessionLabels comprehensively to prevent
+      // falsely treating sessions with history as empty due to switchSession clearing messages early.
       const isEmptyNonMain = !currentSessionKey.endsWith(':main')
         && messages.length === 0
         && !sessionLastActivity[currentSessionKey]
