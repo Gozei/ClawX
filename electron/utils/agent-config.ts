@@ -10,7 +10,7 @@ import { mergeClawXSection } from './openclaw-workspace';
 import { buildSharedExecutionPlaybook } from '../../shared/agent-execution';
 
 const MAIN_AGENT_ID = 'main';
-const MAIN_AGENT_NAME = 'Main Agent';
+const MAIN_AGENT_NAME = 'Main Role';
 const DEFAULT_ACCOUNT_ID = 'default';
 const DEFAULT_WORKSPACE_PATH = '~/.openclaw/workspace';
 const AGENT_BOOTSTRAP_FILES = [
@@ -1027,7 +1027,7 @@ export async function updateAgentStudio(agentId: string, updates: AgentStudioUpd
 export async function deleteAgentConfig(agentId: string): Promise<{ snapshot: AgentsSnapshot; removedEntry: AgentListEntry }> {
   return withConfigLock(async () => {
     if (agentId === MAIN_AGENT_ID) {
-      throw new Error('The main agent cannot be deleted');
+      throw new Error('The main role cannot be deleted');
     }
 
     const config = await readOpenClawConfig() as AgentConfigDocument;

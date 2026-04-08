@@ -36,6 +36,9 @@ importers:
       posthog-node:
         specifier: ^5.28.0
         version: 5.28.5
+      '@whiskeysockets/baileys':
+        specifier: 7.0.0-rc.9
+        version: 7.0.0-rc.9(sharp@0.34.5)
       ws:
         specifier: ^8.19.0
         version: 8.20.0
@@ -121,9 +124,6 @@ importers:
       '@wecom/wecom-openclaw-plugin':
         specifier: ^2026.3.30
         version: 2026.3.30
-      '@whiskeysockets/baileys':
-        specifier: 7.0.0-rc.9
-        version: 7.0.0-rc.9(sharp@0.34.5)
       autoprefixer:
         specifier: ^10.4.24
         version: 10.4.27(postcss@8.5.8)

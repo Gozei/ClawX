@@ -183,8 +183,8 @@ export function Dashboard() {
     if (agents.length === 0) {
       issues.push({
         id: 'no-agents',
-        title: '尚未创建智能体',
-        detail: '至少创建一个智能体后，才能分配模型、技能和渠道。',
+        title: '尚未创建角色',
+        detail: '至少创建一个角色后，才能分配模型、技能和渠道。',
         severity: 'medium',
         href: '/agents',
       });
@@ -200,12 +200,12 @@ export function Dashboard() {
       <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-10 pt-16 pb-10">
         <PageHeader
           title="总览"
-          subtitle="查看网关、模型、渠道、定时任务与智能体的整体运行状态。"
+          subtitle="查看网关、模型、渠道、定时任务与角色的整体运行状态。"
           metadata={[
             `网关${gatewayStatus.state === 'running' ? '在线运行' : gatewayStatus.state === 'starting' ? '正在启动' : gatewayStatus.state === 'reconnecting' ? '正在重连' : gatewayStatus.state === 'error' ? '连接异常' : '尚未启动'}`,
             `${providerSummary.total} 个模型账户`,
             `${channelSummary.connected}/${channelSummary.total} 个渠道在线`,
-            `${agents.length} 个智能体`,
+            `${agents.length} 个角色`,
           ]}
           actions={(
             <Button
@@ -300,15 +300,15 @@ export function Dashboard() {
           <div className="space-y-6">
             <Card className="border-black/10 dark:border-white/10">
               <CardHeader>
-                <CardTitle className="text-xl">智能体概况</CardTitle>
+                <CardTitle className="text-xl">角色概况</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">智能体数量</span>
+                  <span className="text-muted-foreground">角色数量</span>
                   <span className="font-medium text-foreground">{agents.length}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">默认智能体</span>
+                  <span className="text-muted-foreground">默认角色</span>
                   <span className="font-medium text-foreground">{agents.find((agent) => agent.id === defaultAgentId)?.name ?? defaultAgentId}</span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -318,7 +318,7 @@ export function Dashboard() {
                 <Button asChild variant="outline" className="w-full">
                   <Link to="/agents">
                     <Bot className="mr-2 h-4 w-4" />
-                    管理智能体
+                    管理角色
                   </Link>
                 </Button>
               </CardContent>
@@ -361,7 +361,7 @@ export function Dashboard() {
               {providerError && <p>模型：{providerError}</p>}
               {channelsError && <p>渠道：{channelsError}</p>}
               {cronError && <p>定时任务：{cronError}</p>}
-              {agentsError && <p>智能体：{agentsError}</p>}
+              {agentsError && <p>角色：{agentsError}</p>}
             </CardContent>
           </Card>
         )}

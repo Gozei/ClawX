@@ -81,6 +81,7 @@
         "ms": "^2.1.3",
         "node-machine-id": "^1.1.12",
         "posthog-node": "^5.28.0",
+        "@whiskeysockets/baileys": "7.0.0-rc.9",
         "ws": "^8.19.0"
     },
     "devDependencies": {
@@ -111,7 +112,6 @@
         "@typescript-eslint/parser": "^8.56.0",
         "@vitejs/plugin-react": "^5.1.4",
         "@wecom/wecom-openclaw-plugin": "^2026.3.30",
-        "@whiskeysockets/baileys": "7.0.0-rc.9",
         "autoprefixer": "^10.4.24",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",

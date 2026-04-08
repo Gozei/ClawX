@@ -67,9 +67,18 @@ describe('agent config lifecycle', () => {
   it('falls back to the implicit main agent when no list exists', async () => {
     await writeOpenClawJson({});
 
-    const { listConfiguredAgentIds } = await import('@electron/utils/agent-config');
+    const { listConfiguredAgentIds, listAgentsSnapshot } = await import('@electron/utils/agent-config');
 
     await expect(listConfiguredAgentIds()).resolves.toEqual(['main']);
+    await expect(listAgentsSnapshot()).resolves.toMatchObject({
+      agents: [
+        expect.objectContaining({
+          id: 'main',
+          name: 'Main Role',
+          isDefault: true,
+        }),
+      ],
+    });
   });
 
   it('includes canonical per-agent main session keys in the snapshot', async () => {

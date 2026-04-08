@@ -2,193 +2,174 @@
  * Application Menu Configuration
  * Creates the native application menu for macOS/Windows/Linux
  */
-import { Menu, app, shell, BrowserWindow } from 'electron';
+import { Menu, shell, BrowserWindow } from 'electron';
+import { getResolvedBranding } from '../utils/branding';
+import { getCurrentNativeMenuLanguage, getNativeMenuMessages } from './native-localization';
 
 /**
  * Create application menu
  */
-export function createMenu(): void {
+export async function createMenu(): Promise<void> {
   const isMac = process.platform === 'darwin';
-  const appDisplayName = 'Deep AI Worker';
-  
+  const branding = await getResolvedBranding();
+  const labels = getNativeMenuMessages(await getCurrentNativeMenuLanguage()).appMenu;
+  const appDisplayName = branding.productName;
+
+  const navigate = (path: string) => {
+    const win = BrowserWindow.getFocusedWindow();
+    win?.webContents.send('navigate', path);
+  };
+
   const template: Electron.MenuItemConstructorOptions[] = [
-    // App menu (macOS only)
     ...(isMac
       ? [
           {
             label: appDisplayName,
             submenu: [
-              { role: 'about' as const, label: `关于 ${appDisplayName}` },
+              { role: 'about' as const, label: labels.aboutProduct(appDisplayName) },
               { type: 'separator' as const },
               {
-                label: '偏好设置...',
+                label: labels.preferences,
                 accelerator: 'Cmd+,',
-                click: () => {
-                  const win = BrowserWindow.getFocusedWindow();
-                  win?.webContents.send('navigate', '/settings');
-                },
+                click: () => navigate('/settings'),
               },
               { type: 'separator' as const },
-              { role: 'services' as const, label: '服务' },
+              { role: 'services' as const, label: labels.services },
               { type: 'separator' as const },
-              { role: 'hide' as const, label: `隐藏 ${appDisplayName}` },
-              { role: 'hideOthers' as const, label: '隐藏其他' },
-              { role: 'unhide' as const, label: '显示全部' },
+              { role: 'hide' as const, label: labels.hideProduct(appDisplayName) },
+              { role: 'hideOthers' as const, label: labels.hideOthers },
+              { role: 'unhide' as const, label: labels.showAll },
               { type: 'separator' as const },
-              { role: 'quit' as const, label: `退出 ${appDisplayName}` },
+              { role: 'quit' as const, label: labels.quitProduct(appDisplayName) },
             ],
           },
         ]
       : []),
-    
-    // File menu
+
     {
-      label: '文件',
+      label: labels.file,
       submenu: [
         {
-          label: '新建对话',
+          label: labels.newChat,
           accelerator: 'CmdOrCtrl+N',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            win?.webContents.send('navigate', '/chat');
-          },
+          click: () => navigate('/chat'),
         },
         { type: 'separator' },
-        isMac ? { role: 'close', label: '关闭窗口' } : { role: 'quit', label: `退出 ${appDisplayName}` },
+        isMac
+          ? { role: 'close' as const, label: labels.closeWindow }
+          : { role: 'quit' as const, label: labels.quitProduct(appDisplayName) },
       ],
     },
-    
-    // Edit menu
+
     {
-      label: '编辑',
+      label: labels.edit,
       submenu: [
-        { role: 'undo', label: '撤销' },
-        { role: 'redo', label: '重做' },
+        { role: 'undo', label: labels.undo },
+        { role: 'redo', label: labels.redo },
         { type: 'separator' },
-        { role: 'cut', label: '剪切' },
-        { role: 'copy', label: '复制' },
-        { role: 'paste', label: '粘贴' },
+        { role: 'cut', label: labels.cut },
+        { role: 'copy', label: labels.copy },
+        { role: 'paste', label: labels.paste },
         ...(isMac
           ? [
-              { role: 'pasteAndMatchStyle' as const, label: '粘贴并匹配样式' },
-              { role: 'delete' as const, label: '删除' },
-              { role: 'selectAll' as const, label: '全选' },
+              { role: 'pasteAndMatchStyle' as const, label: labels.pasteAndMatchStyle },
+              { role: 'delete' as const, label: labels.delete },
+              { role: 'selectAll' as const, label: labels.selectAll },
             ]
           : [
-              { role: 'delete' as const, label: '删除' },
+              { role: 'delete' as const, label: labels.delete },
               { type: 'separator' as const },
-              { role: 'selectAll' as const, label: '全选' },
+              { role: 'selectAll' as const, label: labels.selectAll },
             ]),
       ],
     },
-    
-    // View menu
+
     {
-      label: '显示',
+      label: labels.view,
       submenu: [
-        { role: 'reload', label: '重新载入' },
-        { role: 'forceReload', label: '强制重新载入' },
-        { role: 'toggleDevTools', label: '切换开发者工具' },
+        { role: 'reload', label: labels.reload },
+        { role: 'forceReload', label: labels.forceReload },
+        { role: 'toggleDevTools', label: labels.toggleDevTools },
         { type: 'separator' },
-        { role: 'resetZoom', label: '实际大小' },
-        { role: 'zoomIn', label: '放大' },
-        { role: 'zoomOut', label: '缩小' },
+        { role: 'resetZoom', label: labels.actualSize },
+        { role: 'zoomIn', label: labels.zoomIn },
+        { role: 'zoomOut', label: labels.zoomOut },
         { type: 'separator' },
-        { role: 'togglefullscreen', label: '切换全屏' },
+        { role: 'togglefullscreen', label: labels.toggleFullScreen },
       ],
     },
-    
-    // Navigate menu
+
     {
-      label: '导航',
+      label: labels.navigate,
       submenu: [
         {
-          label: '总览',
+          label: labels.overview,
           accelerator: 'CmdOrCtrl+1',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            win?.webContents.send('navigate', '/');
-          },
+          click: () => navigate('/'),
         },
         {
-          label: '对话',
+          label: labels.chat,
           accelerator: 'CmdOrCtrl+2',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            win?.webContents.send('navigate', '/chat');
-          },
+          click: () => navigate('/chat'),
         },
         {
-          label: '渠道',
+          label: labels.channels,
           accelerator: 'CmdOrCtrl+3',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            win?.webContents.send('navigate', '/channels');
-          },
+          click: () => navigate('/channels'),
         },
         {
-          label: '技能',
+          label: labels.skills,
           accelerator: 'CmdOrCtrl+4',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            win?.webContents.send('navigate', '/skills');
-          },
+          click: () => navigate('/skills'),
         },
         {
-          label: '定时任务',
+          label: labels.cron,
           accelerator: 'CmdOrCtrl+5',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            win?.webContents.send('navigate', '/cron');
-          },
+          click: () => navigate('/cron'),
         },
         {
-          label: '设置',
+          label: labels.settings,
           accelerator: isMac ? 'Cmd+,' : 'Ctrl+,',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            win?.webContents.send('navigate', '/settings');
-          },
+          click: () => navigate('/settings'),
         },
       ],
     },
-    
-    // Window menu
+
     {
-      label: '窗口',
+      label: labels.window,
       submenu: [
-        { role: 'minimize', label: '最小化' },
-        { role: 'zoom', label: '缩放' },
+        { role: 'minimize', label: labels.minimize },
+        { role: 'zoom', label: labels.zoom },
         ...(isMac
           ? [
               { type: 'separator' as const },
-              { role: 'front' as const, label: '前置全部窗口' },
+              { role: 'front' as const, label: labels.bringAllToFront },
               { type: 'separator' as const },
-              { role: 'window' as const, label: '窗口' },
+              { role: 'window' as const, label: labels.window },
             ]
-          : [{ role: 'close' as const, label: '关闭窗口' }]),
+          : [{ role: 'close' as const, label: labels.closeWindow }]),
       ],
     },
-    
-    // Help menu
+
     {
       role: 'help',
+      label: labels.help,
       submenu: [
         {
-          label: '官网',
+          label: labels.website,
           click: async () => {
             await shell.openExternal('https://claw-x.com');
           },
         },
         {
-          label: '反馈问题',
+          label: labels.reportIssue,
           click: async () => {
             await shell.openExternal('https://github.com/ValueCell-ai');
           },
         },
         { type: 'separator' },
         {
-          label: 'OpenClaw 文档',
+          label: labels.openClawDocs,
           click: async () => {
             await shell.openExternal('https://docs.openclaw.ai');
           },
@@ -196,7 +177,7 @@ export function createMenu(): void {
       ],
     },
   ];
-  
+
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
 }

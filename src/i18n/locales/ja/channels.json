@@ -1,6 +1,6 @@
 {
     "title": "メッセージングチャンネル",
-    "subtitle": "メッセージングチャンネル、アカウント、Agent への紐付け、チャンネルのデフォルトアカウントを一元管理します",
+    "subtitle": "メッセージングチャンネル、アカウント、Role への紐付け、チャンネルのデフォルトアカウントを一元管理します",
     "refresh": "更新",
     "addChannel": "チャンネルを追加",
     "stats": {
@@ -42,7 +42,7 @@
         "deleteConfirm": "このアカウントを削除してもよろしいですか？",
         "default": "現在の既定",
         "setDefault": "チャンネル既定に設定",
-        "bindAgentLabel": "紐付け Agent",
+        "bindAgentLabel": "紐付け Role",
         "unassigned": "未割り当て",
         "mainAccount": "メインアカウント",
         "customIdLabel": "アカウント ID",

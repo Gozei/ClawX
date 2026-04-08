@@ -156,7 +156,7 @@ function inferUsageTags(modelId: string): string[] {
   }
   if (normalized.includes('qwen') || normalized.includes('glm')) tags.add('中文写作');
   if (normalized.includes('gpt-5') || normalized.includes('glm-5') || normalized.includes('claude-opus') || normalized.includes('gemini-3-pro')) {
-    tags.add('Agent 编排');
+    tags.add('Role 编排');
   }
 
   if (tags.size === 0) {

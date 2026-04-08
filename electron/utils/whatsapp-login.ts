@@ -39,27 +39,17 @@ function resolveOpenClawPackageJson(packageName: string): string {
     }
 }
 
-const baileysPath = dirname(resolveOpenClawPackageJson('@whiskeysockets/baileys'));
-const qrCodeModulePath = openclawRequire.resolve('qrcode-terminal/vendor/QRCode/index.js');
-const qrErrorCorrectLevelPath = openclawRequire.resolve('qrcode-terminal/vendor/QRCode/QRErrorCorrectLevel.js');
+type BaileysSocket = {
+    ev: {
+        on: (event: string, listener: (...args: unknown[]) => void) => void;
+        removeAllListeners: (event?: string) => void;
+    };
+    ws?: {
+        close?: () => void;
+    };
+    end: (error?: Error | undefined) => void;
+};
 
-// Load Baileys dependencies dynamically
-const {
-    default: makeWASocket,
-    useMultiFileAuthState: initAuth, // Rename to avoid React hook linter error
-    DisconnectReason,
-    fetchLatestBaileysVersion
-} = require(baileysPath);
-
-// Load QRCode dependencies dynamically
-const QRCodeModule = require(qrCodeModulePath);
-const QRErrorCorrectLevelModule = require(qrErrorCorrectLevelPath);
-
-// Types from Baileys (approximate since we don't have types for dynamic require)
-interface BaileysError extends Error {
-    output?: { statusCode?: number };
-}
-type BaileysSocket = ReturnType<typeof makeWASocket>;
 type ConnectionState = {
     connection: 'close' | 'open' | 'connecting';
     lastDisconnect?: {
@@ -68,12 +58,98 @@ type ConnectionState = {
     qr?: string;
 };
 
+type PinoLogger = {
+    trace: (...args: unknown[]) => void;
+    debug: (...args: unknown[]) => void;
+    info: (...args: unknown[]) => void;
+    warn: (...args: unknown[]) => void;
+    error: (...args: unknown[]) => void;
+    fatal: (...args: unknown[]) => void;
+    child: () => PinoLogger;
+};
+
+type PinoFactory = (options?: Record<string, unknown>) => PinoLogger;
+
+type WhatsAppRuntimeDeps = {
+    baileysPath: string;
+    makeWASocket: (options: Record<string, unknown>) => BaileysSocket;
+    initAuth: (authDir: string) => Promise<{
+        state: unknown;
+        saveCreds: () => Promise<void>;
+    }>;
+    DisconnectReason: { loggedOut?: number };
+    fetchLatestBaileysVersion: () => Promise<{ version: number[] }>;
+    QRCode: new (typeNumber: number, errorCorrectionLevel: unknown) => {
+        addData(input: string): void;
+        make(): void;
+        getModuleCount(): number;
+        isDark(row: number, col: number): boolean;
+    };
+    QRErrorCorrectLevel: { L: unknown };
+};
+
+export class WhatsAppDependencyError extends Error {
+    constructor(message: string, options?: ErrorOptions) {
+        super(message, options);
+        this.name = 'WhatsAppDependencyError';
+    }
+}
+
+let cachedRuntimeDeps: WhatsAppRuntimeDeps | null = null;
+
+function createWhatsAppDependencyError(error: unknown): WhatsAppDependencyError {
+    const reason = error instanceof Error ? error.message : String(error);
+    return new WhatsAppDependencyError(
+        'WhatsApp support is unavailable because required runtime dependencies ' +
+        `could not be resolved from the bundled OpenClaw runtime. ` +
+        `openclawPath=${openclawPath}, resolvedPath=${openclawResolvedPath}. ${reason}`,
+        error instanceof Error ? { cause: error } : undefined,
+    );
+}
+
+export function loadWhatsAppRuntimeDeps(): WhatsAppRuntimeDeps {
+    if (cachedRuntimeDeps) {
+        return cachedRuntimeDeps;
+    }
+
+    try {
+        const baileysPath = dirname(resolveOpenClawPackageJson('@whiskeysockets/baileys'));
+        const qrCodeModulePath = openclawRequire.resolve('qrcode-terminal/vendor/QRCode/index.js');
+        const qrErrorCorrectLevelPath = openclawRequire.resolve('qrcode-terminal/vendor/QRCode/QRErrorCorrectLevel.js');
+        const baileysModule = require(baileysPath) as {
+            default: (options: Record<string, unknown>) => BaileysSocket;
+            useMultiFileAuthState: (authDir: string) => Promise<{
+                state: unknown;
+                saveCreds: () => Promise<void>;
+            }>;
+            DisconnectReason: { loggedOut?: number };
+            fetchLatestBaileysVersion: () => Promise<{ version: number[] }>;
+        };
+
+        cachedRuntimeDeps = {
+            baileysPath,
+            makeWASocket: baileysModule.default,
+            initAuth: baileysModule.useMultiFileAuthState,
+            DisconnectReason: baileysModule.DisconnectReason,
+            fetchLatestBaileysVersion: baileysModule.fetchLatestBaileysVersion,
+            QRCode: require(qrCodeModulePath) as WhatsAppRuntimeDeps['QRCode'],
+            QRErrorCorrectLevel: require(qrErrorCorrectLevelPath) as WhatsAppRuntimeDeps['QRErrorCorrectLevel'],
+        };
+
+        return cachedRuntimeDeps;
+    } catch (error) {
+        throw createWhatsAppDependencyError(error);
+    }
+}
+
+interface BaileysError extends Error {
+    output?: { statusCode?: number };
+}
+
 // --- QR Generation Logic (Adapted from OpenClaw) ---
 
-const QRCode = QRCodeModule;
-const QRErrorCorrectLevel = QRErrorCorrectLevelModule;
-
 function createQrMatrix(input: string) {
+    const { QRCode, QRErrorCorrectLevel } = loadWhatsAppRuntimeDeps();
     const qr = new QRCode(-1, QRErrorCorrectLevel.L);
     qr.addData(input);
     qr.make();
@@ -188,6 +264,40 @@ async function renderQrPngBase64(
     return png.toString('base64');
 }
 
+export function cleanupWhatsAppLoginCredentials(accountId: string): void {
+    const authDir = join(homedir(), '.openclaw', 'credentials', 'whatsapp', accountId);
+    if (!existsSync(authDir)) {
+        return;
+    }
+
+    rmSync(authDir, { recursive: true, force: true });
+    console.log(`[WhatsAppLogin] Cleaned up auth dir for cancelled login: ${authDir}`);
+
+    const parentDir = join(homedir(), '.openclaw', 'credentials', 'whatsapp');
+    if (!existsSync(parentDir)) {
+        return;
+    }
+
+    const remaining = readdirSync(parentDir);
+    if (remaining.length === 0) {
+        rmSync(parentDir, { recursive: true, force: true });
+        console.log('[WhatsAppLogin] Removed empty whatsapp credentials directory');
+    }
+}
+
+function createFallbackPino(): PinoFactory {
+    const fallback: PinoFactory = () => ({
+        trace: () => { },
+        debug: () => { },
+        info: () => { },
+        warn: () => { },
+        error: () => { },
+        fatal: () => { },
+        child: () => fallback(),
+    });
+    return fallback;
+}
+
 // --- WhatsApp Login Manager ---
 
 export class WhatsAppLoginManager extends EventEmitter {
@@ -247,6 +357,14 @@ export class WhatsAppLoginManager extends EventEmitter {
         if (!this.active) return;
 
         try {
+            const {
+                baileysPath,
+                makeWASocket,
+                initAuth,
+                DisconnectReason,
+                fetchLatestBaileysVersion,
+            } = loadWhatsAppRuntimeDeps();
+
             // Path where OpenClaw expects WhatsApp credentials
             const authDir = join(homedir(), '.openclaw', 'credentials', 'whatsapp', accountId);
 
@@ -258,27 +376,18 @@ export class WhatsAppLoginManager extends EventEmitter {
             console.log(`[WhatsAppLogin] Connecting for ${accountId} at ${authDir} (Attempt ${this.retryCount + 1})`);
 
 
-            let pino: (...args: unknown[]) => Record<string, unknown>;
+            let pino: PinoFactory;
             try {
                 // Try to resolve pino from baileys context since it's a dependency of baileys
                 const baileysRequire = createRequire(join(baileysPath, 'package.json'));
-                pino = baileysRequire('pino');
+                pino = baileysRequire('pino') as PinoFactory;
             } catch (e) {
                 console.warn('[WhatsAppLogin] Could not load pino from baileys, trying root', e);
                 try {
-                    pino = require('pino');
+                    pino = require('pino') as PinoFactory;
                 } catch {
                     console.warn('[WhatsAppLogin] Pino not found, using console fallback');
-                    // Mock pino logger if missing
-                    pino = () => ({
-                        trace: () => { },
-                        debug: () => { },
-                        info: () => { },
-                        warn: () => { },
-                        error: () => { },
-                        fatal: () => { },
-                        child: () => pino(),
-                    });
+                    pino = createFallbackPino();
                 }
             }
 
@@ -386,6 +495,11 @@ export class WhatsAppLoginManager extends EventEmitter {
 
         } catch (error) {
             console.error('[WhatsAppLogin] Fatal Connect Error:', error);
+            if (error instanceof WhatsAppDependencyError) {
+                this.active = false;
+                this.emit('error', error.message);
+                throw error;
+            }
             if (this.active && this.retryCount < this.maxRetries) {
                 this.retryCount++;
                 setTimeout(() => this.connectToWhatsApp(accountId), 2000);
@@ -430,20 +544,7 @@ export class WhatsAppLoginManager extends EventEmitter {
         // as configured based solely on the existence of this directory.
         if (shouldCleanup && cleanupAccountId) {
             try {
-                const authDir = join(homedir(), '.openclaw', 'credentials', 'whatsapp', cleanupAccountId);
-                if (existsSync(authDir)) {
-                    rmSync(authDir, { recursive: true, force: true });
-                    console.log(`[WhatsAppLogin] Cleaned up auth dir for cancelled login: ${authDir}`);
-                    // Also remove the parent whatsapp dir if it's now empty
-                    const parentDir = join(homedir(), '.openclaw', 'credentials', 'whatsapp');
-                    if (existsSync(parentDir)) {
-                        const remaining = readdirSync(parentDir);
-                        if (remaining.length === 0) {
-                            rmSync(parentDir, { recursive: true, force: true });
-                            console.log('[WhatsAppLogin] Removed empty whatsapp credentials directory');
-                        }
-                    }
-                }
+                cleanupWhatsAppLoginCredentials(cleanupAccountId);
             } catch (err) {
                 console.error('[WhatsAppLogin] Failed to clean up auth dir after cancel:', err);
             }

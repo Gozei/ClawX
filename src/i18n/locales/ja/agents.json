@@ -1,9 +1,9 @@
 {
-    "title": "Agents",
+    "title": "Roles",
     "subtitle": "エージェントを定義し、スキルを装着し、業務フローをまとめて運用できます。",
     "refresh": "更新",
-    "addAgent": "Agent を追加",
-    "gatewayWarning": "Gateway サービスが停止しています。Agent または Channel の変更が反映されるまで少し時間がかかる場合があります。",
+    "addAgent": "Role を追加",
+    "gatewayWarning": "Gateway サービスが停止しています。Role または Channel の変更が反映されるまで少し時間がかかる場合があります。",
     "defaultBadge": "default",
     "inherited": "継承",
     "none": "なし",
@@ -13,20 +13,20 @@
     "skillCount": "{{count}} 個のスキル",
     "workflowCount": "{{count}} 個のフローステップ",
     "triggerCount": "{{count}} 個の起動方式",
-    "deleteAgent": "Agent を削除",
+    "deleteAgent": "Role を削除",
     "settings": "設定",
     "creating": "作成中...",
     "createDialog": {
-        "title": "Agent を追加",
-        "description": "役割タイプ、業務目標、役割説明を先に定義し、そのうえでメイン Agent のワークスペース初期ファイルを引き継ぐか決めます。",
-        "nameLabel": "Agent 名",
+        "title": "Role を追加",
+        "description": "役割タイプ、業務目標、役割説明を先に定義し、そのうえでメイン Role のワークスペース初期ファイルを引き継ぐか決めます。",
+        "nameLabel": "Role 名",
         "namePlaceholder": "Coding Helper",
-        "profileTypeLabel": "Agent タイプ",
+        "profileTypeLabel": "Role タイプ",
         "objectiveLabel": "業務目標",
-        "objectivePlaceholder": "この Agent が最終的にどんな業務成果を出すべきかを書いてください。",
+        "objectivePlaceholder": "この Role が最終的にどんな業務成果を出すべきかを書いてください。",
         "roleLabel": "役割説明",
-        "rolePlaceholder": "この Agent が何者で、誰に奉仕し、何を担当するかを書いてください。",
-        "inheritWorkspaceLabel": "メイン Agent のワークスペースを引き継ぐ",
+        "rolePlaceholder": "この Role が何者で、誰に奉仕し、何を担当するかを書いてください。",
+        "inheritWorkspaceLabel": "メイン Role のワークスペースを引き継ぐ",
         "inheritWorkspaceDescription": "SOUL.md、AGENTS.md などの初期ファイルをコピーします"
     },
     "profileTypes": {
@@ -40,16 +40,16 @@
         },
         "coordinator": {
             "label": "調整型",
-            "description": "作業を分解し、下流 Agent に委譲し、最終結果をまとめます。"
+            "description": "作業を分解し、下流 Role に委譲し、最終結果をまとめます。"
         }
     },
     "deleteDialog": {
-        "title": "Agent を削除",
-        "message": "{{appName}} から「{{name}}」を削除しますか？この操作により Agent と、その {{appName}} 管理下のワークスペース、実行時ファイル、セッションファイルがディスクから完全に削除されます。"
+        "title": "Role を削除",
+        "message": "{{appName}} から「{{name}}」を削除しますか？この操作により Role と、その {{appName}} 管理下のワークスペース、実行時ファイル、セッションファイルがディスクから完全に削除されます。"
     },
     "settingsDialog": {
         "title": "{{name}} Settings",
-        "description": "Agent 名を更新し、この Agent に属する Channel を管理します。",
+        "description": "Role 名を更新し、この Role に属する Channel を管理します。",
         "tabs": {
             "overview": "概要",
             "skills": "スキル",
@@ -57,13 +57,13 @@
             "runtime": "稼働",
             "channels": "チャンネル"
         },
-        "nameLabel": "Agent 名",
-        "agentIdLabel": "Agent ID",
-        "profileTypeLabel": "Agent タイプ",
+        "nameLabel": "Role 名",
+        "agentIdLabel": "Role ID",
+        "profileTypeLabel": "Role タイプ",
         "descriptionLabel": "役割説明",
         "descriptionPlaceholder": "このエージェントが担当する業務、対象ユーザー、期待する成果を書いてください。",
         "objectiveLabel": "業務目標",
-        "objectivePlaceholder": "この Agent が最終的に達成すべき成果物と結果を書いてください。",
+        "objectivePlaceholder": "この Role が最終的に達成すべき成果物と結果を書いてください。",
         "boundariesLabel": "実行境界",
         "boundariesPlaceholder": "推測してはいけない条件、確認が必要な条件、引き継ぐ条件を明確にしてください。",
         "outputContractLabel": "出力要件",
@@ -77,7 +77,7 @@
         "modelIdPlaceholder": "model-id",
         "modelPreview": "プレビュー",
         "modelOverridePlaceholder": "provider/model（例: openrouter/openai/gpt-5.4）",
-        "modelOverrideDescription": "この Agent の Provider とモデル ID を選択します。",
+        "modelOverrideDescription": "この Role の Provider とモデル ID を選択します。",
         "unsavedChangesTitle": "未保存の変更",
         "unsavedChangesMessage": "未保存の変更があります。閉じると変更が破棄されます。",
         "closeWithoutSaving": "保存せずに閉じる",
@@ -87,9 +87,9 @@
         "channelsDescription": "ここでは、このエージェントが受け持つチャネル関係を表示します。アカウント接続、紐付け、ルーティングは Channels ページで設定してください。",
         "openChannels": "チャネル設定へ",
         "mainAccount": "メインアカウント",
-        "channelsManagedInChannels": "この Agent はチャンネル種別に紐付いています。アカウント単位の紐付けは Channels ページで管理してください。",
+        "channelsManagedInChannels": "この Role はチャンネル種別に紐付いています。アカウント単位の紐付けは Channels ページで管理してください。",
         "addChannel": "Channel を追加",
-        "noChannels": "この Agent にはまだ Channel が割り当てられていません。",
+        "noChannels": "この Role にはまだ Channel が割り当てられていません。",
         "skillsTitle": "スキル構成",
         "skillsDescription": "このエージェントが呼び出せるスキルを選び、実行能力を持たせます。",
         "skillsSearchLabel": "スキルを絞り込む",
@@ -177,7 +177,7 @@
                 "description": "結果を指定したチャネルまたはアカウントへ送ります。"
             },
             "agent": {
-                "label": "Agent 呼び出し",
+                "label": "Role 呼び出し",
                 "description": "現在の文脈を別のエージェントに渡して続きの処理を任せます。"
             }
         },
@@ -185,7 +185,7 @@
             "skill": "装着済みスキルを選択",
             "model": "使用するモデル ID を入力",
             "channel": "紐付いたチャネルを選択",
-            "agent": "下流 Agent を選択",
+            "agent": "下流 Role を選択",
             "modelRef": "任意、provider/model を入力"
         },
         "workflowFailureModes": {
@@ -252,8 +252,8 @@
         },
         "runtimeOpenSession": "会話を開く",
         "saveStudio": "スタジオ設定を保存",
-        "pendingStudioChanges": "この Agent 定義には未保存の変更があります。閉じる前に保存してください。",
-        "studioSavedHint": "スタジオ定義は OpenClaw 設定と Agent ワークスペースへ同期されます。",
+        "pendingStudioChanges": "この Role 定義には未保存の変更があります。閉じる前に保存してください。",
+        "studioSavedHint": "スタジオ定義は OpenClaw 設定と Role ワークスペースへ同期されます。",
         "rightRailTitle": "スタジオ概要",
         "overview": {
             "skills": "装着スキル",
@@ -267,22 +267,22 @@
         "message": "{{name}} を削除しますか？現在の Channel 設定も削除されます。"
     },
     "toast": {
-        "agentCreated": "Agent を作成しました",
-        "agentCreateFailed": "Agent の作成に失敗しました: {{error}}",
-        "agentDeleted": "Agent を削除しました",
-        "agentDeleteFailed": "Agent の削除に失敗しました: {{error}}",
-        "agentUpdated": "Agent を更新しました",
-        "agentUpdateFailed": "Agent の更新に失敗しました: {{error}}",
+        "agentCreated": "Role を作成しました",
+        "agentCreateFailed": "Role の作成に失敗しました: {{error}}",
+        "agentDeleted": "Role を削除しました",
+        "agentDeleteFailed": "Role の削除に失敗しました: {{error}}",
+        "agentUpdated": "Role を更新しました",
+        "agentUpdateFailed": "Role の更新に失敗しました: {{error}}",
         "agentModelInvalid": "モデル形式は provider/model で指定してください",
         "agentModelProviderRequired": "先に Provider を選択してください",
         "agentModelIdRequired": "モデル ID は必須です",
-        "agentModelUpdated": "Agent のモデルを更新しました",
-        "agentModelUpdateFailed": "Agent モデルの更新に失敗しました: {{error}}",
-        "agentModelReset": "Agent モデルをデフォルトに戻しました",
-        "agentModelResetFailed": "Agent モデルのリセットに失敗しました: {{error}}",
+        "agentModelUpdated": "Role のモデルを更新しました",
+        "agentModelUpdateFailed": "Role モデルの更新に失敗しました: {{error}}",
+        "agentModelReset": "Role モデルをデフォルトに戻しました",
+        "agentModelResetFailed": "Role モデルのリセットに失敗しました: {{error}}",
         "agentStudioUpdated": "エージェントスタジオを更新しました",
         "agentStudioUpdateFailed": "エージェントスタジオの更新に失敗しました: {{error}}",
-        "channelAssigned": "{{channel}} を Agent に割り当てました",
+        "channelAssigned": "{{channel}} を Role に割り当てました",
         "channelAssignFailed": "Channel の割り当てに失敗しました: {{error}}",
         "channelRemoved": "{{channel}} を削除しました",
         "channelRemoveFailed": "Channel の削除に失敗しました: {{error}}"

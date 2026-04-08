@@ -5,9 +5,9 @@
 import { app, BrowserWindow, nativeImage, session, shell } from 'electron';
 import type { Server } from 'node:http';
 import { join } from 'path';
-import { GatewayManager } from '../gateway/manager';
+import { GatewayManager, type GatewayStatus } from '../gateway/manager';
 import { registerIpcHandlers } from './ipc-handlers';
-import { createTray } from './tray';
+import { createTray, updateTrayStatus } from './tray';
 import { createMenu } from './menu';
 import { attachContextMenu } from './context-menu';
 
@@ -312,7 +312,7 @@ async function initialize(): Promise<void> {
   }
 
   // Set application menu
-  createMenu();
+  await createMenu();
 
   // Create the main window
   const window = createMainWindow();
@@ -399,8 +399,11 @@ async function initialize(): Promise<void> {
 
   // Bridge gateway and host-side events before any auto-start logic runs, so
   // renderer subscribers observe the full startup lifecycle.
-  gatewayManager.on('status', (status: { state: string }) => {
+  gatewayManager.on('status', (status: GatewayStatus) => {
     hostEventBus.emit('gateway:status', status);
+    if (!isE2EMode) {
+      void updateTrayStatus(status.state);
+    }
     if (status.state === 'running' && !isE2EMode) {
     void ensureClawXContext().catch((error) => {
       logger.warn('Failed to re-merge Deep AI Worker context after gateway reconnect:', error);

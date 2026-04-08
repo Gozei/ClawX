@@ -2,7 +2,7 @@
     "steps": {
         "welcome": {
             "title": "欢迎使用 {{appName}}",
-            "description": "开始配置您的企业智能体中枢"
+            "description": "开始配置您的企业角色中枢"
         },
         "runtime": {
             "title": "环境检查",
@@ -27,7 +27,7 @@
     },
     "welcome": {
         "title": "欢迎使用 {{appName}}",
-        "description": "{{appName}} 是企业智能体的运行、协同与治理中枢。{{slogan}}。",
+        "description": "{{appName}} 是企业角色的运行、协同与治理中枢。{{slogan}}。",
         "features": {
             "noCommand": "无需命令行",
             "modernUI": "现代美观的界面",
@@ -115,7 +115,7 @@
     },
     "complete": {
         "title": "设置完成！",
-        "subtitle": "系统已配置完成。您现在可以开始连接模型、渠道与智能体。",
+        "subtitle": "系统已配置完成。您现在可以开始连接模型、渠道与角色。",
         "provider": "AI 提供商",
         "components": "组件",
         "gateway": "网关",
