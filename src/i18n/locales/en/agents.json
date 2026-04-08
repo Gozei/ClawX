@@ -1,9 +1,9 @@
 {
-    "title": "Agents",
-    "subtitle": "Define agents, attach skills, shape workflows, and manage how they operate in the business.",
+    "title": "Roles",
+    "subtitle": "Define roles, attach skills, shape workflows, and manage how they operate in the business.",
     "refresh": "Refresh",
-    "addAgent": "Add Agent",
-    "gatewayWarning": "Gateway service is not running. Agent/channel changes may take a moment to apply.",
+    "addAgent": "Add Role",
+    "gatewayWarning": "Gateway service is not running. Role/channel changes may take a moment to apply.",
     "defaultBadge": "default",
     "inherited": "inherited",
     "none": "none",
@@ -13,21 +13,21 @@
     "skillCount": "{{count}} skills",
     "workflowCount": "{{count}} workflow steps",
     "triggerCount": "{{count}} trigger modes",
-    "deleteAgent": "Delete Agent",
+    "deleteAgent": "Delete Role",
     "settings": "Settings",
     "creating": "Creating...",
     "createDialog": {
-        "title": "Add Agent",
-        "description": "Define the role type, business goal, and role statement first, then decide whether to inherit the main agent workspace bootstrap files.",
-        "nameLabel": "Agent Name",
+        "title": "Add Role",
+        "description": "Define the role type, business goal, and role statement first, then decide whether to inherit the main role workspace bootstrap files.",
+        "nameLabel": "Role Name",
         "namePlaceholder": "Coding Helper",
-        "profileTypeLabel": "Agent type",
+        "profileTypeLabel": "Role type",
         "objectiveLabel": "Business goal",
-        "objectivePlaceholder": "Describe the business result this agent should ultimately deliver.",
+        "objectivePlaceholder": "Describe the business result this role should ultimately deliver.",
         "roleLabel": "Role statement",
-        "rolePlaceholder": "Describe who this agent is, who it serves, and what work it owns.",
-        "inheritWorkspaceLabel": "Inherit main agent workspace",
-        "inheritWorkspaceDescription": "Copy SOUL.md, AGENTS.md, etc. from the main agent"
+        "rolePlaceholder": "Describe who this role is, who it serves, and what work it owns.",
+        "inheritWorkspaceLabel": "Inherit main role workspace",
+        "inheritWorkspaceDescription": "Copy SOUL.md, AGENTS.md, etc. from the main role"
     },
     "profileTypes": {
         "specialist": {
@@ -40,16 +40,16 @@
         },
         "coordinator": {
             "label": "Coordinator",
-            "description": "Breaks down work, delegates to downstream agents, and consolidates results."
+            "description": "Breaks down work, delegates to downstream roles, and consolidates results."
         }
     },
     "deleteDialog": {
-        "title": "Delete Agent",
-        "message": "Delete \"{{name}}\" from {{appName}}? This permanently deletes the agent and its {{appName}}-managed workspace, runtime, and session files from disk."
+        "title": "Delete Role",
+        "message": "Delete \"{{name}}\" from {{appName}}? This permanently deletes the role and its {{appName}}-managed workspace, runtime, and session files from disk."
     },
     "settingsDialog": {
         "title": "{{name}} Settings",
-        "description": "Update the agent name and manage which channels belong to this agent.",
+        "description": "Update the role name and manage which channels belong to this role.",
         "tabs": {
             "overview": "Overview",
             "skills": "Skills",
@@ -57,15 +57,15 @@
             "runtime": "Runtime",
             "channels": "Channels"
         },
-        "nameLabel": "Agent Name",
-        "agentIdLabel": "Agent ID",
-        "profileTypeLabel": "Agent type",
+        "nameLabel": "Role Name",
+        "agentIdLabel": "Role ID",
+        "profileTypeLabel": "Role type",
         "descriptionLabel": "Role Description",
-        "descriptionPlaceholder": "Describe what this agent owns, who it serves, and what outcomes it should deliver.",
+        "descriptionPlaceholder": "Describe what this role owns, who it serves, and what outcomes it should deliver.",
         "objectiveLabel": "Business goal",
-        "objectivePlaceholder": "Describe the end result and deliverable this agent is expected to achieve.",
+        "objectivePlaceholder": "Describe the end result and deliverable this role is expected to achieve.",
         "boundariesLabel": "Execution boundaries",
-        "boundariesPlaceholder": "Define when the agent must clarify, hand off, or stop instead of guessing.",
+        "boundariesPlaceholder": "Define when the role must clarify, hand off, or stop instead of guessing.",
         "outputContractLabel": "Output contract",
         "outputContractPlaceholder": "Define the expected format, structure, and quality bar of the final output.",
         "modelLabel": "Model",
@@ -77,33 +77,33 @@
         "modelIdPlaceholder": "model-id",
         "modelPreview": "Preview",
         "modelOverridePlaceholder": "provider/model (for example: openrouter/openai/gpt-5.4)",
-        "modelOverrideDescription": "Select provider and model ID for this agent.",
+        "modelOverrideDescription": "Select provider and model ID for this role.",
         "unsavedChangesTitle": "Unsaved changes",
         "unsavedChangesMessage": "You have unsaved changes. If you close now, your changes will be discarded.",
         "closeWithoutSaving": "Close without saving",
         "saveModelOverride": "Save model",
         "useDefaultModel": "Use default model",
         "channelsTitle": "Channels",
-        "channelsDescription": "This shows which channels currently route to the agent. Configure account login, bindings, and routing rules in the Channels page.",
+        "channelsDescription": "This shows which channels currently route to the role. Configure account login, bindings, and routing rules in the Channels page.",
         "openChannels": "Open channels",
         "mainAccount": "Main account",
-        "channelsManagedInChannels": "This agent is linked to channel types. Manage exact account bindings in the Channels page.",
+        "channelsManagedInChannels": "This role is linked to channel types. Manage exact account bindings in the Channels page.",
         "addChannel": "Add Channel",
-        "noChannels": "No channels are assigned to this agent yet.",
+        "noChannels": "No channels are assigned to this role yet.",
         "skillsTitle": "Skill Assembly",
-        "skillsDescription": "Choose which skills this agent can call so it can do real work, not just chat.",
+        "skillsDescription": "Choose which skills this role can call so it can do real work, not just chat.",
         "skillsSearchLabel": "Filter skills",
         "skillsSearchPlaceholder": "Search by name, description, or ID",
         "skillsEmpty": "No skills are available yet. Install or enable skills in the Skills page first.",
         "skillsNoMatch": "No matching skills found. Try a different keyword.",
         "skillDisabled": "Disabled",
         "workflowTitle": "Workflow",
-        "workflowDescription": "Use lightweight steps to define how this agent receives input, invokes capabilities, and delivers output.",
+        "workflowDescription": "Use lightweight steps to define how this role receives input, invokes capabilities, and delivers output.",
         "workflowTemplatesTitle": "Workflow templates",
         "workflowTemplatesDescription": "Start from a common flow, then tailor the steps to your business.",
         "workflowTemplates": {
             "support": {
-                "label": "Support agent",
+                "label": "Support role",
                 "description": "Good for inbound support, presales, and human handoff.",
                 "steps": [
                     "Receive the incoming message and identify the user's intent",
@@ -133,11 +133,11 @@
                 ]
             },
             "multiAgent": {
-                "label": "Multi-agent collaboration",
-                "description": "Good for a coordinator agent delegating work to specialist agents and skills.",
+                "label": "Multi-role collaboration",
+                "description": "Good for a coordinator role delegating work to specialist roles and skills.",
                 "steps": [
                     "Receive the business goal and turn it into a standard task brief",
-                    "Call a downstream agent for specialist processing",
+                    "Call a downstream role for specialist processing",
                     "Use a skill to validate the intermediate result and enrich data",
                     "Use the current model to consolidate the final business answer"
                 ]
@@ -149,7 +149,7 @@
         "workflowStepTitleLabel": "Step description",
         "workflowStepTargetLabel": "Execution target",
         "workflowStepModelRefLabel": "Step model override",
-        "workflowStepModelRefDescription": "Optional. Use a different model for this step without changing the agent default.",
+        "workflowStepModelRefDescription": "Optional. Use a different model for this step without changing the role default.",
         "workflowFailureModeLabel": "Failure handling",
         "workflowSuggestedModelsLabel": "Suggested models",
         "workflowInputSpecLabel": "Standard input",
@@ -177,15 +177,15 @@
                 "description": "Send the result to a bound channel or account."
             },
             "agent": {
-                "label": "Agent call",
-                "description": "Hand the current context to another agent so the workflow can collaborate across specialists."
+                "label": "Role call",
+                "description": "Hand the current context to another role so the workflow can collaborate across specialists."
             }
         },
         "workflowTargetPlaceholders": {
             "skill": "Select an attached skill",
             "model": "Enter the model ID to use",
             "channel": "Select a bound channel",
-            "agent": "Select a downstream agent",
+            "agent": "Select a downstream role",
             "modelRef": "Optional, enter provider/model"
         },
         "workflowFailureModes": {
@@ -199,12 +199,12 @@
             },
             "handoff": {
                 "label": "Handoff",
-                "description": "Stop the automated flow and hand off to a human or supervising agent."
+                "description": "Stop the automated flow and hand off to a human or supervising role."
             }
         },
         "addWorkflowStep": "Add step",
         "runtimeTitle": "Runtime",
-        "runtimeDescription": "Define how this agent is triggered and review its recent operating activity.",
+        "runtimeDescription": "Define how this role is triggered and review its recent operating activity.",
         "runtimeLoading": "Loading...",
         "triggerModes": {
             "manual": {
@@ -240,8 +240,8 @@
             "triggersReady": "{{count}} trigger modes enabled"
         },
         "runtimeRecentTitle": "Recent activity",
-        "runtimeRecentDescription": "A quick view of the latest sessions for this agent so you can tell whether it is actively working.",
-        "runtimeRecentEmpty": "No recent activity yet. Once this agent starts taking work, the recent sessions will appear here.",
+        "runtimeRecentDescription": "A quick view of the latest sessions for this role so you can tell whether it is actively working.",
+        "runtimeRecentEmpty": "No recent activity yet. Once this role starts taking work, the recent sessions will appear here.",
         "runtimeRecentFields": {
             "time": "Time",
             "model": "Model"
@@ -252,8 +252,8 @@
         },
         "runtimeOpenSession": "Open session",
         "saveStudio": "Save studio settings",
-        "pendingStudioChanges": "This agent definition has unsaved changes. Save it before closing.",
-        "studioSavedHint": "Studio definitions sync to OpenClaw config and the agent workspace.",
+        "pendingStudioChanges": "This role definition has unsaved changes. Save it before closing.",
+        "studioSavedHint": "Studio definitions sync to OpenClaw config and the role workspace.",
         "rightRailTitle": "Studio Summary",
         "overview": {
             "skills": "Skills attached",
@@ -267,22 +267,22 @@
         "message": "Remove {{name}} from {{appName}}? This deletes the current channel configuration."
     },
     "toast": {
-        "agentCreated": "Agent created",
-        "agentCreateFailed": "Failed to create agent: {{error}}",
-        "agentDeleted": "Agent deleted",
-        "agentDeleteFailed": "Failed to delete agent: {{error}}",
-        "agentUpdated": "Agent updated",
-        "agentUpdateFailed": "Failed to update agent: {{error}}",
+        "agentCreated": "Role created",
+        "agentCreateFailed": "Failed to create role: {{error}}",
+        "agentDeleted": "Role deleted",
+        "agentDeleteFailed": "Failed to delete role: {{error}}",
+        "agentUpdated": "Role updated",
+        "agentUpdateFailed": "Failed to update role: {{error}}",
         "agentModelInvalid": "Model must be in provider/model format",
         "agentModelProviderRequired": "Select a provider first",
         "agentModelIdRequired": "Model ID is required",
-        "agentModelUpdated": "Agent model updated",
-        "agentModelUpdateFailed": "Failed to update agent model: {{error}}",
-        "agentModelReset": "Agent model reset to default",
-        "agentModelResetFailed": "Failed to reset agent model: {{error}}",
-        "agentStudioUpdated": "Agent studio updated",
-        "agentStudioUpdateFailed": "Failed to update agent studio: {{error}}",
-        "channelAssigned": "{{channel}} assigned to agent",
+        "agentModelUpdated": "Role model updated",
+        "agentModelUpdateFailed": "Failed to update role model: {{error}}",
+        "agentModelReset": "Role model reset to default",
+        "agentModelResetFailed": "Failed to reset role model: {{error}}",
+        "agentStudioUpdated": "Role studio updated",
+        "agentStudioUpdateFailed": "Failed to update role studio: {{error}}",
+        "channelAssigned": "{{channel}} assigned to role",
         "channelAssignFailed": "Failed to assign channel: {{error}}",
         "channelRemoved": "{{channel}} removed",
         "channelRemoveFailed": "Failed to remove channel: {{error}}"

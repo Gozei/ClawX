@@ -559,7 +559,7 @@ function AgentCard({
         </div>
       </div>
 
-      <div className="mt-5 grid gap-3 border-t border-white/6 pt-4 md:grid-cols-4">
+      <div data-testid="agent-card-summary-grid" className="mt-5 grid gap-3 border-t border-black/10 pt-4 md:grid-cols-5 dark:border-white/6">
         <AgentMetric
           label={t('settingsDialog.profileTypeLabel')}
           value={safeProfileTypeLabel}
@@ -571,18 +571,18 @@ function AgentCard({
           tone={boundChannelAccounts.length > 0 ? 'primary' : 'muted'}
         />
         <AgentMetric
-          label={t('settingsDialog.runtimeSummaryTitle')}
+          label={t('settingsDialog.overview.triggers')}
           value={triggerText}
           tone={safeTriggerModes.length > 0 ? 'primary' : 'muted'}
         />
-        <div className="grid grid-cols-2 gap-3">
-          <StatPill label={t('skillCount', { count: safeSkillIds.length })} value={String(safeSkillIds.length)} />
-          <StatPill label={t('workflowCount', { count: safeWorkflowSteps.length })} value={String(safeWorkflowSteps.length)} />
-        </div>
+        <StatPill label={t('skillCount', { count: safeSkillIds.length })} value={String(safeSkillIds.length)} />
+        <StatPill label={t('workflowCount', { count: safeWorkflowSteps.length })} value={String(safeWorkflowSteps.length)} />
       </div>
     </div>
   );
 }
+
+const agentMetricCardClasses = 'h-full min-h-[96px] rounded-2xl border border-black/10 bg-white px-4 py-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.04] dark:shadow-none';
 
 function AgentMetric({
   label,
@@ -595,30 +595,29 @@ function AgentMetric({
 }) {
   return (
     <div
+      data-testid="agent-card-summary-item"
       className={cn(
-        'rounded-2xl border px-3.5 py-3',
-        tone === 'primary' && 'border-primary/18 bg-primary/[0.08]',
-        tone === 'neutral' && 'border-white/6 bg-white/[0.03]',
-        tone === 'muted' && 'border-white/5 bg-black/10',
+        agentMetricCardClasses,
+        tone === 'muted' ? 'text-foreground/62' : 'text-foreground',
       )}
     >
-      <p className="text-[11px] uppercase tracking-[0.16em] text-foreground/42">{label}</p>
-      <p className="mt-2 line-clamp-2 text-[14px] leading-6 text-foreground/82">{value}</p>
+      <p className="text-[11px] uppercase tracking-[0.16em] leading-4 text-foreground/42 [overflow-wrap:anywhere]">{label}</p>
+      <p className={cn('mt-2 line-clamp-2 text-[14px] leading-6', tone === 'muted' ? 'text-foreground/58' : 'text-foreground/82')}>{value}</p>
     </div>
   );
 }
 
 function StatPill({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-white/6 bg-white/[0.03] px-3.5 py-3">
-      <p className="text-[11px] uppercase tracking-[0.14em] text-foreground/42">{label}</p>
+    <div data-testid="agent-card-summary-item" className={agentMetricCardClasses}>
+      <p className="text-[11px] uppercase tracking-[0.14em] leading-4 text-foreground/42 [overflow-wrap:anywhere]">{label}</p>
       <p className="mt-2 text-[20px] font-semibold tracking-[-0.02em] text-foreground">{value}</p>
     </div>
   );
 }
 
-const inputClasses = 'h-[44px] rounded-xl font-mono text-[13px] bg-[#eeece3] dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
-const selectClasses = 'h-[44px] w-full rounded-xl font-mono text-[13px] bg-[#eeece3] dark:bg-muted border border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground px-3';
+const inputClasses = 'h-[44px] rounded-xl font-mono text-[13px] bg-background dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
+const selectClasses = 'h-[44px] w-full rounded-xl font-mono text-[13px] bg-background dark:bg-muted border border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground px-3';
 const labelClasses = 'text-[14px] text-foreground/80 font-bold';
 
 function ChannelLogo({ type }: { type: ChannelType }) {
@@ -711,7 +710,7 @@ function AddAgentDialog({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md rounded-3xl border-0 shadow-2xl bg-[#f3f1e9] dark:bg-card overflow-hidden">
+      <Card className="w-full max-w-md rounded-3xl border-0 shadow-2xl bg-background dark:bg-card overflow-hidden">
         <CardHeader className="pb-2">
           <CardTitle className="text-2xl font-serif font-normal tracking-tight">
             {t('createDialog.title')}
@@ -756,7 +755,7 @@ function AddAgentDialog({
               value={objective}
               onChange={(event) => setObjective(event.target.value)}
               placeholder={t('createDialog.objectivePlaceholder')}
-              className="min-h-24 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+              className="min-h-24 w-full rounded-2xl border border-black/10 bg-background px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
             />
           </div>
           <div className="space-y-2.5">
@@ -766,7 +765,7 @@ function AddAgentDialog({
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               placeholder={t('createDialog.rolePlaceholder')}
-              className="min-h-24 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+              className="min-h-24 w-full rounded-2xl border border-black/10 bg-background px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
             />
           </div>
           <div className="flex items-center justify-between">
@@ -1299,7 +1298,7 @@ function AgentSettingsModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-5xl max-h-[90vh] flex flex-col rounded-3xl border-0 shadow-2xl bg-[#f3f1e9] dark:bg-card overflow-hidden">
+      <Card className="w-full max-w-5xl max-h-[90vh] flex flex-col rounded-3xl border-0 shadow-2xl bg-background dark:bg-card overflow-hidden">
         <CardHeader className="flex flex-row items-start justify-between pb-2 shrink-0">
           <div>
             <CardTitle className="text-2xl font-serif font-normal tracking-tight">
@@ -1334,7 +1333,7 @@ function AgentSettingsModal({
                     variant="outline"
                     onClick={() => void handleSaveName()}
                     disabled={savingName || !name.trim() || name.trim() === safeAgentName}
-                    className="h-[44px] text-[13px] font-medium rounded-xl px-4 border-black/10 dark:border-white/10 bg-[#eeece3] dark:bg-muted hover:bg-black/5 dark:hover:bg-white/5 shadow-none text-foreground/80 hover:text-foreground"
+                    className="h-[44px] text-[13px] font-medium rounded-xl px-4 border-black/10 dark:border-white/10 bg-background dark:bg-muted hover:bg-black/5 dark:hover:bg-white/5 shadow-none text-foreground/80 hover:text-foreground"
                   >
                     {savingName ? <RefreshCw className="h-4 w-4 animate-spin" /> : t('common:actions.save')}
                   </Button>
@@ -1435,7 +1434,7 @@ function AgentSettingsModal({
                         value={objective}
                         onChange={(event) => setObjective(event.target.value)}
                         placeholder={t('settingsDialog.objectivePlaceholder')}
-                        className="min-h-28 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                        className="min-h-28 w-full rounded-2xl border border-black/10 bg-background px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
                       />
                     </div>
                     <div className="space-y-2.5">
@@ -1445,7 +1444,7 @@ function AgentSettingsModal({
                         value={outputContract}
                         onChange={(event) => setOutputContract(event.target.value)}
                         placeholder={t('settingsDialog.outputContractPlaceholder')}
-                        className="min-h-28 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                        className="min-h-28 w-full rounded-2xl border border-black/10 bg-background px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
                       />
                     </div>
                   </div>
@@ -1457,7 +1456,7 @@ function AgentSettingsModal({
                       value={description}
                       onChange={(event) => setDescription(event.target.value)}
                       placeholder={t('settingsDialog.descriptionPlaceholder')}
-                      className="min-h-28 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                      className="min-h-28 w-full rounded-2xl border border-black/10 bg-background px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
                     />
                   </div>
                   <div className="space-y-2.5">
@@ -1467,7 +1466,7 @@ function AgentSettingsModal({
                       value={boundaries}
                       onChange={(event) => setBoundaries(event.target.value)}
                       placeholder={t('settingsDialog.boundariesPlaceholder')}
-                      className="min-h-28 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                      className="min-h-28 w-full rounded-2xl border border-black/10 bg-background px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
                     />
                   </div>
                 </TabsContent>
@@ -1577,7 +1576,7 @@ function AgentSettingsModal({
                               <select
                                 value={step.type}
                                 onChange={(event) => handleWorkflowNodeChange(index, 'type', event.target.value as AgentWorkflowNode['type'])}
-                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-[#eeece3] px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-background px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
                               >
                                 {workflowStepTypeOptions.map((option) => (
                                   <option key={option.id} value={option.id}>
@@ -1605,7 +1604,7 @@ function AgentSettingsModal({
                               <select
                                 value={step.target || ''}
                                 onChange={(event) => handleWorkflowNodeChange(index, 'target', event.target.value)}
-                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-[#eeece3] px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-background px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
                               >
                                 <option value="">{t('settingsDialog.workflowTargetPlaceholders.skill')}</option>
                                 {assignedSkillDetails.map((skill) => (
@@ -1622,7 +1621,7 @@ function AgentSettingsModal({
                               <select
                                 value={step.target || ''}
                                 onChange={(event) => handleWorkflowNodeChange(index, 'target', event.target.value)}
-                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-[#eeece3] px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-background px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
                               >
                                 <option value="">{t('settingsDialog.workflowTargetPlaceholders.agent')}</option>
                                 {availableAgentTargets.map((candidate) => (
@@ -1648,7 +1647,7 @@ function AgentSettingsModal({
                                       <select
                                         value={selectedProviderKey}
                                         onChange={(event) => handleWorkflowModelProviderChange(index, event.target.value)}
-                                        className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-[#eeece3] px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                                        className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-background px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
                                       >
                                         <option value="">{t('settingsDialog.modelProviderPlaceholder')}</option>
                                         {runtimeProviderOptions.map((option) => (
@@ -1717,7 +1716,7 @@ function AgentSettingsModal({
                               <select
                                 value={step.target || ''}
                                 onChange={(event) => handleWorkflowNodeChange(index, 'target', event.target.value)}
-                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-[#eeece3] px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-background px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
                               >
                                 <option value="">{t('settingsDialog.workflowTargetPlaceholders.channel')}</option>
                                 {assignedChannels.map((channel) => {
@@ -1738,7 +1737,7 @@ function AgentSettingsModal({
                                 value={step.inputSpec || ''}
                                 onChange={(event) => handleWorkflowNodeChange(index, 'inputSpec', event.target.value)}
                                 placeholder={t('settingsDialog.workflowInputSpecPlaceholder')}
-                                className="mt-2 min-h-24 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                                className="mt-2 min-h-24 w-full rounded-2xl border border-black/10 bg-background px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
                               />
                             </div>
                             <div>
@@ -1747,7 +1746,7 @@ function AgentSettingsModal({
                                 value={step.outputSpec || ''}
                                 onChange={(event) => handleWorkflowNodeChange(index, 'outputSpec', event.target.value)}
                                 placeholder={t('settingsDialog.workflowOutputSpecPlaceholder')}
-                                className="mt-2 min-h-24 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                                className="mt-2 min-h-24 w-full rounded-2xl border border-black/10 bg-background px-4 py-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
                               />
                             </div>
                           </div>
@@ -1757,7 +1756,7 @@ function AgentSettingsModal({
                               value={step.code || ''}
                               onChange={(event) => handleWorkflowNodeChange(index, 'code', event.target.value)}
                               placeholder={t('settingsDialog.workflowCodePlaceholder')}
-                              className="mt-2 min-h-24 w-full rounded-2xl border border-black/10 bg-[#eeece3] px-4 py-3 font-mono text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                              className="mt-2 min-h-24 w-full rounded-2xl border border-black/10 bg-background px-4 py-3 font-mono text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
                             />
                             <p className="mt-2 text-[12px] text-muted-foreground">{t('settingsDialog.workflowCodeDescription')}</p>
                           </div>
@@ -1766,7 +1765,7 @@ function AgentSettingsModal({
                             <select
                               value={step.onFailure || 'continue'}
                               onChange={(event) => handleWorkflowNodeChange(index, 'onFailure', event.target.value as NonNullable<AgentWorkflowNode['onFailure']>)}
-                              className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-[#eeece3] px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                              className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-background px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
                             >
                               {workflowFailureOptions.map((option) => (
                                 <option key={option.id} value={option.id}>
@@ -1998,7 +1997,7 @@ function AgentSettingsModal({
             </div>
           </div>
         </CardContent>
-        <CardFooter className="shrink-0 border-t border-black/5 dark:border-white/10 bg-[#f3f1e9]/95 dark:bg-card/95 backdrop-blur px-6 py-4">
+        <CardFooter className="shrink-0 border-t border-black/5 dark:border-white/10 bg-background/95 dark:bg-card/95 backdrop-blur px-6 py-4">
           <div className="flex w-full items-center justify-between gap-3">
             <p className="text-[13px] text-foreground/60">
               {hasStudioChanges ? t('settingsDialog.pendingStudioChanges') : t('settingsDialog.studioSavedHint')}
@@ -2176,7 +2175,7 @@ function AgentModelModal({
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-xl rounded-3xl border-0 shadow-2xl bg-[#f3f1e9] dark:bg-card overflow-hidden">
+      <Card className="w-full max-w-xl rounded-3xl border-0 shadow-2xl bg-background dark:bg-card overflow-hidden">
         <CardHeader className="flex flex-row items-start justify-between pb-2">
           <div>
             <CardTitle className="text-2xl font-serif font-normal tracking-tight">

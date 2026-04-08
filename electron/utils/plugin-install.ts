@@ -33,6 +33,21 @@ function fsPath(filePath: string): string {
   return normalizeFsPathForWindows(filePath);
 }
 
+function resolveRealPathForNodeModulesPath(filePath: string): string {
+  const normalizedPath = filePath.replace(/\//g, path.sep);
+  try {
+    return realpathSync(normalizedPath);
+  } catch (error) {
+    if (process.platform === 'win32') {
+      const extendedLengthPath = fsPath(normalizedPath);
+      if (extendedLengthPath !== normalizedPath) {
+        return realpathSync(extendedLengthPath);
+      }
+    }
+    throw error;
+  }
+}
+
 /**
  * Unicode-safe recursive directory copy.
  *
@@ -292,7 +307,7 @@ function listPackagesInDir(nodeModulesDir: string): Array<{ name: string; fullPa
 export function copyPluginFromNodeModules(npmPkgPath: string, targetDir: string, npmName: string): void {
   let realPath: string;
   try {
-    realPath = realpathSync(fsPath(npmPkgPath));
+    realPath = resolveRealPathForNodeModulesPath(npmPkgPath);
   } catch {
     throw new Error(`Cannot resolve real path for ${npmPkgPath}`);
   }
@@ -330,7 +345,7 @@ export function copyPluginFromNodeModules(npmPkgPath: string, targetDir: string,
       if (SKIP_PACKAGES.has(name) || name.startsWith('@types/')) continue;
       let depRealPath: string;
       try {
-        depRealPath = realpathSync(fsPath(fullPath));
+        depRealPath = resolveRealPathForNodeModulesPath(fullPath);
       } catch { continue; }
       if (collected.has(depRealPath)) continue;
       collected.set(depRealPath, name);

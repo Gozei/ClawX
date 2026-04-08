@@ -9,7 +9,7 @@ test.describe('Chat user message copy', () => {
       const textarea = page.locator('textarea').first();
       const messageText = 'Please copy this user prompt';
 
-      await expect(page.getByTestId('main-layout')).toBeVisible();
+      await expect(page.getByTestId('main-layout')).toBeVisible({ timeout: 45_000 });
       await expect(textarea).toBeEnabled({ timeout: 45_000 });
 
       await app.evaluate(({ clipboard }) => {

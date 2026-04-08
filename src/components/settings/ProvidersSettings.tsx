@@ -1471,6 +1471,7 @@ function AddProviderDialog({
       : (selectedType === 'google' ? 'oauth_browser' : null));
   // Effective OAuth mode: pure OAuth providers, or dual-mode with oauth selected
   const useOAuthFlow = isOAuth && (!supportsApiKey || authMode === 'oauth');
+  const dialogInputClasses = cn(inputClasses, 'bg-background dark:bg-muted');
 
   useEffect(() => {
     if (!selectedVendor || !isOAuth || !supportsApiKey) {
@@ -1709,7 +1710,10 @@ function AddProviderDialog({
 
   return (
     <div data-testid="add-provider-dialog" className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-3xl border-0 shadow-2xl bg-[#f3f1e9] dark:bg-card overflow-hidden">
+      <Card
+        data-testid="add-provider-dialog-card"
+        className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-3xl border-0 shadow-2xl bg-background dark:bg-card overflow-hidden"
+      >
         <CardHeader className="relative pb-2 shrink-0">
           <CardTitle className="text-2xl font-serif font-normal">{t('aiProviders.dialog.title')}</CardTitle>
           <CardDescription className="text-[15px] mt-1 text-foreground/70">
@@ -1806,13 +1810,13 @@ function AddProviderDialog({
                     placeholder={typeInfo?.id === 'custom' ? t('aiProviders.custom') : typeInfo?.name}
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className={inputClasses}
+                    className={dialogInputClasses}
                   />
                 </div>
 
                 {/* Auth mode toggle for providers supporting both */}
                 {isOAuth && supportsApiKey && (
-                  <div className="flex rounded-xl border border-black/10 dark:border-white/10 overflow-hidden text-[13px] font-medium shadow-sm bg-[#eeece3] dark:bg-muted p-1 gap-1">
+                  <div className="flex rounded-xl border border-black/10 dark:border-white/10 overflow-hidden text-[13px] font-medium shadow-sm bg-background dark:bg-muted p-1 gap-1">
                     <button
                       onClick={() => setAuthMode('oauth')}
                       className={cn(
@@ -1862,7 +1866,7 @@ function AddProviderDialog({
                           setApiKey(e.target.value);
                           setValidationError(null);
                         }}
-                        className={inputClasses}
+                        className={dialogInputClasses}
                       />
                       <button
                         type="button"
@@ -1890,7 +1894,7 @@ function AddProviderDialog({
                       placeholder={getProtocolBaseUrlPlaceholder(apiProtocol)}
                       value={baseUrl}
                       onChange={(e) => setBaseUrl(e.target.value)}
-                      className={inputClasses}
+                      className={dialogInputClasses}
                     />
                   </div>
                 )}
@@ -1909,7 +1913,7 @@ function AddProviderDialog({
                               setValidationError(null);
                             }
                           }}
-                          className={cn(inputClasses, 'font-sans')}
+                          className={cn(dialogInputClasses, 'font-sans')}
                         >
                           <option value="__custom__">{t('aiProviders.dialog.modelPresetCustom', '自定义输入')}</option>
                           {recommendedModels.map((option) => (
@@ -1929,7 +1933,7 @@ function AddProviderDialog({
                         setModelId(e.target.value);
                         setValidationError(null);
                       }}
-                      className={inputClasses}
+                      className={dialogInputClasses}
                     />
                   </div>
                 )}
@@ -2031,7 +2035,7 @@ function AddProviderDialog({
                           placeholder={t('aiProviders.dialog.userAgentPlaceholder', { userAgentProduct: branding.userAgentProduct })}
                           value={userAgent}
                           onChange={(e) => setUserAgent(e.target.value)}
-                          className={inputClasses}
+                          className={dialogInputClasses}
                         />
                       </div>
                     )}
@@ -2100,7 +2104,7 @@ function AddProviderDialog({
                                 placeholder="Paste callback URL or code"
                                 value={manualCodeInput}
                                 onChange={(e) => setManualCodeInput(e.target.value)}
-                                className={inputClasses}
+                                className={dialogInputClasses}
                               />
 
                               <Button
@@ -2126,7 +2130,7 @@ function AddProviderDialog({
                                 </div>
                               </div>
 
-                              <div className="flex items-center justify-center gap-3 p-4 bg-[#eeece3] dark:bg-muted border border-black/5 dark:border-white/5 rounded-xl shadow-inner">
+                              <div className="flex items-center justify-center gap-3 p-4 bg-background dark:bg-muted border border-black/5 dark:border-white/5 rounded-xl shadow-inner">
                                 <code className="text-3xl font-mono tracking-[0.2em] font-bold text-foreground">
                                   {oauthData.userCode}
                                 </code>

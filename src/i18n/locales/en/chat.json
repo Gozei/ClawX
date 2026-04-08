@@ -3,7 +3,7 @@
     "gatewayRequired": "The OpenClaw Gateway needs to be running to use chat. It will start automatically, or you can start it from Settings.",
     "offline": {
         "stoppedTitle": "Ready To Start",
-        "stoppedDesc": "{{appName}} needs to connect to the OpenClaw Gateway before chat, agent routing, and workflow execution can begin. You can start it now on port {{port}}.",
+        "stoppedDesc": "{{appName}} needs to connect to the OpenClaw Gateway before chat, role routing, and workflow execution can begin. You can start it now on port {{port}}.",
         "startingTitle": "Connecting To OpenClaw",
         "startingDesc": "{{appName}} is starting and connecting to the OpenClaw Gateway. This usually takes a moment. Current port: {{port}}.",
         "errorTitle": "Gateway Connection Needs Attention",
@@ -17,14 +17,14 @@
         "title": "{{appName}} Chat",
         "eyebrow": "{{appName}} Workspace",
         "subtitle": "Hand off the work and I'll keep it moving",
-        "description": "{{appName}} can handle complex tasks, drive multi-step execution, and coordinate multiple agents toward a finished result.",
+        "description": "{{appName}} can handle complex tasks, drive multi-step execution, and coordinate multiple roles toward a finished result.",
         "askQuestions": "Handle Tasks",
         "askQuestionsDesc": "Work on task-oriented requests",
         "creativeTasks": "Continuous Execution",
         "creativeTasksDesc": "Keep running through multi-step work",
-        "brainstorming": "Multi-Agent Coordination",
-        "brainstormingDesc": "Split and execute work across multiple agents",
-        "footerHint": "Start by typing a goal, attaching materials, or choosing a target agent from the toolbar."
+        "brainstorming": "Multi-Role Coordination",
+        "brainstormingDesc": "Split and execute work across multiple roles",
+        "footerHint": "Start by typing a goal, attaching materials, or choosing a target role from the toolbar."
     },
     "noLogs": "(No logs available yet)",
     "toolbar": {
@@ -37,10 +37,10 @@
     },
     "composer": {
         "attachFiles": "Attach files",
-        "pickAgent": "Choose agent",
-        "clearTarget": "Clear target agent",
+        "pickAgent": "Choose role",
+        "clearTarget": "Clear target role",
         "targetChip": "@{{agent}}",
-        "agentPickerTitle": "Route the next message to another agent",
+        "agentPickerTitle": "Route the next message to another role",
         "gatewayDisconnectedPlaceholder": "Gateway not connected...",
         "send": "Send",
         "stop": "Stop",

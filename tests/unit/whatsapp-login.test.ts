@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync, readdirSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readdirSync } from 'fs';
 import { rm } from 'fs/promises';
 import { join } from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -56,26 +56,63 @@ vi.mock('@electron/utils/logger', () => ({
 }));
 
 /**
- * Standalone implementation of the cleanup logic from WhatsAppLoginManager.stop().
- * This mirrors the exact logic added in the fix, enabling us to unit-test it
- * without importing the full WhatsAppLoginManager (which has heavy Baileys deps).
- *
- * Uses testHome directly since vi.mock('os') only affects ESM imports, not
- * CommonJS require('os') calls.
+ * Imports the real cleanup helper so the test covers the same code path used
+ * by WhatsAppLoginManager.stop().
  */
-function cleanupWhatsAppLoginCredentials(accountId: string): void {
-  const authDir = join(testHome, '.openclaw', 'credentials', 'whatsapp', accountId);
-  if (existsSync(authDir)) {
-    rmSync(authDir, { recursive: true, force: true });
-    const parentDir = join(testHome, '.openclaw', 'credentials', 'whatsapp');
-    if (existsSync(parentDir)) {
-      const remaining = readdirSync(parentDir);
-      if (remaining.length === 0) {
-        rmSync(parentDir, { recursive: true, force: true });
-      }
-    }
-  }
+async function cleanupWhatsAppLoginCredentials(accountId: string): Promise<void> {
+  const { cleanupWhatsAppLoginCredentials: cleanup } = await import('@electron/utils/whatsapp-login');
+  cleanup(accountId);
 }
+
+function mockModuleCreateRequire(resolveErrorMessage: string): void {
+  vi.doMock('module', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('module')>();
+    const createRequire = () => {
+      const mockedRequire = Object.assign(vi.fn(), {
+        resolve: vi.fn(() => {
+          throw new Error(resolveErrorMessage);
+        }),
+      });
+      return mockedRequire;
+    };
+
+    return {
+      ...actual,
+      createRequire,
+      default: {
+        ...(actual as unknown as Record<string, unknown>),
+        createRequire,
+      },
+    };
+  });
+}
+
+describe('WhatsApp runtime dependency loading', () => {
+  beforeEach(async () => {
+    vi.resetAllMocks();
+    vi.resetModules();
+    vi.doUnmock('module');
+    await rm(testHome, { recursive: true, force: true });
+    await rm(testUserData, { recursive: true, force: true });
+  });
+
+  it('can import the login module without eagerly resolving runtime deps', async () => {
+    mockModuleCreateRequire('dependency resolution should be lazy');
+
+    const mod = await import('@electron/utils/whatsapp-login');
+    expect(mod.whatsAppLoginManager).toBeInstanceOf(mod.WhatsAppLoginManager);
+  });
+
+  it('fails start with a dependency error when runtime deps are unavailable', async () => {
+    mockModuleCreateRequire("Cannot find module '@whiskeysockets/baileys/package.json'");
+
+    const { whatsAppLoginManager, WhatsAppDependencyError } = await import('@electron/utils/whatsapp-login');
+    whatsAppLoginManager.on('error', () => {});
+
+    await expect(whatsAppLoginManager.start('default')).rejects.toBeInstanceOf(WhatsAppDependencyError);
+    await expect(whatsAppLoginManager.start('default')).rejects.toThrow(/WhatsApp support is unavailable/);
+  });
+});
 
 describe('WhatsApp login cancel cleanup logic', () => {
   const whatsappCredsDir = () => join(testHome, '.openclaw', 'credentials', 'whatsapp');
@@ -84,23 +121,24 @@ describe('WhatsApp login cancel cleanup logic', () => {
   beforeEach(async () => {
     vi.resetAllMocks();
     vi.resetModules();
+    vi.doUnmock('module');
     await rm(testHome, { recursive: true, force: true });
     await rm(testUserData, { recursive: true, force: true });
   });
 
-  it('removes credentials directory and empty parent on cleanup', () => {
+  it('removes credentials directory and empty parent on cleanup', async () => {
     const authDir = accountAuthDir('default');
     mkdirSync(authDir, { recursive: true });
     writeFileSync(join(authDir, 'creds.json'), '{}', 'utf8');
     expect(existsSync(authDir)).toBe(true);
 
-    cleanupWhatsAppLoginCredentials('default');
+    await cleanupWhatsAppLoginCredentials('default');
 
     expect(existsSync(authDir)).toBe(false);
     expect(existsSync(whatsappCredsDir())).toBe(false);
   });
 
-  it('does not remove other accounts when cleaning up one account', () => {
+  it('does not remove other accounts when cleaning up one account', async () => {
     // Pre-existing account
     const existingDir = accountAuthDir('existing-account');
     mkdirSync(existingDir, { recursive: true });
@@ -110,7 +148,7 @@ describe('WhatsApp login cancel cleanup logic', () => {
     const newDir = accountAuthDir('new-account');
     mkdirSync(newDir, { recursive: true });
 
-    cleanupWhatsAppLoginCredentials('new-account');
+    await cleanupWhatsAppLoginCredentials('new-account');
 
     expect(existsSync(newDir)).toBe(false);
     expect(existsSync(existingDir)).toBe(true);
@@ -120,9 +158,9 @@ describe('WhatsApp login cancel cleanup logic', () => {
     expect(remaining).toEqual(['existing-account']);
   });
 
-  it('handles missing auth dir gracefully', () => {
+  it('handles missing auth dir gracefully', async () => {
     // Should not throw when directory doesn't exist
-    expect(() => cleanupWhatsAppLoginCredentials('nonexistent')).not.toThrow();
+    await expect(cleanupWhatsAppLoginCredentials('nonexistent')).resolves.toBeUndefined();
   });
 });
 
@@ -130,6 +168,7 @@ describe('listConfiguredChannels WhatsApp detection', () => {
   beforeEach(async () => {
     vi.resetAllMocks();
     vi.resetModules();
+    vi.doUnmock('module');
     await rm(testHome, { recursive: true, force: true });
     await rm(testUserData, { recursive: true, force: true });
   });
@@ -178,7 +217,7 @@ describe('listConfiguredChannels WhatsApp detection', () => {
     expect(channelsBefore).toContain('whatsapp');
 
     // Simulate cancel: cleanup removes the directory
-    cleanupWhatsAppLoginCredentials('default');
+    await cleanupWhatsAppLoginCredentials('default');
 
     // After cleanup: WhatsApp should NOT be reported
     const channelsAfter = await listConfiguredChannels();

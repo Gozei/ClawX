@@ -221,16 +221,14 @@ export const ChatMessage = memo(function ChatMessage({
           </div>
         )}
 
-        {/* Hover row for user messages — timestamp only */}
-        {isUser && message.timestamp && (
-          <span className="text-muted-foreground opacity-0 transition-opacity duration-200 select-none group-hover:opacity-100" style={{ fontSize: metaFontSize }}>
-            {formatTimestamp(message.timestamp)}
-          </span>
-        )}
-
-        {/* Hover row for assistant messages — only when there is real text content */}
-        {!isUser && hasText && (
-          <AssistantHoverBar text={text} timestamp={message.timestamp} metaFontSize={metaFontSize} />
+        {/* Hover row — show timestamp + copy action on the bottom-right for text messages */}
+        {hasText && (
+          <MessageHoverBar
+            text={text}
+            timestamp={message.timestamp}
+            metaFontSize={metaFontSize}
+            messageType={isUser ? 'user' : 'assistant'}
+          />
         )}
       </div>
 
@@ -299,9 +297,19 @@ function ToolStatusBar({
   );
 }
 
-// ── Assistant hover bar (timestamp + copy, shown on group hover) ─
+// ── Message hover bar (timestamp + copy, shown on group hover) ──
 
-function AssistantHoverBar({ text, timestamp, metaFontSize }: { text: string; timestamp?: number; metaFontSize: string }) {
+function MessageHoverBar({
+  text,
+  timestamp,
+  metaFontSize,
+  messageType,
+}: {
+  text: string;
+  timestamp?: number;
+  metaFontSize: string;
+  messageType: 'user' | 'assistant';
+}) {
   const [copied, setCopied] = useState(false);
 
   const copyContent = useCallback(() => {
@@ -311,15 +319,18 @@ function AssistantHoverBar({ text, timestamp, metaFontSize }: { text: string; ti
   }, [text]);
 
   return (
-    <div className="flex items-center justify-between w-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 select-none px-1">
-      <span className="text-muted-foreground" style={{ fontSize: metaFontSize }}>
-        {timestamp ? formatTimestamp(timestamp) : ''}
-      </span>
+    <div className="flex items-center gap-1.5 self-end opacity-0 group-hover:opacity-100 transition-opacity duration-200 select-none px-1">
+      {timestamp ? (
+        <span className="text-muted-foreground" style={{ fontSize: metaFontSize }}>
+          {formatTimestamp(timestamp)}
+        </span>
+      ) : null}
       <Button
         variant="ghost"
         size="icon"
         className="h-6 w-6"
         onClick={copyContent}
+        data-testid={`chat-message-copy-${messageType}`}
       >
         {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
       </Button>

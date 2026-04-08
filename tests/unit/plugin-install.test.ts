@@ -208,7 +208,7 @@ describe('plugin installer diagnostics', () => {
       '[plugin] Bundled mirror install failed for WeCom',
       expect.objectContaining({
         sourceDir,
-        targetDir: expect.stringContaining('.openclaw/extensions/wecom'),
+        targetDir: expect.stringContaining('.openclaw\\extensions\\wecom'),
         platform: 'win32',
         attempts: [
           expect.objectContaining({ attempt: 1, code: 'EPERM' }),
@@ -216,5 +216,22 @@ describe('plugin installer diagnostics', () => {
         ],
       }),
     );
+  });
+
+  it('resolves pnpm junction packages via their normal Windows path before using extended-length prefixes', async () => {
+    setPlatform('win32');
+    mockApp.isPackaged = false;
+    mockHomedir.mockReturnValue('C:\\Users\\test');
+
+    const npmPkgPath = 'D:\\repo\\node_modules\\@larksuite\\openclaw-lark';
+    const targetDir = 'C:\\Users\\test\\.openclaw\\extensions\\feishu-openclaw-plugin';
+
+    mockRealpathSync.mockImplementation((input: string) => input);
+
+    const { copyPluginFromNodeModules } = await import('@electron/utils/plugin-install');
+    copyPluginFromNodeModules(npmPkgPath, targetDir, '@larksuite/openclaw-lark');
+
+    expect(mockRealpathSync).toHaveBeenCalledWith(npmPkgPath);
+    expect(mockRealpathSync).not.toHaveBeenCalledWith(expect.stringMatching(/^\\\\\?\\/));
   });
 });

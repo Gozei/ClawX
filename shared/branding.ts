@@ -1,4 +1,4 @@
-export type SupportedBrandingLocale = 'en' | 'zh' | 'ja';
+export type SupportedBrandingLocale = 'en' | 'zh';
 
 export type BrandingTextMap = Partial<Record<SupportedBrandingLocale, string>>;
 
@@ -26,7 +26,6 @@ export const DEFAULT_BRANDING: BrandingConfig = {
   tagline: {
     en: 'Make intelligence truly operational in the enterprise.',
     zh: '让智能在企业中真正运转起来',
-    ja: 'Make intelligence truly operational in the enterprise.',
   },
   requestTitle: 'Deep AI Worker',
   uiDisplayName: 'Deep AI Worker UI',
@@ -62,7 +61,6 @@ export function mergeBranding(
 export function toBrandingLocale(language?: string | null): SupportedBrandingLocale {
   if (!language) return 'en';
   if (language.startsWith('zh')) return 'zh';
-  if (language.startsWith('ja')) return 'ja';
   return 'en';
 }
 

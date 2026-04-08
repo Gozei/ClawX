@@ -1,6 +1,6 @@
 {
     "title": "消息频道",
-    "subtitle": "统一管理消息频道、账号、账号与智能体的绑定关系，以及频道默认账号",
+    "subtitle": "统一管理消息频道、账号、账号与角色的绑定关系，以及频道默认账号",
     "refresh": "刷新",
     "addChannel": "添加频道",
     "stats": {
@@ -42,7 +42,7 @@
         "deleteConfirm": "确定要删除该账号吗？",
         "default": "当前默认",
         "setDefault": "设为频道默认账号",
-        "bindAgentLabel": "绑定 Agent",
+        "bindAgentLabel": "绑定 Role",
         "unassigned": "未绑定",
         "mainAccount": "主账号",
         "customIdLabel": "账号 ID",

@@ -115,7 +115,7 @@
     },
     "complete": {
         "title": "Setup Complete!",
-        "subtitle": "Your workspace is configured and ready to use. You can now connect models, channels, and agents.",
+        "subtitle": "Your workspace is configured and ready to use. You can now connect models, channels, and roles.",
         "provider": "AI Provider",
         "components": "Components",
         "gateway": "Gateway",

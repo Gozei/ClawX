@@ -1,9 +1,9 @@
 {
-    "title": "智能体",
-    "subtitle": "定义智能体、装配技能、组织流程，并管理它在业务中的运行方式。",
+    "title": "角色",
+    "subtitle": "定义角色、装配技能、组织流程，并管理它在业务中的运行方式。",
     "refresh": "刷新",
-    "addAgent": "添加 Agent",
-    "gatewayWarning": "Gateway 服务未运行。Agent 或频道变更可能需要一点时间生效。",
+    "addAgent": "添加 Role",
+    "gatewayWarning": "Gateway 服务未运行。Role 或频道变更可能需要一点时间生效。",
     "defaultBadge": "默认",
     "inherited": "继承",
     "none": "无",
@@ -13,21 +13,21 @@
     "skillCount": "{{count}} 个技能",
     "workflowCount": "{{count}} 个流程步骤",
     "triggerCount": "{{count}} 种触发方式",
-    "deleteAgent": "删除 Agent",
+    "deleteAgent": "删除 Role",
     "settings": "设置",
     "creating": "创建中...",
     "createDialog": {
-        "title": "添加 Agent",
-        "description": "先定义这个智能体的岗位类型、业务目标和角色说明，再决定是否继承主 Agent 的工作区引导文件。",
-        "nameLabel": "Agent 名称",
+        "title": "添加 Role",
+        "description": "先定义这个角色的岗位类型、业务目标和角色说明，再决定是否继承主 Role 的工作区引导文件。",
+        "nameLabel": "Role 名称",
         "namePlaceholder": "Coding Helper",
-        "profileTypeLabel": "智能体类型",
+        "profileTypeLabel": "角色类型",
         "objectiveLabel": "业务目标",
-        "objectivePlaceholder": "说明这个智能体最终要完成什么业务结果，例如：产出正式公文草稿、完成客服分流、生成日报。",
+        "objectivePlaceholder": "说明这个角色最终要完成什么业务结果，例如：产出正式公文草稿、完成客服分流、生成日报。",
         "roleLabel": "角色说明",
         "rolePlaceholder": "说明它是谁、服务谁、擅长什么，形成清晰岗位定位。",
-        "inheritWorkspaceLabel": "继承主 Agent 工作区",
-        "inheritWorkspaceDescription": "从主 Agent 复制 SOUL.md、AGENTS.md 等引导文件"
+        "inheritWorkspaceLabel": "继承主 Role 工作区",
+        "inheritWorkspaceDescription": "从主 Role 复制 SOUL.md、AGENTS.md 等引导文件"
     },
     "profileTypes": {
         "specialist": {
@@ -40,16 +40,16 @@
         },
         "coordinator": {
             "label": "协调型",
-            "description": "负责拆解任务、调度下游智能体和整合最终结果。"
+            "description": "负责拆解任务、调度下游角色和整合最终结果。"
         }
     },
     "deleteDialog": {
-        "title": "删除 Agent",
-        "message": "确认从 {{appName}} 删除 “{{name}}”？这会永久删除该 Agent 及其由 {{appName}} 管理的工作区、运行时和会话文件。"
+        "title": "删除 Role",
+        "message": "确认从 {{appName}} 删除 “{{name}}”？这会永久删除该 Role 及其由 {{appName}} 管理的工作区、运行时和会话文件。"
     },
     "settingsDialog": {
         "title": "{{name}} 设置",
-        "description": "更新 Agent 名称，并管理哪些频道归属于这个 Agent。",
+        "description": "更新 Role 名称，并管理哪些频道归属于这个 Role。",
         "tabs": {
             "overview": "概览",
             "skills": "技能",
@@ -57,13 +57,13 @@
             "runtime": "运行",
             "channels": "频道"
         },
-        "nameLabel": "Agent 名称",
-        "agentIdLabel": "Agent ID",
-        "profileTypeLabel": "智能体类型",
+        "nameLabel": "Role 名称",
+        "agentIdLabel": "Role ID",
+        "profileTypeLabel": "角色类型",
         "descriptionLabel": "角色说明",
-        "descriptionPlaceholder": "说明这个智能体负责什么工作、面向谁服务、输出什么结果。",
+        "descriptionPlaceholder": "说明这个角色负责什么工作、面向谁服务、输出什么结果。",
         "objectiveLabel": "业务目标",
-        "objectivePlaceholder": "写清楚这个智能体最终要达成什么业务目标和交付物。",
+        "objectivePlaceholder": "写清楚这个角色最终要达成什么业务目标和交付物。",
         "boundariesLabel": "执行边界",
         "boundariesPlaceholder": "写清楚哪些情况必须澄清、转交、停止，不能自行编造或越权处理。",
         "outputContractLabel": "输出要求",
@@ -77,28 +77,28 @@
         "modelIdPlaceholder": "model-id",
         "modelPreview": "预览",
         "modelOverridePlaceholder": "provider/model（例如：openrouter/openai/gpt-5.4）",
-        "modelOverrideDescription": "为该 Agent 选择 Provider 和模型 ID。",
+        "modelOverrideDescription": "为该 Role 选择 Provider 和模型 ID。",
         "unsavedChangesTitle": "未保存的修改",
         "unsavedChangesMessage": "你有未保存的修改。关闭后这些修改将被丢弃。",
         "closeWithoutSaving": "不保存并关闭",
         "saveModelOverride": "保存模型",
         "useDefaultModel": "使用默认模型",
         "channelsTitle": "频道",
-        "channelsDescription": "这里展示当前智能体承接的频道关系。账号登录、绑定和路由规则请在渠道页面配置。",
+        "channelsDescription": "这里展示当前角色承接的频道关系。账号登录、绑定和路由规则请在渠道页面配置。",
         "openChannels": "前往渠道配置",
         "mainAccount": "主账号",
-        "channelsManagedInChannels": "该 Agent 绑定了频道类型，但具体账号绑定请在 Channels 页面查看。",
+        "channelsManagedInChannels": "该 Role 绑定了频道类型，但具体账号绑定请在 Channels 页面查看。",
         "addChannel": "添加频道",
-        "noChannels": "这个 Agent 还没有分配任何频道。",
+        "noChannels": "这个 Role 还没有分配任何频道。",
         "skillsTitle": "技能装配",
-        "skillsDescription": "为这个智能体选择可调用的技能，让它具备真实的执行能力。",
+        "skillsDescription": "为这个角色选择可调用的技能，让它具备真实的执行能力。",
         "skillsSearchLabel": "筛选技能",
         "skillsSearchPlaceholder": "按名称、说明或 ID 搜索技能",
         "skillsEmpty": "还没有可用技能。请先到 Skills 页面安装或启用技能。",
         "skillsNoMatch": "没有找到匹配的技能，换个关键词试试。",
         "skillDisabled": "未启用",
         "workflowTitle": "业务流程",
-        "workflowDescription": "先用轻量步骤定义这个智能体如何接收输入、调用能力并产出结果。",
+        "workflowDescription": "先用轻量步骤定义这个角色如何接收输入、调用能力并产出结果。",
         "workflowTemplatesTitle": "常用流程模板",
         "workflowTemplatesDescription": "先套用一个常见工作流，再按你的业务场景调整步骤。",
         "workflowTemplates": {
@@ -133,11 +133,11 @@
                 ]
             },
             "multiAgent": {
-                "label": "多智能体协作",
-                "description": "适合主控智能体拆解任务，再把子任务交给专家智能体和技能协同处理。",
+                "label": "多角色协作",
+                "description": "适合主控角色拆解任务，再把子任务交给专家角色和技能协同处理。",
                 "steps": [
                     "接收业务目标并拆成标准任务说明",
-                    "调用下游智能体完成专项处理",
+                    "调用下游角色完成专项处理",
                     "使用技能校验中间结果并补齐数据",
                     "用当前模型汇总为最终业务输出"
                 ]
@@ -149,7 +149,7 @@
         "workflowStepTitleLabel": "步骤说明",
         "workflowStepTargetLabel": "执行目标",
         "workflowStepModelRefLabel": "步骤模型覆盖",
-        "workflowStepModelRefDescription": "可选。为当前步骤指定不同模型，不影响整个智能体的默认模型。",
+        "workflowStepModelRefDescription": "可选。为当前步骤指定不同模型，不影响整个角色的默认模型。",
         "workflowFailureModeLabel": "失败处理",
         "workflowSuggestedModelsLabel": "建议模型",
         "workflowInputSpecLabel": "标准输入",
@@ -177,15 +177,15 @@
                 "description": "将结果发送到指定渠道或账号。"
             },
             "agent": {
-                "label": "调用智能体",
-                "description": "把当前上下文交给另一个智能体继续处理，适合多人协作式流程。"
+                "label": "调用角色",
+                "description": "把当前上下文交给另一个角色继续处理，适合多人协作式流程。"
             }
         },
         "workflowTargetPlaceholders": {
             "skill": "选择一个已装配技能",
             "model": "填写要使用的模型 ID",
             "channel": "选择一个已绑定渠道",
-            "agent": "选择一个下游智能体",
+            "agent": "选择一个下游角色",
             "modelRef": "可选，填写 provider/model"
         },
         "workflowFailureModes": {
@@ -199,12 +199,12 @@
             },
             "handoff": {
                 "label": "转人工处理",
-                "description": "当前步骤失败后停止自动流程，并交给人工或主控智能体接管。"
+                "description": "当前步骤失败后停止自动流程，并交给人工或主控角色接管。"
             }
         },
         "addWorkflowStep": "添加步骤",
         "runtimeTitle": "运行",
-        "runtimeDescription": "定义这个智能体如何被触发，并查看最近的运行活跃度。",
+        "runtimeDescription": "定义这个角色如何被触发，并查看最近的运行活跃度。",
         "runtimeLoading": "加载中...",
         "triggerModes": {
             "manual": {
@@ -240,8 +240,8 @@
             "triggersReady": "已启用 {{count}} 种触发方式"
         },
         "runtimeRecentTitle": "最近运行记录",
-        "runtimeRecentDescription": "基于最近会话整理这个智能体的活跃记录，方便快速判断是否在持续工作。",
-        "runtimeRecentEmpty": "还没有找到最近运行记录。等这个智能体开始接单后，这里会逐步出现。",
+        "runtimeRecentDescription": "基于最近会话整理这个角色的活跃记录，方便快速判断是否在持续工作。",
+        "runtimeRecentEmpty": "还没有找到最近运行记录。等这个角色开始接单后，这里会逐步出现。",
         "runtimeRecentFields": {
             "time": "时间",
             "model": "模型"
@@ -252,7 +252,7 @@
         },
         "runtimeOpenSession": "进入对话",
         "saveStudio": "保存工作台配置",
-        "pendingStudioChanges": "当前智能体定义有未保存修改，请先保存再关闭。",
+        "pendingStudioChanges": "当前角色定义有未保存修改，请先保存再关闭。",
         "studioSavedHint": "工作台定义会同步到 OpenClaw 配置和对应工作区。",
         "rightRailTitle": "工作台摘要",
         "overview": {
@@ -267,22 +267,22 @@
         "message": "确认移除 {{name}}？这会删除当前的频道配置。"
     },
     "toast": {
-        "agentCreated": "Agent 已创建",
-        "agentCreateFailed": "创建 Agent 失败：{{error}}",
-        "agentDeleted": "Agent 已删除",
-        "agentDeleteFailed": "删除 Agent 失败：{{error}}",
-        "agentUpdated": "Agent 已更新",
-        "agentUpdateFailed": "更新 Agent 失败：{{error}}",
+        "agentCreated": "Role 已创建",
+        "agentCreateFailed": "创建 Role 失败：{{error}}",
+        "agentDeleted": "Role 已删除",
+        "agentDeleteFailed": "删除 Role 失败：{{error}}",
+        "agentUpdated": "Role 已更新",
+        "agentUpdateFailed": "更新 Role 失败：{{error}}",
         "agentModelInvalid": "模型格式必须为 provider/model",
         "agentModelProviderRequired": "请先选择 Provider",
         "agentModelIdRequired": "模型 ID 不能为空",
-        "agentModelUpdated": "Agent 模型已更新",
-        "agentModelUpdateFailed": "更新 Agent 模型失败：{{error}}",
-        "agentModelReset": "Agent 模型已恢复为默认",
-        "agentModelResetFailed": "恢复 Agent 默认模型失败：{{error}}",
-        "agentStudioUpdated": "智能体工作台已更新",
-        "agentStudioUpdateFailed": "更新智能体工作台失败：{{error}}",
-        "channelAssigned": "{{channel}} 已分配给 Agent",
+        "agentModelUpdated": "Role 模型已更新",
+        "agentModelUpdateFailed": "更新 Role 模型失败：{{error}}",
+        "agentModelReset": "Role 模型已恢复为默认",
+        "agentModelResetFailed": "恢复 Role 默认模型失败：{{error}}",
+        "agentStudioUpdated": "角色工作台已更新",
+        "agentStudioUpdateFailed": "更新角色工作台失败：{{error}}",
+        "channelAssigned": "{{channel}} 已分配给 Role",
         "channelAssignFailed": "分配频道失败：{{error}}",
         "channelRemoved": "{{channel}} 已移除",
         "channelRemoveFailed": "移除频道失败：{{error}}"

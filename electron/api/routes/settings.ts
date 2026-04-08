@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { applyProxySettings } from '../../main/proxy';
 import { syncLaunchAtStartupSettingFromStore } from '../../main/launch-at-startup';
+import { createMenu } from '../../main/menu';
+import { refreshTray } from '../../main/tray';
 import { syncProxyConfigToOpenClaw } from '../../utils/openclaw-proxy';
 import { getAllSettings, getSetting, resetSettings, setSetting, type AppSettings } from '../../utils/store';
 import type { HostApiContext } from '../context';
@@ -30,6 +32,16 @@ function patchTouchesLaunchAtStartup(patch: Partial<AppSettings>): boolean {
   return Object.prototype.hasOwnProperty.call(patch, 'launchAtStartup');
 }
 
+function patchTouchesNativeMenus(patch: Partial<AppSettings>): boolean {
+  return Object.prototype.hasOwnProperty.call(patch, 'language')
+    || Object.prototype.hasOwnProperty.call(patch, 'brandingOverrides');
+}
+
+async function refreshNativeMenus(ctx: HostApiContext): Promise<void> {
+  await createMenu();
+  await refreshTray(ctx.mainWindow);
+}
+
 export async function handleSettingsRoutes(
   req: IncomingMessage,
   res: ServerResponse,
@@ -53,6 +65,9 @@ export async function handleSettingsRoutes(
       }
       if (patchTouchesLaunchAtStartup(patch)) {
         await syncLaunchAtStartupSettingFromStore();
+      }
+      if (patchTouchesNativeMenus(patch)) {
+        await refreshNativeMenus(ctx);
       }
       sendJson(res, 200, { success: true });
     } catch (error) {
@@ -89,6 +104,9 @@ export async function handleSettingsRoutes(
       if (key === 'launchAtStartup') {
         await syncLaunchAtStartupSettingFromStore();
       }
+      if (key === 'language' || key === 'brandingOverrides') {
+        await refreshNativeMenus(ctx);
+      }
       sendJson(res, 200, { success: true });
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
@@ -101,6 +119,7 @@ export async function handleSettingsRoutes(
       await resetSettings();
       await handleProxySettingsChange(ctx);
       await syncLaunchAtStartupSettingFromStore();
+      await refreshNativeMenus(ctx);
       sendJson(res, 200, { success: true, settings: await getAllSettings() });
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
