@@ -692,6 +692,11 @@ function clearSessionEntryFromMap<T extends Record<string, unknown>>(entries: T,
   return Object.fromEntries(Object.entries(entries).filter(([key]) => key !== sessionKey)) as T;
 }
 
+function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boolean {
+  const session = sessions.find((entry) => entry.key === sessionKey);
+  return typeof session?.label === 'string' && session.label.trim().length > 0;
+}
+
 function buildSessionSwitchPatch(
   state: Pick<
     ChatState,
@@ -1131,7 +1136,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     const next: Partial<typeof s> = {};
                     if (firstUser) {
                       const labelText = getMessageText(firstUser.content).trim();
-                      if (labelText) {
+                      if (labelText && !s.sessionLabels[session.key] && !hasStoredSessionLabel(s.sessions, session.key)) {
                         const truncated = labelText.length > 50 ? `${labelText.slice(0, 50)}…` : labelText;
                         next.sessionLabels = { ...s.sessionLabels, [session.key]: truncated };
                       }
@@ -1281,6 +1286,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ── Cleanup empty session on navigate away ──
 
+  renameSession: async (key: string, label: string) => {
+    const trimmed = label.trim();
+    const normalized = Array.from(trimmed).slice(0, 30).join('');
+    if (!normalized) return;
+
+    await hostApiFetch<{ success: boolean; label: string }>('/api/sessions/rename', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKey: key, label: normalized }),
+    });
+
+    set((s) => ({
+      sessions: s.sessions.map((session) => (
+        session.key === key
+          ? { ...session, label: normalized }
+          : session
+      )),
+      sessionLabels: {
+        ...s.sessionLabels,
+        [key]: normalized,
+      },
+    }));
+  },
+
   cleanupEmptySession: () => {
     const { currentSessionKey, messages, sessionLastActivity, sessionLabels } = get();
     // Only remove non-main sessions that were never used (no messages sent).
@@ -1411,12 +1439,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const firstUserMsg = finalMessages.find((m) => m.role === 'user');
         if (firstUserMsg) {
           const labelText = getMessageText(firstUserMsg.content).trim();
-          if (labelText) {
+          set((s) => {
+            const hasStoredLabel = hasStoredSessionLabel(s.sessions, currentSessionKey);
+            if (!labelText || s.sessionLabels[currentSessionKey] || hasStoredLabel) {
+              return {};
+            }
             const truncated = labelText.length > 50 ? `${labelText.slice(0, 50)}…` : labelText;
-            set((s) => ({
+            return {
               sessionLabels: { ...s.sessionLabels, [currentSessionKey]: truncated },
-            }));
-          }
+            };
+          });
         }
       }
 
@@ -1573,9 +1605,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     // Update session label with first user message text as soon as it's sent
-    const { sessionLabels, messages } = get();
+    const { sessionLabels, messages, sessions } = get();
     const isFirstMessage = !messages.slice(0, -1).some((m) => m.role === 'user');
-    if (!currentSessionKey.endsWith(':main') && isFirstMessage && !sessionLabels[currentSessionKey] && trimmed) {
+    const hasStoredLabel = hasStoredSessionLabel(sessions, currentSessionKey);
+    if (!currentSessionKey.endsWith(':main') && isFirstMessage && !sessionLabels[currentSessionKey] && !hasStoredLabel && trimmed) {
       const truncated = trimmed.length > 50 ? `${trimmed.slice(0, 50)}…` : trimmed;
       set((s) => ({ sessionLabels: { ...s.sessionLabels, [currentSessionKey]: truncated } }));
     }

@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeIpcMock = vi.fn();
+const hostApiFetchMock = vi.fn();
 
 vi.mock('@/lib/api-client', () => ({
   invokeIpc: (...args: unknown[]) => invokeIpcMock(...args),
+}));
+
+vi.mock('@/lib/host-api', () => ({
+  hostApiFetch: (...args: unknown[]) => hostApiFetchMock(...args),
 }));
 
 type ChatLikeState = {
@@ -53,6 +58,7 @@ describe('chat session actions', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     invokeIpcMock.mockResolvedValue({ success: true });
+    hostApiFetchMock.mockResolvedValue({ success: true, label: 'Renamed session' });
   });
 
   it('switchSession preserves non-main session that has activity history', async () => {
@@ -139,6 +145,28 @@ describe('chat session actions', () => {
     expect(next.activeRunId).toBeNull();
     expect(next.pendingFinal).toBe(false);
     nowSpy.mockRestore();
+  });
+
+  it('renameSession persists and updates the local label with a 30-character cap', async () => {
+    const { createSessionActions } = await import('@/stores/chat/session-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:foo:session-a',
+      sessions: [{ key: 'agent:foo:session-a', displayName: 'Session A' }],
+      sessionLabels: { 'agent:foo:session-a': 'Old name' },
+    });
+    const actions = createSessionActions(h.set as never, h.get as never);
+
+    await actions.renameSession('agent:foo:session-a', '123456789012345678901234567890XYZ');
+
+    expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/rename', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionKey: 'agent:foo:session-a',
+        label: '123456789012345678901234567890',
+      }),
+    });
+    expect(h.read().sessionLabels['agent:foo:session-a']).toBe('123456789012345678901234567890');
+    expect(h.read().sessions[0]?.label).toBe('123456789012345678901234567890');
   });
 
   it('seeds sessionLastActivity from backend updatedAt metadata', async () => {

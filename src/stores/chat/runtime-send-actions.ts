@@ -127,9 +127,12 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
       }));
 
       // Update session label with first user message text as soon as it's sent
-      const { sessionLabels, messages } = get();
+      const { sessionLabels, messages, sessions } = get();
       const isFirstMessage = !messages.slice(0, -1).some((m) => m.role === 'user');
-      if (!currentSessionKey.endsWith(':main') && isFirstMessage && !sessionLabels[currentSessionKey] && trimmed) {
+      const hasStoredLabel = sessions.some(
+        (session) => session.key === currentSessionKey && typeof session.label === 'string' && session.label.trim().length > 0,
+      );
+      if (!currentSessionKey.endsWith(':main') && isFirstMessage && !sessionLabels[currentSessionKey] && !hasStoredLabel && trimmed) {
         const truncated = trimmed.length > 50 ? `${trimmed.slice(0, 50)}…` : trimmed;
         set((s) => ({ sessionLabels: { ...s.sessionLabels, [currentSessionKey]: truncated } }));
       }

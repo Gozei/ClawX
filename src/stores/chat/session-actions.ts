@@ -1,4 +1,5 @@
 import { invokeIpc } from '@/lib/api-client';
+import { hostApiFetch } from '@/lib/host-api';
 import { getCanonicalPrefixFromSessions, getMessageText, toMs } from './helpers';
 import { DEFAULT_CANONICAL_PREFIX, DEFAULT_SESSION_KEY, type ChatSession, type RawMessage } from './types';
 import type { ChatGet, ChatSet, SessionHistoryActions } from './store-api';
@@ -22,10 +23,15 @@ function parseSessionUpdatedAtMs(value: unknown): number | undefined {
   return undefined;
 }
 
+function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boolean {
+  const session = sessions.find((entry) => entry.key === sessionKey);
+  return typeof session?.label === 'string' && session.label.trim().length > 0;
+}
+
 export function createSessionActions(
   set: ChatSet,
   get: ChatGet,
-): Pick<SessionHistoryActions, 'loadSessions' | 'switchSession' | 'newSession' | 'deleteSession' | 'cleanupEmptySession'> {
+): Pick<SessionHistoryActions, 'loadSessions' | 'switchSession' | 'newSession' | 'renameSession' | 'deleteSession' | 'cleanupEmptySession'> {
   return {
     loadSessions: async () => {
       try {
@@ -130,7 +136,7 @@ export function createSessionActions(
                     const next: Partial<typeof s> = {};
                     if (firstUser) {
                       const labelText = getMessageText(firstUser.content).trim();
-                      if (labelText) {
+                      if (labelText && !s.sessionLabels[session.key] && !hasStoredSessionLabel(s.sessions, session.key)) {
                         const truncated = labelText.length > 50 ? `${labelText.slice(0, 50)}…` : labelText;
                         next.sessionLabels = { ...s.sessionLabels, [session.key]: truncated };
                       }
@@ -287,6 +293,29 @@ export function createSessionActions(
     },
 
     // ── Cleanup empty session on navigate away ──
+
+    renameSession: async (key: string, label: string) => {
+      const trimmed = label.trim();
+      const normalized = Array.from(trimmed).slice(0, 30).join('');
+      if (!normalized) return;
+
+      await hostApiFetch<{ success: boolean; label: string }>('/api/sessions/rename', {
+        method: 'POST',
+        body: JSON.stringify({ sessionKey: key, label: normalized }),
+      });
+
+      set((s) => ({
+        sessions: s.sessions.map((session) => (
+          session.key === key
+            ? { ...session, label: normalized }
+            : session
+        )),
+        sessionLabels: {
+          ...s.sessionLabels,
+          [key]: normalized,
+        },
+      }));
+    },
 
     cleanupEmptySession: () => {
       const { currentSessionKey, messages, sessionLastActivity, sessionLabels } = get();
