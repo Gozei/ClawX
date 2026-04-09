@@ -41,6 +41,7 @@ export function Chat() {
   const streamingMessage = useChatStore((s) => s.streamingMessage);
   const streamingTools = useChatStore((s) => s.streamingTools);
   const pendingFinal = useChatStore((s) => s.pendingFinal);
+  const lastUserMessageAt = useChatStore((s) => s.lastUserMessageAt);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const abortRun = useChatStore((s) => s.abortRun);
   const clearError = useChatStore((s) => s.clearError);
@@ -94,7 +95,33 @@ export function Chat() {
   const streamImages = streamMsg ? extractImages(streamMsg) : [];
   const hasStreamImages = streamImages.length > 0;
   const hasStreamToolStatus = chatProcessDisplayMode === 'all' && streamingTools.length > 0;
-  const shouldRenderStreaming = sending && (hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus);
+  const lastUserTsMs = typeof lastUserMessageAt === 'number'
+    ? (lastUserMessageAt < 1e12 ? lastUserMessageAt * 1000 : lastUserMessageAt)
+    : 0;
+  const latestPersistedAssistant = [...safeMessages].reverse().find((message) => {
+    if (message.role !== 'assistant') return false;
+    if (!lastUserTsMs || !message.timestamp) return true;
+    const messageTsMs = message.timestamp < 1e12 ? message.timestamp * 1000 : message.timestamp;
+    return messageTsMs >= lastUserTsMs;
+  });
+  const latestPersistedAssistantText = latestPersistedAssistant ? extractText(latestPersistedAssistant).trim() : '';
+  const latestPersistedAssistantThinking = latestPersistedAssistant ? (extractThinking(latestPersistedAssistant)?.trim() ?? '') : '';
+  const latestPersistedAssistantImages = latestPersistedAssistant ? extractImages(latestPersistedAssistant) : [];
+  const latestPersistedAssistantTools = latestPersistedAssistant ? extractToolUse(latestPersistedAssistant) : [];
+  const isStreamingDuplicateOfPersistedAssistant = !!latestPersistedAssistant
+    && (
+      (hasStreamText && latestPersistedAssistantText === streamText.trim())
+      || (
+        !hasStreamText
+        && hasStreamThinking
+        && latestPersistedAssistantThinking === (streamThinking?.trim() ?? '')
+      )
+    )
+    && (!hasStreamImages || latestPersistedAssistantImages.length === streamImages.length)
+    && (!hasStreamTools || latestPersistedAssistantTools.length === streamTools.length);
+  const shouldRenderStreaming = sending
+    && !isStreamingDuplicateOfPersistedAssistant
+    && (hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus);
   const hasAnyStreamContent = hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus;
 
   const isEmpty = safeMessages.length === 0 && !sending;
@@ -165,7 +192,7 @@ export function Chat() {
               )}
 
               {/* Activity indicator: waiting for next AI turn after tool execution */}
-              {sending && pendingFinal && !shouldRenderStreaming && chatProcessDisplayMode === 'all' && (
+              {sending && pendingFinal && !shouldRenderStreaming && !isStreamingDuplicateOfPersistedAssistant && chatProcessDisplayMode === 'all' && (
                 <ActivityIndicator phase="tool_processing" />
               )}
 
