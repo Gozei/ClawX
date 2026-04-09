@@ -87,6 +87,27 @@ function mergePendingDeltaUpdates(updates: ToolStatus[]): void {
   pendingDeltaUpdates = Array.from(merged.values());
 }
 
+function buildMessageContentKey(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return JSON.stringify(content);
+  return '';
+}
+
+function isEquivalentRecentAssistantMessage(
+  messages: RawMessage[],
+  candidate: RawMessage,
+): boolean {
+  const candidateRole = candidate.role || 'assistant';
+  const candidateContentKey = buildMessageContentKey(candidate.content);
+  if (!candidateContentKey) return false;
+
+  return messages.slice(-3).some((message) => {
+    const role = message.role || 'assistant';
+    if (role !== candidateRole) return false;
+    return buildMessageContentKey(message.content) === candidateContentKey;
+  });
+}
+
 export function handleRuntimeEventState(
   set: ChatSet,
   get: ChatGet,
@@ -211,7 +232,8 @@ export function handleRuntimeEventState(
               const clearPendingImages = { pendingToolImages: [] as AttachedFileMeta[] };
 
               // Check if message already exists (prevent duplicates)
-              const alreadyExists = s.messages.some(m => m.id === msgId);
+              const alreadyExists = s.messages.some(m => m.id === msgId)
+                || isEquivalentRecentAssistantMessage(s.messages, msgWithImages);
               if (alreadyExists) {
                 return toolOnly ? {
                   streamingText: '',

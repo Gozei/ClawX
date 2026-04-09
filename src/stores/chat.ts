@@ -82,21 +82,29 @@ function pruneChatEventDedupe(now: number): void {
 }
 
 function buildChatEventDedupeKey(eventState: string, event: Record<string, unknown>): string | null {
-  const runId = event.runId != null ? String(event.runId) : '';
-  const sessionKey = event.sessionKey != null ? String(event.sessionKey) : '';
-  const seq = event.seq != null ? String(event.seq) : '';
-  if (runId || sessionKey || seq || eventState) {
-    return [runId, sessionKey, seq, eventState].join('|');
-  }
   const msg = (event.message && typeof event.message === 'object')
     ? event.message as Record<string, unknown>
     : null;
   if (msg) {
     const messageId = msg.id != null ? String(msg.id) : '';
     const stopReason = msg.stopReason ?? msg.stop_reason;
-    if (messageId || stopReason) {
-      return `msg|${messageId}|${String(stopReason ?? '')}|${eventState}`;
+    const role = msg.role != null ? String(msg.role) : '';
+    const content = msg.content;
+    const contentKey = typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? JSON.stringify(content)
+        : '';
+    if (messageId || stopReason || (role && contentKey)) {
+      return `msg|${messageId}|${String(stopReason ?? '')}|${role}|${contentKey}|${eventState}`;
     }
+  }
+
+  const runId = event.runId != null ? String(event.runId) : '';
+  const sessionKey = event.sessionKey != null ? String(event.sessionKey) : '';
+  const seq = event.seq != null ? String(event.seq) : '';
+  if (runId || sessionKey || seq || eventState) {
+    return [runId, sessionKey, seq, eventState].join('|');
   }
   return null;
 }
@@ -111,6 +119,27 @@ function isDuplicateChatEvent(eventState: string, event: Record<string, unknown>
   }
   _chatEventDedupe.set(key, now);
   return false;
+}
+
+function buildMessageContentKey(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return JSON.stringify(content);
+  return '';
+}
+
+function isEquivalentRecentAssistantMessage(
+  messages: RawMessage[],
+  candidate: RawMessage,
+): boolean {
+  const candidateRole = candidate.role || 'assistant';
+  const candidateContentKey = buildMessageContentKey(candidate.content);
+  if (!candidateContentKey) return false;
+
+  return messages.slice(-3).some((message) => {
+    const role = message.role || 'assistant';
+    if (role !== candidateRole) return false;
+    return buildMessageContentKey(message.content) === candidateContentKey;
+  });
 }
 
 // ── Local image cache ─────────────────────────────────────────
@@ -2024,7 +2053,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const clearPendingImages = { pendingToolImages: [] as AttachedFileMeta[] };
 
             // Check if message already exists (prevent duplicates)
-            const alreadyExists = s.messages.some(m => m.id === msgId);
+            const alreadyExists = s.messages.some(m => m.id === msgId)
+              || isEquivalentRecentAssistantMessage(s.messages, msgWithImages);
             if (alreadyExists) {
               return toolOnly ? {
                 streamingText: '',
