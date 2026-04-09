@@ -6,7 +6,7 @@
  */
 import { memo, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, ListTodo, Loader2, Network, Sparkles, Workflow } from 'lucide-react';
+import { AlertCircle, ChevronDown, ChevronRight, ListTodo, Loader2, Network, Sparkles, Workflow } from 'lucide-react';
 import { useChatStore, type RawMessage } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
@@ -21,6 +21,7 @@ import { useBranding } from '@/lib/branding';
 import { useStickToBottomInstant } from '@/hooks/use-stick-to-bottom-instant';
 import { useMinLoading } from '@/hooks/use-min-loading';
 import { useSettingsStore } from '@/stores/settings';
+import { groupMessagesForDisplay, splitFinalMessageForTurnDisplay } from './history-grouping';
 
 export function Chat() {
   const { t } = useTranslation('chat');
@@ -223,18 +224,90 @@ const HistoryMessages = memo(function HistoryMessages({
   messages: RawMessage[];
   showThinking: boolean;
 }) {
+  const displayItems = groupMessagesForDisplay(messages);
+
   return (
     <>
-      {messages.map((msg, idx) => (
-        <ChatMessage
-          key={msg.id || `msg-${idx}`}
-          message={msg}
-          showThinking={showThinking}
-        />
-      ))}
+      {displayItems.map((item) => {
+        if (item.type === 'turn') {
+          return (
+            <CollapsedThinkingTurn
+              key={item.key}
+              userMessage={item.userMessage}
+              intermediateMessages={item.intermediateMessages}
+              finalMessage={item.finalMessage}
+              showThinking={showThinking}
+            />
+          );
+        }
+
+        return (
+          <ChatMessage
+            key={item.key}
+            message={item.message}
+            showThinking={showThinking}
+          />
+        );
+      })}
     </>
   );
 });
+
+function CollapsedThinkingTurn({
+  userMessage,
+  intermediateMessages,
+  finalMessage,
+  showThinking,
+}: {
+  userMessage: RawMessage;
+  intermediateMessages: RawMessage[];
+  finalMessage: RawMessage;
+  showThinking: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const { collapsedThinkingMessage, finalDisplayMessage } = splitFinalMessageForTurnDisplay(finalMessage);
+  const collapsedMessages = collapsedThinkingMessage
+    ? [...intermediateMessages, collapsedThinkingMessage]
+    : intermediateMessages;
+
+  return (
+    <div className="space-y-3">
+      <ChatMessage message={userMessage} showThinking={showThinking} />
+
+      <div className="flex gap-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-1 bg-black/5 dark:bg-white/5 text-foreground">
+          <Sparkles className="h-4 w-4" />
+        </div>
+        <div className="w-full min-w-0 max-w-[80%]">
+          <div className="w-full rounded-xl border border-black/10 bg-black/5 text-[14px] dark:border-white/10 dark:bg-white/5">
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setExpanded((current) => !current)}
+              data-testid="chat-turn-thinking-toggle"
+            >
+              {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+              <span className="font-medium">Thinking</span>
+            </button>
+            {expanded && (
+              <div className="space-y-4 px-0 pb-1" data-testid="chat-turn-thinking-content">
+                {collapsedMessages.map((message, index) => (
+                  <ChatMessage
+                    key={message.id || `intermediate-${index}`}
+                    message={message}
+                    showThinking={showThinking}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <ChatMessage message={finalDisplayMessage} showThinking={false} />
+    </div>
+  );
+}
 
 // ── Welcome Screen ──────────────────────────────────────────────
 
