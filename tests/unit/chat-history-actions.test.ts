@@ -48,8 +48,12 @@ type ChatLikeState = {
   loading: boolean;
   error: string | null;
   sending: boolean;
+  streamingText: string;
+  streamingMessage: unknown | null;
+  streamingTools: unknown[];
   lastUserMessageAt: number | null;
   pendingFinal: boolean;
+  pendingToolImages: unknown[];
   sessionLabels: Record<string, string>;
   sessionLastActivity: Record<string, number>;
   thinkingLevel: string | null;
@@ -63,8 +67,12 @@ function makeHarness(initial?: Partial<ChatLikeState>) {
     loading: false,
     error: null,
     sending: false,
+    streamingText: '',
+    streamingMessage: null,
+    streamingTools: [],
     lastUserMessageAt: null,
     pendingFinal: false,
+    pendingToolImages: [],
     sessionLabels: {},
     sessionLastActivity: {},
     thinkingLevel: null,
@@ -302,6 +310,50 @@ describe('chat history actions', () => {
 
     expect(h.read().currentSessionKey).toBe('agent:main:session-b');
     expect(h.read().messages.map((message) => message.content)).toEqual(['session b content']);
+  });
+
+  it('clears streaming state when history already contains the final assistant reply', async () => {
+    const { createHistoryActions } = await import('@/stores/chat/history-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:main:main',
+      sending: true,
+      activeRunId: 'run-final',
+      pendingFinal: true,
+      lastUserMessageAt: 1000,
+      streamingText: 'Photo saved (60KB). You should be able to see it now.',
+      streamingMessage: {
+        role: 'assistant',
+        content: 'Photo saved (60KB). You should be able to see it now.',
+      },
+      streamingTools: [{ name: 'camera_capture', status: 'running' }],
+      pendingToolImages: [{ fileName: 'photo.png' }],
+    });
+    const actions = createHistoryActions(h.set as never, h.get as never);
+
+    invokeIpcMock.mockResolvedValueOnce({
+      success: true,
+      result: {
+        messages: [
+          { role: 'user', content: 'Take a photo for me.', timestamp: 1000 },
+          { role: 'assistant', content: 'Photo saved (60KB). You should be able to see it now.', timestamp: 1002 },
+        ],
+      },
+    });
+
+    await actions.loadHistory();
+
+    expect(h.read().messages.map((message) => message.content)).toEqual([
+      'Take a photo for me.',
+      'Photo saved (60KB). You should be able to see it now.',
+    ]);
+    expect(h.read().sending).toBe(false);
+    expect(h.read().activeRunId).toBeNull();
+    expect(h.read().pendingFinal).toBe(false);
+    expect(h.read().streamingText).toBe('');
+    expect(h.read().streamingMessage).toBeNull();
+    expect(h.read().streamingTools).toEqual([]);
+    expect(h.read().pendingToolImages).toEqual([]);
+    expect(clearHistoryPoll).toHaveBeenCalledTimes(1);
   });
 
   it('preserves newer same-session messages when preview hydration finishes later', async () => {
