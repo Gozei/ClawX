@@ -2,6 +2,7 @@ import {
   clearErrorRecoveryTimer,
   clearHistoryPoll,
   collectToolUpdates,
+  EMPTY_ASSISTANT_RESPONSE_ERROR,
   extractImagesAsAttachedFiles,
   extractMediaRefs,
   extractRawFilePaths,
@@ -9,6 +10,7 @@ import {
   getToolCallFilePath,
   hasErrorRecoveryTimer,
   hasNonToolAssistantContent,
+  isEmptyAssistantResponse,
   isToolOnlyMessage,
   isToolResultRole,
   makeAttachedFile,
@@ -188,15 +190,23 @@ export function handleRuntimeEventState(
                     : s.pendingToolImages,
                   streamingTools: updates.length > 0 ? upsertToolStatuses(s.streamingTools, updates) : s.streamingTools,
                 };
-              });
-              break;
+            });
+            break;
+          }
+          const toolOnly = isToolOnlyMessage(finalMsg);
+          const pendingImgsSnapshot = get().pendingToolImages;
+          const previewFinalMsg: RawMessage = pendingImgsSnapshot.length > 0
+            ? {
+              ...finalMsg,
+              _attachedFiles: [...(finalMsg._attachedFiles || []), ...pendingImgsSnapshot],
             }
-            const toolOnly = isToolOnlyMessage(finalMsg);
-            const hasOutput = hasNonToolAssistantContent(finalMsg);
-            const msgId = finalMsg.id || (toolOnly ? `run-${runId}-tool-${Date.now()}` : `run-${runId}`);
-            set((s) => {
-              const nextTools = updates.length > 0 ? upsertToolStatuses(s.streamingTools, updates) : s.streamingTools;
-              const streamingTools = hasOutput ? [] : nextTools;
+            : finalMsg;
+          const hasOutput = hasNonToolAssistantContent(previewFinalMsg);
+          const emptyAssistantResponse = !toolOnly && isEmptyAssistantResponse(previewFinalMsg);
+          const msgId = finalMsg.id || (toolOnly ? `run-${runId}-tool-${Date.now()}` : `run-${runId}`);
+          set((s) => {
+            const nextTools = updates.length > 0 ? upsertToolStatuses(s.streamingTools, updates) : s.streamingTools;
+            const streamingTools = hasOutput ? [] : nextTools;
 
               // Attach any images collected from preceding tool results
               const pendingImgs = s.pendingToolImages;
@@ -229,6 +239,19 @@ export function handleRuntimeEventState(
                   ...clearPendingImages,
                 };
               }
+              if (emptyAssistantResponse) {
+                return {
+                  messages: [...s.messages, msgWithImages],
+                  streamingText: '',
+                  streamingMessage: null,
+                  sending: false,
+                  activeRunId: null,
+                  pendingFinal: false,
+                  streamingTools,
+                  error: EMPTY_ASSISTANT_RESPONSE_ERROR,
+                  ...clearPendingImages,
+                };
+              }
               return toolOnly ? {
                 messages: [...s.messages, msgWithImages],
                 streamingText: '',
@@ -252,6 +275,8 @@ export function handleRuntimeEventState(
             if (hasOutput && !toolOnly) {
               clearHistoryPoll();
               void get().loadHistory(true);
+            } else if (emptyAssistantResponse) {
+              clearHistoryPoll();
             }
           } else {
             // No message in final event - reload history to get complete data

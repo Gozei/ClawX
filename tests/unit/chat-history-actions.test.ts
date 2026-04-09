@@ -3,12 +3,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const invokeIpcMock = vi.fn();
 const hostApiFetchMock = vi.fn();
 const clearHistoryPoll = vi.fn();
+const EMPTY_ASSISTANT_RESPONSE_ERROR = 'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.';
 const enrichWithCachedImages = vi.fn((messages) => messages);
 const enrichWithToolResultFiles = vi.fn((messages) => messages);
 const getMessageText = vi.fn((content: unknown) => typeof content === 'string' ? content : '');
-const hasNonToolAssistantContent = vi.fn((message: { content?: unknown } | undefined) => {
+const hasNonToolAssistantContent = vi.fn((message: { content?: unknown; _attachedFiles?: unknown[] } | undefined) => {
   if (!message) return false;
-  return typeof message.content === 'string' ? message.content.trim().length > 0 : true;
+  if (Array.isArray(message._attachedFiles) && message._attachedFiles.length > 0) return true;
+  if (typeof message.content === 'string') return message.content.trim().length > 0;
+  if (Array.isArray(message.content)) return message.content.length > 0;
+  return Boolean(message.content);
+});
+const isEmptyAssistantResponse = vi.fn((message: { role?: string; content?: unknown; _attachedFiles?: unknown[] } | undefined) => {
+  if (!message || message.role !== 'assistant') return false;
+  const hasFiles = Array.isArray(message._attachedFiles) && message._attachedFiles.length > 0;
+  if (hasFiles) return false;
+  return typeof message.content === 'string'
+    ? message.content.trim().length === 0
+    : Array.isArray(message.content) && message.content.length === 0;
 });
 const isToolResultRole = vi.fn((role: unknown) => role === 'toolresult' || role === 'tool_result');
 const isInternalMessage = vi.fn((msg: { role?: unknown; content?: unknown }) => {
@@ -32,10 +44,12 @@ vi.mock('@/lib/host-api', () => ({
 
 vi.mock('@/stores/chat/helpers', () => ({
   clearHistoryPoll: (...args: unknown[]) => clearHistoryPoll(...args),
+  EMPTY_ASSISTANT_RESPONSE_ERROR,
   enrichWithCachedImages: (...args: unknown[]) => enrichWithCachedImages(...args),
   enrichWithToolResultFiles: (...args: unknown[]) => enrichWithToolResultFiles(...args),
   getMessageText: (...args: unknown[]) => getMessageText(...args),
   hasNonToolAssistantContent: (...args: unknown[]) => hasNonToolAssistantContent(...args),
+  isEmptyAssistantResponse: (...args: unknown[]) => isEmptyAssistantResponse(...args),
   isInternalMessage: (...args: unknown[]) => isInternalMessage(...args),
   isToolResultRole: (...args: unknown[]) => isToolResultRole(...args),
   loadMissingPreviews: (...args: unknown[]) => loadMissingPreviews(...args),
@@ -366,5 +380,34 @@ describe('chat history actions', () => {
       'newer message',
     ]);
     expect(h.read().messages[0]?._attachedFiles?.[0]?.preview).toBe('data:image/png;base64,abc');
+  });
+
+  it('surfaces an error when the latest assistant reply is empty', async () => {
+    const { createHistoryActions } = await import('@/stores/chat/history-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:main:main',
+      sending: true,
+      pendingFinal: true,
+      lastUserMessageAt: 1000,
+    });
+    const actions = createHistoryActions(h.set as never, h.get as never);
+
+    invokeIpcMock.mockResolvedValueOnce({
+      success: true,
+      result: {
+        messages: [
+          { role: 'user', content: 'Hello', timestamp: 1000 },
+          { role: 'assistant', content: [], timestamp: 1001 },
+        ],
+      },
+    });
+
+    await actions.loadHistory(true);
+
+    expect(clearHistoryPoll).toHaveBeenCalledTimes(1);
+    expect(h.read().sending).toBe(false);
+    expect(h.read().pendingFinal).toBe(false);
+    expect(h.read().lastUserMessageAt).toBeNull();
+    expect(h.read().error).toBe(EMPTY_ASSISTANT_RESPONSE_ERROR);
   });
 });

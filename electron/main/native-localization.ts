@@ -171,7 +171,7 @@ const NATIVE_MENU_MESSAGES: Record<LanguageCode, NativeMenuMessages> = {
       navigate: '导航',
       overview: '总览',
       chat: '对话',
-      channels: '渠道',
+      channels: '通道',
       skills: '技能',
       cron: '定时任务',
       settings: '设置',

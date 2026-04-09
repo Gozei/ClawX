@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const clearErrorRecoveryTimer = vi.fn();
 const clearHistoryPoll = vi.fn();
 const collectToolUpdates = vi.fn(() => []);
+const EMPTY_ASSISTANT_RESPONSE_ERROR = 'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.';
 const extractImagesAsAttachedFiles = vi.fn(() => []);
 const extractMediaRefs = vi.fn(() => []);
 const extractRawFilePaths = vi.fn(() => []);
@@ -10,6 +11,7 @@ const getMessageText = vi.fn(() => '');
 const getToolCallFilePath = vi.fn(() => undefined);
 const hasErrorRecoveryTimer = vi.fn(() => false);
 const hasNonToolAssistantContent = vi.fn(() => true);
+const isEmptyAssistantResponse = vi.fn(() => false);
 const isToolOnlyMessage = vi.fn(() => false);
 const isToolResultRole = vi.fn((role: unknown) => role === 'toolresult');
 const makeAttachedFile = vi.fn((ref: { filePath: string; mimeType: string }) => ({
@@ -26,6 +28,7 @@ vi.mock('@/stores/chat/helpers', () => ({
   clearErrorRecoveryTimer: (...args: unknown[]) => clearErrorRecoveryTimer(...args),
   clearHistoryPoll: (...args: unknown[]) => clearHistoryPoll(...args),
   collectToolUpdates: (...args: unknown[]) => collectToolUpdates(...args),
+  EMPTY_ASSISTANT_RESPONSE_ERROR,
   extractImagesAsAttachedFiles: (...args: unknown[]) => extractImagesAsAttachedFiles(...args),
   extractMediaRefs: (...args: unknown[]) => extractMediaRefs(...args),
   extractRawFilePaths: (...args: unknown[]) => extractRawFilePaths(...args),
@@ -33,6 +36,7 @@ vi.mock('@/stores/chat/helpers', () => ({
   getToolCallFilePath: (...args: unknown[]) => getToolCallFilePath(...args),
   hasErrorRecoveryTimer: (...args: unknown[]) => hasErrorRecoveryTimer(...args),
   hasNonToolAssistantContent: (...args: unknown[]) => hasNonToolAssistantContent(...args),
+  isEmptyAssistantResponse: (...args: unknown[]) => isEmptyAssistantResponse(...args),
   isToolOnlyMessage: (...args: unknown[]) => isToolOnlyMessage(...args),
   isToolResultRole: (...args: unknown[]) => isToolResultRole(...args),
   makeAttachedFile: (...args: unknown[]) => makeAttachedFile(...args),
@@ -85,6 +89,7 @@ describe('chat runtime event handlers', () => {
     hasErrorRecoveryTimer.mockReturnValue(false);
     collectToolUpdates.mockReturnValue([]);
     upsertToolStatuses.mockImplementation((_current, updates) => updates);
+    isEmptyAssistantResponse.mockReturnValue(false);
   });
 
   afterEach(() => {
@@ -212,5 +217,32 @@ describe('chat runtime event handlers', () => {
     expect(next.pendingFinal).toBe(false);
     expect(next.lastUserMessageAt).toBeNull();
     expect(next.pendingToolImages).toEqual([]);
+  });
+
+  it('surfaces an error when the final assistant reply is empty', async () => {
+    isEmptyAssistantResponse.mockReturnValue(true);
+    hasNonToolAssistantContent.mockReturnValue(false);
+
+    const { handleRuntimeEventState } = await import('@/stores/chat/runtime-event-handlers');
+    const h = makeHarness({
+      sending: true,
+      activeRunId: 'r-empty',
+      pendingFinal: true,
+    });
+
+    handleRuntimeEventState(
+      h.set as never,
+      h.get as never,
+      { message: { role: 'assistant', content: [] } },
+      'final',
+      'r-empty',
+    );
+
+    const next = h.read();
+    expect(clearHistoryPoll).toHaveBeenCalledTimes(1);
+    expect(next.sending).toBe(false);
+    expect(next.activeRunId).toBeNull();
+    expect(next.pendingFinal).toBe(false);
+    expect(next.error).toBe(EMPTY_ASSISTANT_RESPONSE_ERROR);
   });
 });

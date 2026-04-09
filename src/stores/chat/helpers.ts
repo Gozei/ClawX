@@ -785,8 +785,12 @@ function collectToolUpdates(message: unknown, eventState: string): ToolStatus[] 
   return updates;
 }
 
+const EMPTY_ASSISTANT_RESPONSE_ERROR =
+  'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.';
+
 function hasNonToolAssistantContent(message: RawMessage | undefined): boolean {
   if (!message) return false;
+  if (Array.isArray(message._attachedFiles) && message._attachedFiles.length > 0) return true;
   if (typeof message.content === 'string' && message.content.trim()) return true;
 
   const content = message.content;
@@ -802,6 +806,13 @@ function hasNonToolAssistantContent(message: RawMessage | undefined): boolean {
   if (typeof msg.text === 'string' && msg.text.trim()) return true;
 
   return false;
+}
+
+function isEmptyAssistantResponse(message: RawMessage | undefined): boolean {
+  if (!message || message.role !== 'assistant') return false;
+  if (isInternalMessage(message)) return false;
+  if (isToolOnlyMessage(message)) return false;
+  return !hasNonToolAssistantContent(message);
 }
 
 function setHistoryPollTimer(timer: ReturnType<typeof setTimeout> | null): void {
@@ -843,7 +854,9 @@ export {
   getToolCallFilePath,
   collectToolUpdates,
   upsertToolStatuses,
+  EMPTY_ASSISTANT_RESPONSE_ERROR,
   hasNonToolAssistantContent,
+  isEmptyAssistantResponse,
   isToolOnlyMessage,
   setHistoryPollTimer,
   hasErrorRecoveryTimer,

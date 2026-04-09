@@ -2,10 +2,12 @@ import { invokeIpc } from '@/lib/api-client';
 import { hostApiFetch } from '@/lib/host-api';
 import {
   clearHistoryPoll,
+  EMPTY_ASSISTANT_RESPONSE_ERROR,
   enrichWithCachedImages,
   enrichWithToolResultFiles,
   getMessageText,
   hasNonToolAssistantContent,
+  isEmptyAssistantResponse,
   isInternalMessage,
   isToolResultRole,
   loadMissingPreviews,
@@ -167,8 +169,8 @@ export function createHistoryActions(
           }
         }
 
-        // If pendingFinal, check whether the AI produced a final text response.
-        if (pendingFinal || get().pendingFinal) {
+        const shouldInspectLatestAssistant = pendingFinal || get().pendingFinal || isSendingNow;
+        if (shouldInspectLatestAssistant) {
           const recentAssistant = [...filteredMessages].reverse().find((msg) => {
             if (msg.role !== 'assistant') return false;
             if (!hasNonToolAssistantContent(msg)) return false;
@@ -176,7 +178,24 @@ export function createHistoryActions(
           });
           if (recentAssistant) {
             clearHistoryPoll();
-            set({ sending: false, activeRunId: null, pendingFinal: false });
+            set({ sending: false, activeRunId: null, pendingFinal: false, lastUserMessageAt: null });
+            return;
+          }
+
+          const recentEmptyAssistant = [...filteredMessages].reverse().find((msg) => {
+            if (msg.role !== 'assistant') return false;
+            if (!isEmptyAssistantResponse(msg)) return false;
+            return isAfterUserMsg(msg);
+          });
+          if (recentEmptyAssistant) {
+            clearHistoryPoll();
+            set({
+              sending: false,
+              activeRunId: null,
+              pendingFinal: false,
+              lastUserMessageAt: null,
+              error: EMPTY_ASSISTANT_RESPONSE_ERROR,
+            });
           }
         }
       };
