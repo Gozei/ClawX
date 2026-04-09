@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { modalOverlayClasses } from '@/components/ui/modal';
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -73,7 +74,7 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className={modalOverlayClasses}
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-dialog-title"
@@ -81,7 +82,7 @@ export function ConfirmDialog({
     >
       <div
         className={cn(
-          'mx-4 max-w-md rounded-lg border bg-card p-6 shadow-lg',
+          'w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-lg border bg-card p-6 shadow-lg',
           'focus:outline-none'
         )}
         tabIndex={-1}

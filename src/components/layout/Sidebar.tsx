@@ -30,7 +30,7 @@ import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { hostApiFetch } from '@/lib/host-api';
 import { useTranslation } from 'react-i18next';
-import logoSvg from '@/assets/logo.svg';
+import { AppLogo } from '@/components/branding/AppLogo';
 import { useBranding } from '@/lib/branding';
 
 type SessionBucketKey =
@@ -493,9 +493,7 @@ export function Sidebar() {
       <div className={cn("flex items-center px-3 py-3 h-14 border-b border-black/5", sidebarCollapsed ? "justify-center" : "justify-between")}>
         {!sidebarCollapsed && (
           <div className="flex items-center gap-2.5 overflow-hidden">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5">
-              <img src={logoSvg} alt={branding.productName} className="h-5 w-auto shrink-0" />
-            </div>
+            <AppLogo testId="sidebar-brand-logo" className="h-[22.5px]" />
             <div className="min-w-0">
               <div className="text-sm font-semibold tracking-[-0.01em] truncate whitespace-nowrap text-foreground/95">
                 {branding.productName}

@@ -3,6 +3,7 @@ import { RefreshCw, Trash2, AlertCircle, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { getSelectIconStyle, selectBaseClasses } from '@/components/ui/select';
 import { useGatewayStore } from '@/stores/gateway';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { hostApiFetch } from '@/lib/host-api';
@@ -29,6 +30,7 @@ import dingtalkIcon from '@/assets/channels/dingtalk.svg';
 import feishuIcon from '@/assets/channels/feishu.svg';
 import wecomIcon from '@/assets/channels/wecom.svg';
 import qqIcon from '@/assets/channels/qq.svg';
+const compactSelectIconStyle = getSelectIconStyle(8, 14);
 
 interface ChannelAccountItem {
   accountId: string;
@@ -238,10 +240,11 @@ export function Channels() {
           subtitle={t('subtitle')}
           actions={(
             <Button
+              data-testid="channels-refresh-button"
               variant="outline"
               onClick={handleRefresh}
               disabled={gatewayStatus.state !== 'running'}
-              className="h-10 rounded-full px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white/82 dark:hover:bg-white/6"
+              className="h-10 rounded-full px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6"
             >
               <RefreshCw className={cn('h-3.5 w-3.5 mr-2', isUsingStableValue && 'animate-spin')} />
               {t('refresh')}
@@ -359,7 +362,8 @@ export function Channels() {
                             <div className="flex items-center gap-2">
                               <span className="text-xs text-muted-foreground">{t('account.bindAgentLabel')}</span>
                               <select
-                                className="h-8 rounded-lg border border-black/10 dark:border-white/10 bg-background px-2 text-xs"
+                                className={cn(selectBaseClasses, 'h-8 w-auto rounded-lg border-black/10 bg-background px-2 pr-7 text-[12px] leading-4 dark:border-white/10 [background-position:right_8px_center] [background-size:14px_14px]')}
+                                style={compactSelectIconStyle}
                                 value={account.agentId || ''}
                                 onChange={(event) => {
                                   void handleBindAgent(group.channelType, account.accountId, event.target.value);

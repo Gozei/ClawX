@@ -72,6 +72,9 @@
       "cancel": "キャンセル",
       "change": "プロバイダーを変更",
       "add": "プロバイダーを追加",
+      "addModelIds": "追加",
+      "modelIdHelp": "複数のモデル ID を一度に入力できます。英字または中国語のカンマで区切ってください。先頭のモデルがデフォルトとして保存されます。",
+      "removeModelId": "モデル ID を削除",
       "save": "保存",
       "customDoc": "ドキュメント",
       "validate": "検証"
@@ -96,7 +99,8 @@
       "fallbacks_other": "フォールバック ({{count}}): {{names}}",
       "setDefault": "デフォルトに設定",
       "editKey": "API キーを編集",
-      "delete": "プロバイダーを削除"
+      "delete": "プロバイダーを削除",
+      "failedModelsHint": "テストに失敗したモデル ID を削除してから、追加または保存してください。"
     },
     "protocols": {
       "openai": "OpenAI 互換",
@@ -115,7 +119,27 @@
       "failedUpdate": "プロバイダーの更新に失敗しました",
       "invalidKey": "無効な API キー",
       "modelRequired": "モデル ID が必要です",
-      "minimaxConflict": "MiniMax (Global) と MiniMax (CN) は同時に追加できません。"
+      "minimaxConflict": "MiniMax (Global) と MiniMax (CN) は同時に追加できません。",
+      "testSuccess": "接続テストに成功しました",
+      "testFailed": "接続テストに失敗しました",
+      "testModel": "モデル",
+      "testLatency": "レイテンシ",
+      "testOutput": "出力",
+      "baseUrlRequired": "ベース URL は必須です",
+      "apiKeyRequired": "API キーは必須です",
+      "batchTestSummary": "{{passed}} / {{total}} 件のモデルがテストに成功しました",
+      "reusePassedModelTests": "すでにテスト成功済みのモデル結果を再利用しました",
+      "removeFailedModelsBeforeAdd": "追加する前に、テストに失敗したモデル ID を削除してください。",
+      "modelIdsAlreadyAdded": "そのモデル ID はすでに追加されています。",
+      "addModelIdsBeforeTest": "テスト前に、入力欄のモデル ID を先に追加してください。",
+      "testFailedModels": "次のモデルのテストに失敗しました：{{models}}",
+      "testAllModelsPassed": "{{count}} 件のモデル ID がテストに成功しました",
+      "removeFailedModelsBeforeSave": "保存する前に、テストに失敗したモデル ID を削除してください。",
+      "testPassedRequiredBeforeSave": "保存前に、少なくとも 1 つのモデル ID がテスト成功している必要があります。",
+      "retestRequiredBeforeSave": "変更があります。保存前に再テストしてください。",
+      "testAllModelsBeforeSave": "保存前にすべてのモデル ID をテストし、すべて成功していることを確認してください。",
+      "saveValidatedModels": "テスト済みの {{count}} 件のモデル ID を保存しています",
+      "testInProgressBeforeSave": "テスト完了後に保存してください"
     },
     "oauth": {
       "loginMode": "OAuthログイン",

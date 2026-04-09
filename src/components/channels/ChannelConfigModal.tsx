@@ -15,6 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { modalCardClasses, modalOverlayClasses } from '@/components/ui/modal';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
@@ -492,7 +493,7 @@ export function ChannelConfigModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      className={modalOverlayClasses}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
@@ -500,7 +501,7 @@ export function ChannelConfigModal({
       }}
     >
       <Card
-        className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-3xl border-0 shadow-2xl bg-background dark:bg-card overflow-hidden"
+        className={cn(modalCardClasses, 'max-w-3xl rounded-3xl border-0 shadow-2xl bg-background dark:bg-card')}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
       >

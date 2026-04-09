@@ -177,14 +177,11 @@ function handleGatewayNotification(notification: { method?: string; params?: Rec
         const matchesActiveRun = runId != null && state.activeRunId != null && String(runId) === state.activeRunId;
 
         if (matchesCurrentSession || matchesActiveRun) {
-          maybeLoadHistory(state);
+          maybeLoadHistory(state, true);
         }
         if ((matchesCurrentSession || matchesActiveRun) && state.sending) {
           useChatStore.setState({
-            sending: false,
-            activeRunId: null,
-            pendingFinal: false,
-            lastUserMessageAt: null,
+            pendingFinal: true,
             error: null,
           });
         }

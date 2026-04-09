@@ -34,7 +34,7 @@ describe('gateway store event wiring', () => {
   });
 
   it('subscribes to host events through subscribeHostEvent on init', async () => {
-    hostApiFetchMock.mockResolvedValueOnce({ state: 'running', port: 18789 });
+    hostApiFetchMock.mockResolvedValue({ state: 'running', port: 18789 });
 
     const handlers = new Map<string, (payload: unknown) => void>();
     subscribeHostEventMock.mockImplementation((eventName: string, handler: (payload: unknown) => void) => {
@@ -55,8 +55,8 @@ describe('gateway store event wiring', () => {
     expect(useGatewayStore.getState().status.state).toBe('stopped');
   });
 
-  it('dedupes the same final chat message arriving from notification and chat-message events', async () => {
-    hostApiFetchMock.mockResolvedValueOnce({ state: 'running', port: 18789 });
+  it('keeps pending state on completed notifications until final history is reconciled', async () => {
+    hostApiFetchMock.mockResolvedValue({ state: 'running', port: 18789 });
 
     const handlers = new Map<string, (payload: unknown) => void>();
     subscribeHostEventMock.mockImplementation((eventName: string, handler: (payload: unknown) => void) => {
@@ -64,43 +64,38 @@ describe('gateway store event wiring', () => {
       return () => {};
     });
 
+    const { useChatStore } = await import('../../src/stores/chat');
+    const loadHistory = vi.fn();
+    const loadSessions = vi.fn();
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      sessions: [{ key: 'agent:main:main' }],
+      activeRunId: 'run-1',
+      sending: true,
+      pendingFinal: false,
+      error: 'stale error',
+      loadHistory,
+      loadSessions,
+    } as never);
+
     const { useGatewayStore } = await import('@/stores/gateway');
     await useGatewayStore.getState().init();
-
-    const finalMessage = {
-      id: 'assistant-msg-1',
-      role: 'assistant',
-      content: '同一条回复',
-      stopReason: 'end_turn',
-    };
 
     handlers.get('gateway:notification')?.({
       method: 'agent',
       params: {
+        phase: 'completed',
         runId: 'run-1',
         sessionKey: 'agent:main:main',
-        state: 'final',
-        message: finalMessage,
       },
     });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    handlers.get('gateway:chat-message')?.({
-      runId: 'run-1',
-      message: finalMessage,
-    });
-
-    await vi.waitFor(() => {
-      expect(handleChatEventMock).toHaveBeenCalledTimes(1);
-    });
-
-    expect(handleChatEventMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runId: 'run-1',
-        message: expect.objectContaining({
-          id: 'assistant-msg-1',
-          content: '同一条回复',
-        }),
-      }),
-    );
+    expect(useChatStore.getState().sending).toBe(true);
+    expect(useChatStore.getState().pendingFinal).toBe(true);
+    expect(useChatStore.getState().error).toBeNull();
   });
 });

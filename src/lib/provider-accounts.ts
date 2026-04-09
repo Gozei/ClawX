@@ -30,7 +30,7 @@ export interface ProviderModelSummary {
   id: string;
   label: string;
   isDefault: boolean;
-  source: 'default' | 'recommended' | 'alias';
+  source: 'default' | 'configured' | 'recommended';
   usageTags: string[];
   manualUsageTags: string[];
 }
@@ -115,9 +115,9 @@ function getResolvedModel(
   status?: ProviderWithKeyInfo,
   aliases: ProviderAccount[] = [],
 ): string | undefined {
-  return account.model
+  return getConfiguredModelIds(account)[0]
     || status?.model
-    || aliases.find((candidate) => candidate.model)?.model
+    || aliases.flatMap((candidate) => getConfiguredModelIds(candidate)).find(Boolean)
     || undefined;
 }
 
@@ -140,6 +140,14 @@ function prettifyModelLabel(modelId: string): string {
   if (direct) return direct;
   const stripped = modelId.includes('/') ? modelId.split('/').pop() || modelId : modelId;
   return stripped.replace(/[-_]/g, ' ');
+}
+
+function normalizeConfiguredModelIds(models?: string[]): string[] {
+  return Array.from(new Set((models ?? []).map((model) => model.trim()).filter(Boolean)));
+}
+
+function getConfiguredModelIds(account: ProviderAccount): string[] {
+  return normalizeConfiguredModelIds([account.model || '', ...(account.metadata?.customModels ?? [])]);
 }
 
 function inferUsageTags(modelId: string): string[] {
@@ -186,11 +194,15 @@ function buildProviderModels(
   aliases: ProviderAccount[],
   status?: ProviderWithKeyInfo,
 ): ProviderModelSummary[] {
-  const defaultModel = primary.model || status?.model || aliases.find((candidate) => candidate.model)?.model;
+  const defaultModel = getResolvedModel(primary, status, aliases);
   const recommended = getRecommendedModelOptions(primary.vendorId, {
     baseUrl: primary.baseUrl,
     apiProtocol: primary.apiProtocol,
   });
+  const configuredModels = normalizeConfiguredModelIds([
+    ...getConfiguredModelIds(primary),
+    ...aliases.flatMap((alias) => getConfiguredModelIds(alias)),
+  ]);
 
   const entries = new Map<string, ProviderModelSummary>();
   const upsert = (modelId: string | undefined, source: ProviderModelSummary['source']) => {
@@ -216,7 +228,9 @@ function buildProviderModels(
   };
 
   upsert(defaultModel, 'default');
-  for (const alias of aliases) upsert(alias.model, 'alias');
+  for (const modelId of configuredModels) {
+    upsert(modelId, modelId === defaultModel ? 'default' : 'configured');
+  }
   for (const option of recommended) upsert(option.value, 'recommended');
 
   return [...entries.values()].map((entry) => ({
@@ -225,7 +239,7 @@ function buildProviderModels(
   })).sort((left, right) => {
     if (left.isDefault) return -1;
     if (right.isDefault) return 1;
-    const sourceRank = { default: 0, alias: 1, recommended: 2 } as const;
+    const sourceRank = { default: 0, configured: 1, recommended: 2 } as const;
     if (sourceRank[left.source] !== sourceRank[right.source]) {
       return sourceRank[left.source] - sourceRank[right.source];
     }

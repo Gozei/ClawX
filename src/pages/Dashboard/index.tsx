@@ -163,8 +163,8 @@ export function Dashboard() {
     if (channelSummary.degraded > 0) {
       issues.push({
         id: 'channel-errors',
-        title: '渠道连接异常',
-        detail: `${channelSummary.degraded} 个渠道连接处于异常状态。`,
+        title: '通道连接异常',
+        detail: `${channelSummary.degraded} 个通道连接处于异常状态。`,
         severity: 'high',
         href: '/channels',
       });
@@ -184,7 +184,7 @@ export function Dashboard() {
       issues.push({
         id: 'no-agents',
         title: '尚未创建角色',
-        detail: '至少创建一个角色后，才能分配模型、技能和渠道。',
+        detail: '至少创建一个角色后，才能分配模型、技能和通道。',
         severity: 'medium',
         href: '/agents',
       });
@@ -200,15 +200,16 @@ export function Dashboard() {
       <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-10 pt-16 pb-10">
         <PageHeader
           title="总览"
-          subtitle="查看网关、模型、渠道、定时任务与角色的整体运行状态。"
+          subtitle="查看网关、模型、通道、定时任务与角色的整体运行状态。"
           metadata={[
             `网关${gatewayStatus.state === 'running' ? '在线运行' : gatewayStatus.state === 'starting' ? '正在启动' : gatewayStatus.state === 'reconnecting' ? '正在重连' : gatewayStatus.state === 'error' ? '连接异常' : '尚未启动'}`,
             `${providerSummary.total} 个模型账户`,
-            `${channelSummary.connected}/${channelSummary.total} 个渠道在线`,
+            `${channelSummary.connected}/${channelSummary.total} 个通道在线`,
             `${agents.length} 个角色`,
           ]}
           actions={(
             <Button
+              data-testid="dashboard-refresh-button"
               onClick={() => {
                 void initGateway();
                 void refreshProviderSnapshot();
@@ -218,7 +219,7 @@ export function Dashboard() {
               }}
               disabled={isRefreshing}
               variant="outline"
-              className="h-10 rounded-full border-[#d4dceb] bg-white px-4 text-[13px] font-medium text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white/82 dark:hover:bg-white/6"
+              className="h-10 rounded-full border-[#d4dceb] bg-white px-4 text-[13px] font-medium text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6"
             >
               <RefreshCw className={cn('mr-2 h-4 w-4', isRefreshing && 'animate-spin')} />
               刷新状态
@@ -249,7 +250,7 @@ export function Dashboard() {
             }
           />
           <SummaryCard
-            title="渠道"
+            title="通道"
             value={`${channelSummary.connected}/${channelSummary.total}`}
             description={`${channelSummary.degraded} 个连接异常`}
             href="/channels"
@@ -312,7 +313,7 @@ export function Dashboard() {
                   <span className="font-medium text-foreground">{agents.find((agent) => agent.id === defaultAgentId)?.name ?? defaultAgentId}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">已分配渠道</span>
+                  <span className="text-muted-foreground">已分配通道</span>
                   <span className="font-medium text-foreground">{agents.reduce((sum, agent) => sum + agent.channelTypes.length, 0)}</span>
                 </div>
                 <Button asChild variant="outline" className="w-full">
@@ -338,7 +339,7 @@ export function Dashboard() {
                 <Button asChild variant="outline" className="justify-start">
                   <Link to="/channels">
                     <Network className="mr-2 h-4 w-4" />
-                    检查渠道状态
+                    检查通道状态
                   </Link>
                 </Button>
                 <Button asChild variant="outline" className="justify-start">
@@ -359,7 +360,7 @@ export function Dashboard() {
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-red-700 dark:text-red-200">
               {providerError && <p>模型：{providerError}</p>}
-              {channelsError && <p>渠道：{channelsError}</p>}
+              {channelsError && <p>通道：{channelsError}</p>}
               {cronError && <p>定时任务：{cronError}</p>}
               {agentsError && <p>角色：{agentsError}</p>}
             </CardContent>

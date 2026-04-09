@@ -2,10 +2,12 @@ import { invokeIpc } from '@/lib/api-client';
 import { hostApiFetch } from '@/lib/host-api';
 import {
   clearHistoryPoll,
+  EMPTY_ASSISTANT_RESPONSE_ERROR,
   enrichWithCachedImages,
   enrichWithToolResultFiles,
   getMessageText,
   hasNonToolAssistantContent,
+  isEmptyAssistantResponse,
   isInternalMessage,
   isToolResultRole,
   loadMissingPreviews,

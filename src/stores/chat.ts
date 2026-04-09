@@ -1043,8 +1043,12 @@ function collectToolUpdates(message: unknown, eventState: string): ToolStatus[] 
   return updates;
 }
 
+const EMPTY_ASSISTANT_RESPONSE_ERROR =
+  'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.';
+
 function hasNonToolAssistantContent(message: RawMessage | undefined): boolean {
   if (!message) return false;
+  if (Array.isArray(message._attachedFiles) && message._attachedFiles.length > 0) return true;
   if (typeof message.content === 'string' && message.content.trim()) return true;
 
   const content = message.content;
@@ -1060,6 +1064,13 @@ function hasNonToolAssistantContent(message: RawMessage | undefined): boolean {
   if (typeof msg.text === 'string' && msg.text.trim()) return true;
 
   return false;
+}
+
+function isEmptyAssistantResponse(message: RawMessage | undefined): boolean {
+  if (!message || message.role !== 'assistant') return false;
+  if (isInternalMessage(message)) return false;
+  if (isToolOnlyMessage(message)) return false;
+  return !hasNonToolAssistantContent(message);
 }
 
 // ── Store ────────────────────────────────────────────────────────
@@ -2047,7 +2058,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
             break;
           }
           const toolOnly = isToolOnlyMessage(finalMsg);
-          const hasOutput = hasNonToolAssistantContent(finalMsg);
+          const pendingImgsSnapshot = get().pendingToolImages;
+          const previewFinalMsg: RawMessage = pendingImgsSnapshot.length > 0
+            ? {
+              ...finalMsg,
+              _attachedFiles: [...(finalMsg._attachedFiles || []), ...pendingImgsSnapshot],
+            }
+            : finalMsg;
+          const hasOutput = hasNonToolAssistantContent(previewFinalMsg);
+          const emptyAssistantResponse = !toolOnly && isEmptyAssistantResponse(previewFinalMsg);
           const msgId = finalMsg.id || (toolOnly ? `run-${runId}-tool-${Date.now()}` : `run-${runId}`);
           set((s) => {
             const nextTools = updates.length > 0 ? upsertToolStatuses(s.streamingTools, updates) : s.streamingTools;
@@ -2085,6 +2104,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 ...clearPendingImages,
               };
             }
+            if (emptyAssistantResponse) {
+              return {
+                messages: [...s.messages, msgWithImages],
+                streamingText: '',
+                streamingMessage: null,
+                sending: false,
+                activeRunId: null,
+                pendingFinal: false,
+                streamingTools,
+                error: EMPTY_ASSISTANT_RESPONSE_ERROR,
+                ...clearPendingImages,
+              };
+            }
             return toolOnly ? {
               messages: [...s.messages, msgWithImages],
               streamingText: '',
@@ -2108,6 +2140,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (hasOutput && !toolOnly) {
             clearHistoryPoll();
             void get().loadHistory(true);
+          } else if (emptyAssistantResponse) {
+            clearHistoryPoll();
           }
         } else {
           // No message in final event - reload history to get complete data
