@@ -59,7 +59,7 @@ import { hostApiFetch } from '@/lib/host-api';
 import { subscribeHostEvent } from '@/lib/host-events';
 import { useBranding } from '@/lib/branding';
 
-const inputClasses = 'h-[44px] rounded-xl font-mono text-[13px] bg-[#eeece3] dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
+const inputClasses = 'h-[44px] rounded-xl font-mono text-[13px] bg-white dark:bg-card border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
 const labelClasses = 'text-[14px] text-foreground/80 font-bold';
 type ArkMode = 'apikey' | 'codeplan';
 type ProviderTestResult = {
@@ -1435,9 +1435,7 @@ function ProviderCard({
                     value={fallbackModelsText}
                     onChange={(e) => setFallbackModelsText(e.target.value)}
                     placeholder={t('aiProviders.dialog.fallbackModelIdsPlaceholder')}
-                    className={isDefault
-                      ? "min-h-24 w-full rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-card px-3 py-2 text-[13px] font-mono outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 shadow-sm"
-                      : "min-h-24 w-full rounded-xl border border-black/10 dark:border-white/10 bg-[#eeece3] dark:bg-muted px-3 py-2 text-[13px] font-mono outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40"}
+                    className="min-h-24 w-full rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-card px-3 py-2 text-[13px] font-mono outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40"
                   />
                   <p className="text-[12px] text-muted-foreground">
                     {t('aiProviders.dialog.fallbackModelIdsHelp')}
@@ -1540,7 +1538,7 @@ function ProviderCard({
                     'rounded-xl px-4 border-black/10 dark:border-white/10 font-medium text-foreground',
                     isDefault
                       ? 'h-[40px] bg-white dark:bg-card hover:bg-black/5 dark:hover:bg-white/10'
-                      : 'h-[44px] bg-[#eeece3] dark:bg-muted hover:bg-black/5 dark:hover:bg-white/10 shadow-sm'
+                      : 'h-[44px] bg-white dark:bg-card hover:bg-black/5 dark:hover:bg-white/10 shadow-sm'
                   )}
                   disabled={validating || saving}
                 >
@@ -1560,7 +1558,7 @@ function ProviderCard({
                     'rounded-xl border border-black/10 dark:border-white/10',
                     isDefault
                       ? 'h-[40px] bg-transparent hover:bg-black/5 dark:hover:bg-white/10'
-                      : 'h-[44px] bg-[#eeece3] dark:bg-muted hover:bg-black/5 dark:hover:bg-white/10 shadow-sm'
+                      : 'h-[44px] bg-white dark:bg-card hover:bg-black/5 dark:hover:bg-white/10 shadow-sm'
                   )}
                 >
                   {t('aiProviders.dialog.cancel', 'Cancel')}
@@ -2556,4 +2554,3 @@ function AddProviderDialog({
     </div>
   );
 }
-
