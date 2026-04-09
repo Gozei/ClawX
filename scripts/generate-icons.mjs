@@ -82,8 +82,19 @@ try {
   const TRAY_SVG_SOURCE = path.join(ICONS_DIR, 'whale_tray_logo.svg');
   
   if (fs.existsSync(TRAY_SVG_SOURCE)) {
-    await sharp(TRAY_SVG_SOURCE)
-      .resize(22, 22)
+    const traySourceBuffer = await sharp(TRAY_SVG_SOURCE)
+      .resize(88, 88, {
+        fit: 'contain',
+        kernel: sharp.kernel.lanczos3,
+      })
+      .png()
+      .toBuffer();
+
+    await sharp(traySourceBuffer)
+      .resize(22, 22, {
+        fit: 'contain',
+        kernel: sharp.kernel.lanczos3,
+      })
       .png()
       .toFile(path.join(ICONS_DIR, 'tray-icon-Template.png'));
     echo`  ✅ Created tray-icon-Template.png (22x22)`;
