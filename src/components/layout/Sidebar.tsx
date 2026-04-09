@@ -524,7 +524,10 @@ export function Sidebar() {
           data-testid="sidebar-new-chat"
           onClick={() => {
             const { messages } = useChatStore.getState();
-            if (messages.length > 0) newSession();
+            if (messages.length > 0) {
+              newSession();
+            }
+            setSidebarCollapsed(true);
             navigate('/');
           }}
           className={cn(

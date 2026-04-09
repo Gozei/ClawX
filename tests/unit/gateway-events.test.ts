@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hostApiFetchMock = vi.fn();
 const subscribeHostEventMock = vi.fn();
+const handleChatEventMock = vi.fn();
 
 vi.mock('@/lib/host-api', () => ({
   hostApiFetch: (...args: unknown[]) => hostApiFetchMock(...args),
@@ -9,6 +10,21 @@ vi.mock('@/lib/host-api', () => ({
 
 vi.mock('@/lib/host-events', () => ({
   subscribeHostEvent: (...args: unknown[]) => subscribeHostEventMock(...args),
+}));
+
+vi.mock('@/stores/chat', () => ({
+  useChatStore: {
+    getState: () => ({
+      currentSessionKey: 'agent:main:main',
+      sessions: [{ key: 'agent:main:main', displayName: 'Main' }],
+      sending: false,
+      activeRunId: null,
+      loadSessions: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue(undefined),
+      handleChatEvent: handleChatEventMock,
+    }),
+    setState: vi.fn(),
+  },
 }));
 
 describe('gateway store event wiring', () => {

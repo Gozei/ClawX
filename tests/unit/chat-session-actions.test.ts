@@ -123,7 +123,7 @@ describe('chat session actions', () => {
     expect(h.read().loadHistory).toHaveBeenCalledTimes(1);
   });
 
-  it('newSession creates a canonical session key and clears transient state', async () => {
+  it('newSession creates a draft session key without adding it to history yet', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1711111111111);
     const { createSessionActions } = await import('@/stores/chat/session-actions');
     const h = makeHarness({
@@ -139,12 +139,38 @@ describe('chat session actions', () => {
     actions.newSession();
     const next = h.read();
     expect(next.currentSessionKey).toBe('agent:foo:session-1711111111111');
-    expect(next.sessions.some((s) => s.key === 'agent:foo:session-1711111111111')).toBe(true);
+    expect(next.sessions.some((s) => s.key === 'agent:foo:session-1711111111111')).toBe(false);
     expect(next.messages).toEqual([]);
     expect(next.streamingText).toBe('');
     expect(next.activeRunId).toBeNull();
     expect(next.pendingFinal).toBe(false);
     nowSpy.mockRestore();
+  });
+
+  it('loadSessions does not materialize the active empty draft as history', async () => {
+    const { createSessionActions } = await import('@/stores/chat/session-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:foo:session-draft',
+      sessions: [{ key: 'agent:foo:session-draft' }],
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+    });
+    const actions = createSessionActions(h.set as never, h.get as never);
+
+    invokeIpcMock.mockResolvedValueOnce({
+      success: true,
+      result: {
+        sessions: [
+          { key: 'agent:foo:main', displayName: 'Main' },
+        ],
+      },
+    });
+
+    await actions.loadSessions();
+
+    expect(h.read().currentSessionKey).toBe('agent:foo:session-draft');
+    expect(h.read().sessions.some((session) => session.key === 'agent:foo:session-draft')).toBe(false);
   });
 
   it('renameSession persists and updates the local label with a 30-character cap', async () => {

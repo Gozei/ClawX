@@ -82,21 +82,29 @@ function pruneChatEventDedupe(now: number): void {
 }
 
 function buildChatEventDedupeKey(eventState: string, event: Record<string, unknown>): string | null {
-  const runId = event.runId != null ? String(event.runId) : '';
-  const sessionKey = event.sessionKey != null ? String(event.sessionKey) : '';
-  const seq = event.seq != null ? String(event.seq) : '';
-  if (runId || sessionKey || seq || eventState) {
-    return [runId, sessionKey, seq, eventState].join('|');
-  }
   const msg = (event.message && typeof event.message === 'object')
     ? event.message as Record<string, unknown>
     : null;
   if (msg) {
     const messageId = msg.id != null ? String(msg.id) : '';
     const stopReason = msg.stopReason ?? msg.stop_reason;
-    if (messageId || stopReason) {
-      return `msg|${messageId}|${String(stopReason ?? '')}|${eventState}`;
+    const role = msg.role != null ? String(msg.role) : '';
+    const content = msg.content;
+    const contentKey = typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? JSON.stringify(content)
+        : '';
+    if (messageId || stopReason || (role && contentKey)) {
+      return `msg|${messageId}|${String(stopReason ?? '')}|${role}|${contentKey}|${eventState}`;
     }
+  }
+
+  const runId = event.runId != null ? String(event.runId) : '';
+  const sessionKey = event.sessionKey != null ? String(event.sessionKey) : '';
+  const seq = event.seq != null ? String(event.seq) : '';
+  if (runId || sessionKey || seq || eventState) {
+    return [runId, sessionKey, seq, eventState].join('|');
   }
   return null;
 }
@@ -111,6 +119,27 @@ function isDuplicateChatEvent(eventState: string, event: Record<string, unknown>
   }
   _chatEventDedupe.set(key, now);
   return false;
+}
+
+function buildMessageContentKey(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return JSON.stringify(content);
+  return '';
+}
+
+function isEquivalentRecentAssistantMessage(
+  messages: RawMessage[],
+  candidate: RawMessage,
+): boolean {
+  const candidateRole = candidate.role || 'assistant';
+  const candidateContentKey = buildMessageContentKey(candidate.content);
+  if (!candidateContentKey) return false;
+
+  return messages.slice(-3).some((message) => {
+    const role = message.role || 'assistant';
+    if (role !== candidateRole) return false;
+    return buildMessageContentKey(message.content) === candidateContentKey;
+  });
 }
 
 // ── Local image cache ─────────────────────────────────────────
@@ -708,6 +737,18 @@ function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boo
   return typeof session?.label === 'string' && session.label.trim().length > 0;
 }
 
+function isUnusedDraftSession(
+  state: Pick<ChatState, 'currentSessionKey' | 'messages' | 'sessions' | 'sessionLabels' | 'sessionLastActivity'>,
+  sessionKey: string,
+): boolean {
+  return !sessionKey.endsWith(':main')
+    && state.currentSessionKey === sessionKey
+    && state.messages.length === 0
+    && !state.sessionLastActivity[sessionKey]
+    && !state.sessionLabels[sessionKey]
+    && !hasStoredSessionLabel(state.sessions, sessionKey);
+}
+
 function buildSessionSwitchPatch(
   state: Pick<
     ChatState,
@@ -719,10 +760,7 @@ function buildSessionSwitchPatch(
   // Relying solely on messages.length is unreliable because switchSession clears
   // the current messages before loadHistory runs, creating a race condition that
   // could cause sessions with real history to be incorrectly removed from the sidebar.
-  const leavingEmpty = !state.currentSessionKey.endsWith(':main')
-    && state.messages.length === 0
-    && !state.sessionLastActivity[state.currentSessionKey]
-    && !state.sessionLabels[state.currentSessionKey];
+  const leavingEmpty = isUnusedDraftSession(state, state.currentSessionKey);
 
   const nextSessions = leavingEmpty
     ? state.sessions.filter((session) => session.key !== state.currentSessionKey)
@@ -1139,16 +1177,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
               nextSessionKey = canonicalMatch;
             }
           }
+          const currentState = get();
+          const currentIsUnusedDraft = isUnusedDraftSession(currentState, nextSessionKey);
           if (!dedupedSessions.find((s) => s.key === nextSessionKey) && dedupedSessions.length > 0) {
             // Preserve only locally-created pending sessions. On initial boot the
             // default ghost key (`agent:main:main`) should yield to real history.
-            const hasLocalPendingSession = localSessions.some((session) => session.key === nextSessionKey);
+            const hasLocalPendingSession = localSessions.some((session) => session.key === nextSessionKey) && !currentIsUnusedDraft;
             if (!hasLocalPendingSession) {
               nextSessionKey = dedupedSessions[0].key;
             }
           }
 
-          const sessionsWithCurrent = !dedupedSessions.find((s) => s.key === nextSessionKey) && nextSessionKey
+          const shouldMaterializeCurrentSession = !isUnusedDraftSession(get(), nextSessionKey);
+          const sessionsWithCurrent = !dedupedSessions.find((s) => s.key === nextSessionKey) && nextSessionKey && shouldMaterializeCurrentSession
             ? [
               ...dedupedSessions,
               { key: nextSessionKey, displayName: nextSessionKey },
@@ -1306,23 +1347,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // sessions.reset archives (renames) the session JSONL file, making old
     // conversation history inaccessible when the user switches back to it.
     const { currentSessionKey, messages, sessions, sessionLastActivity, sessionLabels } = get();
-    // Only treat sessions with no history records and no activity timestamp as empty
-    const leavingEmpty = !currentSessionKey.endsWith(':main')
-      && messages.length === 0
-      && !sessionLastActivity[currentSessionKey]
-      && !sessionLabels[currentSessionKey];
+    const leavingEmpty = isUnusedDraftSession(
+      { currentSessionKey, messages, sessions, sessionLabels, sessionLastActivity },
+      currentSessionKey,
+    );
     const prefix = getCanonicalPrefixFromSessionKey(currentSessionKey)
       ?? getCanonicalPrefixFromSessions(sessions)
       ?? DEFAULT_CANONICAL_PREFIX;
     const newKey = `${prefix}:session-${Date.now()}`;
-    const newSessionEntry: ChatSession = { key: newKey, displayName: newKey };
     set((s) => ({
       currentSessionKey: newKey,
       currentAgentId: getAgentIdFromSessionKey(newKey),
-      sessions: [
-        ...(leavingEmpty ? s.sessions.filter((sess) => sess.key !== currentSessionKey) : s.sessions),
-        newSessionEntry,
-      ],
+      sessions: leavingEmpty ? s.sessions.filter((sess) => sess.key !== currentSessionKey) : s.sessions,
       sessionLabels: leavingEmpty
         ? Object.fromEntries(Object.entries(s.sessionLabels).filter(([k]) => k !== currentSessionKey))
         : s.sessionLabels,
@@ -1402,17 +1438,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   cleanupEmptySession: () => {
-    const { currentSessionKey, messages, sessionLastActivity, sessionLabels } = get();
+    const { currentSessionKey, messages, sessions, sessionLastActivity, sessionLabels } = get();
     // Only remove non-main sessions that were never used (no messages sent).
     // This mirrors the "leavingEmpty" logic in switchSession so that creating
     // a new session and immediately navigating away doesn't leave a ghost entry
     // in the sidebar.
     // Also check sessionLastActivity and sessionLabels comprehensively to prevent
     // falsely treating sessions with history as empty due to switchSession clearing messages early.
-    const isEmptyNonMain = !currentSessionKey.endsWith(':main')
-      && messages.length === 0
-      && !sessionLastActivity[currentSessionKey]
-      && !sessionLabels[currentSessionKey];
+    const isEmptyNonMain = isUnusedDraftSession(
+      { currentSessionKey, messages, sessions, sessionLabels, sessionLastActivity },
+      currentSessionKey,
+    );
     if (!isEmptyNonMain) return;
     set((s) => ({
       sessions: s.sessions.filter((sess) => sess.key !== currentSessionKey),
@@ -1521,7 +1557,53 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
 
-      set({ messages: finalMessages, thinkingLevel, loading: false });
+      const {
+        pendingFinal: historyPendingFinal,
+        lastUserMessageAt: historyLastUserMessageAt,
+        sending: historyIsSendingNow,
+      } = get();
+
+      const historyUserMsTs = historyLastUserMessageAt ? toMs(historyLastUserMessageAt) : 0;
+      const isAfterHistoryUserMsg = (msg: RawMessage): boolean => {
+        if (!historyUserMsTs || !msg.timestamp) return true;
+        return toMs(msg.timestamp) >= historyUserMsTs;
+      };
+
+      const shouldEnterHistoryPendingFinal = historyIsSendingNow && !historyPendingFinal && [...filteredMessages].reverse().some((msg) => {
+        if (msg.role !== 'assistant') return false;
+        return isAfterHistoryUserMsg(msg);
+      });
+
+      const historyRecentAssistant = (historyPendingFinal || shouldEnterHistoryPendingFinal)
+        ? [...filteredMessages].reverse().find((msg) => {
+            if (msg.role !== 'assistant') return false;
+            if (!hasNonToolAssistantContent(msg)) return false;
+            return isAfterHistoryUserMsg(msg);
+          })
+        : undefined;
+
+      if (historyRecentAssistant) {
+        clearHistoryPoll();
+      }
+
+      set({
+        messages: finalMessages,
+        thinkingLevel,
+        loading: false,
+        ...(historyRecentAssistant
+          ? {
+              sending: false,
+              activeRunId: null,
+              pendingFinal: false,
+              streamingText: '',
+              streamingMessage: null,
+              streamingTools: [],
+              pendingToolImages: [],
+            }
+          : shouldEnterHistoryPendingFinal
+            ? { pendingFinal: true }
+            : {}),
+      });
 
       // Extract first user message text as a session label for display in the toolbar.
       // Skip main sessions (key ends with ":main") — they rely on the Gateway-provided
@@ -1562,56 +1644,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }));
         }
       });
-      const { pendingFinal, lastUserMessageAt, sending: isSendingNow } = get();
-
-      // If we're sending but haven't received streaming events, check
-      // whether the loaded history reveals intermediate tool-call activity.
-      // This surfaces progress via the pendingFinal → ActivityIndicator path.
-      const userMsTs = lastUserMessageAt ? toMs(lastUserMessageAt) : 0;
-      const isAfterUserMsg = (msg: RawMessage): boolean => {
-        if (!userMsTs || !msg.timestamp) return true;
-        return toMs(msg.timestamp) >= userMsTs;
-      };
-
-      if (isSendingNow && !pendingFinal) {
-        const hasRecentAssistantActivity = [...filteredMessages].reverse().some((msg) => {
-          if (msg.role !== 'assistant') return false;
-          return isAfterUserMsg(msg);
-        });
-        if (hasRecentAssistantActivity) {
-          set({ pendingFinal: true });
-        }
-      }
-
-      const shouldInspectLatestAssistant = pendingFinal || get().pendingFinal || isSendingNow;
-      if (shouldInspectLatestAssistant) {
-        const recentAssistant = [...filteredMessages].reverse().find((msg) => {
-          if (msg.role !== 'assistant') return false;
-          if (!hasNonToolAssistantContent(msg)) return false;
-          return isAfterUserMsg(msg);
-        });
-        if (recentAssistant) {
-          clearHistoryPoll();
-          set({ sending: false, activeRunId: null, pendingFinal: false, lastUserMessageAt: null });
-          return;
-        }
-
-        const recentEmptyAssistant = [...filteredMessages].reverse().find((msg) => {
-          if (msg.role !== 'assistant') return false;
-          if (!isEmptyAssistantResponse(msg)) return false;
-          return isAfterUserMsg(msg);
-        });
-        if (recentEmptyAssistant) {
-          clearHistoryPoll();
-          set({
-            sending: false,
-            activeRunId: null,
-            pendingFinal: false,
-            lastUserMessageAt: null,
-            error: EMPTY_ASSISTANT_RESPONSE_ERROR,
-          });
-        }
-      }
       };
 
       try {
@@ -1702,10 +1734,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         filePath: a.stagedPath,
       })),
     };
-    set((s) => ({
-      messages: [...s.messages, userMsg],
-      sending: true,
-      error: null,
+      set((s) => ({
+        sessions: ensureSessionEntry(s.sessions, currentSessionKey),
+        messages: [...s.messages, userMsg],
+        sending: true,
+        error: null,
       streamingText: '',
       streamingMessage: null,
       streamingTools: [],
@@ -2052,7 +2085,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const clearPendingImages = { pendingToolImages: [] as AttachedFileMeta[] };
 
             // Check if message already exists (prevent duplicates)
-            const alreadyExists = s.messages.some(m => m.id === msgId);
+            const alreadyExists = s.messages.some(m => m.id === msgId)
+              || isEquivalentRecentAssistantMessage(s.messages, msgWithImages);
             if (alreadyExists) {
               return toolOnly ? {
                 streamingText: '',

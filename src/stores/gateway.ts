@@ -48,21 +48,29 @@ function pruneGatewayEventDedupe(now: number): void {
 }
 
 function buildGatewayEventDedupeKey(event: Record<string, unknown>): string | null {
+  const message = event.message;
+  if (message && typeof message === 'object') {
+    const msg = message as Record<string, unknown>;
+    const messageId = msg.id != null ? String(msg.id) : '';
+    const stopReason = msg.stopReason ?? msg.stop_reason;
+    const role = msg.role != null ? String(msg.role) : '';
+    const content = msg.content;
+    const contentKey = typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? JSON.stringify(content)
+        : '';
+    if (messageId || stopReason || (role && contentKey)) {
+      return `msg|${messageId}|${String(stopReason ?? '')}|${role}|${contentKey}`;
+    }
+  }
+
   const runId = event.runId != null ? String(event.runId) : '';
   const sessionKey = event.sessionKey != null ? String(event.sessionKey) : '';
   const seq = event.seq != null ? String(event.seq) : '';
   const state = event.state != null ? String(event.state) : '';
   if (runId || sessionKey || seq || state) {
     return [runId, sessionKey, seq, state].join('|');
-  }
-  const message = event.message;
-  if (message && typeof message === 'object') {
-    const msg = message as Record<string, unknown>;
-    const messageId = msg.id != null ? String(msg.id) : '';
-    const stopReason = msg.stopReason ?? msg.stop_reason;
-    if (messageId || stopReason) {
-      return `msg|${messageId}|${String(stopReason ?? '')}`;
-    }
   }
   return null;
 }
