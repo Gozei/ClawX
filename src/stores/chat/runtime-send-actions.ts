@@ -116,6 +116,7 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
         })),
       };
       set((s) => ({
+        sessions: ensureSessionEntry(s.sessions, currentSessionKey),
         messages: [...s.messages, userMsg],
         sending: true,
         error: null,
