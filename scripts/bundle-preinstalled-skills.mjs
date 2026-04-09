@@ -104,7 +104,12 @@ async function fetchSparseRepo(repo, ref, paths, checkoutDir) {
 echo`Bundling preinstalled skills...`;
 
 if (process.env.SKIP_PREINSTALLED_SKILLS === '1') {
-  echo`⏭  SKIP_PREINSTALLED_SKILLS=1 set, skipping skills fetch.`;
+  if (existsSync(OUTPUT_ROOT)) {
+    echo`⏭  SKIP_PREINSTALLED_SKILLS=1 set, keeping existing bundled skills at ${OUTPUT_ROOT}.`;
+  } else {
+    mkdirSync(OUTPUT_ROOT, { recursive: true });
+    echo`⏭  SKIP_PREINSTALLED_SKILLS=1 set, skipping skills fetch and leaving ${OUTPUT_ROOT} empty.`;
+  }
   process.exit(0);
 }
 

@@ -213,4 +213,33 @@ describe('chat runtime event handlers', () => {
     expect(next.lastUserMessageAt).toBeNull();
     expect(next.pendingToolImages).toEqual([]);
   });
+
+  it('skips appending a final assistant message when an equivalent recent one already exists', async () => {
+    const { handleRuntimeEventState } = await import('@/stores/chat/runtime-event-handlers');
+    const existing = {
+      id: 'assistant-existing',
+      role: 'assistant',
+      content: '重复回复',
+    };
+    const h = makeHarness({
+      sending: true,
+      activeRunId: 'run-dup',
+      messages: [existing],
+      streamingMessage: { role: 'assistant', content: '重复回复' },
+    });
+
+    handleRuntimeEventState(
+      h.set as never,
+      h.get as never,
+      { message: { id: 'assistant-new', role: 'assistant', content: '重复回复' } },
+      'final',
+      'run-dup',
+    );
+
+    const next = h.read();
+    expect(next.messages).toHaveLength(1);
+    expect(next.messages[0]).toEqual(existing);
+    expect(next.streamingMessage).toBeNull();
+    expect(next.sending).toBe(false);
+  });
 });

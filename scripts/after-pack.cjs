@@ -19,9 +19,9 @@
  *      @mariozechner/clipboard).
  */
 
-const { cpSync, existsSync, readdirSync, rmSync, statSync, mkdirSync, realpathSync } = require('fs');
+const { cpSync, copyFileSync, existsSync, lstatSync, readdirSync, readlinkSync, rmSync, statSync, mkdirSync, realpathSync } = require('fs');
 const { execFileSync } = require('child_process');
-const { join, dirname, basename, relative } = require('path');
+const { join, dirname, basename, relative, resolve } = require('path');
 
 // On Windows, paths in pnpm's virtual store can exceed the default MAX_PATH
 // limit (260 chars). Node.js 18.17+ respects the system LongPathsEnabled
@@ -198,6 +198,57 @@ function cleanupNativePlatformPackages(nodeModulesDir, platform, arch) {
   }
 
   return removed;
+}
+
+function materializeSymlinks(rootDir) {
+  if (!existsSync(rootDir)) return { materialized: 0, removed: 0 };
+
+  let materialized = 0;
+  let removed = 0;
+
+  function walk(currentDir) {
+    let entries;
+    try { entries = readdirSync(currentDir, { withFileTypes: true }); } catch { return; }
+
+    for (const entry of entries) {
+      const fullPath = join(currentDir, entry.name);
+
+      let lst;
+      try { lst = lstatSync(fullPath); } catch { continue; }
+
+      if (lst.isSymbolicLink()) {
+        let linkTarget;
+        try { linkTarget = readlinkSync(fullPath); } catch { continue; }
+
+        const resolvedTarget = resolve(dirname(fullPath), linkTarget);
+        try {
+          const targetStat = statSync(resolvedTarget);
+          rmSync(fullPath, { recursive: true, force: true });
+          if (targetStat.isDirectory()) {
+            cpSync(resolvedTarget, fullPath, { recursive: true, dereference: true });
+          } else {
+            mkdirSync(dirname(fullPath), { recursive: true });
+            copyFileSync(resolvedTarget, fullPath);
+          }
+          materialized++;
+
+          if (targetStat.isDirectory()) {
+            walk(fullPath);
+          }
+        } catch {
+          try { rmSync(fullPath, { recursive: true, force: true }); removed++; } catch { /* */ }
+        }
+        continue;
+      }
+
+      if (lst.isDirectory()) {
+        walk(fullPath);
+      }
+    }
+  }
+
+  walk(rootDir);
+  return { materialized, removed };
 }
 
 // ── Broken module patcher ─────────────────────────────────────────────────────
@@ -567,6 +618,20 @@ exports.default = async function afterPack(context) {
   cpSync(src, dest, { recursive: true });
   console.log('[after-pack] ✅ openclaw node_modules copied.');
 
+  // pnpm leaves executable shims and some package entries as symlinks.
+  // Those links can point back to the workspace's virtual store, which makes
+  // the packaged macOS app fail codesign verification. Drop .bin and
+  // materialize any remaining symlinks into real files/directories.
+  try {
+    rmSync(join(dest, '.bin'), { recursive: true, force: true });
+    console.log('[after-pack] 🧹 Removed openclaw/node_modules/.bin symlink shims.');
+  } catch { /* */ }
+
+  const topLevelSymlinks = materializeSymlinks(dest);
+  if (topLevelSymlinks.materialized > 0 || topLevelSymlinks.removed > 0) {
+    console.log(`[after-pack] 🔗 Materialized ${topLevelSymlinks.materialized} symlink(s), removed ${topLevelSymlinks.removed} broken symlink(s) in openclaw/node_modules.`);
+  }
+
   // Patch broken modules whose CJS transpiled output sets module.exports = undefined,
   // causing TypeError in Node.js 22+ ESM interop.
   patchBrokenModules(dest);
@@ -623,6 +688,10 @@ exports.default = async function afterPack(context) {
       const destExtNM = join(packExtDir, extEntry.name, 'node_modules');
       if (!existsSync(destExtNM)) {
         cpSync(srcNM, destExtNM, { recursive: true });
+        const extSymlinks = materializeSymlinks(destExtNM);
+        if (extSymlinks.materialized > 0 || extSymlinks.removed > 0) {
+          console.log(`[after-pack] 🔗 Extension ${extEntry.name}: materialized ${extSymlinks.materialized} symlink(s), removed ${extSymlinks.removed} broken symlink(s).`);
+        }
       }
       extNMCount++;
 
