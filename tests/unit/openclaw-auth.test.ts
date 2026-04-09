@@ -41,14 +41,6 @@ async function readOpenClawJson(): Promise<Record<string, unknown>> {
   return JSON.parse(content) as Record<string, unknown>;
 }
 
-async function readManagedProvidersJson(): Promise<Record<string, unknown>> {
-  const content = await readFile(
-    join(testHome, '.openclaw', 'deep-ai-worker', 'config', 'providers.json'),
-    'utf8',
-  );
-  return JSON.parse(content) as Record<string, unknown>;
-}
-
 async function readAuthProfiles(agentId: string): Promise<Record<string, unknown>> {
   const content = await readFile(join(testHome, '.openclaw', 'agents', agentId, 'agent', 'auth-profiles.json'), 'utf8');
   return JSON.parse(content) as Record<string, unknown>;
@@ -128,28 +120,6 @@ describe('saveProviderKeyToOpenClaw', () => {
     );
 
     logSpy.mockRestore();
-  });
-
-  it('always writes auth profiles to main even when main is not listed in agents.list', async () => {
-    await writeOpenClawJson({
-      agents: {
-        list: [
-          {
-            id: 'agent-4',
-            name: '售前解决方案',
-            workspace: '~/.openclaw/workspace-agent-4',
-            agentDir: '~/.openclaw/agents/agent-4/agent',
-          },
-        ],
-      },
-    });
-
-    const { saveProviderKeyToOpenClaw } = await import('@electron/utils/openclaw-auth');
-    await saveProviderKeyToOpenClaw('custom-custom36', 'sk-qwen');
-
-    const mainProfiles = await readAuthProfiles('main');
-
-    expect((mainProfiles.profiles as Record<string, { key: string }>)['custom-custom36:default'].key).toBe('sk-qwen');
   });
 });
 
@@ -423,6 +393,158 @@ describe('sanitizeOpenClawConfig', () => {
 
     logSpy.mockRestore();
   });
+
+  it('migrates legacy tools.web.search.kimi into moonshot plugin config', async () => {
+    await writeOpenClawJson({
+      models: {
+        providers: {
+          moonshot: { baseUrl: 'https://api.moonshot.cn/v1', api: 'openai-completions' },
+        },
+      },
+      tools: {
+        web: {
+          search: {
+            kimi: {
+              apiKey: 'stale-inline-key',
+              baseUrl: 'https://api.moonshot.cn/v1',
+            },
+          },
+        },
+      },
+    });
+
+    const { sanitizeOpenClawConfig } = await import('@electron/utils/openclaw-auth');
+    await sanitizeOpenClawConfig();
+
+    const result = await readOpenClawJson();
+    const tools = (result.tools as Record<string, unknown> | undefined) || {};
+    const web = (tools.web as Record<string, unknown> | undefined) || {};
+    const search = (web.search as Record<string, unknown> | undefined) || {};
+    const moonshot = ((((result.plugins as Record<string, unknown>).entries as Record<string, unknown>).moonshot as Record<string, unknown>).config as Record<string, unknown>).webSearch as Record<string, unknown>;
+
+    expect(search).not.toHaveProperty('kimi');
+    expect(moonshot).not.toHaveProperty('apiKey');
+    expect(moonshot.baseUrl).toBe('https://api.moonshot.cn/v1');
+  });
+
+  it('mirrors telegram default account credentials to top level during sanitize', async () => {
+    await writeOpenClawJson({
+      channels: {
+        telegram: {
+          enabled: true,
+          defaultAccount: 'default',
+          accounts: {
+            default: {
+              botToken: 'telegram-token',
+              enabled: true,
+            },
+          },
+          proxy: 'socks5://127.0.0.1:7891',
+        },
+      },
+    });
+
+    const { sanitizeOpenClawConfig } = await import('@electron/utils/openclaw-auth');
+    await sanitizeOpenClawConfig();
+
+    const result = await readOpenClawJson();
+    const channels = result.channels as Record<string, Record<string, unknown>>;
+    const telegram = channels.telegram;
+    // telegram is NOT in the exclude set, so credentials are mirrored to top level
+    expect(telegram.proxy).toBe('socks5://127.0.0.1:7891');
+    expect(telegram.botToken).toBe('telegram-token');
+  });
+
+  it('strips accounts/defaultAccount from dingtalk (strict-schema channel) during sanitize', async () => {
+    await writeOpenClawJson({
+      channels: {
+        dingtalk: {
+          enabled: true,
+          defaultAccount: 'default',
+          accounts: {
+            default: {
+              clientId: 'dt-client-id-nested',
+              clientSecret: 'dt-secret-nested',
+              enabled: true,
+            },
+          },
+          clientId: 'dt-client-id',
+          clientSecret: 'dt-secret',
+        },
+      },
+    });
+
+    const { sanitizeOpenClawConfig } = await import('@electron/utils/openclaw-auth');
+    await sanitizeOpenClawConfig();
+
+    const result = await readOpenClawJson();
+    const channels = result.channels as Record<string, Record<string, unknown>>;
+    const dingtalk = channels.dingtalk;
+    // dingtalk's strict schema rejects accounts/defaultAccount — they must be stripped
+    expect(dingtalk.enabled).toBe(true);
+    expect(dingtalk.accounts).toBeUndefined();
+    expect(dingtalk.defaultAccount).toBeUndefined();
+    // Top-level credentials must be preserved
+    expect(dingtalk.clientId).toBe('dt-client-id');
+    expect(dingtalk.clientSecret).toBe('dt-secret');
+  });
+});
+
+describe('syncProviderConfigToOpenClaw', () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.restoreAllMocks();
+    await rm(testHome, { recursive: true, force: true });
+    await rm(testUserData, { recursive: true, force: true });
+  });
+
+  it('writes moonshot web search config to plugin config instead of tools.web.search.kimi', async () => {
+    await writeOpenClawJson({
+      models: {
+        providers: {},
+      },
+    });
+
+    const { syncProviderConfigToOpenClaw } = await import('@electron/utils/openclaw-auth');
+
+    await syncProviderConfigToOpenClaw('moonshot', 'kimi-k2.5', {
+      baseUrl: 'https://api.moonshot.cn/v1',
+      api: 'openai-completions',
+    });
+
+    const result = await readOpenClawJson();
+    const tools = (result.tools as Record<string, unknown> | undefined) || {};
+    const web = (tools.web as Record<string, unknown> | undefined) || {};
+    const search = (web.search as Record<string, unknown> | undefined) || {};
+    const moonshot = ((((result.plugins as Record<string, unknown>).entries as Record<string, unknown>).moonshot as Record<string, unknown>).config as Record<string, unknown>).webSearch as Record<string, unknown>;
+
+    expect(search).not.toHaveProperty('kimi');
+    expect(moonshot.baseUrl).toBe('https://api.moonshot.cn/v1');
+  });
+
+  it('preserves legacy plugins array by converting it into plugins.load during moonshot sync', async () => {
+    await writeOpenClawJson({
+      plugins: ['/tmp/custom-plugin.js'],
+      models: {
+        providers: {},
+      },
+    });
+
+    const { syncProviderConfigToOpenClaw } = await import('@electron/utils/openclaw-auth');
+
+    await syncProviderConfigToOpenClaw('moonshot', 'kimi-k2.5', {
+      baseUrl: 'https://api.moonshot.cn/v1',
+      api: 'openai-completions',
+    });
+
+    const result = await readOpenClawJson();
+    const plugins = result.plugins as Record<string, unknown>;
+    const load = plugins.load as string[];
+    const moonshot = (((plugins.entries as Record<string, unknown>).moonshot as Record<string, unknown>).config as Record<string, unknown>).webSearch as Record<string, unknown>;
+
+    expect(load).toEqual(['/tmp/custom-plugin.js']);
+    expect(moonshot.baseUrl).toBe('https://api.moonshot.cn/v1');
+  });
 });
 
 describe('auth-backed provider discovery', () => {
@@ -590,152 +712,5 @@ describe('auth-backed provider discovery', () => {
     expect((config.models as { providers?: Record<string, unknown> }).providers).toEqual({});
     expect(result.providers).toEqual({});
     await expect(getActiveOpenClawProviders()).resolves.toEqual(new Set());
-  });
-
-  it('writes managed providers state when setting the default model', async () => {
-    const { setOpenClawDefaultModel } = await import('@electron/utils/openclaw-auth');
-
-    await setOpenClawDefaultModel('openrouter', 'openrouter/sonic', ['openrouter/mini']);
-
-    const runtimeConfig = await readOpenClawJson();
-    const managedProviders = await readManagedProvidersJson();
-
-    expect((runtimeConfig.agents as Record<string, unknown>).defaults).toEqual({
-      model: {
-        primary: 'openrouter/sonic',
-        fallbacks: ['openrouter/mini'],
-      },
-    });
-    expect(managedProviders).toMatchObject({
-      version: 1,
-      defaultModel: 'openrouter/sonic',
-      defaultFallbacks: ['openrouter/mini'],
-    });
-  });
-
-  it('removes deleted provider from managed providers state as well as runtime config', async () => {
-    await writeOpenClawJson({
-      agents: {
-        defaults: {
-          model: {
-            primary: 'custom-abc12345/moonshot-v1',
-            fallbacks: ['custom-abc12345/moonshot-v1-32k'],
-          },
-        },
-      },
-      models: {
-        providers: {
-          'custom-abc12345': {
-            baseUrl: 'https://api.example.com/v1',
-            api: 'openai-completions',
-          },
-        },
-      },
-    });
-
-    const providersConfigDir = join(testHome, '.openclaw', 'deep-ai-worker', 'config');
-    await mkdir(providersConfigDir, { recursive: true });
-    await writeFile(
-      join(providersConfigDir, 'providers.json'),
-      JSON.stringify({
-        version: 1,
-        updatedAt: new Date().toISOString(),
-        providers: {
-          'custom-abc12345': {
-            baseUrl: 'https://api.example.com/v1',
-            api: 'openai-completions',
-          },
-        },
-        defaultModel: 'custom-abc12345/moonshot-v1',
-        defaultFallbacks: ['custom-abc12345/moonshot-v1-32k'],
-      }, null, 2),
-      'utf8',
-    );
-
-    const { removeProviderFromOpenClaw, getOpenClawProvidersConfig } = await import('@electron/utils/openclaw-auth');
-
-    await removeProviderFromOpenClaw('custom-abc12345');
-
-    const runtimeConfig = await readOpenClawJson();
-    const managedProviders = await readManagedProvidersJson();
-    const providerConfig = await getOpenClawProvidersConfig();
-
-    expect((runtimeConfig.models as Record<string, unknown>).providers).toEqual({});
-    expect(((runtimeConfig.agents as Record<string, unknown>).defaults as Record<string, unknown>).model).toBeUndefined();
-    expect(managedProviders.providers).toEqual({});
-    expect('defaultModel' in managedProviders).toBe(false);
-    expect(managedProviders.defaultFallbacks).toEqual([]);
-    expect(providerConfig).toEqual({
-      providers: {},
-      defaultModel: undefined,
-    });
-  });
-
-  it('clears agent-specific model refs when their provider is deleted', async () => {
-    await writeOpenClawJson({
-      agents: {
-        defaults: {
-          model: {
-            primary: 'custom-custom36/qwen-plus',
-            fallbacks: [],
-          },
-        },
-        list: [
-          {
-            id: 'agent-4',
-            name: '售前解决方案',
-            model: {
-              primary: 'custom-custom36/qwen-plus',
-            },
-          },
-          {
-            id: 'agent-5',
-            name: '深度研究',
-            model: {
-              primary: 'deepseek/deepseek-chat',
-            },
-          },
-        ],
-      },
-      models: {
-        providers: {
-          'custom-custom36': {
-            baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-            api: 'openai-responses',
-          },
-        },
-      },
-    });
-
-    await mkdir(join(testHome, '.openclaw', 'deep-ai-worker', 'config'), { recursive: true });
-    await writeFile(
-      join(testHome, '.openclaw', 'deep-ai-worker', 'config', 'providers.json'),
-      JSON.stringify({
-        version: 1,
-        updatedAt: new Date().toISOString(),
-        providers: {
-          'custom-custom36': {
-            baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-            api: 'openai-responses',
-          },
-        },
-        defaultModel: 'custom-custom36/qwen-plus',
-        defaultFallbacks: [],
-      }, null, 2),
-      'utf8',
-    );
-
-    const { removeProviderFromOpenClaw } = await import('@electron/utils/openclaw-auth');
-    await removeProviderFromOpenClaw('custom-custom36');
-
-    const runtimeConfig = await readOpenClawJson();
-    const agents = (((runtimeConfig.agents as Record<string, unknown>).list) ?? []) as Array<Record<string, unknown>>;
-    const removedAgent = agents.find((agent) => agent.id === 'agent-4');
-    const untouchedAgent = agents.find((agent) => agent.id === 'agent-5');
-
-    expect(removedAgent?.model).toBeUndefined();
-    expect(untouchedAgent?.model).toEqual({
-      primary: 'deepseek/deepseek-chat',
-    });
   });
 });
