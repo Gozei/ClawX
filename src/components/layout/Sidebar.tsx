@@ -527,7 +527,6 @@ export function Sidebar() {
             if (messages.length > 0) {
               newSession();
             }
-            setSidebarCollapsed(true);
             navigate('/');
           }}
           className={cn(
