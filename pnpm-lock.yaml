@@ -15,6 +15,9 @@ importers:
       '@sinclair/typebox':
         specifier: ^0.34.48
         version: 0.34.48
+      '@whiskeysockets/baileys':
+        specifier: 7.0.0-rc.9
+        version: 7.0.0-rc.9(jimp@1.6.1)(sharp@0.34.5)
       clawhub:
         specifier: ^0.5.0
         version: 0.5.0
@@ -121,9 +124,6 @@ importers:
       '@wecom/wecom-openclaw-plugin':
         specifier: ^2026.4.8
         version: 2026.4.8
-      '@whiskeysockets/baileys':
-        specifier: 7.0.0-rc.9
-        version: 7.0.0-rc.9(jimp@1.6.1)(sharp@0.34.5)
       autoprefixer:
         specifier: ^10.4.24
         version: 10.4.27(postcss@8.5.8)

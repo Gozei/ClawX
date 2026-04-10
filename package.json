@@ -1,6 +1,6 @@
 {
     "name": "deep-ai-worker",
-    "version": "0.4.2",
+    "version": "0.4.4",
     "pnpm": {
         "onlyBuiltDependencies": [
             "@discordjs/opus",
@@ -62,8 +62,8 @@
         "package:mac": "pnpm run package && electron-builder --mac --publish never",
         "package:mac:arm64": "pnpm run package && electron-builder --mac --arm64 --publish never",
         "package:mac:local": "SKIP_PREINSTALLED_SKILLS=1 pnpm run package && electron-builder --mac --publish never",
-        "package:mac:dmg:arm64:local": "pnpm run package && electron-builder --mac dmg --arm64 --publish never",
-        "package:mac:zip:arm64": "SKIP_PREINSTALLED_SKILLS=1 pnpm run package && electron-builder --mac zip --arm64 --publish never",
+        "package:mac:dmg:arm64:local": "SKIP_PREINSTALLED_SKILLS=1 pnpm run package && electron-builder --mac dmg --arm64 --publish never",
+        "package:mac:zip:arm64:local": "SKIP_PREINSTALLED_SKILLS=1 pnpm run package && electron-builder --mac zip --arm64 --publish never",
         "package:win": "pnpm run prep:win-binaries && pnpm run package && electron-builder --win --publish never",
         "package:win:x64": "pnpm run prep:win-binaries:x64 && pnpm run package && electron-builder --win --x64 --publish never",
         "package:linux": "pnpm run package && electron-builder --linux --publish never",
