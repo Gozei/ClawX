@@ -48,6 +48,10 @@
         "gatewayStatus": "gateway {{state}} | port: {{port}} {{pid}}",
         "retryFailedAttachments": "重试失败的附件"
     },
+    "process": {
+        "workingFor": "处理中 {{duration}}",
+        "processedFor": "已处理 {{duration}}"
+    },
     "historyBuckets": {
         "today": "今天",
         "yesterday": "昨天",

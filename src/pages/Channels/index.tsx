@@ -236,6 +236,7 @@ export function Channels() {
     <div data-testid="channels-page" className="flex flex-col -m-6 dark:bg-background h-[calc(100vh-2.5rem)] overflow-hidden">
       <div className="w-full max-w-5xl mx-auto flex flex-col h-full p-10 pt-16">
         <PageHeader
+          titleTestId="channels-page-title"
           title={t('title')}
           subtitle={t('subtitle')}
           actions={(

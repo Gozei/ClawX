@@ -2,6 +2,7 @@ import {
   clearErrorRecoveryTimer,
   clearHistoryPoll,
   collectToolUpdates,
+  createToolResultProcessMessage,
   EMPTY_ASSISTANT_RESPONSE_ERROR,
   extractImagesAsAttachedFiles,
   extractMediaRefs,
@@ -151,6 +152,7 @@ export function handleRuntimeEventState(
           if (finalMsg) {
             const updates = collectToolUpdates(finalMsg, resolvedState);
             if (isToolResultRole(finalMsg.role)) {
+              const toolResultProcessMessage = createToolResultProcessMessage(finalMsg);
               // Resolve file path from the streaming assistant message's matching tool call
               const currentStreamForPath = get().streamingMessage as RawMessage | null;
               const matchedPath = (currentStreamForPath && finalMsg.toolCallId)
@@ -200,6 +202,13 @@ export function handleRuntimeEventState(
                       });
                     }
                   }
+                }
+                if (
+                  toolResultProcessMessage
+                  && !s.messages.some((message) => message.id === toolResultProcessMessage.id)
+                  && !snapshotMsgs.some((message) => message.id === toolResultProcessMessage.id)
+                ) {
+                  snapshotMsgs.push(toolResultProcessMessage);
                 }
                 return {
                   messages: snapshotMsgs.length > 0 ? [...s.messages, ...snapshotMsgs] : s.messages,

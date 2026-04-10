@@ -251,6 +251,12 @@
     "chatProcessDisplayDesc": "控制对话中的工具执行、读取等过程提示卡片是否显示。",
     "chatFontScale": "聊天字号",
     "chatFontScaleDesc": "调节聊天消息和输入区字号，阅读更轻松。",
+    "assistantMessageStyle": "助手输出样式",
+    "assistantMessageStyleDesc": "在当前气泡回复和更扁平的事件流回复之间切换。",
+    "assistantMessageStyleOptions": {
+      "bubble": "气泡",
+      "stream": "事件流"
+    },
     "chatFontScaleOption": "{{value}}%",
     "chatProcessDisplayOptions": {
       "all": "全部显示",

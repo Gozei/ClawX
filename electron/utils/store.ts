@@ -9,6 +9,7 @@ import type { BrandingOverrides } from '../../shared/branding';
 import { resolveSupportedLanguage } from '../../shared/language';
 
 type ChatProcessDisplayMode = 'all' | 'files' | 'hidden';
+type AssistantMessageStyle = 'bubble' | 'stream';
 
 // Lazy-load electron-store (ESM module)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,6 +34,7 @@ export interface AppSettings {
   telemetryEnabled: boolean;
   brandingOverrides: BrandingOverrides;
   chatProcessDisplayMode: ChatProcessDisplayMode;
+  assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
   machineId: string;
   hasReportedInstall: boolean;
@@ -87,6 +89,7 @@ function createDefaultSettings(): AppSettings {
     telemetryEnabled: true,
     brandingOverrides: {},
     chatProcessDisplayMode: 'files',
+    assistantMessageStyle: 'bubble',
     chatFontScale: 100,
     machineId: '',
     hasReportedInstall: false,

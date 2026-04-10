@@ -4,10 +4,10 @@
  * via gateway:rpc IPC. Session selector, thinking toggle, and refresh
  * are in the toolbar; messages render with markdown + streaming.
  */
-import { memo, useEffect, useState } from 'react';
+import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ChevronDown, ChevronRight, ListTodo, Loader2, Network, Sparkles, Workflow } from 'lucide-react';
-import { useChatStore, type RawMessage } from '@/stores/chat';
+import { useChatStore, type RawMessage, type ToolStatus } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
@@ -20,8 +20,11 @@ import { cn } from '@/lib/utils';
 import { useBranding } from '@/lib/branding';
 import { useStickToBottomInstant } from '@/hooks/use-stick-to-bottom-instant';
 import { useMinLoading } from '@/hooks/use-min-loading';
-import { useSettingsStore } from '@/stores/settings';
+import { useSettingsStore, type AssistantMessageStyle, type ChatProcessDisplayMode } from '@/stores/settings';
 import { groupMessagesForDisplay, splitFinalMessageForTurnDisplay } from './history-grouping';
+import { getProcessEventItems, ProcessEventMessage } from './process-events';
+
+const EMPTY_MESSAGES: RawMessage[] = [];
 
 export function Chat() {
   const { t } = useTranslation('chat');
@@ -38,6 +41,7 @@ export function Chat() {
   const error = useChatStore((s) => s.error);
   const showThinking = useChatStore((s) => s.showThinking);
   const chatProcessDisplayMode = useSettingsStore((s) => s.chatProcessDisplayMode);
+  const assistantMessageStyle = useSettingsStore((s) => s.assistantMessageStyle);
   const streamingMessage = useChatStore((s) => s.streamingMessage);
   const streamingTools = useChatStore((s) => s.streamingTools);
   const pendingFinal = useChatStore((s) => s.pendingFinal);
@@ -49,7 +53,7 @@ export function Chat() {
 
   const cleanupEmptySession = useChatStore((s) => s.cleanupEmptySession);
 
-  const safeMessages = Array.isArray(messages) ? messages : [];
+  const safeMessages = Array.isArray(messages) ? messages : EMPTY_MESSAGES;
   const [streamingTimestamp, setStreamingTimestamp] = useState<number>(0);
   const minLoading = useMinLoading(loading && safeMessages.length > 0);
   const { contentRef, scrollRef } = useStickToBottomInstant(currentSessionKey);
@@ -98,12 +102,12 @@ export function Chat() {
   const lastUserTsMs = typeof lastUserMessageAt === 'number'
     ? (lastUserMessageAt < 1e12 ? lastUserMessageAt * 1000 : lastUserMessageAt)
     : 0;
-  const latestPersistedAssistant = [...safeMessages].reverse().find((message) => {
+  const latestPersistedAssistant = useMemo(() => [...safeMessages].reverse().find((message) => {
     if (message.role !== 'assistant') return false;
     if (!lastUserTsMs || !message.timestamp) return true;
     const messageTsMs = message.timestamp < 1e12 ? message.timestamp * 1000 : message.timestamp;
     return messageTsMs >= lastUserTsMs;
-  });
+  }), [lastUserTsMs, safeMessages]);
   const latestPersistedAssistantText = latestPersistedAssistant ? extractText(latestPersistedAssistant).trim() : '';
   const latestPersistedAssistantThinking = latestPersistedAssistant ? (extractThinking(latestPersistedAssistant)?.trim() ?? '') : '';
   const latestPersistedAssistantImages = latestPersistedAssistant ? extractImages(latestPersistedAssistant) : [];
@@ -123,9 +127,80 @@ export function Chat() {
     && !isStreamingDuplicateOfPersistedAssistant
     && (hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus);
   const hasAnyStreamContent = hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus;
+  const streamingDisplayMessage = useMemo(() => (
+    shouldRenderStreaming
+      ? buildStreamingDisplayMessage(streamMsg, streamText, streamingTimestamp)
+      : null
+  ), [shouldRenderStreaming, streamMsg, streamText, streamingTimestamp]);
+  const activeTurnStartIndex = useMemo(() => (
+    sending ? findLastUserMessageIndex(safeMessages) : -1
+  ), [safeMessages, sending]);
+  const historyMessages = useMemo(() => (
+    activeTurnStartIndex >= 0 ? safeMessages.slice(0, activeTurnStartIndex) : safeMessages
+  ), [activeTurnStartIndex, safeMessages]);
+  const deferredHistoryMessages = useDeferredValue(historyMessages);
+  const activeTurnMessages = useMemo(() => (
+    activeTurnStartIndex >= 0 ? safeMessages.slice(activeTurnStartIndex) : EMPTY_MESSAGES
+  ), [activeTurnStartIndex, safeMessages]);
+  const activeTurnUserMessage = activeTurnMessages[0]?.role === 'user' ? activeTurnMessages[0] : null;
+  const displayHistoryMessages = useMemo(() => (
+    trimDeferredHistoryForActiveTurn(deferredHistoryMessages, activeTurnUserMessage)
+  ), [activeTurnUserMessage, deferredHistoryMessages]);
+  const activeTurnAssistantMessages = useMemo(() => (
+    activeTurnUserMessage
+      ? activeTurnMessages.slice(1).filter((message) => message.role === 'assistant')
+      : EMPTY_MESSAGES
+  ), [activeTurnMessages, activeTurnUserMessage]);
+  const persistedActiveFinalMessage = isStreamingDuplicateOfPersistedAssistant && activeTurnAssistantMessages.length > 0
+    ? activeTurnAssistantMessages[activeTurnAssistantMessages.length - 1]
+    : null;
+  const activeTurnProcessMessages = useMemo(() => (
+    persistedActiveFinalMessage
+      ? activeTurnAssistantMessages.slice(0, -1)
+      : activeTurnAssistantMessages
+  ), [activeTurnAssistantMessages, persistedActiveFinalMessage]);
+  const streamingSplit = useMemo(() => (
+    streamingDisplayMessage
+      ? splitFinalMessageForTurnDisplay(streamingDisplayMessage)
+      : null
+  ), [streamingDisplayMessage]);
+  const streamingProcessMessage = streamingSplit?.collapsedProcessMessage ?? null;
+  const splitStreamingFinalMessage = streamingSplit?.finalDisplayMessage ?? null;
+  const hasPersistedProcessMessages = activeTurnProcessMessages.some((message) => (
+    hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle)
+  ));
+  const hasStreamingProcessMessage = streamingProcessMessage != null
+    && hasVisibleProcessContent(streamingProcessMessage, showThinking, chatProcessDisplayMode, assistantMessageStyle);
+  const hasStreamingFinalMessage = splitStreamingFinalMessage != null
+    && hasVisibleFinalContent(splitStreamingFinalMessage);
+  const shouldUseProcessLayout = hasPersistedProcessMessages
+    || hasStreamingProcessMessage
+    || hasStreamToolStatus
+    || pendingFinal;
+  const showProcessActivity = shouldUseProcessLayout && pendingFinal && !hasStreamingFinalMessage;
+  const activeTurnProcessStreamingMessage = shouldUseProcessLayout
+    ? (hasStreamingProcessMessage
+        ? streamingProcessMessage
+        : hasStreamToolStatus
+          ? {
+              role: 'assistant' as const,
+              content: '',
+              timestamp: streamingDisplayMessage?.timestamp ?? streamingTimestamp,
+            }
+          : null)
+    : null;
+  const activeTurnFinalStreamingMessage = shouldUseProcessLayout
+    ? (hasStreamingFinalMessage ? splitStreamingFinalMessage : null)
+    : streamingDisplayMessage;
+  const activeTurnFinalPhaseStarted = shouldUseProcessLayout
+    && (hasStreamingFinalMessage || persistedActiveFinalMessage != null);
+  const activeTurnStartedAtMs = activeTurnUserMessage
+    ? toTimestampMs(activeTurnUserMessage.timestamp) ?? lastUserTsMs
+    : lastUserTsMs;
 
   const isEmpty = safeMessages.length === 0 && !sending;
   const showGatewayOfflineState = !isGatewayRunning && safeMessages.length === 0 && !sending;
+  const showSessionLoadingState = loading && safeMessages.length === 0 && !sending;
 
   const handleStartGateway = async () => {
     try {
@@ -164,41 +239,62 @@ export function Chat() {
               onStart={handleStartGateway}
               onOpenSettings={() => navigate('/settings')}
             />
+          ) : showSessionLoadingState ? (
+            <div className="flex min-h-[40vh] items-center justify-center">
+              <div className="bg-background shadow-lg rounded-full p-2.5 border border-border">
+                <LoadingSpinner size="md" />
+              </div>
+            </div>
           ) : isEmpty ? (
             <WelcomeScreen />
           ) : (
             <>
-              <HistoryMessages messages={safeMessages} showThinking={showThinking} />
+              <HistoryMessages
+                messages={displayHistoryMessages}
+                showThinking={showThinking}
+                chatProcessDisplayMode={chatProcessDisplayMode}
+                assistantMessageStyle={assistantMessageStyle}
+              />
 
-              {/* Streaming message */}
-              {shouldRenderStreaming && (
-                <ChatMessage
-                  message={(streamMsg
-                    ? {
-                        ...(streamMsg as Record<string, unknown>),
-                        role: (typeof streamMsg.role === 'string' ? streamMsg.role : 'assistant') as RawMessage['role'],
-                        content: streamMsg.content ?? streamText,
-                        timestamp: streamMsg.timestamp ?? streamingTimestamp,
-                      }
-                    : {
-                        role: 'assistant',
-                        content: streamText,
-                        timestamp: streamingTimestamp,
-                      }) as RawMessage}
+              {activeTurnUserMessage ? (
+                <ActiveTurn
+                  key={activeTurnUserMessage.id || `active-turn-${currentSessionKey}`}
+                  userMessage={activeTurnUserMessage}
+                  processMessages={activeTurnProcessMessages}
+                  processStreamingMessage={activeTurnProcessStreamingMessage}
+                  finalMessage={persistedActiveFinalMessage}
+                  finalStreamingMessage={activeTurnFinalStreamingMessage}
                   showThinking={showThinking}
-                  isStreaming
+                  chatProcessDisplayMode={chatProcessDisplayMode}
+                  assistantMessageStyle={assistantMessageStyle}
+                  startedAtMs={activeTurnStartedAtMs}
+                  finalPhaseStarted={activeTurnFinalPhaseStarted}
+                  showActivity={showProcessActivity}
+                  showTyping={!shouldUseProcessLayout && !persistedActiveFinalMessage && !activeTurnFinalStreamingMessage && !pendingFinal && !hasAnyStreamContent}
                   streamingTools={streamingTools}
                 />
-              )}
+              ) : (
+                <>
+                  {/* Streaming message */}
+                  {activeTurnFinalStreamingMessage && (
+                    <ChatMessage
+                      message={activeTurnFinalStreamingMessage}
+                      showThinking={showThinking}
+                      isStreaming
+                      streamingTools={streamingTools}
+                    />
+                  )}
 
-              {/* Activity indicator: waiting for next AI turn after tool execution */}
-              {sending && pendingFinal && !shouldRenderStreaming && !isStreamingDuplicateOfPersistedAssistant && chatProcessDisplayMode === 'all' && (
-                <ActivityIndicator phase="tool_processing" />
-              )}
+                  {/* Activity indicator: waiting for next AI turn after tool execution */}
+                  {sending && pendingFinal && !activeTurnFinalStreamingMessage && !isStreamingDuplicateOfPersistedAssistant && chatProcessDisplayMode === 'all' && (
+                    <ActivityIndicator phase="tool_processing" />
+                  )}
 
-              {/* Typing indicator when sending but no stream content yet */}
-              {sending && !pendingFinal && !hasAnyStreamContent && (
-                <TypingIndicator />
+                  {/* Typing indicator when sending but no stream content yet */}
+                  {sending && !pendingFinal && !hasAnyStreamContent && (
+                    <TypingIndicator />
+                  )}
+                </>
               )}
             </>
           )}
@@ -244,26 +340,175 @@ export function Chat() {
   );
 }
 
+type ProcessPhase = 'working' | 'processed';
+
+function toTimestampMs(timestamp: number | undefined): number | null {
+  if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) return null;
+  return timestamp < 1e12 ? timestamp * 1000 : timestamp;
+}
+
+function findLastUserMessageIndex(messages: RawMessage[]): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === 'user') {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function buildMessageDisplayKey(message: RawMessage): string {
+  return `${message.id ?? ''}|${message.role}|${message.timestamp ?? ''}|${extractText(message).trim()}`;
+}
+
+function trimDeferredHistoryForActiveTurn(
+  deferredHistoryMessages: RawMessage[],
+  activeTurnUserMessage: RawMessage | null,
+): RawMessage[] {
+  if (!activeTurnUserMessage) return deferredHistoryMessages;
+
+  const activeTurnUserKey = buildMessageDisplayKey(activeTurnUserMessage);
+  const activeTurnHistoryIndex = deferredHistoryMessages.findIndex((message) => (
+    buildMessageDisplayKey(message) === activeTurnUserKey
+  ));
+
+  return activeTurnHistoryIndex >= 0
+    ? deferredHistoryMessages.slice(0, activeTurnHistoryIndex)
+    : deferredHistoryMessages;
+}
+
+function buildStreamingDisplayMessage(
+  streamMsg: { role?: string; content?: unknown; timestamp?: number } | null,
+  streamText: string,
+  streamingTimestamp: number,
+): RawMessage | null {
+  if (!streamMsg && !streamText.trim()) return null;
+  return (streamMsg
+    ? {
+        ...(streamMsg as Record<string, unknown>),
+        role: (typeof streamMsg.role === 'string' ? streamMsg.role : 'assistant') as RawMessage['role'],
+        content: streamMsg.content ?? streamText,
+        timestamp: streamMsg.timestamp ?? streamingTimestamp,
+      }
+    : {
+        role: 'assistant',
+        content: streamText,
+        timestamp: streamingTimestamp,
+      }) as RawMessage;
+}
+
+function normalizeProcessLocale(language: string | undefined): 'en' | 'zh' {
+  if (language?.startsWith('zh')) return 'zh';
+  return 'en';
+}
+
+function formatProcessDuration(
+  durationMs: number,
+  language: string | undefined,
+): string {
+  const locale = normalizeProcessLocale(language);
+  const safeMs = Math.max(0, Math.floor(durationMs));
+  const totalSeconds = Math.floor(safeMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const safeSeconds = Math.max(1, seconds);
+
+  if (locale === 'zh') {
+    if (hours > 0) {
+      return `${hours}\u5c0f\u65f6${minutes}\u5206`;
+    }
+    if (minutes > 0) {
+      return `${minutes}\u5206${safeSeconds}\u79d2`;
+    }
+    return `${safeSeconds}\u79d2`;
+  }
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${safeSeconds}s`;
+  }
+  return `${safeSeconds}s`;
+}
+
+function formatProcessStatus(
+  phase: ProcessPhase,
+  durationLabel: string,
+  language: string | undefined,
+): string {
+  switch (normalizeProcessLocale(language)) {
+    case 'zh':
+      return phase === 'processed'
+        ? `\u5df2\u5904\u7406 ${durationLabel}`
+        : `\u6b63\u5728\u5904\u7406 ${durationLabel}`;
+    default:
+      return phase === 'processed' ? `Processed ${durationLabel}` : `Working for ${durationLabel}`;
+  }
+}
+
+function hasVisibleProcessContent(
+  message: RawMessage | null | undefined,
+  showThinking: boolean,
+  chatProcessDisplayMode: ChatProcessDisplayMode,
+  assistantMessageStyle: AssistantMessageStyle,
+): boolean {
+  if (!message || message.role !== 'assistant') return false;
+
+  const text = extractText(message);
+  const thinking = extractThinking(message);
+  const tools = extractToolUse(message);
+  const images = extractImages(message);
+  const files = message._attachedFiles || [];
+
+  if (assistantMessageStyle === 'bubble') {
+    return text.trim().length > 0
+      || (showThinking && !!thinking && thinking.trim().length > 0)
+      || (chatProcessDisplayMode === 'all' && tools.length > 0)
+      || images.length > 0
+      || files.length > 0;
+  }
+
+  const items = getProcessEventItems(message, showThinking, chatProcessDisplayMode);
+
+  return items.length > 0
+    || images.length > 0
+    || files.length > 0;
+}
+
+function hasVisibleFinalContent(message: RawMessage | null | undefined): boolean {
+  if (!message || message.role !== 'assistant') return false;
+  return extractText(message).trim().length > 0
+    || extractImages(message).length > 0
+    || (message._attachedFiles || []).length > 0;
+}
+
 const HistoryMessages = memo(function HistoryMessages({
   messages,
   showThinking,
+  chatProcessDisplayMode,
+  assistantMessageStyle,
 }: {
   messages: RawMessage[];
   showThinking: boolean;
+  chatProcessDisplayMode: ChatProcessDisplayMode;
+  assistantMessageStyle: AssistantMessageStyle;
 }) {
-  const displayItems = groupMessagesForDisplay(messages);
+  const displayItems = useMemo(() => groupMessagesForDisplay(messages), [messages]);
 
   return (
     <>
       {displayItems.map((item) => {
         if (item.type === 'turn') {
           return (
-            <CollapsedThinkingTurn
+            <CollapsedProcessTurn
               key={item.key}
               userMessage={item.userMessage}
               intermediateMessages={item.intermediateMessages}
               finalMessage={item.finalMessage}
               showThinking={showThinking}
+              chatProcessDisplayMode={chatProcessDisplayMode}
+              assistantMessageStyle={assistantMessageStyle}
             />
           );
         }
@@ -280,58 +525,302 @@ const HistoryMessages = memo(function HistoryMessages({
   );
 });
 
-function CollapsedThinkingTurn({
+function ProcessSection({
+  processMessages,
+  processStreamingMessage,
+  phase,
+  showThinking,
+  chatProcessDisplayMode,
+  assistantMessageStyle,
+  startedAtMs,
+  completedAtMs,
+  showActivity,
+  streamingTools,
+}: {
+  processMessages: RawMessage[];
+  processStreamingMessage?: RawMessage | null;
+  phase: ProcessPhase;
+  showThinking: boolean;
+  chatProcessDisplayMode: ChatProcessDisplayMode;
+  assistantMessageStyle: AssistantMessageStyle;
+  startedAtMs: number;
+  completedAtMs?: number;
+  showActivity?: boolean;
+  streamingTools?: ToolStatus[];
+}) {
+  const { i18n } = useTranslation('chat');
+  const visibleMessages = processMessages.filter((message) => (
+    hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle)
+  ));
+  const hasStreamingProcessContent = !!processStreamingMessage
+    && (
+      hasVisibleProcessContent(processStreamingMessage, showThinking, chatProcessDisplayMode, assistantMessageStyle)
+      || (chatProcessDisplayMode === 'all' && (streamingTools?.length ?? 0) > 0)
+    );
+  const hasSection = visibleMessages.length > 0 || hasStreamingProcessContent || !!showActivity;
+  const [collapsed, setCollapsed] = useState(phase === 'processed');
+  const [nowMs, setNowMs] = useState(Date.now());
+  const [frozenCompletedAtMs, setFrozenCompletedAtMs] = useState<number | null>(
+    phase === 'processed' ? (completedAtMs ?? Date.now()) : null,
+  );
+
+  useEffect(() => {
+    if (phase === 'processed' && frozenCompletedAtMs == null) {
+      setFrozenCompletedAtMs(completedAtMs ?? Date.now());
+      setCollapsed(true);
+    }
+  }, [completedAtMs, frozenCompletedAtMs, phase]);
+
+  useEffect(() => {
+    if (phase !== 'working') return undefined;
+    const timer = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [phase]);
+
+  if (!hasSection) return null;
+
+  const effectiveEndMs = phase === 'processed'
+    ? (frozenCompletedAtMs ?? completedAtMs ?? nowMs)
+    : nowMs;
+  const elapsedLabel = formatProcessDuration(
+    Math.max(0, effectiveEndMs - startedAtMs),
+    i18n?.resolvedLanguage || i18n?.language,
+  );
+  const statusLabel = formatProcessStatus(
+    phase,
+    elapsedLabel,
+    i18n?.resolvedLanguage || i18n?.language,
+  );
+  const isCollapsible = phase === 'processed';
+  const expandedMessageIndex = hasStreamingProcessContent ? -1 : Math.max(visibleMessages.length - 1, 0);
+  const usesStreamProcessStyle = assistantMessageStyle === 'stream';
+
+  return (
+    <div className="flex gap-3">
+      <div
+        data-testid="chat-process-avatar"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-1 bg-black/5 dark:bg-white/5 text-foreground"
+      >
+        <Sparkles className="h-4 w-4" />
+      </div>
+      <div className={cn('w-full min-w-0', usesStreamProcessStyle ? 'max-w-none' : 'max-w-[80%]')}>
+        {isCollapsible ? (
+          <button
+            type="button"
+            onClick={() => setCollapsed((current) => !current)}
+            className="group inline-flex items-center gap-1.5 rounded-full px-1 py-0.5 text-left text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+            data-testid="chat-process-toggle"
+          >
+            <span data-testid="chat-process-status">{statusLabel}</span>
+            {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </button>
+        ) : (
+          <div
+            className="inline-flex items-center rounded-full px-1 py-0.5 text-left text-[13px] font-medium text-muted-foreground"
+            data-testid="chat-process-header"
+          >
+            <span data-testid="chat-process-status">{statusLabel}</span>
+          </div>
+        )}
+
+        {!collapsed && (
+          <div
+            className={cn('mt-1.5', usesStreamProcessStyle ? 'space-y-1.5' : 'space-y-3')}
+            data-testid="chat-process-content"
+          >
+            {usesStreamProcessStyle ? (
+              <>
+                {visibleMessages.map((message, index) => (
+                  <ProcessEventMessage
+                    key={message.id || `process-${index}`}
+                    message={message}
+                    showThinking={showThinking}
+                    chatProcessDisplayMode={chatProcessDisplayMode}
+                    defaultExpanded={!hasStreamingProcessContent && index === expandedMessageIndex}
+                  />
+                ))}
+                {hasStreamingProcessContent && processStreamingMessage && (
+                  <ProcessEventMessage
+                    key={processStreamingMessage.id || 'process-streaming'}
+                    message={processStreamingMessage}
+                    showThinking={showThinking}
+                    chatProcessDisplayMode={chatProcessDisplayMode}
+                    defaultExpanded
+                    streamingTools={streamingTools}
+                  />
+                )}
+              </>
+            ) : (
+              <>
+                {visibleMessages.map((message, index) => (
+                  <ChatMessage
+                    key={message.id || `process-${index}`}
+                    message={message}
+                    showThinking={showThinking}
+                    hideAvatar
+                    constrainWidth={false}
+                  />
+                ))}
+                {hasStreamingProcessContent && processStreamingMessage && (
+                  <ChatMessage
+                    key={processStreamingMessage.id || 'process-streaming'}
+                    message={processStreamingMessage}
+                    showThinking={showThinking}
+                    isStreaming
+                    hideAvatar
+                    constrainWidth={false}
+                    streamingTools={streamingTools}
+                  />
+                )}
+              </>
+            )}
+            {showActivity && (
+              <ProcessActivityIndicator streamStyle={usesStreamProcessStyle} />
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CollapsedProcessTurn({
   userMessage,
   intermediateMessages,
   finalMessage,
   showThinking,
+  chatProcessDisplayMode,
+  assistantMessageStyle,
 }: {
   userMessage: RawMessage;
   intermediateMessages: RawMessage[];
   finalMessage: RawMessage;
   showThinking: boolean;
+  chatProcessDisplayMode: ChatProcessDisplayMode;
+  assistantMessageStyle: AssistantMessageStyle;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const { collapsedThinkingMessage, finalDisplayMessage } = splitFinalMessageForTurnDisplay(finalMessage);
-  const collapsedMessages = collapsedThinkingMessage
-    ? [...intermediateMessages, collapsedThinkingMessage]
+  const { collapsedProcessMessage, finalDisplayMessage } = splitFinalMessageForTurnDisplay(finalMessage);
+  const processMessages = collapsedProcessMessage
+    ? [...intermediateMessages, collapsedProcessMessage]
     : intermediateMessages;
+  const hasProcessSection = processMessages.some((message) => (
+    hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle)
+  ));
+  const finalHasVisibleContent = hasVisibleFinalContent(finalDisplayMessage);
 
   return (
-    <div className="space-y-3">
+    <div className={cn('space-y-3', hasProcessSection && finalHasVisibleContent && 'space-y-2')}>
       <ChatMessage message={userMessage} showThinking={showThinking} />
 
-      <div className="flex gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-1 bg-black/5 dark:bg-white/5 text-foreground">
-          <Sparkles className="h-4 w-4" />
-        </div>
-        <div className="w-full min-w-0 max-w-[80%]">
-          <div className="w-full rounded-xl border border-black/10 bg-black/5 text-[14px] dark:border-white/10 dark:bg-white/5">
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground transition-colors hover:text-foreground"
-              onClick={() => setExpanded((current) => !current)}
-              data-testid="chat-turn-thinking-toggle"
-            >
-              {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-              <span className="font-medium">Thinking</span>
-            </button>
-            {expanded && (
-              <div className="space-y-4 px-0 pb-1" data-testid="chat-turn-thinking-content">
-                {collapsedMessages.map((message, index) => (
-                  <ChatMessage
-                    key={message.id || `intermediate-${index}`}
-                    message={message}
-                    showThinking={showThinking}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+      {hasProcessSection && (
+        <ProcessSection
+          processMessages={processMessages}
+          phase="processed"
+          showThinking={showThinking}
+          chatProcessDisplayMode={chatProcessDisplayMode}
+          assistantMessageStyle={assistantMessageStyle}
+          startedAtMs={toTimestampMs(userMessage.timestamp) ?? Date.now()}
+          completedAtMs={toTimestampMs(finalMessage.timestamp) ?? Date.now()}
+        />
+      )}
 
-      <ChatMessage message={finalDisplayMessage} showThinking={false} />
+      {finalHasVisibleContent && (
+        <ChatMessage
+          message={finalDisplayMessage}
+          showThinking={false}
+          hideAvatar={hasProcessSection}
+          reserveAvatarSpace={hasProcessSection}
+        />
+      )}
+    </div>
+  );
+}
+
+function ActiveTurn({
+  userMessage,
+  processMessages,
+  processStreamingMessage,
+  finalMessage,
+  finalStreamingMessage,
+  showThinking,
+  chatProcessDisplayMode,
+  assistantMessageStyle,
+  startedAtMs,
+  finalPhaseStarted,
+  showActivity,
+  showTyping,
+  streamingTools,
+}: {
+  userMessage: RawMessage;
+  processMessages: RawMessage[];
+  processStreamingMessage?: RawMessage | null;
+  finalMessage?: RawMessage | null;
+  finalStreamingMessage?: RawMessage | null;
+  showThinking: boolean;
+  chatProcessDisplayMode: ChatProcessDisplayMode;
+  assistantMessageStyle: AssistantMessageStyle;
+  startedAtMs: number;
+  finalPhaseStarted: boolean;
+  showActivity: boolean;
+  showTyping: boolean;
+  streamingTools: ToolStatus[];
+}) {
+  const hasProcessSection = processMessages.some((message) => (
+    hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle)
+  ))
+    || (
+      !!processStreamingMessage
+      && (
+        hasVisibleProcessContent(processStreamingMessage, showThinking, chatProcessDisplayMode, assistantMessageStyle)
+        || (chatProcessDisplayMode === 'all' && streamingTools.length > 0)
+      )
+    )
+    || showActivity;
+  const finalHasVisibleContent = hasVisibleFinalContent(finalMessage);
+  const finalStreamingHasVisibleContent = hasVisibleFinalContent(finalStreamingMessage);
+
+  return (
+    <div className={cn('space-y-3', hasProcessSection && (finalHasVisibleContent || finalStreamingHasVisibleContent) && 'space-y-2')}>
+      <ChatMessage message={userMessage} showThinking={showThinking} />
+
+      {hasProcessSection && (
+        <ProcessSection
+          processMessages={processMessages}
+          processStreamingMessage={processStreamingMessage}
+          phase={finalPhaseStarted ? 'processed' : 'working'}
+          showThinking={showThinking}
+          chatProcessDisplayMode={chatProcessDisplayMode}
+          assistantMessageStyle={assistantMessageStyle}
+          startedAtMs={startedAtMs}
+          showActivity={showActivity}
+          streamingTools={streamingTools}
+        />
+      )}
+
+      {finalHasVisibleContent && finalMessage && (
+        <ChatMessage
+          message={finalMessage}
+          showThinking={false}
+          hideAvatar={hasProcessSection}
+          reserveAvatarSpace={hasProcessSection}
+        />
+      )}
+
+      {finalStreamingHasVisibleContent && finalStreamingMessage && (
+        <ChatMessage
+          message={finalStreamingMessage}
+          showThinking={false}
+          hideAvatar={hasProcessSection}
+          reserveAvatarSpace={hasProcessSection}
+          isStreaming
+        />
+      )}
+
+      {!hasProcessSection && !finalHasVisibleContent && !finalStreamingHasVisibleContent && showTyping && (
+        <TypingIndicator />
+      )}
     </div>
   );
 }
@@ -514,6 +1003,27 @@ function TypingIndicator() {
 }
 
 // ── Activity Indicator (shown between tool cycles) ─────────────
+
+function ProcessActivityIndicator({ streamStyle = false }: { streamStyle?: boolean }) {
+  const { t } = useTranslation('chat');
+  if (streamStyle) {
+    return (
+      <div className="flex items-center gap-2 px-1.5 py-1 text-sm text-muted-foreground" data-testid="chat-process-activity-stream">
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+        <span>{t('process.workingFor', { duration: '...' })}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-black/6 bg-white/40 px-4 py-3 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm dark:border-white/8 dark:bg-white/[0.04]">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+        <span>{t('process.workingFor', { duration: '...' })}</span>
+      </div>
+    </div>
+  );
+}
 
 function ActivityIndicator({ phase }: { phase: 'tool_processing' }) {
   void phase;

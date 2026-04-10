@@ -108,6 +108,13 @@ function getConfiguredModelIds(account: ProviderAccount): string[] {
   return normalizeConfiguredModelIds([account.model || '', ...(account.metadata?.customModels ?? [])]);
 }
 
+function getEditableModelIds(item: ProviderListItem): string[] {
+  return normalizeConfiguredModelIds([
+    item.resolvedModel || '',
+    ...item.aliases.flatMap((alias) => getConfiguredModelIds(alias)),
+  ]);
+}
+
 function configuredModelIdsEqual(a?: string[], b?: string[]): boolean {
   const left = normalizeConfiguredModelIds(a);
   const right = normalizeConfiguredModelIds(b);
@@ -304,7 +311,7 @@ export function ProvidersSettings() {
           </Button>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div data-testid="providers-list" className="space-y-3">
           {displayProviders.map((item) => (
             <ProviderCard
               key={item.account.id}
@@ -386,7 +393,7 @@ function ProviderCard({
   const [baseUrl, setBaseUrl] = useState(account.baseUrl || '');
   const [apiProtocol, setApiProtocol] = useState<ProviderAccount['apiProtocol']>(account.apiProtocol || 'openai-completions');
   const [userAgent, setUserAgent] = useState(getUserAgentHeader(account.headers));
-  const [modelIds, setModelIds] = useState<string[]>(getConfiguredModelIds(account));
+  const [modelIds, setModelIds] = useState<string[]>(getEditableModelIds(item));
   const [modelInput, setModelInput] = useState('');
   const [fallbackModelsText, setFallbackModelsText] = useState(
     normalizeFallbackModels(account.fallbackModels).join('\n')
@@ -441,7 +448,7 @@ function ProviderCard({
       setBaseUrl(account.baseUrl || '');
       setApiProtocol(account.apiProtocol || 'openai-completions');
       setUserAgent(getUserAgentHeader(account.headers));
-      setModelIds(getConfiguredModelIds(account));
+      setModelIds(getEditableModelIds(item));
       setModelInput('');
       setFallbackModelsText(normalizeFallbackModels(account.fallbackModels).join('\n'));
       setFallbackProviderIds(normalizeFallbackProviderIds(account.fallbackAccountIds));
@@ -963,8 +970,8 @@ function ProviderCard({
       className={cn(
         "group flex flex-col p-4 rounded-2xl transition-all relative overflow-hidden hover:bg-black/5 dark:hover:bg-white/5",
         isDefault
-          ? "bg-black/[0.04] dark:bg-white/[0.06] border border-transparent"
-          : "bg-transparent border border-transparent"
+          ? "bg-black/[0.04] dark:bg-white/[0.06] border border-black/10 dark:border-white/10"
+          : "bg-transparent border border-black/10 dark:border-white/10"
       )}
     >
       <div className="flex items-center justify-between">

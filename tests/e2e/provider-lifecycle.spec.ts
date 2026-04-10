@@ -6,6 +6,7 @@ const TEST_PROVIDER_ID = 'moonshot-e2e';
 const TEST_PROVIDER_LABEL = 'Moonshot E2E';
 const TEST_CUSTOM_PROVIDER_ID = 'custom-models-e2e';
 const TEST_CUSTOM_PROVIDER_LABEL = 'Custom Models E2E';
+const TEST_MERGED_PROVIDER_LABEL = 'Merged Custom E2E';
 
 async function seedTestProvider(page: Parameters<typeof completeSetup>[0]): Promise<void> {
   await page.evaluate(async ({ providerId, providerLabel }) => {
@@ -55,6 +56,55 @@ async function seedCustomProvider(
     providerLabel: TEST_CUSTOM_PROVIDER_LABEL,
     providerBaseUrl: baseUrl,
   });
+}
+
+async function seedMergedCustomProviders(page: Parameters<typeof completeSetup>[0]): Promise<void> {
+  await page.evaluate(async ({ providerLabel }) => {
+    const baseUrl = 'https://api.merged-provider.example/v1';
+    const accounts = [
+      {
+        id: 'custom-aa111111',
+        vendorId: 'custom',
+        label: providerLabel,
+        authMode: 'api_key',
+        baseUrl,
+        apiProtocol: 'openai-completions',
+        model: 'glm-4.6',
+        metadata: {
+          customModels: ['glm-5'],
+        },
+        enabled: true,
+        isDefault: false,
+        createdAt: '2026-04-09T10:00:00.000Z',
+        updatedAt: '2026-04-09T10:00:00.000Z',
+      },
+      {
+        id: 'custom-bb222222',
+        vendorId: 'custom',
+        label: providerLabel,
+        authMode: 'api_key',
+        baseUrl,
+        apiProtocol: 'openai-completions',
+        model: 'qwen3.5-plus',
+        enabled: true,
+        isDefault: false,
+        createdAt: '2026-04-09T10:05:00.000Z',
+        updatedAt: '2026-04-09T10:05:00.000Z',
+      },
+    ];
+
+    for (const account of accounts) {
+      await window.electron.ipcRenderer.invoke('hostapi:fetch', {
+        path: '/api/provider-accounts',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          account,
+          apiKey: 'sk-test',
+        }),
+      });
+    }
+  }, { providerLabel: TEST_MERGED_PROVIDER_LABEL });
 }
 
 async function startMockOpenAiServer(): Promise<{
@@ -129,6 +179,7 @@ test.describe('Deep AI Worker provider lifecycle', () => {
 
     await page.getByTestId('sidebar-nav-models').click();
     await expect(page.getByTestId('providers-settings')).toBeVisible();
+    await expect(page.getByTestId(`provider-card-${TEST_PROVIDER_ID}`)).toHaveCSS('border-top-width', '1px');
     await expect(page.getByTestId(`provider-card-${TEST_PROVIDER_ID}`)).toContainText(TEST_PROVIDER_LABEL);
 
     await page.getByTestId(`provider-card-${TEST_PROVIDER_ID}`).hover();
@@ -243,6 +294,27 @@ test.describe('Deep AI Worker provider lifecycle', () => {
     } finally {
       await mockServer.close();
     }
+  });
+
+  test('shows all merged configured model IDs in edit mode for merged compatible providers', async ({ page }) => {
+    await completeSetup(page);
+    await seedMergedCustomProviders(page);
+
+    await page.getByTestId('sidebar-nav-models').click();
+    await expect(page.getByTestId('providers-settings')).toBeVisible();
+
+    const providerCard = page.locator('[data-testid^="provider-card-"]').filter({ hasText: TEST_MERGED_PROVIDER_LABEL }).first();
+    await expect(providerCard).toContainText('glm-4.6');
+    await expect(providerCard).toContainText('glm-5');
+    await expect(providerCard).toContainText('qwen3.5-plus');
+
+    await providerCard.locator('[data-testid^="provider-edit-"]').click();
+
+    const modelChips = providerCard.locator('[data-testid^="provider-edit-model-chip-"]');
+    await expect(modelChips).toHaveCount(3);
+    await expect(providerCard).toContainText('glm-4.6');
+    await expect(providerCard).toContainText('glm-5');
+    await expect(providerCard).toContainText('qwen3.5-plus');
   });
 });
 

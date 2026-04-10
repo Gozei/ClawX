@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const clearErrorRecoveryTimer = vi.fn();
 const clearHistoryPoll = vi.fn();
 const collectToolUpdates = vi.fn(() => []);
+const createToolResultProcessMessage = vi.fn((message: unknown) => message);
 const EMPTY_ASSISTANT_RESPONSE_ERROR = 'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.';
 const extractImagesAsAttachedFiles = vi.fn(() => []);
 const extractMediaRefs = vi.fn(() => []);
@@ -28,6 +29,7 @@ vi.mock('@/stores/chat/helpers', () => ({
   clearErrorRecoveryTimer: (...args: unknown[]) => clearErrorRecoveryTimer(...args),
   clearHistoryPoll: (...args: unknown[]) => clearHistoryPoll(...args),
   collectToolUpdates: (...args: unknown[]) => collectToolUpdates(...args),
+  createToolResultProcessMessage: (...args: unknown[]) => createToolResultProcessMessage(...args),
   EMPTY_ASSISTANT_RESPONSE_ERROR,
   extractImagesAsAttachedFiles: (...args: unknown[]) => extractImagesAsAttachedFiles(...args),
   extractMediaRefs: (...args: unknown[]) => extractMediaRefs(...args),
@@ -86,6 +88,7 @@ describe('chat runtime event handlers', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.useFakeTimers();
+    createToolResultProcessMessage.mockImplementation((message: unknown) => message);
     hasErrorRecoveryTimer.mockReturnValue(false);
     collectToolUpdates.mockReturnValue([]);
     upsertToolStatuses.mockImplementation((_current, updates) => updates);

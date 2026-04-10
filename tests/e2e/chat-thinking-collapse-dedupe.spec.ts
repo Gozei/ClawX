@@ -82,22 +82,47 @@ test.describe('Chat thinking collapse dedupe', () => {
       const page = await getStableWindow(app);
       await expect(page.getByTestId('main-layout')).toBeVisible();
 
-      await page.getByTestId(`sidebar-session-${SESSION_KEY}`).click();
+      const sessionRow = page.getByTestId(`sidebar-session-${SESSION_KEY}`);
+      if (await sessionRow.count() === 0) {
+        const startResult = await page.evaluate(async () => (
+          await window.electron.ipcRenderer.invoke('gateway:start')
+        ) as { success?: boolean; error?: string });
+        expect(startResult?.success, startResult?.error || 'gateway:start failed during E2E setup').toBe(true);
+      }
+      await expect(sessionRow).toBeVisible({ timeout: 60_000 });
+      await sessionRow.click();
 
       await expect(page.getByText(USER_TEXT, { exact: true })).toBeVisible({ timeout: 60_000 });
       await expect(page.getByText(FINAL_TEXT, { exact: true })).toBeVisible({ timeout: 60_000 });
       await expect(page.getByText(FINAL_TEXT, { exact: true })).toHaveCount(1);
-      await expect(page.getByTestId('chat-turn-thinking-toggle')).toBeVisible();
-      await expect(page.getByTestId('chat-turn-thinking-toggle')).toHaveCount(1);
+      await expect(page.getByTestId('chat-process-toggle')).toBeVisible();
+      await expect(page.getByTestId('chat-process-toggle')).toHaveCount(1);
       await expect(page.getByText(INTERMEDIATE_TEXT_1, { exact: true })).toHaveCount(0);
       await expect(page.getByText(INTERMEDIATE_TEXT_2, { exact: true })).toHaveCount(0);
 
-      await page.getByTestId('chat-turn-thinking-toggle').click();
+      await page.getByTestId('chat-process-toggle').click();
 
-      await expect(page.getByTestId('chat-turn-thinking-content')).toBeVisible();
+      await expect(page.getByTestId('chat-process-content')).toBeVisible();
       await expect(page.getByText(INTERMEDIATE_TEXT_1, { exact: true })).toBeVisible();
       await expect(page.getByText(INTERMEDIATE_TEXT_2, { exact: true })).toBeVisible();
       await expect(page.getByText(THINKING_TEXT, { exact: true })).toBeVisible();
+
+      const processMessage = page
+        .getByTestId('chat-process-content')
+        .getByTestId('chat-message-content-assistant')
+        .filter({ has: page.getByText(INTERMEDIATE_TEXT_1, { exact: true }) });
+      const finalMessage = page
+        .getByTestId('chat-message-content-assistant')
+        .filter({ has: page.getByText(FINAL_TEXT, { exact: true }) });
+
+      const [processBox, finalBox] = await Promise.all([
+        processMessage.boundingBox(),
+        finalMessage.boundingBox(),
+      ]);
+
+      expect(processBox).not.toBeNull();
+      expect(finalBox).not.toBeNull();
+      expect(Math.abs((processBox?.width ?? 0) - (finalBox?.width ?? 0))).toBeLessThanOrEqual(2);
     } finally {
       await closeElectronApp(app);
     }

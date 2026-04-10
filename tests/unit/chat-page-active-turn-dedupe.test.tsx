@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { Chat } from '@/pages/Chat';
 
 const navigateMock = vi.fn();
 
-const { agentsState, chatState, gatewayState, settingsState } = vi.hoisted(() => ({
+const { agentsState, chatState, gatewayState, settingsState, useDeferredValueMock } = vi.hoisted(() => ({
   agentsState: {
     fetchAgents: vi.fn(async () => {}),
   },
@@ -34,7 +33,16 @@ const { agentsState, chatState, gatewayState, settingsState } = vi.hoisted(() =>
     chatFontScale: 100,
     assistantMessageStyle: 'bubble',
   },
+  useDeferredValueMock: vi.fn(),
 }));
+
+vi.mock('react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react')>();
+  return {
+    ...actual,
+    useDeferredValue: (value: unknown) => useDeferredValueMock(value),
+  };
+});
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => navigateMock,
@@ -91,7 +99,9 @@ vi.mock('@/pages/Chat/ChatToolbar', () => ({
   ChatToolbar: () => <div data-testid="chat-toolbar" />,
 }));
 
-describe('Chat streaming dedupe', () => {
+import { Chat } from '@/pages/Chat';
+
+describe('Chat active turn dedupe', () => {
   beforeEach(() => {
     navigateMock.mockReset();
     agentsState.fetchAgents.mockClear();
@@ -99,26 +109,8 @@ describe('Chat streaming dedupe', () => {
       {
         id: 'user-1',
         role: 'user',
-        content: 'Take a photo for me.',
+        content: '你叫啥呢',
         timestamp: 1000,
-      },
-      {
-        id: 'assistant-1',
-        role: 'assistant',
-        content: [
-          { type: 'thinking', thinking: 'Checking the camera.' },
-          { type: 'text', text: 'Preparing the camera.' },
-        ],
-        timestamp: 1001,
-      },
-      {
-        id: 'assistant-2',
-        role: 'assistant',
-        content: [
-          { type: 'thinking', thinking: 'Confirm the final output one last time.' },
-          { type: 'text', text: 'Photo saved (60KB). You should be able to see it now.' },
-        ],
-        timestamp: 1002,
       },
     ];
     chatState.currentSessionKey = 'agent:main:main';
@@ -126,23 +118,19 @@ describe('Chat streaming dedupe', () => {
     chatState.sending = true;
     chatState.error = null;
     chatState.showThinking = true;
-    chatState.streamingMessage = {
-      role: 'assistant',
-      content: 'Photo saved (60KB). You should be able to see it now.',
-      timestamp: 1003,
-    };
+    chatState.streamingMessage = null;
     chatState.streamingTools = [];
     chatState.pendingFinal = false;
     chatState.lastUserMessageAt = 1000;
     settingsState.chatProcessDisplayMode = 'all';
     settingsState.chatFontScale = 100;
     settingsState.assistantMessageStyle = 'bubble';
+    useDeferredValueMock.mockImplementation(() => chatState.messages);
   });
 
-  it('does not render a duplicate streaming bubble when the same assistant reply is already persisted', () => {
+  it('does not render the active turn user bubble twice when deferred history lags behind', () => {
     render(<Chat />);
 
-    expect(screen.getByTestId('chat-process-toggle')).toBeInTheDocument();
-    expect(screen.getAllByText('Photo saved (60KB). You should be able to see it now.')).toHaveLength(1);
+    expect(screen.getAllByText('你叫啥呢')).toHaveLength(1);
   });
 });

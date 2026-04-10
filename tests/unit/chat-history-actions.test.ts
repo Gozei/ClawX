@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const invokeIpcMock = vi.fn();
 const hostApiFetchMock = vi.fn();
 const clearHistoryPoll = vi.fn();
+const createToolResultProcessMessage = vi.fn((message: unknown) => message);
 const EMPTY_ASSISTANT_RESPONSE_ERROR = 'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.';
 const enrichWithCachedImages = vi.fn((messages) => messages);
 const enrichWithToolResultFiles = vi.fn((messages) => messages);
@@ -44,6 +45,7 @@ vi.mock('@/lib/host-api', () => ({
 
 vi.mock('@/stores/chat/helpers', () => ({
   clearHistoryPoll: (...args: unknown[]) => clearHistoryPoll(...args),
+  createToolResultProcessMessage: (...args: unknown[]) => createToolResultProcessMessage(...args),
   EMPTY_ASSISTANT_RESPONSE_ERROR,
   enrichWithCachedImages: (...args: unknown[]) => enrichWithCachedImages(...args),
   enrichWithToolResultFiles: (...args: unknown[]) => enrichWithToolResultFiles(...args),
@@ -105,6 +107,7 @@ function makeHarness(initial?: Partial<ChatLikeState>) {
 describe('chat history actions', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    createToolResultProcessMessage.mockImplementation((message: unknown) => message);
     invokeIpcMock.mockResolvedValue({ success: true, result: { messages: [] } });
     hostApiFetchMock.mockResolvedValue({ messages: [] });
   });
@@ -368,6 +371,36 @@ describe('chat history actions', () => {
     expect(h.read().streamingTools).toEqual([]);
     expect(h.read().pendingToolImages).toEqual([]);
     expect(clearHistoryPoll).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves local in-flight assistant process messages when history polling is behind', async () => {
+    const { createHistoryActions } = await import('@/stores/chat/history-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:main:main',
+      sending: true,
+      lastUserMessageAt: 1000,
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Take a photo for me.', timestamp: 1000 },
+        { id: 'assistant-local-1', role: 'assistant', content: 'Preparing the camera.', timestamp: 1001 },
+      ],
+    });
+    const actions = createHistoryActions(h.set as never, h.get as never);
+
+    invokeIpcMock.mockResolvedValueOnce({
+      success: true,
+      result: {
+        messages: [
+          { id: 'user-1', role: 'user', content: 'Take a photo for me.', timestamp: 1000 },
+        ],
+      },
+    });
+
+    await actions.loadHistory(true);
+
+    expect(h.read().messages.map((message) => message.content)).toEqual([
+      'Take a photo for me.',
+      'Preparing the camera.',
+    ]);
   });
 
   it('preserves newer same-session messages when preview hydration finishes later', async () => {

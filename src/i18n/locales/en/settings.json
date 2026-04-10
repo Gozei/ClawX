@@ -249,6 +249,12 @@
     "devModeDesc": "Show developer tools and shortcuts",
     "chatProcessDisplay": "Chat process hints",
     "chatProcessDisplayDesc": "Control whether tool execution and read-process cards appear in the conversation.",
+    "assistantMessageStyle": "Assistant output style",
+    "assistantMessageStyleDesc": "Switch between the current bubble reply and a flatter event-stream reply.",
+    "assistantMessageStyleOptions": {
+      "bubble": "Bubble",
+      "stream": "Event stream"
+    },
     "chatFontScale": "Chat font size",
     "chatFontScaleDesc": "Adjust message and composer font size for a lighter, easier reading experience.",
     "chatFontScaleOption": "{{value}}%",

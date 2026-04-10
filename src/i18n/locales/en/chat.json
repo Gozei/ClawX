@@ -48,6 +48,10 @@
         "gatewayStatus": "gateway {{state}} | port: {{port}} {{pid}}",
         "retryFailedAttachments": "Retry failed attachments"
     },
+    "process": {
+        "workingFor": "Working for {{duration}}",
+        "processedFor": "Processed {{duration}}"
+    },
     "historyBuckets": {
         "today": "Today",
         "yesterday": "Yesterday",

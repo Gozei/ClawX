@@ -14,6 +14,14 @@ export type HistoryDisplayItem =
       finalMessage: RawMessage;
     };
 
+function isProcessBlock(block: ContentBlock): boolean {
+  return block.type === 'thinking'
+    || block.type === 'tool_use'
+    || block.type === 'toolCall'
+    || block.type === 'tool_result'
+    || block.type === 'toolResult';
+}
+
 function normalizeRole(role: RawMessage['role'] | string | undefined): string {
   return typeof role === 'string' ? role.toLowerCase() : '';
 }
@@ -24,6 +32,11 @@ function isUserMessage(message: RawMessage | undefined): boolean {
 
 function isAssistantMessage(message: RawMessage | undefined): boolean {
   return normalizeRole(message?.role) === 'assistant';
+}
+
+function shouldRenderAssistantAsProcessTurn(message: RawMessage | undefined): boolean {
+  if (!message || !isAssistantMessage(message)) return false;
+  return splitFinalMessageForTurnDisplay(message).collapsedProcessMessage != null;
 }
 
 export function groupMessagesForDisplay(messages: RawMessage[]): HistoryDisplayItem[] {
@@ -52,7 +65,10 @@ export function groupMessagesForDisplay(messages: RawMessage[]): HistoryDisplayI
     const turnMessages = messages.slice(index + 1, nextUserIndex);
     const assistantMessages = turnMessages.filter((message) => isAssistantMessage(message));
 
-    if (assistantMessages.length > 1) {
+    const shouldGroupAsTurn = assistantMessages.length > 1
+      || (assistantMessages.length === 1 && shouldRenderAssistantAsProcessTurn(assistantMessages[0]));
+
+    if (shouldGroupAsTurn) {
       const finalMessage = assistantMessages[assistantMessages.length - 1];
       items.push({
         type: 'turn',
@@ -85,36 +101,48 @@ export function groupMessagesForDisplay(messages: RawMessage[]): HistoryDisplayI
 }
 
 export function splitFinalMessageForTurnDisplay(finalMessage: RawMessage): {
+  collapsedProcessMessage: RawMessage | null;
   collapsedThinkingMessage: RawMessage | null;
   finalDisplayMessage: RawMessage;
 } {
   if (!Array.isArray(finalMessage.content)) {
     return {
+      collapsedProcessMessage: null,
       collapsedThinkingMessage: null,
       finalDisplayMessage: finalMessage,
     };
   }
 
+  const processBlocks = (finalMessage.content as ContentBlock[]).filter((block) => isProcessBlock(block));
   const thinkingBlocks = (finalMessage.content as ContentBlock[]).filter((block) => block.type === 'thinking');
-  if (thinkingBlocks.length === 0) {
+  if (processBlocks.length === 0) {
     return {
+      collapsedProcessMessage: null,
       collapsedThinkingMessage: null,
       finalDisplayMessage: finalMessage,
     };
   }
 
-  const nonThinkingBlocks = (finalMessage.content as ContentBlock[]).filter((block) => block.type !== 'thinking');
+  const nonProcessBlocks = (finalMessage.content as ContentBlock[]).filter((block) => !isProcessBlock(block));
 
   return {
-    collapsedThinkingMessage: {
+    collapsedProcessMessage: {
       ...finalMessage,
-      id: finalMessage.id ? `${finalMessage.id}-thinking` : finalMessage.id,
-      content: thinkingBlocks,
+      id: finalMessage.id ? `${finalMessage.id}-process` : finalMessage.id,
+      content: processBlocks,
       _attachedFiles: [],
     },
+    collapsedThinkingMessage: thinkingBlocks.length > 0
+      ? {
+          ...finalMessage,
+          id: finalMessage.id ? `${finalMessage.id}-thinking` : finalMessage.id,
+          content: thinkingBlocks,
+          _attachedFiles: [],
+        }
+      : null,
     finalDisplayMessage: {
       ...finalMessage,
-      content: nonThinkingBlocks,
+      content: nonProcessBlocks,
     },
   };
 }

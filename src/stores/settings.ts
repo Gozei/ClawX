@@ -12,6 +12,7 @@ import { resolveSupportedLanguage } from '../../shared/language';
 type Theme = 'light' | 'dark' | 'system';
 type UpdateChannel = 'stable' | 'beta' | 'dev';
 export type ChatProcessDisplayMode = 'all' | 'files' | 'hidden';
+export type AssistantMessageStyle = 'bubble' | 'stream';
 
 interface SettingsState {
   // General
@@ -22,6 +23,7 @@ interface SettingsState {
   telemetryEnabled: boolean;
   brandingOverrides: BrandingOverrides;
   chatProcessDisplayMode: ChatProcessDisplayMode;
+  assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
 
   // Gateway
@@ -54,6 +56,7 @@ interface SettingsState {
   setLaunchAtStartup: (value: boolean) => void;
   setTelemetryEnabled: (value: boolean) => void;
   setChatProcessDisplayMode: (value: ChatProcessDisplayMode) => void;
+  setAssistantMessageStyle: (value: AssistantMessageStyle) => void;
   setChatFontScale: (value: number) => void;
   setGatewayAutoStart: (value: boolean) => void;
   setGatewayPort: (port: number) => void;
@@ -80,6 +83,7 @@ const defaultSettings = {
   telemetryEnabled: true,
   brandingOverrides: {},
   chatProcessDisplayMode: 'files' as ChatProcessDisplayMode,
+  assistantMessageStyle: 'bubble' as AssistantMessageStyle,
   chatFontScale: 100,
   gatewayAutoStart: true,
   gatewayPort: 18789,
@@ -158,6 +162,13 @@ export const useSettingsStore = create<SettingsState>()(
         void hostApiFetch('/api/settings/chatProcessDisplayMode', {
           method: 'PUT',
           body: JSON.stringify({ value: chatProcessDisplayMode }),
+        }).catch(() => { });
+      },
+      setAssistantMessageStyle: (assistantMessageStyle) => {
+        set({ assistantMessageStyle });
+        void hostApiFetch('/api/settings/assistantMessageStyle', {
+          method: 'PUT',
+          body: JSON.stringify({ value: assistantMessageStyle }),
         }).catch(() => { });
       },
       setChatFontScale: (chatFontScale) => {

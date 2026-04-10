@@ -236,17 +236,9 @@ export function Sidebar() {
   const sessionMenuLabels = useMemo(() => {
     if (i18n.resolvedLanguage?.startsWith('zh')) {
       return {
-        rename: '命名',
-        pin: '置顶',
-        unpin: '取消置顶',
-      };
-    }
-
-    if (i18n.resolvedLanguage?.startsWith('ja')) {
-      return {
-        rename: '名前を変更',
-        pin: 'ピン留め',
-        unpin: 'ピン留めを解除',
+        rename: '\u91cd\u547d\u540d',
+        pin: '\u7f6e\u9876',
+        unpin: '\u53d6\u6d88\u7f6e\u9876',
       };
     }
 

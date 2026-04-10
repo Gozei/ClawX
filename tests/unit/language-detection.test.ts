@@ -8,7 +8,6 @@ describe('resolveSupportedLanguage', () => {
   });
 
   it('falls back to English for unsupported locales', () => {
-    expect(resolveSupportedLanguage('ja_JP')).toBe('en');
     expect(resolveSupportedLanguage('fr-FR')).toBe('en');
     expect(resolveSupportedLanguage('ko')).toBe('en');
   });
