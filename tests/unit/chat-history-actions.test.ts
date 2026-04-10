@@ -403,6 +403,42 @@ describe('chat history actions', () => {
     ]);
   });
 
+  it('preserves the current streaming assistant reply during refresh when history is still behind', async () => {
+    const { createHistoryActions } = await import('@/stores/chat/history-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:main:main',
+      sending: true,
+      pendingFinal: true,
+      lastUserMessageAt: 1000,
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Take a photo for me.', timestamp: 1000 },
+      ],
+      streamingMessage: {
+        id: 'stream-1',
+        role: 'assistant',
+        content: 'Photo saved (60KB). You should be able to see it now.',
+        timestamp: 1001,
+      },
+    });
+    const actions = createHistoryActions(h.set as never, h.get as never);
+
+    invokeIpcMock.mockResolvedValueOnce({
+      success: true,
+      result: {
+        messages: [
+          { id: 'user-1', role: 'user', content: 'Take a photo for me.', timestamp: 1000 },
+        ],
+      },
+    });
+
+    await actions.loadHistory(true);
+
+    expect(h.read().messages.map((message) => message.content)).toEqual([
+      'Take a photo for me.',
+      'Photo saved (60KB). You should be able to see it now.',
+    ]);
+  });
+
   it('preserves newer same-session messages when preview hydration finishes later', async () => {
     const { createHistoryActions } = await import('@/stores/chat/history-actions');
     let releasePreviewHydration: (() => void) | null = null;
