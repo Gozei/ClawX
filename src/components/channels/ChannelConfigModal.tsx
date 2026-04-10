@@ -15,6 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { modalCardClasses, modalOverlayClasses } from '@/components/ui/modal';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
@@ -32,7 +33,11 @@ import {
   type ChannelMeta,
   type ChannelConfigField,
 } from '@/types/channel';
-import { buildQrChannelEventName, usesPluginManagedQrAccounts } from '@/lib/channel-alias';
+import {
+  buildQrChannelEventName,
+  isCanonicalOpenClawAccountId,
+  usesPluginManagedQrAccounts,
+} from '@/lib/channel-alias';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import telegramIcon from '@/assets/channels/telegram.svg';
@@ -82,6 +87,7 @@ export function ChannelConfigModal({
   const [configValues, setConfigValues] = useState<Record<string, string>>({});
   const [channelName, setChannelName] = useState('');
   const [accountIdInput, setAccountIdInput] = useState(accountId || '');
+  const [accountIdError, setAccountIdError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
   const [qrCode, setQrCode] = useState<string | null>(null);
@@ -104,6 +110,10 @@ export function ChannelConfigModal({
     : showAccountIdEditor
       ? accountIdInput.trim()
       : (accountId ?? (agentId ? (agentId === 'main' ? 'default' : agentId) : undefined));
+  const shouldLoadExistingConfig = Boolean(
+    selectedType && allowExistingConfig && configuredTypes.includes(selectedType)
+  );
+  const accountIdForConfigLoad = shouldLoadExistingConfig ? resolvedAccountId : undefined;
 
   useEffect(() => {
     setSelectedType(initialSelectedType);
@@ -111,6 +121,7 @@ export function ChannelConfigModal({
 
   useEffect(() => {
     setAccountIdInput(accountId || '');
+    setAccountIdError(null);
   }, [accountId]);
 
   useEffect(() => {
@@ -121,10 +132,10 @@ export function ChannelConfigModal({
       setValidationResult(null);
       setQrCode(null);
       setConnecting(false);
+      setAccountIdError(null);
       return;
     }
 
-    const shouldLoadExistingConfig = allowExistingConfig && configuredTypes.includes(selectedType);
     if (!shouldLoadExistingConfig) {
       setConfigValues({});
       setIsExistingConfig(false);
@@ -147,7 +158,7 @@ export function ChannelConfigModal({
 
     (async () => {
       try {
-        const accountParam = resolvedAccountId ? `?accountId=${encodeURIComponent(resolvedAccountId)}` : '';
+        const accountParam = accountIdForConfigLoad ? `?accountId=${encodeURIComponent(accountIdForConfigLoad)}` : '';
         const result = await hostApiFetch<{ success: boolean; values?: Record<string, string> }>(
           `/api/channels/config/${encodeURIComponent(selectedType)}${accountParam}`
         );
@@ -173,7 +184,7 @@ export function ChannelConfigModal({
     return () => {
       cancelled = true;
     };
-  }, [allowExistingConfig, configuredTypes, initialConfigValues, resolvedAccountId, selectedType, showChannelName]);
+  }, [accountIdForConfigLoad, initialConfigValues, selectedType, shouldLoadExistingConfig, showChannelName]);
 
   useEffect(() => {
     if (selectedType && !loadingConfig && showChannelName && firstInputRef.current) {
@@ -349,16 +360,28 @@ export function ChannelConfigModal({
       if (showAccountIdEditor) {
         const nextAccountId = accountIdInput.trim();
         if (!nextAccountId) {
-          toast.error(t('account.invalidId'));
+          const message = t('account.invalidId');
+          setAccountIdError(message);
+          toast.error(message);
+          setConnecting(false);
+          return;
+        }
+        if (!isCanonicalOpenClawAccountId(nextAccountId)) {
+          const message = t('account.invalidCanonicalId');
+          setAccountIdError(message);
+          toast.error(message);
           setConnecting(false);
           return;
         }
         const duplicateExists = existingAccountIds.some((id) => id === nextAccountId && id !== (accountId || '').trim());
         if (duplicateExists) {
-          toast.error(t('account.accountIdExists', { accountId: nextAccountId }));
+          const message = t('account.accountIdExists', { accountId: nextAccountId });
+          setAccountIdError(message);
+          toast.error(message);
           setConnecting(false);
           return;
         }
+        setAccountIdError(null);
       }
 
       if (meta.connectionType === 'qr') {
@@ -470,7 +493,7 @@ export function ChannelConfigModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      className={modalOverlayClasses}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
@@ -478,7 +501,7 @@ export function ChannelConfigModal({
       }}
     >
       <Card
-        className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-3xl border-0 shadow-2xl bg-background dark:bg-card overflow-hidden"
+        className={cn(modalCardClasses, 'max-w-3xl rounded-3xl border-0 shadow-2xl bg-background dark:bg-card')}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
       >
@@ -640,11 +663,20 @@ export function ChannelConfigModal({
                   <Input
                     id="account-id"
                     value={accountIdInput}
-                    onChange={(event) => setAccountIdInput(event.target.value)}
+                    onChange={(event) => {
+                      setAccountIdInput(event.target.value);
+                      if (accountIdError) {
+                        setAccountIdError(null);
+                      }
+                    }}
                     placeholder={t('account.customIdPlaceholder')}
-                    className={inputClasses}
+                    className={cn(inputClasses, accountIdError && 'border-destructive/50 focus-visible:ring-destructive/30')}
                   />
-                  <p className="text-[12px] text-muted-foreground">{t('account.customIdHint')}</p>
+                  {accountIdError ? (
+                    <p className="text-[12px] text-destructive">{accountIdError}</p>
+                  ) : (
+                    <p className="text-[12px] text-muted-foreground">{t('account.customIdHint')}</p>
+                  )}
                 </div>
               )}
 

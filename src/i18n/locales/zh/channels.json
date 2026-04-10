@@ -1,30 +1,30 @@
 {
-    "title": "消息频道",
-    "subtitle": "统一管理消息频道、账号、账号与角色的绑定关系，以及频道默认账号",
+    "title": "消息通道",
+    "subtitle": "统一管理消息通道、账号、账号与角色的绑定关系，以及通道默认账号",
     "refresh": "刷新",
-    "addChannel": "添加频道",
+    "addChannel": "添加通道",
     "stats": {
-        "total": "频道总数",
+        "total": "通道总数",
         "connected": "已连接",
         "disconnected": "未连接"
     },
-    "gatewayWarning": "网关未运行。未启用网关时无法管理频道。",
-    "availableChannels": "可用频道",
-    "supportedChannels": "支持的频道",
+    "gatewayWarning": "网关未运行。未启用网关时无法管理通道。",
+    "availableChannels": "可用通道",
+    "supportedChannels": "支持的通道",
     "pluginBadge": "插件",
-    "available": "可用频道",
-    "availableDesc": "连接一个新的频道",
-    "configured": "已配置频道",
-    "configuredDesc": "管理已完成配置的频道",
+    "available": "可用通道",
+    "availableDesc": "连接一个新的通道",
+    "configured": "已配置通道",
+    "configuredDesc": "管理已完成配置的通道",
     "configuredBadge": "已配置",
-    "deleteConfirm": "确定要删除此频道吗？",
+    "deleteConfirm": "确定要删除此通道吗？",
     "showAll": "显示全部",
     "toast": {
         "whatsappConnected": "WhatsApp 连接成功",
         "whatsappFailed": "WhatsApp 连接失败: {{error}}",
         "qrConnected": "{{name}} 连接成功",
         "qrFailed": "{{name}} 连接失败: {{error}}",
-        "channelSaved": "频道 {{name}} 已保存",
+        "channelSaved": "通道 {{name}} 已保存",
         "channelConnecting": "正在连接 {{name}}...",
         "savedButRefreshFailed": "配置已保存，但刷新页面数据失败，请手动刷新查看最新状态",
         "restartManual": "请手动重启网关",
@@ -32,23 +32,24 @@
         "bindingUpdated": "账号绑定已更新",
         "defaultUpdated": "默认账号已更新",
         "accountDeleted": "账号已删除",
-        "channelDeleted": "频道已删除"
+        "channelDeleted": "通道已删除"
     },
     "account": {
         "add": "添加账号",
         "edit": "编辑",
         "delete": "删除账号",
-        "deleteChannel": "删除频道",
+        "deleteChannel": "删除通道",
         "deleteConfirm": "确定要删除该账号吗？",
         "default": "当前默认",
-        "setDefault": "设为频道默认账号",
+        "setDefault": "设为通道默认账号",
         "bindAgentLabel": "绑定 Role",
         "unassigned": "未绑定",
         "mainAccount": "主账号",
         "customIdLabel": "账号 ID",
         "customIdPlaceholder": "例如：feishu-sales-bot",
-        "customIdHint": "可自定义账号 ID，用于区分同一频道下的多个账号。",
+        "customIdHint": "使用小写账号 ID（字母、数字、连字符、下划线）来区分同一频道下的多个账号。",
         "invalidId": "账号 ID 不能为空",
+        "invalidCanonicalId": "账号 ID 仅支持小写字母、数字、连字符和下划线；必须以字母或数字开头，且最长 64 个字符。",
         "idLabel": "ID: {{id}}",
         "boundTo": "绑定对象：{{agent}}",
         "handledBy": "由 {{agent}} 处理",
@@ -64,27 +65,27 @@
             "disconnected": "未连接",
             "error": "异常"
         },
-        "accountIdPrompt": "请输入该频道的新账号 ID",
+        "accountIdPrompt": "请输入该通道的新账号 ID",
         "accountIdExists": "账号 ID {{accountId}} 已存在"
     },
     "dialog": {
         "updateTitle": "更新 {{name}}",
         "configureTitle": "配置 {{name}}",
-        "addTitle": "添加频道",
+        "addTitle": "添加通道",
         "existingDesc": "更新您现有的配置",
-        "selectDesc": "选择要配置的频道类型",
+        "selectDesc": "选择要配置的通道类型",
         "qrCode": "二维码",
         "token": "令牌",
         "scanQR": "使用 {{name}} 扫描此二维码",
         "refreshCode": "刷新代码",
         "loadingConfig": "正在加载配置...",
-        "existingHint": "您已配置过此频道",
+        "existingHint": "您已配置过此通道",
         "howToConnect": "如何连接",
         "viewDocs": "查看文档",
-        "channelName": "频道名称",
+        "channelName": "通道名称",
         "channelNamePlaceholder": "我的 {{name}}",
-        "enableChannel": "启用频道",
-        "enableChannelDesc": "关闭后会保存配置，但不会启动该频道",
+        "enableChannel": "启用通道",
+        "enableChannelDesc": "关闭后会保存配置，但不会启动该通道",
         "credentialsVerified": "凭证已验证",
         "validationFailed": "验证失败",
         "warnings": "警告",
@@ -135,9 +136,9 @@
                     "description": "限制机器人仅在特定服务器工作。右键点击服务器 → 复制服务器 ID。"
                 },
                 "channelId": {
-                    "label": "频道 ID (可选)",
+                    "label": "通道 ID (可选)",
                     "placeholder": "例如 123456789012345678",
-                    "description": "限制机器人仅在特定频道工作。右键点击频道 → 复制频道 ID。"
+                    "description": "限制机器人仅在特定通道工作。右键点击通道 → 复制通道 ID。"
                 }
             },
             "instructions": [
@@ -170,7 +171,7 @@
             ]
         },
         "dingtalk": {
-            "description": "通过 OpenClaw 渠道插件连接钉钉（Stream 模式）",
+            "description": "通过 OpenClaw 通道插件连接钉钉（Stream 模式）",
             "docsUrl": "https://icnnp7d0dymg.feishu.cn/wiki/Y5eNwiSiZidkLskrwtJc1rUln0b#doxcnr8KfaA2mNPeQUeHO83eDPh",
             "fields": {
                 "clientId": {
@@ -299,18 +300,18 @@
             "docsUrl": "https://docs.openclaw.ai/channels/line",
             "fields": {
                 "channelAccessToken": {
-                    "label": "频道访问令牌",
-                    "placeholder": "您的 LINE 频道访问令牌"
+                    "label": "通道访问令牌",
+                    "placeholder": "您的 LINE 通道访问令牌"
                 },
                 "channelSecret": {
-                    "label": "频道密钥",
-                    "placeholder": "您的 LINE 频道密钥"
+                    "label": "通道密钥",
+                    "placeholder": "您的 LINE 通道密钥"
                 }
             },
             "instructions": [
                 "前往 LINE 开发者控制台",
-                "创建一个 Messaging API 频道",
-                "获取频道访问令牌和密钥"
+                "创建一个 Messaging API 通道",
+                "获取通道访问令牌和密钥"
             ]
         },
         "msteams": {
@@ -330,7 +331,7 @@
                 "前往 Azure 门户",
                 "注册一个新的 Bot 应用",
                 "获取应用 ID 并创建密码",
-                "配置 Teams 频道"
+                "配置 Teams 通道"
             ]
         },
         "googlechat": {
@@ -369,7 +370,7 @@
             ]
         },
         "qqbot": {
-            "description": "连接 QQ 机器人频道（OpenClaw 3.31 起内置）",
+            "description": "连接 QQ 机器人通道（OpenClaw 3.31 起内置）",
             "docsUrl": "https://icnnp7d0dymg.feishu.cn/wiki/KPIJwlyiGiupMrkiS9ice39Zn2c",
             "fields": {
                 "appId": {

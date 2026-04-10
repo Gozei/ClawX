@@ -7,6 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { modalCardClasses, modalOverlayClasses } from '@/components/ui/modal';
+import { getSelectIconStyle, selectBaseClasses } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
@@ -345,14 +347,16 @@ export function Agents() {
           actions={(
             <>
               <Button
+                data-testid="agents-refresh-button"
                 variant="outline"
                 onClick={handleRefresh}
-                className="h-10 rounded-full px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white/82 dark:hover:bg-white/6"
+                className="h-10 rounded-full px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6"
               >
                 <RefreshCw className={cn('h-3.5 w-3.5 mr-2', isUsingStableValue && 'animate-spin')} />
                 {t('refresh')}
               </Button>
               <Button
+                data-testid="agents-add-button"
                 onClick={() => setShowAddDialog(true)}
                 className="h-10 rounded-full px-4 text-[13px] font-medium shadow-none"
               >
@@ -617,8 +621,10 @@ function StatPill({ label, value }: { label: string; value: string }) {
 }
 
 const inputClasses = 'h-[44px] rounded-xl font-mono text-[13px] bg-background dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
-const selectClasses = 'h-[44px] w-full rounded-xl font-mono text-[13px] bg-background dark:bg-muted border border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground px-3';
+const selectClasses = cn(selectBaseClasses, 'h-[44px] rounded-xl border-black/10 bg-background dark:bg-muted shadow-sm transition-all focus-visible:border-blue-500 focus-visible:ring-blue-500/50 dark:border-white/10');
+const workflowSelectClasses = cn(selectClasses, 'mt-2');
 const labelClasses = 'text-[14px] text-foreground/80 font-bold';
+const selectIconStyle = getSelectIconStyle();
 
 function ChannelLogo({ type }: { type: ChannelType }) {
   switch (type) {
@@ -709,9 +715,12 @@ function AddAgentDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md rounded-3xl border-0 shadow-2xl bg-background dark:bg-card overflow-hidden">
-        <CardHeader className="pb-2">
+    <div data-testid="add-agent-dialog" className={modalOverlayClasses}>
+      <Card
+        data-testid="add-agent-dialog-card"
+        className={cn(modalCardClasses, 'max-w-md rounded-3xl border-0 shadow-2xl bg-background dark:bg-card')}
+      >
+        <CardHeader className="pb-2 shrink-0">
           <CardTitle className="text-2xl font-serif font-normal tracking-tight">
             {t('createDialog.title')}
           </CardTitle>
@@ -719,7 +728,7 @@ function AddAgentDialog({
             {t('createDialog.description')}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6 pt-4 p-6">
+        <CardContent className="flex-1 space-y-6 overflow-y-auto p-6 pt-4">
           <div className="space-y-2.5">
             <Label htmlFor="agent-name" className={labelClasses}>{t('createDialog.nameLabel')}</Label>
             <Input
@@ -737,6 +746,7 @@ function AddAgentDialog({
               value={profileType}
               onChange={(event) => setProfileType(event.target.value as AgentProfileType)}
               className={selectClasses}
+              style={selectIconStyle}
             >
               {profileOptions.map((option) => (
                 <option key={option.id} value={option.id}>
@@ -1297,8 +1307,8 @@ function AgentSettingsModal({
   const availableAgentTargets = agents.filter((candidate) => candidate.id !== agent.id);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-5xl max-h-[90vh] flex flex-col rounded-3xl border-0 shadow-2xl bg-background dark:bg-card overflow-hidden">
+    <div className={modalOverlayClasses}>
+      <Card className={cn(modalCardClasses, 'max-w-5xl rounded-3xl border-0 shadow-2xl bg-background dark:bg-card')}>
         <CardHeader className="flex flex-row items-start justify-between pb-2 shrink-0">
           <div>
             <CardTitle className="text-2xl font-serif font-normal tracking-tight">
@@ -1414,6 +1424,7 @@ function AgentSettingsModal({
                       value={profileType}
                       onChange={(event) => setProfileType(event.target.value as AgentProfileType)}
                       className={selectClasses}
+                      style={selectIconStyle}
                     >
                       {profileOptions.map((option) => (
                         <option key={option.id} value={option.id}>
@@ -1576,7 +1587,8 @@ function AgentSettingsModal({
                               <select
                                 value={step.type}
                                 onChange={(event) => handleWorkflowNodeChange(index, 'type', event.target.value as AgentWorkflowNode['type'])}
-                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-background px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                                className={workflowSelectClasses}
+                                style={selectIconStyle}
                               >
                                 {workflowStepTypeOptions.map((option) => (
                                   <option key={option.id} value={option.id}>
@@ -1604,7 +1616,8 @@ function AgentSettingsModal({
                               <select
                                 value={step.target || ''}
                                 onChange={(event) => handleWorkflowNodeChange(index, 'target', event.target.value)}
-                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-background px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                                className={workflowSelectClasses}
+                                style={selectIconStyle}
                               >
                                 <option value="">{t('settingsDialog.workflowTargetPlaceholders.skill')}</option>
                                 {assignedSkillDetails.map((skill) => (
@@ -1621,7 +1634,8 @@ function AgentSettingsModal({
                               <select
                                 value={step.target || ''}
                                 onChange={(event) => handleWorkflowNodeChange(index, 'target', event.target.value)}
-                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-background px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                                className={workflowSelectClasses}
+                                style={selectIconStyle}
                               >
                                 <option value="">{t('settingsDialog.workflowTargetPlaceholders.agent')}</option>
                                 {availableAgentTargets.map((candidate) => (
@@ -1647,7 +1661,8 @@ function AgentSettingsModal({
                                       <select
                                         value={selectedProviderKey}
                                         onChange={(event) => handleWorkflowModelProviderChange(index, event.target.value)}
-                                        className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-background px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                                        className={workflowSelectClasses}
+                                        style={selectIconStyle}
                                       >
                                         <option value="">{t('settingsDialog.modelProviderPlaceholder')}</option>
                                         {runtimeProviderOptions.map((option) => (
@@ -1716,7 +1731,8 @@ function AgentSettingsModal({
                               <select
                                 value={step.target || ''}
                                 onChange={(event) => handleWorkflowNodeChange(index, 'target', event.target.value)}
-                                className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-background px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                                className={workflowSelectClasses}
+                                style={selectIconStyle}
                               >
                                 <option value="">{t('settingsDialog.workflowTargetPlaceholders.channel')}</option>
                                 {assignedChannels.map((channel) => {
@@ -1765,7 +1781,8 @@ function AgentSettingsModal({
                             <select
                               value={step.onFailure || 'continue'}
                               onChange={(event) => handleWorkflowNodeChange(index, 'onFailure', event.target.value as NonNullable<AgentWorkflowNode['onFailure']>)}
-                              className="mt-2 h-[44px] w-full rounded-xl border border-black/10 bg-background px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted"
+                              className={workflowSelectClasses}
+                              style={selectIconStyle}
                             >
                               {workflowFailureOptions.map((option) => (
                                 <option key={option.id} value={option.id}>
@@ -2209,6 +2226,7 @@ function AgentModelModal({
                 }
               }}
               className={selectClasses}
+              style={selectIconStyle}
             >
               <option value="">{t('settingsDialog.modelProviderPlaceholder')}</option>
               {runtimeProviderOptions.map((option) => (

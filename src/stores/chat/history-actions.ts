@@ -2,10 +2,12 @@ import { invokeIpc } from '@/lib/api-client';
 import { hostApiFetch } from '@/lib/host-api';
 import {
   clearHistoryPoll,
+  EMPTY_ASSISTANT_RESPONSE_ERROR,
   enrichWithCachedImages,
   enrichWithToolResultFiles,
   getMessageText,
   hasNonToolAssistantContent,
+  isEmptyAssistantResponse,
   isInternalMessage,
   isToolResultRole,
   loadMissingPreviews,
@@ -103,7 +105,53 @@ export function createHistoryActions(
           }
         }
 
-        set({ messages: finalMessages, thinkingLevel, loading: false });
+        const {
+          pendingFinal: historyPendingFinal,
+          lastUserMessageAt: historyLastUserMessageAt,
+          sending: historyIsSendingNow,
+        } = get();
+
+        const historyUserMsTs = historyLastUserMessageAt ? toMs(historyLastUserMessageAt) : 0;
+        const isAfterHistoryUserMsg = (msg: RawMessage): boolean => {
+          if (!historyUserMsTs || !msg.timestamp) return true;
+          return toMs(msg.timestamp) >= historyUserMsTs;
+        };
+
+        const shouldEnterHistoryPendingFinal = historyIsSendingNow && !historyPendingFinal && [...filteredMessages].reverse().some((msg) => {
+          if (msg.role !== 'assistant') return false;
+          return isAfterHistoryUserMsg(msg);
+        });
+
+        const historyRecentAssistant = (historyPendingFinal || shouldEnterHistoryPendingFinal)
+          ? [...filteredMessages].reverse().find((msg) => {
+              if (msg.role !== 'assistant') return false;
+              if (!hasNonToolAssistantContent(msg)) return false;
+              return isAfterHistoryUserMsg(msg);
+            })
+          : undefined;
+
+        if (historyRecentAssistant) {
+          clearHistoryPoll();
+        }
+
+        set({
+          messages: finalMessages,
+          thinkingLevel,
+          loading: false,
+          ...(historyRecentAssistant
+            ? {
+                sending: false,
+                activeRunId: null,
+                pendingFinal: false,
+                streamingText: '',
+                streamingMessage: null,
+                streamingTools: [],
+                pendingToolImages: [],
+              }
+            : shouldEnterHistoryPendingFinal
+              ? { pendingFinal: true }
+              : {}),
+        });
 
         // Extract first user message text as a session label for display in the toolbar.
         // Skip main sessions (key ends with ":main") — they rely on the Gateway-provided
@@ -146,39 +194,6 @@ export function createHistoryActions(
             }));
           }
         });
-        const { pendingFinal, lastUserMessageAt, sending: isSendingNow } = get();
-
-        // If we're sending but haven't received streaming events, check
-        // whether the loaded history reveals intermediate tool-call activity.
-        // This surfaces progress via the pendingFinal → ActivityIndicator path.
-        const userMsTs = lastUserMessageAt ? toMs(lastUserMessageAt) : 0;
-        const isAfterUserMsg = (msg: RawMessage): boolean => {
-          if (!userMsTs || !msg.timestamp) return true;
-          return toMs(msg.timestamp) >= userMsTs;
-        };
-
-        if (isSendingNow && !pendingFinal) {
-          const hasRecentAssistantActivity = [...filteredMessages].reverse().some((msg) => {
-            if (msg.role !== 'assistant') return false;
-            return isAfterUserMsg(msg);
-          });
-          if (hasRecentAssistantActivity) {
-            set({ pendingFinal: true });
-          }
-        }
-
-        // If pendingFinal, check whether the AI produced a final text response.
-        if (pendingFinal || get().pendingFinal) {
-          const recentAssistant = [...filteredMessages].reverse().find((msg) => {
-            if (msg.role !== 'assistant') return false;
-            if (!hasNonToolAssistantContent(msg)) return false;
-            return isAfterUserMsg(msg);
-          });
-          if (recentAssistant) {
-            clearHistoryPoll();
-            set({ sending: false, activeRunId: null, pendingFinal: false });
-          }
-        }
       };
 
       try {

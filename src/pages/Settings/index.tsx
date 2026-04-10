@@ -41,6 +41,8 @@ import { SUPPORTED_LANGUAGES } from '@/i18n';
 import { hostApiFetch } from '@/lib/host-api';
 import { cn } from '@/lib/utils';
 import { useBranding } from '@/lib/branding';
+import { AppLogo } from '@/components/branding/AppLogo';
+import { PageHeader } from '@/components/layout/PageHeader';
 type ControlUiInfo = {
   url: string;
   token: string;
@@ -481,21 +483,16 @@ export function Settings() {
     <div data-testid="settings-page" className="flex flex-col -m-6 dark:bg-background h-[calc(100vh-2.5rem)] overflow-hidden">
       <div className="w-full max-w-5xl mx-auto flex flex-col h-full p-10 pt-16">
 
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-start justify-between mb-12 shrink-0 gap-4">
-          <div>
-            <h1 className="text-5xl md:text-6xl font-serif text-foreground mb-3 font-normal tracking-tight" style={{ fontFamily: 'Georgia, Cambria, "Times New Roman", Times, serif' }}>
-              {t('title')}
-            </h1>
-            <p className="text-[17px] text-foreground/70 font-medium">
-              {t('subtitle', {
-                appName: branding.productName,
-                slogan: branding.slogan,
-                userAgentProduct: branding.userAgentProduct,
-              })}
-            </p>
-          </div>
-        </div>
+        <PageHeader
+          title={t('title')}
+          subtitle={t('subtitle', {
+            appName: branding.productName,
+            slogan: branding.slogan,
+            userAgentProduct: branding.userAgentProduct,
+          })}
+          titleTestId="settings-page-title"
+          subtitleTestId="settings-page-subtitle"
+        />
 
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto pr-2 pb-10 min-h-0 -mr-2 space-y-12">
@@ -510,6 +507,7 @@ export function Settings() {
                 <Label className="text-[15px] font-medium text-foreground/80">{t('appearance.theme')}</Label>
                 <div className="flex flex-wrap gap-2">
                   <Button
+                    data-testid="settings-theme-light"
                     variant={theme === 'light' ? 'secondary' : 'outline'}
                     className={cn("rounded-full px-5 h-10 border-black/10 dark:border-white/10", theme === 'light' ? "bg-black/5 dark:bg-white/10 text-foreground" : "bg-transparent text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5")}
                     onClick={() => setTheme('light')}
@@ -518,6 +516,7 @@ export function Settings() {
                     {t('appearance.light')}
                   </Button>
                   <Button
+                    data-testid="settings-theme-dark"
                     variant={theme === 'dark' ? 'secondary' : 'outline'}
                     className={cn("rounded-full px-5 h-10 border-black/10 dark:border-white/10", theme === 'dark' ? "bg-black/5 dark:bg-white/10 text-foreground" : "bg-transparent text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5")}
                     onClick={() => setTheme('dark')}
@@ -526,6 +525,7 @@ export function Settings() {
                     {t('appearance.dark')}
                   </Button>
                   <Button
+                    data-testid="settings-theme-system"
                     variant={theme === 'system' ? 'secondary' : 'outline'}
                     className={cn("rounded-full px-5 h-10 border-black/10 dark:border-white/10", theme === 'system' ? "bg-black/5 dark:bg-white/10 text-foreground" : "bg-transparent text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5")}
                     onClick={() => setTheme('system')}
@@ -1144,33 +1144,42 @@ export function Settings() {
 
           {/* About */}
           <div>
-            <h2 className="text-3xl font-serif text-foreground mb-6 font-normal tracking-tight" style={{ fontFamily: 'Georgia, Cambria, "Times New Roman", Times, serif' }}>
-              {t('about.title')}
-            </h2>
-            <div className="space-y-3 text-[14px] text-muted-foreground">
-              <p>
-                <strong className="text-foreground font-semibold">
-                  {t('about.appName', { appName: branding.productName })}
-                </strong>{' '}
-                - {t('about.tagline', { slogan: branding.slogan })}
-              </p>
-              <p>{t('about.basedOn')}</p>
-              <p>{t('about.version', { version: currentVersion })}</p>
-              <div className="flex gap-4 pt-3">
-                <Button
-                  variant="link"
-                  className="h-auto p-0 text-[14px] text-blue-500 hover:text-blue-600 font-medium"
-                  onClick={() => window.electron.openExternal('https://aiworker.szdeepdata.cn/')}
+            <div className="min-w-0">
+              <div className="mb-6 flex flex-wrap items-center gap-3">
+                <h2
+                  data-testid="settings-about-heading"
+                  className="text-3xl font-serif text-foreground font-normal tracking-tight"
+                  style={{ fontFamily: 'Georgia, Cambria, "Times New Roman", Times, serif' }}
                 >
-                  {t('about.docs')}
-                </Button>
-                <Button
-                  variant="link"
-                  className="h-auto p-0 text-[14px] text-blue-500 hover:text-blue-600 font-medium"
-                  onClick={() => window.electron.openExternal('https://docs.qq.com/aio/p/scchzbdpjgz9ho4?p=RCREYa5p35U7ZfykDhxH6z')}
-                >
-                  {t('about.faq')}
-                </Button>
+                  {t('about.title')}
+                </h2>
+                <AppLogo testId="settings-about-logo" className="relative top-[3px] h-[22.5px] max-w-[62px] shrink-0" />
+              </div>
+              <div className="space-y-3 text-[14px] text-muted-foreground">
+                <p>
+                  <strong className="text-foreground font-semibold">
+                    {t('about.appName', { appName: branding.productName })}
+                  </strong>{' '}
+                  - {t('about.tagline', { slogan: branding.slogan })}
+                </p>
+                <p>{t('about.basedOn')}</p>
+                <p>{t('about.version', { version: currentVersion })}</p>
+                <div className="flex gap-4 pt-3">
+                  <Button
+                    variant="link"
+                    className="h-auto p-0 text-[14px] text-blue-500 hover:text-blue-600 font-medium"
+                    onClick={() => window.electron.openExternal('https://aiworker.szdeepdata.cn/')}
+                  >
+                    {t('about.docs')}
+                  </Button>
+                  <Button
+                    variant="link"
+                    className="h-auto p-0 text-[14px] text-blue-500 hover:text-blue-600 font-medium"
+                    onClick={() => window.electron.openExternal('https://docs.qq.com/aio/p/scchzbdpjgz9ho4?p=RCREYa5p35U7ZfykDhxH6z')}
+                  >
+                    {t('about.faq')}
+                  </Button>
+                </div>
               </div>
             </div>
           </div>

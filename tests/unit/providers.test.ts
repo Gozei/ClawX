@@ -96,10 +96,10 @@ describe('provider metadata', () => {
     expect(getProviderDocsUrl(siliconflow, 'en')).toBe('https://docs.siliconflow.cn/cn/userguide/introduction');
     expect(getProviderDocsUrl(ark, 'en')).toBe('https://www.volcengine.com/');
     expect(getProviderDocsUrl(custom, 'en')).toBe(
-      'https://icnnp7d0dymg.feishu.cn/wiki/BmiLwGBcEiloZDkdYnGc8RWnn6d#Ee1ldfvKJoVGvfxc32mcILwenth'
+      'https://docs.qq.com/aio/p/scchzbdpjgz9ho4?p=5mPH8jZ09MQrPfAQhQhzUD'
     );
     expect(getProviderDocsUrl(custom, 'zh-CN')).toBe(
-      'https://icnnp7d0dymg.feishu.cn/wiki/BmiLwGBcEiloZDkdYnGc8RWnn6d#IWQCdfe5fobGU3xf3UGcgbLynGh'
+      'https://docs.qq.com/aio/p/scchzbdpjgz9ho4?p=5mPH8jZ09MQrPfAQhQhzUD'
     );
   });
 
@@ -264,5 +264,58 @@ describe('provider metadata', () => {
       displayName: '阿里百炼 / Qwen',
       resolvedModel: 'qwen3.5-plus',
     });
+  });
+
+  it('surfaces configured custom models ahead of recommended models', () => {
+    const accounts: ProviderAccount[] = [
+      {
+        id: 'openrouter-test',
+        vendorId: 'openrouter',
+        label: 'OpenRouter',
+        authMode: 'api_key',
+        model: 'openai/gpt-5.4',
+        metadata: {
+          customModels: ['anthropic/claude-sonnet-4', 'google/gemini-3-pro-preview'],
+        },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-04T00:00:00.000Z',
+        updatedAt: '2026-04-04T00:00:00.000Z',
+      },
+    ];
+    const statuses = [
+      {
+        id: 'openrouter-test',
+        name: 'OpenRouter',
+        type: 'openrouter',
+        enabled: true,
+        createdAt: '2026-04-04T00:00:00.000Z',
+        updatedAt: '2026-04-04T00:00:00.000Z',
+        hasKey: true,
+        keyMasked: '****',
+        model: 'openai/gpt-5.4',
+      },
+    ];
+    const vendors: ProviderVendorInfo[] = [
+      {
+        ...(PROVIDER_TYPE_INFO.find((provider) => provider.id === 'openrouter') as ProviderVendorInfo),
+        category: 'official',
+        supportedAuthModes: ['api_key'],
+        defaultAuthMode: 'api_key',
+        supportsMultipleAccounts: true,
+      },
+    ];
+
+    const items = buildProviderListItems(accounts, statuses, vendors, 'openrouter-test');
+
+    expect(items).toHaveLength(1);
+    expect(items[0].resolvedModel).toBe('openai/gpt-5.4');
+    expect(items[0].models.slice(0, 3).map((model) => model.id)).toEqual([
+      'openai/gpt-5.4',
+      'anthropic/claude-sonnet-4',
+      'google/gemini-3-pro-preview',
+    ]);
+    expect(items[0].models[1]?.source).toBe('configured');
+    expect(items[0].models[2]?.source).toBe('configured');
   });
 });

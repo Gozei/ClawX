@@ -22,6 +22,8 @@ import {
   type UsageHistoryEntry,
   type UsageWindow,
 } from './usage-history';
+import { cn } from '@/lib/utils';
+import { modalCardClasses, modalOverlayClasses } from '@/components/ui/modal';
 const DEFAULT_USAGE_FETCH_MAX_ATTEMPTS = 2;
 const WINDOWS_USAGE_FETCH_MAX_ATTEMPTS = 3;
 const USAGE_FETCH_RETRY_DELAY_MS = 1500;
@@ -645,8 +647,8 @@ function UsageContentPopup({
   unknownModelLabel: string;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4" role="dialog" aria-modal="true">
-      <div className="w-full max-w-3xl rounded-2xl border border-black/10 dark:border-white/10 bg-background shadow-xl">
+    <div className={modalOverlayClasses} role="dialog" aria-modal="true">
+      <div className={cn(modalCardClasses, 'max-w-3xl rounded-2xl border border-black/10 dark:border-white/10 bg-background shadow-xl')}>
         <div className="flex items-start justify-between gap-3 border-b border-black/10 dark:border-white/10 px-5 py-4">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-foreground">{title}</p>
@@ -664,7 +666,7 @@ function UsageContentPopup({
             <X className="h-4 w-4" />
           </Button>
         </div>
-        <div className="max-h-[65vh] overflow-y-auto px-5 py-4">
+        <div className="flex-1 overflow-y-auto px-5 py-4">
           <pre className="whitespace-pre-wrap break-words text-sm text-foreground font-mono">
             {entry.content}
           </pre>

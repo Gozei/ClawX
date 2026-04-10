@@ -72,6 +72,9 @@
       "cancel": "取消",
       "change": "更换提供商",
       "add": "添加提供商",
+      "addModelIds": "添加",
+      "modelIdHelp": "支持一次输入多个模型 ID，使用中文或英文逗号分隔。第一个模型会保存为默认模型。",
+      "removeModelId": "移除模型 ID",
       "save": "保存",
       "customDoc": "查看文档",
       "validate": "验证"
@@ -98,7 +101,8 @@
       "fallbacks_other": "回退（{{count}} 个）：{{names}}",
       "setDefault": "设为默认",
       "editKey": "编辑 API 密钥",
-      "delete": "删除提供商"
+      "delete": "删除提供商",
+      "failedModelsHint": "请先删除测试失败的模型 ID，才能继续添加或保存。"
     },
     "protocols": {
       "openai": "OpenAI 兼容",
@@ -122,7 +126,22 @@
       "testFailed": "连接测试失败",
       "testModel": "模型",
       "testLatency": "耗时",
-      "testOutput": "输出"
+      "testOutput": "输出",
+      "baseUrlRequired": "基础 URL 不能为空",
+      "apiKeyRequired": "API Key 不能为空",
+      "batchTestSummary": "{{passed}} / {{total}} 个模型测试通过",
+      "reusePassedModelTests": "已沿用已通过的模型测试结果",
+      "removeFailedModelsBeforeAdd": "请先删除测试失败的模型 ID，再继续添加。",
+      "modelIdsAlreadyAdded": "输入的模型 ID 已存在。",
+      "addModelIdsBeforeTest": "请先添加输入框中的模型 ID，再进行测试",
+      "testFailedModels": "以下模型测试失败：{{models}}",
+      "testAllModelsPassed": "{{count}} 个模型测试通过",
+      "removeFailedModelsBeforeSave": "请先删除测试失败的模型 ID，再保存。",
+      "testPassedRequiredBeforeSave": "保存前至少需要一个测试通过的模型 ID",
+      "retestRequiredBeforeSave": "当前有修改项，请先重新测试后再保存",
+      "testAllModelsBeforeSave": "保存前请先测试全部模型 ID，并确保全部通过。",
+      "saveValidatedModels": "正在保存 {{count}} 个已测试通过的模型 ID",
+      "testInProgressBeforeSave": "请等待测试完成后再保存"
     },
     "oauth": {
       "loginMode": "OAuth 登录",
@@ -169,7 +188,7 @@
     "hideAdvancedProxy": "隐藏高级代理字段",
     "proxyBypass": "绕过规则",
     "proxyBypassHelp": "使用分号、逗号或换行分隔需要直连的主机。",
-    "proxyRestartNote": "保存后会立即重新应用 Electron 网络代理，并自动重启 Gateway。若代理已关闭，Gateway 常规重启会保留 Telegram 频道已有代理；如需清空，请在关闭代理后手动保存一次。",
+    "proxyRestartNote": "保存后会立即重新应用 Electron 网络代理，并自动重启 Gateway。若代理已关闭，Gateway 常规重启会保留 Telegram 通道已有代理；如需清空，请在关闭代理后手动保存一次。",
     "proxySaved": "代理设置已保存",
     "proxySaveFailed": "保存代理设置失败"
   },

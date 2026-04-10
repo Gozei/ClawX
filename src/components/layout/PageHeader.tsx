@@ -4,6 +4,7 @@ type PageHeaderProps = {
   eyebrow?: string;
   title: string;
   subtitle?: string;
+  subtitleTestId?: string;
   metadata?: string[];
   actions?: ReactNode;
   className?: string;
@@ -14,6 +15,7 @@ export function PageHeader({
   eyebrow,
   title,
   subtitle,
+  subtitleTestId,
   metadata = [],
   actions,
   className = '',
@@ -37,7 +39,10 @@ export function PageHeader({
             {title}
           </h1>
           {subtitle && (
-            <p className="mt-2 max-w-3xl text-[14px] font-medium leading-[1.65] text-[#5e6c80] dark:text-white/66">
+            <p
+              data-testid={subtitleTestId}
+              className="mt-2 max-w-3xl text-[14px] font-medium leading-[1.65] text-[#5e6c80] dark:text-white/66"
+            >
               {subtitle}
             </p>
           )}

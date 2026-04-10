@@ -39,6 +39,18 @@ function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boo
   return typeof session?.label === 'string' && session.label.trim().length > 0;
 }
 
+function isUnusedDraftSession(
+  state: Pick<ReturnType<ChatGet>, 'currentSessionKey' | 'messages' | 'sessions' | 'sessionLabels' | 'sessionLastActivity'>,
+  sessionKey: string,
+): boolean {
+  return !sessionKey.endsWith(':main')
+    && state.currentSessionKey === sessionKey
+    && state.messages.length === 0
+    && !state.sessionLastActivity[sessionKey]
+    && !state.sessionLabels[sessionKey]
+    && !hasStoredSessionLabel(state.sessions, sessionKey);
+}
+
 export function createSessionActions(
   set: ChatSet,
   get: ChatGet,
@@ -117,15 +129,17 @@ export function createSessionActions(
               nextSessionKey = canonicalMatch;
             }
           }
+          const currentState = get();
+          const currentIsUnusedDraft = isUnusedDraftSession(currentState, nextSessionKey);
           if (!dedupedSessions.find((s) => s.key === nextSessionKey) && dedupedSessions.length > 0) {
             // Current session not found in the backend list
-            const isNewEmptySession = get().messages.length === 0;
+            const isNewEmptySession = currentIsUnusedDraft;
             if (!isNewEmptySession) {
               nextSessionKey = dedupedSessions[0].key;
             }
           }
 
-          const sessionsWithCurrent = !dedupedSessions.find((s) => s.key === nextSessionKey) && nextSessionKey
+          const sessionsWithCurrent = !dedupedSessions.find((s) => s.key === nextSessionKey) && nextSessionKey && !isUnusedDraftSession(get(), nextSessionKey)
             ? [
               ...dedupedSessions,
               { key: nextSessionKey, displayName: nextSessionKey },
@@ -200,10 +214,7 @@ export function createSessionActions(
       // Relying solely on messages.length is unreliable because switchSession clears
       // the current messages before loadHistory runs, creating a race condition that
       // could cause sessions with real history to be incorrectly removed from the sidebar.
-      const leavingEmpty = !currentSessionKey.endsWith(':main')
-        && messages.length === 0
-        && !sessionLastActivity[currentSessionKey]
-        && !sessionLabels[currentSessionKey];
+      const leavingEmpty = isUnusedDraftSession({ currentSessionKey, messages, sessions: get().sessions, sessionLastActivity, sessionLabels }, currentSessionKey);
       set((s) => ({
         currentSessionKey: key,
         currentAgentId: getAgentIdFromSessionKey(key),
@@ -295,22 +306,14 @@ export function createSessionActions(
       // NOTE: We intentionally do NOT call sessions.reset on the old session.
       // sessions.reset archives (renames) the session JSONL file, making old
       // conversation history inaccessible when the user switches back to it.
-      const { currentSessionKey, messages, sessionLastActivity, sessionLabels } = get();
-      // Only treat sessions with no history records and no activity timestamp as empty
-      const leavingEmpty = !currentSessionKey.endsWith(':main')
-        && messages.length === 0
-        && !sessionLastActivity[currentSessionKey]
-        && !sessionLabels[currentSessionKey];
+      const { currentSessionKey, messages, sessionLastActivity, sessionLabels, sessions } = get();
+      const leavingEmpty = isUnusedDraftSession({ currentSessionKey, messages, sessions, sessionLastActivity, sessionLabels }, currentSessionKey);
       const prefix = getCanonicalPrefixFromSessions(get().sessions) ?? DEFAULT_CANONICAL_PREFIX;
       const newKey = `${prefix}:session-${Date.now()}`;
-      const newSessionEntry: ChatSession = { key: newKey, displayName: newKey };
       set((s) => ({
         currentSessionKey: newKey,
         currentAgentId: getAgentIdFromSessionKey(newKey),
-        sessions: [
-          ...(leavingEmpty ? s.sessions.filter((sess) => sess.key !== currentSessionKey) : s.sessions),
-          newSessionEntry,
-        ],
+        sessions: leavingEmpty ? s.sessions.filter((sess) => sess.key !== currentSessionKey) : s.sessions,
         sessionLabels: leavingEmpty
           ? Object.fromEntries(Object.entries(s.sessionLabels).filter(([k]) => k !== currentSessionKey))
           : s.sessionLabels,
@@ -390,17 +393,14 @@ export function createSessionActions(
     },
 
     cleanupEmptySession: () => {
-      const { currentSessionKey, messages, sessionLastActivity, sessionLabels } = get();
+      const { currentSessionKey, messages, sessionLastActivity, sessionLabels, sessions } = get();
       // Only remove non-main sessions that were never used (no messages sent).
       // This mirrors the "leavingEmpty" logic in switchSession so that creating
       // a new session and immediately navigating away doesn't leave a ghost entry
       // in the sidebar.
       // Also check sessionLastActivity and sessionLabels comprehensively to prevent
       // falsely treating sessions with history as empty due to switchSession clearing messages early.
-      const isEmptyNonMain = !currentSessionKey.endsWith(':main')
-        && messages.length === 0
-        && !sessionLastActivity[currentSessionKey]
-        && !sessionLabels[currentSessionKey];
+      const isEmptyNonMain = isUnusedDraftSession({ currentSessionKey, messages, sessions, sessionLastActivity, sessionLabels }, currentSessionKey);
       if (!isEmptyNonMain) return;
       set((s) => ({
         sessions: s.sessions.filter((sess) => sess.key !== currentSessionKey),

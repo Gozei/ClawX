@@ -72,6 +72,9 @@
       "cancel": "Cancel",
       "change": "Change provider",
       "add": "Add Provider",
+      "addModelIds": "Add",
+      "modelIdHelp": "You can enter multiple model IDs at once with English or Chinese commas. The first model will be saved as the default.",
+      "removeModelId": "Remove model ID",
       "save": "Save",
       "customDoc": "Documentation",
       "validate": "Validate"
@@ -98,7 +101,8 @@
       "fallbacks_other": "Fallbacks ({{count}}): {{names}}",
       "setDefault": "Set as default",
       "editKey": "Edit API key",
-      "delete": "Delete provider"
+      "delete": "Delete provider",
+      "failedModelsHint": "Remove failed model IDs before adding more or saving."
     },
     "protocols": {
       "openai": "OpenAI Compatible",
@@ -122,7 +126,22 @@
       "testFailed": "Connection test failed",
       "testModel": "Model",
       "testLatency": "Latency",
-      "testOutput": "Output"
+      "testOutput": "Output",
+      "baseUrlRequired": "Base URL is required",
+      "apiKeyRequired": "API Key is required",
+      "batchTestSummary": "{{passed}} / {{total}} models passed",
+      "reusePassedModelTests": "Reused the model IDs that already passed testing",
+      "removeFailedModelsBeforeAdd": "Remove failed model IDs before adding more.",
+      "modelIdsAlreadyAdded": "Those model IDs are already added.",
+      "addModelIdsBeforeTest": "Add the model IDs in the input before testing.",
+      "testFailedModels": "These models failed testing: {{models}}",
+      "testAllModelsPassed": "All {{count}} model IDs passed testing",
+      "removeFailedModelsBeforeSave": "Remove failed model IDs before saving.",
+      "testPassedRequiredBeforeSave": "At least one model ID must pass testing before saving.",
+      "retestRequiredBeforeSave": "There are new changes. Retest before saving.",
+      "testAllModelsBeforeSave": "Test every model ID and make sure they all pass before saving.",
+      "saveValidatedModels": "Saving {{count}} tested model IDs",
+      "testInProgressBeforeSave": "Wait for testing to finish before saving."
     },
     "oauth": {
       "loginMode": "OAuth Login",
