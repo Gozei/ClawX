@@ -49,7 +49,16 @@ export function createHistoryActions(
           return true;
         }
         const candidateKey = getPreviewMergeKey(candidate);
-        return messagesToScan.some((message) => getPreviewMergeKey(message) === candidateKey);
+        const candidateText = getMessageText(candidate.content).trim();
+        return messagesToScan.some((message) => (
+          getPreviewMergeKey(message) === candidateKey
+          || (
+            candidate.role === 'assistant'
+            && message.role === candidate.role
+            && candidateText.length > 0
+            && getMessageText(message.content).trim() === candidateText
+          )
+        ));
       };
       const preservePendingAssistantMessages = (
         currentMessages: RawMessage[],
@@ -64,6 +73,29 @@ export function createHistoryActions(
           && !!message.timestamp
           && toMs(message.timestamp) >= userMs
         ));
+        const currentStreamingMessage = get().streamingMessage;
+        if (
+          currentStreamingMessage
+          && typeof currentStreamingMessage === 'object'
+          && !isToolResultRole((currentStreamingMessage as RawMessage).role)
+        ) {
+          const streamingAssistant = currentStreamingMessage as RawMessage;
+          const streamingRole = streamingAssistant.role;
+          const streamingTimestamp = typeof streamingAssistant.timestamp === 'number'
+            ? toMs(streamingAssistant.timestamp)
+            : userMs;
+          if (
+            (streamingRole === 'assistant' || streamingRole === undefined)
+            && streamingTimestamp >= userMs
+            && hasNonToolAssistantContent(streamingAssistant)
+          ) {
+            localTurnAssistants.push({
+              ...streamingAssistant,
+              role: 'assistant',
+              timestamp: streamingAssistant.timestamp ?? ((userMs + 1) / 1000),
+            });
+          }
+        }
         if (localTurnAssistants.length === 0) return loadedMessages;
 
         let lastMatchedLocalIndex = -1;

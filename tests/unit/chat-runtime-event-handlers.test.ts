@@ -47,6 +47,7 @@ vi.mock('@/stores/chat/helpers', () => ({
 }));
 
 type ChatLikeState = {
+  currentSessionKey?: string;
   sending: boolean;
   activeRunId: string | null;
   error: string | null;
@@ -62,6 +63,7 @@ type ChatLikeState = {
 
 function makeHarness(initial?: Partial<ChatLikeState>) {
   let state: ChatLikeState = {
+    currentSessionKey: 'agent:main:main',
     sending: false,
     activeRunId: null,
     error: 'stale error',
@@ -72,7 +74,7 @@ function makeHarness(initial?: Partial<ChatLikeState>) {
     pendingFinal: false,
     lastUserMessageAt: null,
     streamingText: '',
-    loadHistory: vi.fn(),
+    loadHistory: vi.fn(async () => undefined),
     ...initial,
   };
 
@@ -220,6 +222,40 @@ describe('chat runtime event handlers', () => {
     expect(next.pendingFinal).toBe(false);
     expect(next.lastUserMessageAt).toBeNull();
     expect(next.pendingToolImages).toEqual([]);
+  });
+
+  it('recovers a stuck pending-final state so the next message can be sent', async () => {
+    const { handleRuntimeEventState } = await import('@/stores/chat/runtime-event-handlers');
+    const h = makeHarness({
+      sending: true,
+      activeRunId: 'run-stuck',
+      streamingMessage: {
+        id: 'stream-1',
+        role: 'assistant',
+        content: '记下来了，后面我会按这个风格来。',
+        timestamp: 1001,
+      },
+      messages: [
+        { id: 'user-1', role: 'user', content: '请按这个风格回答', timestamp: 1000 },
+      ],
+    });
+
+    handleRuntimeEventState(
+      h.set as never,
+      h.get as never,
+      { message: { id: 'tool-1', role: 'toolresult', toolCallId: 'tool-1', content: 'done' } },
+      'final',
+      'run-stuck',
+    );
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    await Promise.resolve();
+
+    const next = h.read();
+    expect(next.loadHistory).toHaveBeenCalledTimes(1);
+    expect(next.sending).toBe(false);
+    expect(next.activeRunId).toBeNull();
+    expect(next.pendingFinal).toBe(false);
   });
 
   it('skips appending a final assistant message when an equivalent recent one already exists', async () => {

@@ -77,6 +77,7 @@ test.describe('Chat history refresh hydration', () => {
       await expect(page.getByText(FINAL_TEXT, { exact: true })).toHaveCount(0);
 
       await writeSession(homeDir, true);
+      await page.getByTestId('chat-refresh-button').click();
 
       await expect(page.getByText(FINAL_TEXT, { exact: true })).toBeVisible({ timeout: 60_000 });
     } finally {

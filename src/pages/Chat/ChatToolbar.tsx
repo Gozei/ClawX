@@ -43,6 +43,7 @@ export function ChatToolbar() {
             className="h-8 w-8"
             onClick={() => refresh()}
             disabled={loading}
+            data-testid="chat-refresh-button"
           >
             <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
           </Button>
