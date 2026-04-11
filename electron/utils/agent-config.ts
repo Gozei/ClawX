@@ -3,7 +3,7 @@ import { constants } from 'fs';
 import { join, normalize } from 'path';
 import { deleteAgentChannelAccounts, listConfiguredChannels, readOpenClawConfig, writeOpenClawConfig } from './channel-config';
 import { withConfigLock } from './config-mutex';
-import { expandPath, getOpenClawConfigDir } from './paths';
+import { expandPath, getDataDir, getOpenClawConfigDir } from './paths';
 import * as logger from './logger';
 import { toUiChannelType } from './channel-alias';
 import { mergeClawXSection } from './openclaw-workspace';
@@ -27,6 +27,7 @@ const AGENT_RUNTIME_FILES = [
   'models.json',
 ];
 const AGENT_STUDIO_CONTEXT_TITLE = '## Deep AI Worker Agent Studio';
+const AGENT_STUDIO_METADATA_FILE = 'agent-studio.json';
 
 interface AgentModelConfig {
   primary?: string;
@@ -104,6 +105,10 @@ interface AgentConfigDocument extends Record<string, unknown> {
   };
 }
 
+interface AgentStudioMetadataDocument extends Record<string, unknown> {
+  agents?: Record<string, AgentStudioConfig>;
+}
+
 export interface AgentSummary {
   id: string;
   name: string;
@@ -158,6 +163,10 @@ interface AgentStudioUpdates {
   workflowSteps?: string[];
   workflowNodes?: AgentWorkflowNode[];
   triggerModes?: string[];
+}
+
+function getAgentStudioMetadataPath(): string {
+  return join(getDataDir(), AGENT_STUDIO_METADATA_FILE);
 }
 
 function resolveModelRef(model: unknown): string | null {
@@ -275,6 +284,113 @@ function normalizeAgentStudio(studio: unknown): AgentStudioConfig {
     ...(workflowSteps.length > 0 ? { workflowSteps } : {}),
     ...(workflowNodes.length > 0 ? { workflowNodes } : {}),
     ...(triggerModes.length > 0 ? { triggerModes } : {}),
+  };
+}
+
+async function readAgentStudioMetadata(): Promise<Record<string, AgentStudioConfig>> {
+  try {
+    const raw = await readFile(getAgentStudioMetadataPath(), 'utf-8');
+    const parsed = JSON.parse(raw) as AgentStudioMetadataDocument;
+    const agents = parsed?.agents;
+    if (!agents || typeof agents !== 'object' || Array.isArray(agents)) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(agents)
+        .filter(([agentId]) => typeof agentId === 'string' && agentId.trim())
+        .map(([agentId, studio]) => [agentId, normalizeAgentStudio(studio)])
+        .filter(([, studio]) => Object.keys(studio).length > 0),
+    );
+  } catch {
+    return {};
+  }
+}
+
+async function writeAgentStudioMetadata(studioByAgentId: Record<string, AgentStudioConfig>): Promise<void> {
+  const normalizedEntries = Object.entries(studioByAgentId)
+    .map(([agentId, studio]) => [agentId, normalizeAgentStudio(studio)] as const)
+    .filter(([agentId, studio]) => agentId.trim() && Object.keys(studio).length > 0);
+
+  const filePath = getAgentStudioMetadataPath();
+  await ensureDir(getDataDir());
+
+  if (normalizedEntries.length === 0) {
+    if (await fileExists(filePath)) {
+      await rm(filePath, { force: true });
+    }
+    return;
+  }
+
+  const document: AgentStudioMetadataDocument = {
+    agents: Object.fromEntries(normalizedEntries),
+  };
+  await writeFile(filePath, JSON.stringify(document, null, 2), 'utf-8');
+}
+
+async function resolveAgentStudioState(config: AgentConfigDocument): Promise<{
+  config: AgentConfigDocument;
+  studioByAgentId: Record<string, AgentStudioConfig>;
+  changed: boolean;
+}> {
+  const storedStudio = await readAgentStudioMetadata();
+  const nextStudioByAgentId: Record<string, AgentStudioConfig> = { ...storedStudio };
+  let changed = false;
+
+  const agentsConfig = (config.agents && typeof config.agents === 'object'
+    ? { ...(config.agents as AgentsConfig) }
+    : undefined);
+
+  if (agentsConfig && Array.isArray(agentsConfig.list)) {
+    const seenAgentIds = new Set<string>();
+    const nextList = agentsConfig.list.map((entry) => {
+      if (!entry || typeof entry !== 'object' || typeof entry.id !== 'string' || !entry.id.trim()) {
+        return entry;
+      }
+
+      const agentId = entry.id.trim();
+      seenAgentIds.add(agentId);
+      const legacyStudio = normalizeAgentStudio((entry as AgentListEntry).studio);
+      const sidecarStudio = normalizeAgentStudio(nextStudioByAgentId[agentId]);
+      const effectiveStudio = Object.keys(sidecarStudio).length > 0 ? sidecarStudio : legacyStudio;
+
+      if (Object.keys(effectiveStudio).length > 0) {
+        const normalized = normalizeAgentStudio(effectiveStudio);
+        if (JSON.stringify(sidecarStudio) !== JSON.stringify(normalized)) {
+          nextStudioByAgentId[agentId] = normalized;
+          changed = true;
+        }
+      } else if (agentId in nextStudioByAgentId) {
+        delete nextStudioByAgentId[agentId];
+        changed = true;
+      }
+
+      if ('studio' in entry) {
+        const { studio: _studio, ...rest } = entry as AgentListEntry;
+        changed = true;
+        return rest;
+      }
+
+      return entry;
+    });
+
+    for (const agentId of Object.keys(nextStudioByAgentId)) {
+      if (!seenAgentIds.has(agentId)) {
+        delete nextStudioByAgentId[agentId];
+        changed = true;
+      }
+    }
+
+    config.agents = {
+      ...agentsConfig,
+      list: nextList as AgentListEntry[],
+    };
+  }
+
+  return {
+    config,
+    studioByAgentId: nextStudioByAgentId,
+    changed,
   };
 }
 
@@ -746,6 +862,8 @@ function listConfiguredAccountIdsForChannel(config: AgentConfigDocument, channel
 }
 
 async function buildSnapshotFromConfig(config: AgentConfigDocument): Promise<AgentsSnapshot> {
+  const resolvedState = await resolveAgentStudioState(config);
+  const studioByAgentId = resolvedState.studioByAgentId;
   const { entries, defaultAgentId } = normalizeAgentsConfig(config);
   const configuredChannels = await listConfiguredChannels();
   const { channelToAgent, accountToAgent } = getChannelBindingMap(config.bindings);
@@ -802,6 +920,7 @@ async function buildSnapshotFromConfig(config: AgentConfigDocument): Promise<Age
     const inheritedModel = !explicitModelRef && Boolean(defaultModelLabel);
     const entryIdNorm = normalizeAgentIdForBinding(entry.id);
     const ownedChannels = agentChannelSets.get(entryIdNorm) ?? new Set<string>();
+    const studio = normalizeAgentStudio(studioByAgentId[entry.id]);
     return {
       id: entry.id,
       name: entry.name || (entry.id === MAIN_AGENT_ID ? MAIN_AGENT_NAME : entry.id),
@@ -816,15 +935,15 @@ async function buildSnapshotFromConfig(config: AgentConfigDocument): Promise<Age
       channelTypes: configuredChannels
         .filter((ct) => ownedChannels.has(ct))
         .map((channelType) => toUiChannelType(channelType)),
-      skillIds: normalizeStringList(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).skillIds : []),
-      workflowSteps: normalizeStringList(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).workflowSteps : []),
-      workflowNodes: normalizeWorkflowNodes(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).workflowNodes : []),
-      triggerModes: normalizeStringList(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).triggerModes : []),
-      profileType: normalizeProfileType(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).profileType : undefined),
-      description: normalizeOptionalText(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).description : undefined) || null,
-      objective: normalizeOptionalText(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).objective : undefined) || null,
-      boundaries: normalizeOptionalText(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).boundaries : undefined) || null,
-      outputContract: normalizeOptionalText(entry.studio && typeof entry.studio === 'object' ? (entry.studio as AgentStudioConfig).outputContract : undefined) || null,
+      skillIds: normalizeStringList(studio.skillIds),
+      workflowSteps: normalizeStringList(studio.workflowSteps),
+      workflowNodes: normalizeWorkflowNodes(studio.workflowNodes),
+      triggerModes: normalizeStringList(studio.triggerModes),
+      profileType: normalizeProfileType(studio.profileType),
+      description: normalizeOptionalText(studio.description) || null,
+      objective: normalizeOptionalText(studio.objective) || null,
+      boundaries: normalizeOptionalText(studio.boundaries) || null,
+      outputContract: normalizeOptionalText(studio.outputContract) || null,
     };
   });
 
@@ -839,8 +958,15 @@ async function buildSnapshotFromConfig(config: AgentConfigDocument): Promise<Age
 }
 
 export async function listAgentsSnapshot(): Promise<AgentsSnapshot> {
-  const config = await readOpenClawConfig() as AgentConfigDocument;
-  return buildSnapshotFromConfig(config);
+  return withConfigLock(async () => {
+    const config = await readOpenClawConfig() as AgentConfigDocument;
+    const resolvedState = await resolveAgentStudioState(config);
+    if (resolvedState.changed) {
+      await writeOpenClawConfig(resolvedState.config);
+      await writeAgentStudioMetadata(resolvedState.studioByAgentId);
+    }
+    return buildSnapshotFromConfig(resolvedState.config);
+  });
 }
 
 export async function listConfiguredAgentIds(): Promise<string[]> {
@@ -856,6 +982,8 @@ export async function createAgent(
 ): Promise<{ snapshot: AgentsSnapshot; createdAgentId: string }> {
   return withConfigLock(async () => {
     const config = await readOpenClawConfig() as AgentConfigDocument;
+    const resolvedState = await resolveAgentStudioState(config);
+    const studioByAgentId = resolvedState.studioByAgentId;
     const { agentsConfig, entries, syntheticMain } = normalizeAgentsConfig(config);
     const normalizedName = normalizeAgentName(name);
     const existingIds = new Set(entries.map((entry) => entry.id));
@@ -888,6 +1016,9 @@ export async function createAgent(
 
     await provisionAgentFilesystem(config, newAgent, { inheritWorkspace: options?.inheritWorkspace });
     await writeOpenClawConfig(config);
+    if (resolvedState.changed) {
+      await writeAgentStudioMetadata(studioByAgentId);
+    }
     await syncAgentWorkspaceStudioContextFromConfig(config, nextId);
     logger.info('Created agent config entry', { agentId: nextId, inheritWorkspace: !!options?.inheritWorkspace });
     return {
@@ -900,6 +1031,8 @@ export async function createAgent(
 export async function updateAgentName(agentId: string, name: string): Promise<AgentsSnapshot> {
   return withConfigLock(async () => {
     const config = await readOpenClawConfig() as AgentConfigDocument;
+    const resolvedState = await resolveAgentStudioState(config);
+    const studioByAgentId = resolvedState.studioByAgentId;
     const { agentsConfig, entries } = normalizeAgentsConfig(config);
     const normalizedName = normalizeAgentName(name);
     const index = entries.findIndex((entry) => entry.id === agentId);
@@ -918,6 +1051,9 @@ export async function updateAgentName(agentId: string, name: string): Promise<Ag
     };
 
     await writeOpenClawConfig(config);
+    if (resolvedState.changed) {
+      await writeAgentStudioMetadata(studioByAgentId);
+    }
     await syncAgentWorkspaceStudioContextFromConfig(config, agentId);
     logger.info('Updated agent name', { agentId, name: normalizedName });
     return buildSnapshotFromConfig(config);
@@ -932,6 +1068,8 @@ function isValidModelRef(modelRef: string): boolean {
 export async function updateAgentModel(agentId: string, modelRef: string | null): Promise<AgentsSnapshot> {
   return withConfigLock(async () => {
     const config = await readOpenClawConfig() as AgentConfigDocument;
+    const resolvedState = await resolveAgentStudioState(config);
+    const studioByAgentId = resolvedState.studioByAgentId;
     const { agentsConfig, entries } = normalizeAgentsConfig(config);
     const index = entries.findIndex((entry) => entry.id === agentId);
     if (index === -1) {
@@ -957,6 +1095,9 @@ export async function updateAgentModel(agentId: string, modelRef: string | null)
     };
 
     await writeOpenClawConfig(config);
+    if (resolvedState.changed) {
+      await writeAgentStudioMetadata(studioByAgentId);
+    }
     await syncAgentWorkspaceStudioContextFromConfig(config, agentId);
     logger.info('Updated agent model', { agentId, modelRef: normalizedModelRef || null });
     return buildSnapshotFromConfig(config);
@@ -966,6 +1107,8 @@ export async function updateAgentModel(agentId: string, modelRef: string | null)
 export async function updateAgentStudio(agentId: string, updates: AgentStudioUpdates): Promise<AgentsSnapshot> {
   return withConfigLock(async () => {
     const config = await readOpenClawConfig() as AgentConfigDocument;
+    const resolvedState = await resolveAgentStudioState(config);
+    const studioByAgentId = resolvedState.studioByAgentId;
     const { agentsConfig, entries } = normalizeAgentsConfig(config);
     const index = entries.findIndex((entry) => entry.id === agentId);
     if (index === -1) {
@@ -973,7 +1116,7 @@ export async function updateAgentStudio(agentId: string, updates: AgentStudioUpd
     }
 
     const nextEntry: AgentListEntry = { ...entries[index] };
-    const currentStudio = normalizeAgentStudio(nextEntry.studio);
+    const currentStudio = normalizeAgentStudio(studioByAgentId[agentId]);
     const nextStudio: AgentStudioConfig = {
       ...currentStudio,
       ...(updates.profileType !== undefined ? { profileType: normalizeProfileType(updates.profileType) || undefined } : {}),
@@ -1000,9 +1143,9 @@ export async function updateAgentStudio(agentId: string, updates: AgentStudioUpd
 
     const normalizedStudio = normalizeAgentStudio(nextStudio);
     if (Object.keys(normalizedStudio).length === 0) {
-      delete nextEntry.studio;
+      delete studioByAgentId[agentId];
     } else {
-      nextEntry.studio = normalizedStudio;
+      studioByAgentId[agentId] = normalizedStudio;
     }
 
     entries[index] = nextEntry;
@@ -1012,6 +1155,7 @@ export async function updateAgentStudio(agentId: string, updates: AgentStudioUpd
     };
 
     await writeOpenClawConfig(config);
+    await writeAgentStudioMetadata(studioByAgentId);
     await syncAgentWorkspaceStudioContextFromConfig(config, agentId);
     logger.info('Updated agent studio config', {
       agentId,
@@ -1031,6 +1175,8 @@ export async function deleteAgentConfig(agentId: string): Promise<{ snapshot: Ag
     }
 
     const config = await readOpenClawConfig() as AgentConfigDocument;
+    const resolvedState = await resolveAgentStudioState(config);
+    const studioByAgentId = resolvedState.studioByAgentId;
     const { agentsConfig, entries, defaultAgentId } = normalizeAgentsConfig(config);
     const snapshotBeforeDeletion = await buildSnapshotFromConfig(config);
     const removedEntry = entries.find((entry) => entry.id === agentId);
@@ -1067,6 +1213,10 @@ export async function deleteAgentConfig(agentId: string): Promise<{ snapshot: Ag
     );
 
     await writeOpenClawConfig(config);
+    if (agentId in studioByAgentId || resolvedState.changed) {
+      delete studioByAgentId[agentId];
+      await writeAgentStudioMetadata(studioByAgentId);
+    }
     await deleteAgentChannelAccounts(agentId, ownedLegacyAccounts);
     await removeAgentRuntimeDirectory(agentId);
     // NOTE: workspace directory is NOT deleted here intentionally.
@@ -1083,6 +1233,8 @@ export async function deleteAgentConfig(agentId: string): Promise<{ snapshot: Ag
 export async function assignChannelToAgent(agentId: string, channelType: string): Promise<AgentsSnapshot> {
   return withConfigLock(async () => {
     const config = await readOpenClawConfig() as AgentConfigDocument;
+    const resolvedState = await resolveAgentStudioState(config);
+    const studioByAgentId = resolvedState.studioByAgentId;
     const { entries } = normalizeAgentsConfig(config);
     if (!entries.some((entry) => entry.id === agentId)) {
       throw new Error(`Agent "${agentId}" not found`);
@@ -1091,6 +1243,9 @@ export async function assignChannelToAgent(agentId: string, channelType: string)
     const accountId = resolveAccountIdForAgent(agentId);
     config.bindings = upsertBindingsForChannel(config.bindings, channelType, agentId, accountId);
     await writeOpenClawConfig(config);
+    if (resolvedState.changed) {
+      await writeAgentStudioMetadata(studioByAgentId);
+    }
     logger.info('Assigned channel to agent', { agentId, channelType, accountId });
     return buildSnapshotFromConfig(config);
   });
@@ -1103,6 +1258,8 @@ export async function assignChannelAccountToAgent(
 ): Promise<AgentsSnapshot> {
   return withConfigLock(async () => {
     const config = await readOpenClawConfig() as AgentConfigDocument;
+    const resolvedState = await resolveAgentStudioState(config);
+    const studioByAgentId = resolvedState.studioByAgentId;
     const { entries } = normalizeAgentsConfig(config);
     if (!entries.some((entry) => entry.id === agentId)) {
       throw new Error(`Agent "${agentId}" not found`);
@@ -1113,6 +1270,9 @@ export async function assignChannelAccountToAgent(
 
     config.bindings = upsertBindingsForChannel(config.bindings, channelType, agentId, accountId.trim());
     await writeOpenClawConfig(config);
+    if (resolvedState.changed) {
+      await writeAgentStudioMetadata(studioByAgentId);
+    }
     logger.info('Assigned channel account to agent', { agentId, channelType, accountId: accountId.trim() });
     return buildSnapshotFromConfig(config);
   });
@@ -1121,8 +1281,13 @@ export async function assignChannelAccountToAgent(
 export async function clearChannelBinding(channelType: string, accountId?: string): Promise<AgentsSnapshot> {
   return withConfigLock(async () => {
     const config = await readOpenClawConfig() as AgentConfigDocument;
+    const resolvedState = await resolveAgentStudioState(config);
+    const studioByAgentId = resolvedState.studioByAgentId;
     config.bindings = upsertBindingsForChannel(config.bindings, channelType, null, accountId);
     await writeOpenClawConfig(config);
+    if (resolvedState.changed) {
+      await writeAgentStudioMetadata(studioByAgentId);
+    }
     logger.info('Cleared channel binding', { channelType, accountId });
     return buildSnapshotFromConfig(config);
   });
@@ -1131,6 +1296,8 @@ export async function clearChannelBinding(channelType: string, accountId?: strin
 export async function clearAllBindingsForChannel(channelType: string): Promise<void> {
   return withConfigLock(async () => {
     const config = await readOpenClawConfig() as AgentConfigDocument;
+    const resolvedState = await resolveAgentStudioState(config);
+    const studioByAgentId = resolvedState.studioByAgentId;
     if (!Array.isArray(config.bindings)) return;
 
     const nextBindings = config.bindings.filter((binding) => {
@@ -1140,6 +1307,9 @@ export async function clearAllBindingsForChannel(channelType: string): Promise<v
 
     config.bindings = nextBindings.length > 0 ? nextBindings : undefined;
     await writeOpenClawConfig(config);
+    if (resolvedState.changed) {
+      await writeAgentStudioMetadata(studioByAgentId);
+    }
     logger.info('Cleared all bindings for channel', { channelType });
   });
 }

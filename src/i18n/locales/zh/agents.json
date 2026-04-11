@@ -253,7 +253,7 @@
         "runtimeOpenSession": "进入对话",
         "saveStudio": "保存工作台配置",
         "pendingStudioChanges": "当前角色定义有未保存修改，请先保存再关闭。",
-        "studioSavedHint": "工作台定义会同步到 OpenClaw 配置和对应工作区。",
+        "studioSavedHint": "工作台定义会同步到 Deep AI Worker 元数据和对应工作区。",
         "rightRailTitle": "工作台摘要",
         "overview": {
             "skills": "已装配技能",
