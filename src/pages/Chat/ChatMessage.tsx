@@ -151,35 +151,18 @@ export const ChatMessage = memo(function ChatMessage({
           </div>
         )}
 
-        {/* File attachments — images above text for user, file cards below */}
+        {/* File attachments */}
         {isUser && attachedFiles.length > 0 && (
           <div className="flex flex-wrap gap-2">
-            {attachedFiles.map((file, i) => {
-              const isImage = file.mimeType.startsWith('image/');
-              // Skip image attachments if we already have images from content blocks
-              if (isImage && images.length > 0) return null;
-              if (isImage) {
-                return file.preview ? (
-                  <ImageThumbnail
-                    key={`local-${i}`}
-                    src={file.preview}
-                    fileName={file.fileName}
-                    filePath={file.filePath}
-                    mimeType={file.mimeType}
-                    onPreview={() => setLightboxImg({ src: file.preview!, fileName: file.fileName, filePath: file.filePath, mimeType: file.mimeType })}
-                  />
-                ) : (
-                  <div
-                    key={`local-${i}`}
-                    className="w-36 h-36 rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 flex items-center justify-center text-muted-foreground"
-                  >
-                    <File className="h-8 w-8" />
-                  </div>
-                );
-              }
-              // Non-image files → file card
-              return <FileCard key={`local-${i}`} file={file} />;
-            })}
+            {attachedFiles.map((file, i) => (
+              <FileCard 
+                key={`local-${i}`} 
+                file={file} 
+                onPreview={file.preview && file.mimeType.startsWith('image/') 
+                  ? () => setLightboxImg({ src: file.preview!, fileName: file.fileName, filePath: file.filePath, mimeType: file.mimeType }) 
+                  : undefined} 
+              />
+            ))}
           </div>
         )}
 
@@ -218,30 +201,15 @@ export const ChatMessage = memo(function ChatMessage({
         {/* File attachments — assistant messages (below text) */}
         {!isUser && attachedFiles.length > 0 && (
           <div className="flex flex-wrap gap-2">
-            {attachedFiles.map((file, i) => {
-              const isImage = file.mimeType.startsWith('image/');
-              if (isImage && images.length > 0) return null;
-              if (isImage && file.preview) {
-                return (
-                  <ImagePreviewCard
-                    key={`local-${i}`}
-                    src={file.preview}
-                    fileName={file.fileName}
-                    filePath={file.filePath}
-                    mimeType={file.mimeType}
-                    onPreview={() => setLightboxImg({ src: file.preview!, fileName: file.fileName, filePath: file.filePath, mimeType: file.mimeType })}
-                  />
-                );
-              }
-              if (isImage && !file.preview) {
-                return (
-                  <div key={`local-${i}`} className="w-36 h-36 rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 flex items-center justify-center text-muted-foreground">
-                    <File className="h-8 w-8" />
-                  </div>
-                );
-              }
-              return <FileCard key={`local-${i}`} file={file} />;
-            })}
+            {attachedFiles.map((file, i) => (
+              <FileCard 
+                key={`local-${i}`} 
+                file={file} 
+                onPreview={file.preview && file.mimeType.startsWith('image/') 
+                  ? () => setLightboxImg({ src: file.preview!, fileName: file.fileName, filePath: file.filePath, mimeType: file.mimeType }) 
+                  : undefined} 
+              />
+            ))}
           </div>
         )}
 
@@ -479,47 +447,55 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-function FileExtIcon({ ext, className }: { ext: string; className?: string }) {
+function FileExtIcon({ ext, color, className }: { ext: string; color: string; className?: string }) {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/>
-      <path d="M14 2v4a2 2 0 0 0 2 2h4"/>
-      <text x="12" y="18" fontSize="6.5" fontFamily="sans-serif" fontWeight="bold" textAnchor="middle" stroke="none" fill="currentColor">{ext.toUpperCase()}</text>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" fill={`${color}20`} />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+      <text x="12" y="18" fontSize="6.5" fontFamily="sans-serif" fontWeight="bold" textAnchor="middle" stroke="none" fill={color}>{ext.toUpperCase()}</text>
     </svg>
   );
 }
 
-function FileIcon({ mimeType, className }: { mimeType: string; className?: string }) {
-  if (mimeType.startsWith('image/') || mimeType.startsWith('video/')) return <FileImage className={className} />;
-  if (mimeType.startsWith('audio/')) return <Music className={className} />;
-  if (mimeType.includes('pdf')) return <FileExtIcon ext="PDF" className={className} />;
-  if (mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType.includes('csv')) return <FileExtIcon ext="XLS" className={className} />;
-  if (mimeType.includes('wordprocessing') || mimeType.includes('msword') || mimeType.includes('document')) return <FileExtIcon ext="DOC" className={className} />;
-  if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return <FileExtIcon ext="PPT" className={className} />;
-  if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === 'application/xml') return <FileCode className={className} />;
-  if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('archive') || mimeType.includes('tar') || mimeType.includes('rar') || mimeType.includes('7z')) return <FileArchive className={className} />;
-  return <File className={className} />;
+function FileIcon({ mimeType, fileName, className }: { mimeType: string; fileName?: string; className?: string }) {
+  const t = mimeType.toLowerCase();
+  const n = (fileName || '').toLowerCase();
+  
+  if (t.startsWith('image/') || t.startsWith('video/') || n.match(/\.(jpg|jpeg|png|gif|webp|mp4|mov|avi|webm)$/i)) return <FileImage color="#8b5cf6" className={className} />;
+  if (t.startsWith('audio/') || n.match(/\.(mp3|wav|ogg|m4a)$/i)) return <Music color="#eab308" className={className} />;
+  if (t.includes('pdf') || n.endsWith('.pdf')) return <FileExtIcon ext="PDF" color="#ef4444" className={className} />;
+  if (t.includes('spreadsheet') || t.includes('excel') || t.includes('csv') || n.match(/\.(xls|xlsx|csv)$/i)) return <FileExtIcon ext="XLS" color="#22c55e" className={className} />;
+  if (t.includes('wordprocessing') || t.includes('msword') || t.includes('document') || n.match(/\.(doc|docx)$/i)) return <FileExtIcon ext="DOC" color="#3b82f6" className={className} />;
+  if (t.includes('presentation') || t.includes('powerpoint') || n.match(/\.(ppt|pptx)$/i)) return <FileExtIcon ext="PPT" color="#f97316" className={className} />;
+  if (t.startsWith('text/') || t === 'application/json' || t === 'application/xml' || n.match(/\.(txt|json|xml|md|csv|log)$/i)) return <FileCode color="#64748b" className={className} />;
+  if (t.includes('zip') || t.includes('compressed') || t.includes('archive') || t.includes('tar') || t.includes('rar') || t.includes('7z') || n.match(/\.(zip|rar|7z|tar|gz)$/i)) return <FileArchive color="#ec4899" className={className} />;
+  
+  return <File color="#94a3b8" className={className} />;
 }
 
-function FileCard({ file }: { file: AttachedFileMeta }) {
+function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () => void }) {
   const handleOpen = useCallback(() => {
+    if (onPreview) {
+      onPreview();
+      return;
+    }
     if (file.filePath) {
       invokeIpc('shell:openPath', file.filePath);
     }
-  }, [file.filePath]);
+  }, [file.filePath, onPreview]);
 
   return (
     <div 
       className={cn(
         "flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 h-14 bg-black/5 dark:bg-white/5 max-w-[220px]",
-        file.filePath && "cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+        (file.filePath || onPreview) && "cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
       )}
       onClick={handleOpen}
       title={file.filePath ? "Open file" : undefined}
     >
-      <FileIcon mimeType={file.mimeType} className="h-5 w-5 shrink-0 text-muted-foreground" />
-      <div className="min-w-0 overflow-hidden">
-        <p className="text-xs font-medium truncate">{file.fileName}</p>
+      <FileIcon mimeType={file.mimeType} fileName={file.fileName} className="h-8 w-8 shrink-0 drop-shadow-sm" />
+      <div className="min-w-0 overflow-hidden leading-tight flex flex-col justify-center">
+        <p className="text-[13px] font-medium truncate">{file.fileName}</p>
         <p className="text-[10px] text-muted-foreground">
           {file.fileSize > 0 ? formatFileSize(file.fileSize) : 'File'}
         </p>
