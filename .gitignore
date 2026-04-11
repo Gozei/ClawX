@@ -55,6 +55,7 @@ test-results/
 *.rpm
 
 resources/bin
+resources/custom-skills/
 
 # Secrets
 *.p12
