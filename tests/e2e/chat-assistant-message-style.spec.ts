@@ -14,6 +14,7 @@ test.describe('Chat assistant message style', () => {
       await expect(page.getByTestId('settings-assistant-message-style-stream')).toBeVisible();
       await page.getByTestId('settings-assistant-message-style-stream').click();
       await expect(page.getByTestId('settings-assistant-message-style-stream')).toHaveClass(/bg-primary/);
+      await expect(page.getByTestId('settings-assistant-message-style-bubble')).not.toHaveClass(/bg-primary/);
 
       await page.getByTestId('sidebar-nav-dashboard').click();
       await expect(page.getByTestId('dashboard-page')).toBeVisible();

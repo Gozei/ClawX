@@ -328,7 +328,7 @@
     "title": "关于",
     "appName": "{{appName}}",
     "tagline": "{{slogan}}",
-    "basedOn": "基于 OpenClaw",
+    "basedOn": "基于 ClawX 二次开发，ClawX 基于 OpenClaw 构建",
     "version": "版本 {{version}}",
     "docs": "官网",
     "github": "GitHub",

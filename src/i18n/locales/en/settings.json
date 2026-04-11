@@ -328,7 +328,7 @@
     "title": "About",
     "appName": "{{appName}}",
     "tagline": "{{slogan}}",
-    "basedOn": "Based on OpenClaw",
+    "basedOn": "Developed based on ClawX, which is built on OpenClaw",
     "version": "Version {{version}}",
     "docs": "Website",
     "github": "GitHub",

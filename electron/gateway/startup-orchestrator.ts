@@ -25,7 +25,15 @@ type StartupHooks = {
   runDoctorRepair: () => Promise<boolean>;
   onDoctorRepairSuccess: () => void;
   delay: (ms: number) => Promise<void>;
+  /** Gateway 进程是否仍在运行（用于握手超时后判断是否可以直接重试 connect） */
+  isProcessAlive?: () => boolean;
+  /** 终止已拥有的 Gateway 进程（重试启动新进程前避免端口冲突） */
+  killOwnedProcess?: () => void;
 };
+
+function isHandshakeTimeoutError(error: unknown): boolean {
+  return error instanceof Error && /Connect handshake timeout/i.test(error.message);
+}
 
 export async function runGatewayStartupSequence(hooks: StartupHooks): Promise<void> {
   let configRepairAttempted = false;
@@ -72,6 +80,30 @@ export async function runGatewayStartupSequence(hooks: StartupHooks): Promise<vo
         throw error;
       }
 
+      // 握手超时但 Gateway 进程仍活着：跳过进程重启，直接重试 connect。
+      // 这避免了因端口占用导致的死锁（旧进程仍占端口，新进程无法启动）。
+      if (
+        isHandshakeTimeoutError(error)
+        && hooks.isProcessAlive?.()
+        && startAttempts < maxStartAttempts
+      ) {
+        startAttempts++;
+        logger.warn(
+          `Handshake timeout but Gateway process alive, retrying connect only... (${startAttempts}/${maxStartAttempts})`,
+        );
+        try {
+          hooks.assertLifecycle('start/retry-connect');
+          await hooks.connect(hooks.port);
+          hooks.assertLifecycle('start/connect');
+          hooks.onConnectedToManagedGateway();
+          return;
+        } catch (retryError) {
+          if (retryError instanceof LifecycleSupersededError) throw retryError;
+          logger.warn(`Connect-only retry also failed: ${String(retryError)}`);
+          // 继续走标准恢复路径
+        }
+      }
+
       const recoveryAction = getGatewayStartupRecoveryAction({
         startupError: error,
         startupStderrLines: hooks.getStartupStderrLines(),
@@ -96,6 +128,8 @@ export async function runGatewayStartupSequence(hooks: StartupHooks): Promise<vo
 
       if (recoveryAction === 'retry') {
         logger.warn(`Transient start error: ${String(error)}. Retrying... (${startAttempts}/${maxStartAttempts})`);
+        // 重试前终止旧 Gateway 进程，避免端口冲突死锁
+        hooks.killOwnedProcess?.();
         await hooks.delay(1000);
         continue;
       }

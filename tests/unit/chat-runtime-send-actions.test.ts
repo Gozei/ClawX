@@ -2,9 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeIpcMock = vi.fn();
 const buildAgentExecutionMetadataMock = vi.fn(() => null);
+const appendAssistantMessage = vi.fn((messages, message) => [...messages, message]);
 const clearErrorRecoveryTimer = vi.fn();
 const clearHistoryPoll = vi.fn();
+const createLocalAssistantMessage = vi.fn((content: string, options?: { isError?: boolean; idPrefix?: string }) => ({
+  id: `${options?.idPrefix || 'local-message'}-1`,
+  role: 'assistant',
+  content,
+  timestamp: 1,
+  isError: options?.isError === true,
+}));
 const getLastChatEventAt = vi.fn(() => 0);
+const getNoResponseError = vi.fn(() => 'Localized no response');
+const getSendFailedError = vi.fn((error?: string) => error ? `Localized send failed: ${error}` : 'Localized send failed');
 const hasNonToolAssistantContent = vi.fn((message: { content?: unknown } | undefined) => (
   !!message && typeof message.content === 'string' && message.content.trim().length > 0
 ));
@@ -30,9 +40,13 @@ vi.mock('@/stores/agents', () => ({
 }));
 
 vi.mock('@/stores/chat/helpers', () => ({
+  appendAssistantMessage: (...args: unknown[]) => appendAssistantMessage(...args),
   clearErrorRecoveryTimer: (...args: unknown[]) => clearErrorRecoveryTimer(...args),
   clearHistoryPoll: (...args: unknown[]) => clearHistoryPoll(...args),
+  createLocalAssistantMessage: (...args: unknown[]) => createLocalAssistantMessage(...args),
   getLastChatEventAt: (...args: unknown[]) => getLastChatEventAt(...args),
+  getNoResponseError: (...args: unknown[]) => getNoResponseError(...args),
+  getSendFailedError: (...args: unknown[]) => getSendFailedError(...args),
   hasNonToolAssistantContent: (...args: unknown[]) => hasNonToolAssistantContent(...args),
   isToolResultRole: (...args: unknown[]) => isToolResultRole(...args),
   setHistoryPollTimer: (...args: unknown[]) => setHistoryPollTimer(...args),
@@ -138,5 +152,26 @@ describe('chat runtime send actions', () => {
     expect(h.read().pendingFinal).toBe(false);
     expect(h.read().streamingMessage).toBeNull();
     expect(h.read().messages.some((message) => message.id === 'stream-1')).toBe(true);
+  });
+
+  it('converts a safety-timeout send failure into an assistant error reply', async () => {
+    const { createRuntimeSendActions } = await import('@/stores/chat/runtime-send-actions');
+    const h = makeHarness();
+    const actions = createRuntimeSendActions(h.set as never, h.get as never);
+
+    void actions.sendMessage('hello');
+
+    await vi.advanceTimersByTimeAsync(90_000);
+    await Promise.resolve();
+
+    const next = h.read();
+    expect(next.error).toBeNull();
+    expect(next.sending).toBe(false);
+    expect(next.activeRunId).toBeNull();
+    expect(next.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: 'Localized no response',
+      isError: true,
+    });
   });
 });

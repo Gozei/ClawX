@@ -4,7 +4,7 @@
  * with markdown, thinking sections, images, and tool cards.
  */
 import { useState, useCallback, useEffect, memo } from 'react';
-import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, FileText, Film, Music, FileArchive, File, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, FileText, Film, Music, FileArchive, File, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle, FileCode, FileSpreadsheet, FileImage } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { createPortal } from 'react-dom';
@@ -51,6 +51,7 @@ export const ChatMessage = memo(function ChatMessage({
   streamingTools = [],
 }: ChatMessageProps) {
   const isUser = message.role === 'user';
+  const isErrorMessage = !isUser && message.isError === true;
   const role = typeof message.role === 'string' ? message.role.toLowerCase() : '';
   const isToolResult = role === 'toolresult' || role === 'tool_result';
   const text = extractText(message);
@@ -93,10 +94,12 @@ export const ChatMessage = memo(function ChatMessage({
             'flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-1',
             hideAvatar
               ? 'opacity-0 pointer-events-none'
-              : 'bg-black/5 dark:bg-white/5 text-foreground',
+              : isErrorMessage
+                ? 'bg-destructive/10 text-destructive'
+                : 'bg-black/5 dark:bg-white/5 text-foreground',
           )}
         >
-          {!hideAvatar && <Sparkles className="h-4 w-4" />}
+          {!hideAvatar && (isErrorMessage ? <AlertCircle className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />)}
         </div>
       )}
 
@@ -185,6 +188,7 @@ export const ChatMessage = memo(function ChatMessage({
           <MessageBubble
             text={text}
             isUser={isUser}
+            isError={isErrorMessage}
             isStreaming={isStreaming}
             fontSize={bodyFontSize}
             assistantMessageStyle={assistantMessageStyle}
@@ -363,12 +367,14 @@ function MessageHoverBar({
 function MessageBubble({
   text,
   isUser,
+  isError,
   isStreaming,
   fontSize,
   assistantMessageStyle,
 }: {
   text: string;
   isUser: boolean;
+  isError: boolean;
   isStreaming: boolean;
   fontSize: string;
   assistantMessageStyle: AssistantMessageStyle;
@@ -377,13 +383,15 @@ function MessageBubble({
 
   return (
     <div
-      data-testid={!isUser ? `chat-assistant-message-${assistantMessageStyle}` : undefined}
+      data-testid={!isUser ? (isError ? 'chat-assistant-error-message' : `chat-assistant-message-${assistantMessageStyle}`) : undefined}
       className={cn(
         'relative',
         usesAssistantStreamStyle ? 'w-full px-1 py-0.5' : 'rounded-[24px] px-4 py-3.5',
         !isUser && !usesAssistantStreamStyle && 'w-full',
         isUser
           ? 'bg-[linear-gradient(135deg,#4f8df7_0%,#2f6fe4_100%)] text-white shadow-[0_12px_28px_rgba(47,111,228,0.24)]'
+          : isError
+            ? 'border border-destructive/25 bg-destructive/8 text-destructive shadow-[0_10px_30px_rgba(220,38,38,0.08)]'
           : usesAssistantStreamStyle
             ? 'bg-transparent text-foreground'
             : 'border border-black/6 bg-white/54 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.06)] backdrop-blur-sm dark:border-white/8 dark:bg-white/[0.045]',
@@ -406,13 +414,13 @@ function MessageBubble({
                 const isInline = !match && !className;
                 if (isInline) {
                   return (
-                    <code className="bg-background/50 px-1.5 py-0.5 rounded text-sm font-mono break-words break-all" {...props}>
-                      {children}
-                    </code>
-                  );
-                }
-                return (
-                  <pre className="bg-background/50 rounded-lg p-4 overflow-x-auto">
+                <code className={cn('px-1.5 py-0.5 rounded text-sm font-mono break-words break-all', isError ? 'bg-destructive/10 text-destructive' : 'bg-background/50')} {...props}>
+                  {children}
+                </code>
+              );
+            }
+            return (
+                  <pre className={cn('rounded-lg p-4 overflow-x-auto', isError ? 'bg-destructive/10' : 'bg-background/50')}>
                     <code className={cn('text-sm font-mono', className)} {...props}>
                       {children}
                     </code>
@@ -421,7 +429,7 @@ function MessageBubble({
               },
               a({ href, children }) {
                 return (
-                  <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-words break-all">
+                  <a href={href} target="_blank" rel="noopener noreferrer" className={cn('hover:underline break-words break-all', isError ? 'text-destructive' : 'text-primary')}>
                     {children}
                   </a>
                 );
@@ -471,12 +479,25 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+function FileExtIcon({ ext, className }: { ext: string; className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/>
+      <path d="M14 2v4a2 2 0 0 0 2 2h4"/>
+      <text x="12" y="18" fontSize="6.5" fontFamily="sans-serif" fontWeight="bold" textAnchor="middle" stroke="none" fill="currentColor">{ext.toUpperCase()}</text>
+    </svg>
+  );
+}
+
 function FileIcon({ mimeType, className }: { mimeType: string; className?: string }) {
-  if (mimeType.startsWith('video/')) return <Film className={className} />;
+  if (mimeType.startsWith('image/') || mimeType.startsWith('video/')) return <FileImage className={className} />;
   if (mimeType.startsWith('audio/')) return <Music className={className} />;
-  if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === 'application/xml') return <FileText className={className} />;
+  if (mimeType.includes('pdf')) return <FileExtIcon ext="PDF" className={className} />;
+  if (mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType.includes('csv')) return <FileExtIcon ext="XLS" className={className} />;
+  if (mimeType.includes('wordprocessing') || mimeType.includes('msword') || mimeType.includes('document')) return <FileExtIcon ext="DOC" className={className} />;
+  if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return <FileExtIcon ext="PPT" className={className} />;
+  if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === 'application/xml') return <FileCode className={className} />;
   if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('archive') || mimeType.includes('tar') || mimeType.includes('rar') || mimeType.includes('7z')) return <FileArchive className={className} />;
-  if (mimeType === 'application/pdf') return <FileText className={className} />;
   return <File className={className} />;
 }
 
@@ -490,7 +511,7 @@ function FileCard({ file }: { file: AttachedFileMeta }) {
   return (
     <div 
       className={cn(
-        "flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 py-2.5 bg-black/5 dark:bg-white/5 max-w-[220px]",
+        "flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 h-14 bg-black/5 dark:bg-white/5 max-w-[220px]",
         file.filePath && "cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
       )}
       onClick={handleOpen}

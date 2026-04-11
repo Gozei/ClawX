@@ -1,14 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const appendAssistantMessage = vi.fn((messages, message) => [...messages, message]);
 const clearErrorRecoveryTimer = vi.fn();
 const clearHistoryPoll = vi.fn();
 const collectToolUpdates = vi.fn(() => []);
+const createLocalAssistantMessage = vi.fn((content: string, options?: { isError?: boolean; idPrefix?: string }) => ({
+  id: `${options?.idPrefix || 'local-message'}-1`,
+  role: 'assistant',
+  content,
+  timestamp: 1,
+  isError: options?.isError === true,
+}));
 const createToolResultProcessMessage = vi.fn((message: unknown) => message);
-const EMPTY_ASSISTANT_RESPONSE_ERROR = 'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.';
 const extractImagesAsAttachedFiles = vi.fn(() => []);
 const extractMediaRefs = vi.fn(() => []);
 const extractRawFilePaths = vi.fn(() => []);
+const getContinueConversationWarning = vi.fn(() => 'Final reply missing but conversation can continue.');
+const getEmptyAssistantResponseError = vi.fn(() => 'Localized empty assistant response');
 const getMessageText = vi.fn(() => '');
+const getSendFailedError = vi.fn((error?: string) => error ? `Localized send failed: ${error}` : 'Localized send failed');
 const getToolCallFilePath = vi.fn(() => undefined);
 const hasErrorRecoveryTimer = vi.fn(() => false);
 const hasNonToolAssistantContent = vi.fn(() => true);
@@ -23,18 +33,23 @@ const makeAttachedFile = vi.fn((ref: { filePath: string; mimeType: string }) => 
   filePath: ref.filePath,
 }));
 const setErrorRecoveryTimer = vi.fn();
+const getLastChatEventAt = vi.fn(() => 0);
 const upsertToolStatuses = vi.fn((_current, updates) => updates);
 
 vi.mock('@/stores/chat/helpers', () => ({
+  appendAssistantMessage: (...args: unknown[]) => appendAssistantMessage(...args),
   clearErrorRecoveryTimer: (...args: unknown[]) => clearErrorRecoveryTimer(...args),
   clearHistoryPoll: (...args: unknown[]) => clearHistoryPoll(...args),
   collectToolUpdates: (...args: unknown[]) => collectToolUpdates(...args),
+  createLocalAssistantMessage: (...args: unknown[]) => createLocalAssistantMessage(...args),
   createToolResultProcessMessage: (...args: unknown[]) => createToolResultProcessMessage(...args),
-  EMPTY_ASSISTANT_RESPONSE_ERROR,
   extractImagesAsAttachedFiles: (...args: unknown[]) => extractImagesAsAttachedFiles(...args),
   extractMediaRefs: (...args: unknown[]) => extractMediaRefs(...args),
   extractRawFilePaths: (...args: unknown[]) => extractRawFilePaths(...args),
+  getContinueConversationWarning: (...args: unknown[]) => getContinueConversationWarning(...args),
+  getEmptyAssistantResponseError: (...args: unknown[]) => getEmptyAssistantResponseError(...args),
   getMessageText: (...args: unknown[]) => getMessageText(...args),
+  getSendFailedError: (...args: unknown[]) => getSendFailedError(...args),
   getToolCallFilePath: (...args: unknown[]) => getToolCallFilePath(...args),
   hasErrorRecoveryTimer: (...args: unknown[]) => hasErrorRecoveryTimer(...args),
   hasNonToolAssistantContent: (...args: unknown[]) => hasNonToolAssistantContent(...args),
@@ -43,6 +58,7 @@ vi.mock('@/stores/chat/helpers', () => ({
   isToolResultRole: (...args: unknown[]) => isToolResultRole(...args),
   makeAttachedFile: (...args: unknown[]) => makeAttachedFile(...args),
   setErrorRecoveryTimer: (...args: unknown[]) => setErrorRecoveryTimer(...args),
+  getLastChatEventAt: (...args: unknown[]) => getLastChatEventAt(...args),
   upsertToolStatuses: (...args: unknown[]) => upsertToolStatuses(...args),
 }));
 
@@ -152,11 +168,16 @@ describe('chat runtime event handlers', () => {
     handleRuntimeEventState(h.set as never, h.get as never, { errorMessage: 'boom' }, 'error', 'r1');
     const next = h.read();
     expect(clearHistoryPoll).toHaveBeenCalledTimes(1);
-    expect(next.error).toBe('boom');
+    expect(next.error).toBeNull();
     expect(next.sending).toBe(false);
     expect(next.activeRunId).toBeNull();
     expect(next.lastUserMessageAt).toBeNull();
     expect(next.streamingTools).toEqual([]);
+    expect(next.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: 'Localized send failed: boom',
+      isError: true,
+    });
   });
 
   it('delta with empty object does not overwrite existing streamingMessage', async () => {
@@ -225,34 +246,33 @@ describe('chat runtime event handlers', () => {
   });
 
   it('recovers a stuck pending-final state so the next message can be sent', async () => {
+    // tool_result 不再设置 pendingFinal，改用 message-less final 触发 recovery
     const { handleRuntimeEventState } = await import('@/stores/chat/runtime-event-handlers');
     const h = makeHarness({
       sending: true,
       activeRunId: 'run-stuck',
-      streamingMessage: {
-        id: 'stream-1',
-        role: 'assistant',
-        content: '记下来了，后面我会按这个风格来。',
-        timestamp: 1001,
-      },
       messages: [
         { id: 'user-1', role: 'user', content: '请按这个风格回答', timestamp: 1000 },
       ],
     });
 
+    // message-less final 会设置 pendingFinal: true 并触发 schedulePendingFinalRecovery
     handleRuntimeEventState(
       h.set as never,
       h.get as never,
-      { message: { id: 'tool-1', role: 'toolresult', toolCallId: 'tool-1', content: 'done' } },
+      {},
       'final',
       'run-stuck',
     );
 
+    expect(h.read().pendingFinal).toBe(true);
+
+    // getLastChatEventAt 返回 0（远古时间），不会推迟 recovery
     await vi.advanceTimersByTimeAsync(20_000);
     await Promise.resolve();
 
     const next = h.read();
-    expect(next.loadHistory).toHaveBeenCalledTimes(1);
+    expect(next.loadHistory).toHaveBeenCalledTimes(2);
     expect(next.sending).toBe(false);
     expect(next.activeRunId).toBeNull();
     expect(next.pendingFinal).toBe(false);

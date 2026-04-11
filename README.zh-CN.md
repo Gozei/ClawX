@@ -272,6 +272,7 @@ Deep AI Worker 采用 **双进程 + Host API 统一接入架构**。渲染进程
 - 可用以下命令确认监听进程：
   - macOS/Linux：`lsof -nP -iTCP:18789 -sTCP:LISTEN`
   - Windows（PowerShell）：`Get-NetTCPConnection -LocalPort 18789 -State Listen`
+- **旧版钉钉扩展**：部分手工安装的 `~/.openclaw/extensions/dingtalk` 会引用 `openclaw/.../plugin-sdk/root-alias.cjs/telegram-core`，而当前捆绑的 OpenClaw 已不再提供该子路径，导致 Gateway 插件阶段长时间卡住。应用启动前会自动检测并将该目录**重命名**为 `dingtalk.disabled-by-clawx-*`（见日志）。若仍需钉钉通道，请安装与当前 OpenClaw 版本匹配的插件，或删除该扩展。
 - 点击窗口关闭按钮（`X`）默认只是最小化到托盘，并不会完全退出应用。请在托盘菜单中选择 **Quit Deep AI Worker** 执行完整退出。
 
 ---

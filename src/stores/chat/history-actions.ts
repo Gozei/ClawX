@@ -1,17 +1,20 @@
 import { invokeIpc } from '@/lib/api-client';
 import { hostApiFetch } from '@/lib/host-api';
 import {
+  appendAssistantMessage,
   clearHistoryPoll,
+  createLocalAssistantMessage,
   createToolResultProcessMessage,
-  EMPTY_ASSISTANT_RESPONSE_ERROR,
   enrichWithCachedImages,
   enrichWithToolResultFiles,
   getMessageText,
   hasNonToolAssistantContent,
+  hasAssistantFinalTextContent,
   isEmptyAssistantResponse,
   isInternalMessage,
   isToolResultRole,
   loadMissingPreviews,
+  getEmptyAssistantResponseError,
   toMs,
 } from './helpers';
 import { buildCronSessionHistoryPath, isCronSessionKey } from './cron-session-utils';
@@ -200,7 +203,7 @@ export function createHistoryActions(
         const historyRecentAssistant = (historyPendingFinal || shouldEnterHistoryPendingFinal)
           ? [...filteredMessages].reverse().find((msg) => {
               if (msg.role !== 'assistant') return false;
-              if (!hasNonToolAssistantContent(msg)) return false;
+              if (!hasAssistantFinalTextContent(msg)) return false;
               return isAfterHistoryUserMsg(msg);
             })
           : undefined;
@@ -240,7 +243,14 @@ export function createHistoryActions(
                   streamingMessage: null,
                   streamingTools: [],
                   pendingToolImages: [],
-                  error: EMPTY_ASSISTANT_RESPONSE_ERROR,
+                  messages: appendAssistantMessage(
+                    finalMessages,
+                    createLocalAssistantMessage(getEmptyAssistantResponseError(), {
+                      isError: true,
+                      idPrefix: 'history-empty-assistant-response',
+                    }),
+                  ),
+                  error: null,
                 }
             : shouldEnterHistoryPendingFinal
               ? { pendingFinal: true }

@@ -1,30 +1,30 @@
-{
+﻿{
     "gatewayNotRunning": "网关未运行",
-    "gatewayRequired": "OpenClaw 网关需要运行才能使用聊天。它将自动启动，或者您可以从设置中启动。",
+    "gatewayRequired": "需要先运行 OpenClaw 网关才能使用聊天。它会自动启动，你也可以在设置中手动启动。",
     "offline": {
-        "stoppedTitle": "准备开始工作",
-        "stoppedDesc": "{{appName}} 需要先连接 OpenClaw 网关，才能开始对话、调度角色和执行流程。你可以现在启动，默认端口是 {{port}}。",
+        "stoppedTitle": "准备开始",
+        "stoppedDesc": "{{appName}} 需要先连接到 OpenClaw 网关，才能开始对话、切换 Role 和执行工作流。你现在就可以启动，默认端口是 {{port}}。",
         "startingTitle": "正在连接 OpenClaw",
-        "startingDesc": "{{appName}} 正在启动并连接 OpenClaw 网关，请稍候片刻。当前监听端口为 {{port}}。",
-        "errorTitle": "网关暂时没有连接成功",
-        "errorDesc": "{{appName}} 刚才尝试连接 OpenClaw 时遇到了一点问题。你可以重新启动网关，或先去设置页检查配置。",
+        "startingDesc": "{{appName}} 正在启动并连接 OpenClaw 网关，这通常只需要一点时间。当前端口：{{port}}。",
+        "errorTitle": "网关连接需要处理",
+        "errorDesc": "{{appName}} 在连接 OpenClaw 时遇到了一点问题。你可以现在重启网关，或前往设置检查配置。",
         "errorDetail": "错误详情",
-        "startNow": "立即启动网关",
-        "retry": "重新启动网关",
-        "openSettings": "前往设置"
+        "startNow": "启动网关",
+        "retry": "重启网关",
+        "openSettings": "打开设置"
     },
     "welcome": {
         "title": "{{appName}} 聊天",
-        "eyebrow": "{{appName}} 智能工作台",
-        "subtitle": "把任务交给我，我来推进",
-        "description": "{{appName}} 可以处理复杂任务、持续推进多步骤工作，并协调多个角色一起完成交付。",
+        "eyebrow": "{{appName}} 工作区",
+        "subtitle": "把工作交给我，我来持续推进",
+        "description": "{{appName}} 可以处理复杂任务，推进多步骤执行，并协调多个角色一起完成交付。",
         "askQuestions": "处理任务",
         "askQuestionsDesc": "处理面向任务的请求",
         "creativeTasks": "持续执行",
         "creativeTasksDesc": "持续推进多步骤工作",
-        "brainstorming": "多角色协同",
-        "brainstormingDesc": "协调多个角色并行拆解与执行",
-        "footerHint": "你可以直接输入目标、上传材料，或在上方选择对话对象后开始工作。"
+        "brainstorming": "多角色协作",
+        "brainstormingDesc": "把工作拆分给多个角色并并行执行",
+        "footerHint": "你可以直接输入目标、上传材料，或先在工具栏里选择目标 Role。"
     },
     "noLogs": "（暂无日志）",
     "toolbar": {
@@ -46,11 +46,21 @@
         "stop": "停止",
         "gatewayConnected": "已连接",
         "gatewayStatus": "gateway {{state}} | port: {{port}} {{pid}}",
-        "retryFailedAttachments": "重试失败的附件"
+        "retryFailedAttachments": "重试失败附件"
     },
     "process": {
         "workingFor": "处理中 {{duration}}",
         "processedFor": "已处理 {{duration}}"
+    },
+    "sessionErrors": {
+        "noResponse": "模型没有返回响应。提供商可能暂时不可用，或 API Key 配额不足。请检查你的提供商设置。",
+        "sendFailed": "消息发送失败。请检查提供商或网关状态后重试。",
+        "sendFailedWithDetail": "消息发送失败：{{error}}",
+        "emptyAssistantResponse": "当前提供商返回了空响应。请检查提供商 Base URL、API 协议、模型和 API Key。"
+    },
+    "sessionWarnings": {
+        "finalReplyMissing": "最终回复暂未到达，但你仍然可以继续当前会话。",
+        "assistantMissingInUI": "助手回复可能已写入会话，但当前显示模式无法展示。请尝试工具栏「刷新聊天」、打开「显示思考过程」或「过程详情」，或稍等网关同步后再试。"
     },
     "historyBuckets": {
         "today": "今天",
@@ -58,6 +68,6 @@
         "withinWeek": "一周内",
         "withinTwoWeeks": "两周内",
         "withinMonth": "一个月内",
-        "older": "一个月之前"
+        "older": "一个月前"
     }
 }

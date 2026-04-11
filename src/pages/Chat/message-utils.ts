@@ -5,6 +5,18 @@
  */
 import type { RawMessage, ContentBlock } from '@/stores/chat';
 
+/** 不参与正文回退拼接的工具/思考类块（避免重复与噪音） */
+function isNonBodyAssistantBlockType(type: string | undefined): boolean {
+  if (!type) return false;
+  const t = type.toLowerCase();
+  return t === 'thinking'
+    || t === 'tool_use'
+    || t === 'toolcall'
+    || t === 'tool_result'
+    || t === 'toolresult'
+    || t === 'image';
+}
+
 /**
  * Clean Gateway metadata from user message text for display.
  * Strips: [media attached: ... | ...], [message_id: ...],
@@ -49,8 +61,31 @@ export function extractText(message: RawMessage | unknown): string {
         }
       }
     }
-    const combined = parts.join('\n\n');
+    let combined = parts.join('\n\n');
     result = combined.trim().length > 0 ? combined : '';
+
+    // 助手消息：网关可能使用非标准 content 块（仅有 type + content 字符串等），标准 text 块为空时回退拼接，避免界面空白
+    if (!result && !isUser) {
+      const fallbackParts: string[] = [];
+      for (const block of content as ContentBlock[]) {
+        const blockType = typeof block.type === 'string' ? block.type : '';
+        if (blockType === 'text' || isNonBodyAssistantBlockType(blockType)) {
+          continue;
+        }
+        const rec = block as unknown as Record<string, unknown>;
+        const piece = typeof rec.text === 'string'
+          ? rec.text
+          : typeof rec.content === 'string'
+            ? rec.content
+            : '';
+        const trimmed = piece.trim();
+        if (trimmed) {
+          fallbackParts.push(trimmed);
+        }
+      }
+      combined = fallbackParts.join('\n\n');
+      result = combined.trim().length > 0 ? combined : '';
+    }
   } else if (typeof msg.text === 'string') {
     // Fallback: try .text field
     result = msg.text.trim().length > 0 ? msg.text : '';
@@ -199,6 +234,21 @@ export function extractToolUse(message: RawMessage | unknown): Array<{ id: strin
   }
 
   return tools;
+}
+
+/** 判断助手消息是否会在 ChatMessage 中渲染出任意可见块（用于兜底提示） */
+export function assistantMessageShowsInChat(
+  message: RawMessage,
+  options: { showThinking: boolean; showTools: boolean },
+): boolean {
+  if (message.role !== 'assistant') return false;
+  if (extractText(message).trim().length > 0) return true;
+  if (extractImages(message).length > 0) return true;
+  const files = message._attachedFiles;
+  if (Array.isArray(files) && files.length > 0) return true;
+  if (options.showThinking && (extractThinking(message)?.trim().length ?? 0) > 0) return true;
+  if (options.showTools && extractToolUse(message).length > 0) return true;
+  return false;
 }
 
 /**
