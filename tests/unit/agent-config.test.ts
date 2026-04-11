@@ -41,6 +41,11 @@ async function readOpenClawJson(): Promise<Record<string, unknown>> {
   return JSON.parse(content) as Record<string, unknown>;
 }
 
+async function readAgentStudioJson(): Promise<Record<string, unknown>> {
+  const content = await readFile(join(testHome, '.clawx', 'agent-studio.json'), 'utf8');
+  return JSON.parse(content) as Record<string, unknown>;
+}
+
 describe('agent config lifecycle', () => {
   beforeEach(async () => {
     vi.resetModules();
@@ -241,6 +246,22 @@ describe('agent config lifecycle', () => {
       ],
     });
 
+    const config = await readOpenClawJson();
+    const writerConfig = ((config.agents as { list: Array<{ id: string; studio?: unknown }> }).list)
+      .find((agent) => agent.id === 'writer');
+    expect(writerConfig?.studio).toBeUndefined();
+
+    const studioMetadata = await readAgentStudioJson();
+    expect(studioMetadata).toMatchObject({
+      agents: {
+        writer: {
+          profileType: 'specialist',
+          description: '负责公文起草与润色',
+          objective: '输出结构化、可审阅的公文草稿',
+        },
+      },
+    });
+
     const content = await readFile(join(workspaceDir, 'AGENTS.md'), 'utf8');
     expect(content).toContain('## Deep AI Worker Agent Studio');
     expect(content).toContain('Agent Name: 公文起草专家');
@@ -263,6 +284,67 @@ describe('agent config lifecycle', () => {
     expect(content).toContain('输出要求：输出标题、正文、落款和政策依据说明');
     expect(content).toContain('仅优先使用这些已装配技能：search-docs、policy-lookup。');
     expect(content).toContain('委派给智能体 "reviewer"');
+  });
+
+  it('migrates legacy studio config out of openclaw.json when listing agents', async () => {
+    await writeOpenClawJson({
+      agents: {
+        list: [
+          {
+            id: 'main',
+            name: 'Main',
+            default: true,
+            studio: {
+              profileType: 'coordinator',
+              description: '主协调角色',
+            },
+          },
+          {
+            id: 'writer',
+            name: 'Writer',
+            studio: {
+              description: '负责写作',
+              skillIds: ['draft'],
+            },
+          },
+        ],
+      },
+    });
+
+    const { listAgentsSnapshot } = await import('@electron/utils/agent-config');
+
+    const snapshot = await listAgentsSnapshot();
+    expect(snapshot.agents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'main',
+          profileType: 'coordinator',
+          description: '主协调角色',
+        }),
+        expect.objectContaining({
+          id: 'writer',
+          description: '负责写作',
+          skillIds: ['draft'],
+        }),
+      ]),
+    );
+
+    const config = await readOpenClawJson();
+    expect(((config.agents as { list: Array<{ studio?: unknown }> }).list).every((agent) => agent.studio === undefined)).toBe(true);
+
+    const studioMetadata = await readAgentStudioJson();
+    expect(studioMetadata).toMatchObject({
+      agents: {
+        main: {
+          profileType: 'coordinator',
+          description: '主协调角色',
+        },
+        writer: {
+          description: '负责写作',
+          skillIds: ['draft'],
+        },
+      },
+    });
   });
 
   it('rejects invalid model ref formats when updating agent model', async () => {

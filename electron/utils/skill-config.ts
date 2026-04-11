@@ -201,18 +201,9 @@ export async function ensureBuiltinSkillsInstalled(): Promise<void> {
 
 const PREINSTALLED_MANIFEST_NAME = 'preinstalled-manifest.json';
 const PREINSTALLED_MARKER_NAME = '.clawx-preinstalled.json';
+const GENERATED_PREINSTALLED_MANIFEST_NAME = '.preinstalled-manifest.generated.json';
 
-async function readPreinstalledManifest(): Promise<PreinstalledSkillSpec[]> {
-    const candidates = [
-        join(getResourcesDir(), 'skills', PREINSTALLED_MANIFEST_NAME),
-        join(process.cwd(), 'resources', 'skills', PREINSTALLED_MANIFEST_NAME),
-    ];
-
-    const manifestPath = candidates.find((p) => existsSync(p));
-    if (!manifestPath) {
-        return [];
-    }
-
+async function readManifestFile(manifestPath: string): Promise<PreinstalledSkillSpec[]> {
     try {
         const raw = await readFile(manifestPath, 'utf-8');
         const parsed = JSON.parse(raw) as PreinstalledManifest;
@@ -224,6 +215,49 @@ async function readPreinstalledManifest(): Promise<PreinstalledSkillSpec[]> {
         logger.warn('Failed to read preinstalled-skills manifest:', error);
         return [];
     }
+}
+
+async function readPreinstalledManifest(): Promise<PreinstalledSkillSpec[]> {
+    const baseManifestCandidates = [
+        join(getResourcesDir(), 'skills', PREINSTALLED_MANIFEST_NAME),
+        join(process.cwd(), 'resources', 'skills', PREINSTALLED_MANIFEST_NAME),
+    ];
+
+    const manifests: PreinstalledSkillSpec[] = [];
+    const seen = new Set<string>();
+
+    const baseManifestPath = baseManifestCandidates.find((p) => existsSync(p));
+    if (baseManifestPath) {
+        for (const skill of await readManifestFile(baseManifestPath)) {
+            if (!seen.has(skill.slug)) {
+                seen.add(skill.slug);
+                manifests.push(skill);
+            }
+        }
+    }
+
+    const generatedManifestCandidates = [
+        join(getResourcesDir(), 'preinstalled-skills', GENERATED_PREINSTALLED_MANIFEST_NAME),
+        join(process.cwd(), 'build', 'preinstalled-skills', GENERATED_PREINSTALLED_MANIFEST_NAME),
+        join(__dirname, '../../build/preinstalled-skills', GENERATED_PREINSTALLED_MANIFEST_NAME),
+    ];
+
+    const generatedManifestPath = generatedManifestCandidates.find((p) => existsSync(p));
+    if (!generatedManifestPath) {
+        return manifests;
+    }
+
+    for (const skill of await readManifestFile(generatedManifestPath)) {
+        const existingIndex = manifests.findIndex((entry) => entry.slug === skill.slug);
+        if (existingIndex >= 0) {
+            manifests[existingIndex] = { ...manifests[existingIndex], ...skill };
+        } else {
+            seen.add(skill.slug);
+            manifests.push(skill);
+        }
+    }
+
+    return manifests;
 }
 
 function resolvePreinstalledSkillsSourceRoot(): string | null {
