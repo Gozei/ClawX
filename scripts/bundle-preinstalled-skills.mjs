@@ -18,15 +18,22 @@ if (os.platform() === 'win32') {
   }
 }
 
-import { readFileSync, existsSync, mkdirSync, rmSync, cpSync, writeFileSync } from 'node:fs';
-import { join, dirname, basename } from 'node:path';
+import { readFileSync, existsSync, mkdirSync, rmSync, cpSync, writeFileSync, readdirSync } from 'node:fs';
+import { join, dirname, basename, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 const MANIFEST_PATH = join(ROOT, 'resources', 'skills', 'preinstalled-manifest.json');
+const CUSTOM_SKILLS_ROOT = join(ROOT, 'resources', 'custom-skills');
 const OUTPUT_ROOT = join(ROOT, 'build', 'preinstalled-skills');
 const TMP_ROOT = join(ROOT, 'build', '.tmp-preinstalled-skills');
+const GENERATED_MANIFEST_NAME = '.preinstalled-manifest.generated.json';
+
+function normalizeVersion(input, fallback = 'manual') {
+  const trimmed = String(input || '').trim();
+  return trimmed || fallback;
+}
 
 function loadManifest() {
   if (!existsSync(MANIFEST_PATH)) {
@@ -43,6 +50,32 @@ function loadManifest() {
     }
   }
   return parsed.skills;
+}
+
+function discoverLocalSkills() {
+  if (!existsSync(CUSTOM_SKILLS_ROOT)) {
+    return [];
+  }
+
+  const entries = readdirSync(CUSTOM_SKILLS_ROOT, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const slug = entry.name.trim();
+      const sourceDir = join(CUSTOM_SKILLS_ROOT, slug);
+      const manifestPath = join(sourceDir, 'SKILL.md');
+      if (!existsSync(manifestPath)) {
+        return null;
+      }
+      return {
+        slug,
+        sourceDir,
+        version: 'local',
+        autoEnable: true,
+        localPath: relative(ROOT, sourceDir).replace(/\\/g, '/'),
+      };
+    })
+    .filter(Boolean);
 }
 
 function groupByRepoRef(entries) {
@@ -118,6 +151,16 @@ async function fetchSparseRepo(repo, ref, paths, checkoutDir) {
   return commit;
 }
 
+function copySkillDir(sourceDir, targetDir, slug) {
+  rmSync(targetDir, { recursive: true, force: true });
+  cpSync(sourceDir, targetDir, { recursive: true, dereference: true, filter: shouldCopySkillFile });
+
+  const skillManifest = join(targetDir, 'SKILL.md');
+  if (!existsSync(skillManifest)) {
+    throw new Error(`Skill ${slug} is missing SKILL.md after copy`);
+  }
+}
+
 echo`Bundling preinstalled skills...`;
 
 if (process.env.SKIP_PREINSTALLED_SKILLS === '1') {
@@ -131,6 +174,8 @@ if (process.env.SKIP_PREINSTALLED_SKILLS === '1') {
 }
 
 const manifestSkills = loadManifest();
+const localSkills = discoverLocalSkills();
+const skipRemoteDownloads = process.env.SKIP_PREINSTALLED_SKILLS_DOWNLOAD === '1';
 
 rmSync(OUTPUT_ROOT, { recursive: true, force: true });
 mkdirSync(OUTPUT_ROOT, { recursive: true });
@@ -141,49 +186,69 @@ const lock = {
   generatedAt: new Date().toISOString(),
   skills: [],
 };
+const generatedManifest = {
+  skills: [],
+};
 
-const groups = groupByRepoRef(manifestSkills);
-for (const group of groups) {
-  const repoDir = join(TMP_ROOT, createRepoDirName(group.repo, group.ref));
-  const sparsePaths = [...new Set(group.entries.map((entry) => entry.repoPath))];
+if (skipRemoteDownloads) {
+  echo`⏭  SKIP_PREINSTALLED_SKILLS_DOWNLOAD=1 set, skipping remote skill downloads.`;
+} else {
+  const groups = groupByRepoRef(manifestSkills);
+  for (const group of groups) {
+    const repoDir = join(TMP_ROOT, createRepoDirName(group.repo, group.ref));
+    const sparsePaths = [...new Set(group.entries.map((entry) => entry.repoPath))];
 
-  echo`Fetching ${group.repo} @ ${group.ref}`;
-  const commit = await fetchSparseRepo(group.repo, group.ref, sparsePaths, repoDir);
-  echo`   commit ${commit}`;
+    echo`Fetching ${group.repo} @ ${group.ref}`;
+    const commit = await fetchSparseRepo(group.repo, group.ref, sparsePaths, repoDir);
+    echo`   commit ${commit}`;
 
-  for (const entry of group.entries) {
-    const sourceDir = join(repoDir, entry.repoPath);
-    const targetDir = join(OUTPUT_ROOT, entry.slug);
+    for (const entry of group.entries) {
+      const sourceDir = join(repoDir, entry.repoPath);
+      const targetDir = join(OUTPUT_ROOT, entry.slug);
 
-    if (!existsSync(sourceDir)) {
-      throw new Error(`Missing source path in repo checkout: ${entry.repoPath}`);
+      if (!existsSync(sourceDir)) {
+        throw new Error(`Missing source path in repo checkout: ${entry.repoPath}`);
+      }
+
+      copySkillDir(sourceDir, targetDir, entry.slug);
+
+      const requestedVersion = (entry.version || '').trim();
+      const resolvedVersion = !requestedVersion || requestedVersion === 'main'
+        ? commit
+        : requestedVersion;
+      lock.skills.push({
+        slug: entry.slug,
+        version: resolvedVersion,
+        repo: entry.repo,
+        repoPath: entry.repoPath,
+        ref: group.ref,
+        commit,
+        source: 'github',
+      });
+
+      echo`   OK ${entry.slug}`;
     }
-
-    rmSync(targetDir, { recursive: true, force: true });
-    cpSync(sourceDir, targetDir, { recursive: true, dereference: true, filter: shouldCopySkillFile });
-
-    const skillManifest = join(targetDir, 'SKILL.md');
-    if (!existsSync(skillManifest)) {
-      throw new Error(`Skill ${entry.slug} is missing SKILL.md after copy`);
-    }
-
-    const requestedVersion = (entry.version || '').trim();
-    const resolvedVersion = !requestedVersion || requestedVersion === 'main'
-      ? commit
-      : requestedVersion;
-    lock.skills.push({
-      slug: entry.slug,
-      version: resolvedVersion,
-      repo: entry.repo,
-      repoPath: entry.repoPath,
-      ref: group.ref,
-      commit,
-    });
-
-    echo`   OK ${entry.slug}`;
   }
 }
 
+for (const entry of localSkills) {
+  const targetDir = join(OUTPUT_ROOT, entry.slug);
+  copySkillDir(entry.sourceDir, targetDir, entry.slug);
+  lock.skills.push({
+    slug: entry.slug,
+    version: normalizeVersion(entry.version, 'local'),
+    source: 'local',
+    localPath: entry.localPath,
+  });
+  generatedManifest.skills.push({
+    slug: entry.slug,
+    version: normalizeVersion(entry.version, 'local'),
+    autoEnable: entry.autoEnable !== false,
+  });
+  echo`Local OK ${entry.slug}`;
+}
+
 writeFileSync(join(OUTPUT_ROOT, '.preinstalled-lock.json'), `${JSON.stringify(lock, null, 2)}\n`, 'utf8');
+writeFileSync(join(OUTPUT_ROOT, GENERATED_MANIFEST_NAME), `${JSON.stringify(generatedManifest, null, 2)}\n`, 'utf8');
 rmSync(TMP_ROOT, { recursive: true, force: true });
 echo`Preinstalled skills ready: ${OUTPUT_ROOT}`;

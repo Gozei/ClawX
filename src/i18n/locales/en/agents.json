@@ -253,7 +253,7 @@
         "runtimeOpenSession": "Open session",
         "saveStudio": "Save studio settings",
         "pendingStudioChanges": "This role definition has unsaved changes. Save it before closing.",
-        "studioSavedHint": "Studio definitions sync to OpenClaw config and the role workspace.",
+        "studioSavedHint": "Studio definitions sync to Deep AI Worker metadata and the role workspace.",
         "rightRailTitle": "Studio Summary",
         "overview": {
             "skills": "Skills attached",
