@@ -26,6 +26,8 @@ export interface ContentBlock {
   type: 'text' | 'image' | 'thinking' | 'tool_use' | 'tool_result' | 'toolCall' | 'toolResult';
   text?: string;
   thinking?: string;
+  status?: 'running' | 'completed' | 'error';
+  durationMs?: number;
   source?: { type: string; media_type?: string; data?: string; url?: string };
   /** Flat image format from Gateway tool results (no source wrapper) */
   data?: string;

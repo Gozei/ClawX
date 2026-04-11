@@ -633,6 +633,10 @@ function summarizeToolOutput(text: string): string | undefined {
   return summary;
 }
 
+function normalizeToolName(name: string | undefined): string {
+  return (name || 'tool').trim() || 'tool';
+}
+
 function normalizeToolStatus(rawStatus: unknown, fallback: 'running' | 'completed'): ToolStatus['status'] {
   const status = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : '';
   if (status === 'error' || status === 'failed') return 'error';
@@ -746,6 +750,52 @@ function extractToolResultUpdate(message: unknown, eventState: string): ToolStat
   };
 }
 
+function createToolResultProcessMessage(message: RawMessage): RawMessage | null {
+  if (!isToolResultRole(message.role)) return null;
+
+  const msg = message as RawMessage & {
+    name?: string;
+    status?: string;
+    error?: string;
+  };
+  const details = (msg.details && typeof msg.details === 'object') ? msg.details as Record<string, unknown> : undefined;
+  const toolName = normalizeToolName(
+    typeof msg.toolName === 'string'
+      ? msg.toolName
+      : (typeof msg.name === 'string' ? msg.name : undefined),
+  );
+  const toolCallId = typeof msg.toolCallId === 'string' ? msg.toolCallId : undefined;
+  const outputText = (details && typeof details.aggregated === 'string')
+    ? details.aggregated
+    : extractTextFromContent(msg.content);
+  const errorText = typeof details?.error === 'string'
+    ? details.error
+    : (typeof msg.error === 'string' ? msg.error : '');
+  const detailText = outputText.trim() || errorText.trim() || toolName;
+  const status = errorText.trim()
+    ? 'error'
+    : normalizeToolStatus(msg.status ?? details?.status, 'completed');
+  const durationMs = parseDurationMs(details?.durationMs ?? details?.duration ?? ((msg as unknown as Record<string, unknown>).durationMs));
+
+  return {
+    ...message,
+    role: 'assistant',
+    id: message.id ? `${message.id}-tool-result` : `${toolCallId || toolName}-tool-result`,
+    content: [
+      {
+        type: 'tool_result',
+        id: toolCallId || message.id || toolName,
+        name: toolName,
+        status,
+        durationMs,
+        text: detailText,
+        content: detailText,
+      },
+    ],
+    _attachedFiles: [],
+  };
+}
+
 function mergeToolStatus(existing: ToolStatus['status'], incoming: ToolStatus['status']): ToolStatus['status'] {
   const order: Record<ToolStatus['status'], number> = { running: 0, completed: 1, error: 2 };
   return order[incoming] >= order[existing] ? incoming : existing;
@@ -852,6 +902,7 @@ export {
   upsertImageCacheEntry,
   getCanonicalPrefixFromSessions,
   getToolCallFilePath,
+  createToolResultProcessMessage,
   collectToolUpdates,
   upsertToolStatuses,
   EMPTY_ASSISTANT_RESPONSE_ERROR,

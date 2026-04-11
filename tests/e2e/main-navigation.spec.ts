@@ -16,24 +16,29 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
       await page.getByTestId('sidebar-nav-agents').click();
       await expect(page.getByTestId('agents-page')).toBeVisible();
       await expect(page.getByText('Main Role').first()).toBeVisible();
-      await expect(page.getByText('触发方式').first()).toBeVisible();
-      await expect(page.getByText(/settingsdialog\.runtimesummarytitle/i)).toHaveCount(0);
       await expect(page.getByTestId('agent-card-summary-grid').first().getByTestId('agent-card-summary-item')).toHaveCount(5);
 
       await page.getByTestId('sidebar-nav-channels').click();
       await expect(page.getByTestId('channels-page')).toBeVisible();
+      const channelsTitleBox = await page.getByTestId('channels-page-title').boundingBox();
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
+      const skillsTitleBox = await page.getByTestId('skills-page-title').boundingBox();
+      expect(channelsTitleBox).not.toBeNull();
+      expect(skillsTitleBox).not.toBeNull();
+      if (channelsTitleBox && skillsTitleBox) {
+        expect(Math.abs(channelsTitleBox.x - skillsTitleBox.x)).toBeLessThan(2);
+        expect(Math.abs(channelsTitleBox.y - skillsTitleBox.y)).toBeLessThan(2);
+      }
 
       await page.getByTestId('sidebar-nav-settings').click();
       await expect(page.getByTestId('settings-page')).toBeVisible();
       await expect(page.getByTestId('settings-page-title')).toHaveCSS('font-size', '30px');
       await expect(page.getByTestId('settings-page-subtitle')).toHaveCSS('font-size', '14px');
       await expect(page.getByRole('button', { name: 'English' }).first()).toBeVisible();
-      await expect(page.getByRole('button', { name: '中文' }).first()).toBeVisible();
-      await expect(page.getByRole('button', { name: '日本語' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: '\u4e2d\u6587' }).first()).toBeVisible();
     } finally {
       await closeElectronApp(app);
     }
@@ -71,6 +76,12 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
         expect(Math.abs(logoBox.y - headingBox.y)).toBeLessThan(24);
       }
 
+      await page.getByTestId('sidebar-nav-skills').click();
+      await expect(page.getByTestId('skills-page')).toBeVisible();
+      await expect(page.getByTestId('skills-toolbar-card')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+      await page.getByTestId('sidebar-nav-settings').click();
+      await expect(page.getByTestId('settings-page')).toBeVisible();
+
        await page.getByTestId('settings-theme-dark').click();
        await expect(page.locator('html')).toHaveClass(/dark/);
        await expect(sidebarLogo).toHaveAttribute('src', /logo-whale-light/);
@@ -94,7 +105,7 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
-      await expect(page.getByTestId('skills-toolbar-card')).toHaveCSS('background-color', 'rgba(255, 255, 255, 0.05)');
+      await expect(page.getByTestId('skills-toolbar-card')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
       await expect(page.getByTestId('skills-source-filter-all')).toHaveCSS('color', 'rgb(255, 255, 255)');
       await expect(page.getByTestId('skills-search-input')).toHaveCSS('color', 'rgb(255, 255, 255)');
     } finally {

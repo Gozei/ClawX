@@ -12,13 +12,16 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { invokeIpc } from '@/lib/api-client';
 import type { RawMessage, AttachedFileMeta } from '@/stores/chat';
-import { useSettingsStore } from '@/stores/settings';
+import { useSettingsStore, type AssistantMessageStyle } from '@/stores/settings';
 import { extractText, extractThinking, extractImages, extractToolUse, formatTimestamp } from './message-utils';
 
 interface ChatMessageProps {
   message: RawMessage;
   showThinking: boolean;
   isStreaming?: boolean;
+  hideAvatar?: boolean;
+  reserveAvatarSpace?: boolean;
+  constrainWidth?: boolean;
   streamingTools?: Array<{
     id?: string;
     toolCallId?: string;
@@ -42,6 +45,9 @@ export const ChatMessage = memo(function ChatMessage({
   message,
   showThinking,
   isStreaming = false,
+  hideAvatar = false,
+  reserveAvatarSpace = false,
+  constrainWidth = true,
   streamingTools = [],
 }: ChatMessageProps) {
   const isUser = message.role === 'user';
@@ -53,7 +59,9 @@ export const ChatMessage = memo(function ChatMessage({
   const images = extractImages(message);
   const tools = extractToolUse(message);
   const chatProcessDisplayMode = useSettingsStore((state) => state.chatProcessDisplayMode);
+  const assistantMessageStyle = useSettingsStore((state) => state.assistantMessageStyle);
   const chatFontScale = useSettingsStore((state) => state.chatFontScale);
+  const usesAssistantStreamStyle = !isUser && assistantMessageStyle === 'stream';
   const visibleThinking = showThinking ? thinking : null;
   const visibleTools = chatProcessDisplayMode === 'all' ? tools : [];
   const bodyFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
@@ -77,16 +85,27 @@ export const ChatMessage = memo(function ChatMessage({
       style={isStreaming ? undefined : { contentVisibility: 'auto', containIntrinsicSize: '160px' }}
     >
       {/* Avatar */}
-      {!isUser && (
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-1 bg-black/5 dark:bg-white/5 text-foreground">
-          <Sparkles className="h-4 w-4" />
+      {!isUser && (!hideAvatar || reserveAvatarSpace) && (
+        <div
+          data-testid={hideAvatar ? undefined : 'chat-assistant-avatar'}
+          aria-hidden={hideAvatar ? 'true' : undefined}
+          className={cn(
+            'flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-1',
+            hideAvatar
+              ? 'opacity-0 pointer-events-none'
+              : 'bg-black/5 dark:bg-white/5 text-foreground',
+          )}
+        >
+          {!hideAvatar && <Sparkles className="h-4 w-4" />}
         </div>
       )}
 
       {/* Content */}
       <div
+        data-testid={isUser ? 'chat-message-content-user' : 'chat-message-content-assistant'}
         className={cn(
-          'flex flex-col w-full min-w-0 max-w-[80%] space-y-2',
+          'flex flex-col w-full min-w-0 space-y-2',
+          constrainWidth && !usesAssistantStreamStyle && 'max-w-[80%]',
           isUser ? 'items-end' : 'items-start',
         )}
       >
@@ -101,7 +120,7 @@ export const ChatMessage = memo(function ChatMessage({
 
         {/* Tool use cards */}
         {visibleTools.length > 0 && (
-          <div className="space-y-1">
+          <div className="w-full space-y-1">
             {visibleTools.map((tool, i) => (
               <ToolCard key={tool.id || i} name={tool.name} input={tool.input} />
             ))}
@@ -168,6 +187,7 @@ export const ChatMessage = memo(function ChatMessage({
             isUser={isUser}
             isStreaming={isStreaming}
             fontSize={bodyFontSize}
+            assistantMessageStyle={assistantMessageStyle}
           />
         )}
 
@@ -345,31 +365,39 @@ function MessageBubble({
   isUser,
   isStreaming,
   fontSize,
+  assistantMessageStyle,
 }: {
   text: string;
   isUser: boolean;
   isStreaming: boolean;
   fontSize: string;
+  assistantMessageStyle: AssistantMessageStyle;
 }) {
+  const usesAssistantStreamStyle = !isUser && assistantMessageStyle === 'stream';
+
   return (
     <div
+      data-testid={!isUser ? `chat-assistant-message-${assistantMessageStyle}` : undefined}
       className={cn(
-        'relative rounded-[24px] px-4 py-3.5',
-        !isUser && 'w-full',
+        'relative',
+        usesAssistantStreamStyle ? 'w-full px-1 py-0.5' : 'rounded-[24px] px-4 py-3.5',
+        !isUser && !usesAssistantStreamStyle && 'w-full',
         isUser
           ? 'bg-[linear-gradient(135deg,#4f8df7_0%,#2f6fe4_100%)] text-white shadow-[0_12px_28px_rgba(47,111,228,0.24)]'
-          : 'border border-black/6 bg-white/54 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.06)] backdrop-blur-sm dark:border-white/8 dark:bg-white/[0.045]',
+          : usesAssistantStreamStyle
+            ? 'bg-transparent text-foreground'
+            : 'border border-black/6 bg-white/54 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.06)] backdrop-blur-sm dark:border-white/8 dark:bg-white/[0.045]',
       )}
     >
       {isUser ? (
         <p className="whitespace-pre-wrap break-words break-all leading-[1.82]" style={{ fontSize }}>{text}</p>
       ) : isStreaming ? (
-        <div className="whitespace-pre-wrap break-words break-all leading-[1.82]" style={{ fontSize }}>
+        <div className={cn('whitespace-pre-wrap break-words break-all leading-[1.82]', usesAssistantStreamStyle && 'prose prose-sm dark:prose-invert max-w-none')} style={{ fontSize }}>
           {text}
           <span className="inline-block w-2 h-4 bg-foreground/50 animate-pulse ml-0.5 align-[-2px]" />
         </div>
       ) : (
-        <div className="prose prose-sm dark:prose-invert max-w-none break-words break-all leading-[1.82]" style={{ fontSize }}>
+        <div className={cn('prose prose-sm dark:prose-invert max-w-none break-words break-all leading-[1.82]', usesAssistantStreamStyle && '[&>*]:my-3 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0')} style={{ fontSize }}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -625,7 +653,10 @@ function ToolCard({ name, input }: { name: string; input: unknown }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-[14px]">
+    <div
+      data-testid="chat-tool-card"
+      className="w-full rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-[14px]"
+    >
       <button
         className="flex items-center gap-2 w-full px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
         onClick={() => setExpanded(!expanded)}

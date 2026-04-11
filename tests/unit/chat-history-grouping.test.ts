@@ -70,6 +70,39 @@ describe('groupMessagesForDisplay', () => {
     expect(grouped[1]).toMatchObject({ type: 'message', message: { id: 'assistant-1' } });
   });
 
+  it('treats a single assistant reply with process blocks as a turn so the process section can collapse', () => {
+    const messages: RawMessage[] = [
+      {
+        id: 'user-1',
+        role: 'user',
+        content: 'Tell me what Memo is.',
+      },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'Confirm the concept before answering.' },
+          { type: 'text', text: 'Memo is an AI memory layer project.' },
+        ],
+      },
+    ];
+
+    const grouped = groupMessagesForDisplay(messages);
+
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0]).toMatchObject({
+      type: 'turn',
+      userMessage: { id: 'user-1' },
+      finalMessage: { id: 'assistant-1' },
+    });
+
+    if (grouped[0].type !== 'turn') {
+      throw new Error('expected a grouped turn item');
+    }
+
+    expect(grouped[0].intermediateMessages).toEqual([]);
+  });
+
   it('moves thinking blocks off the final display message so the turn only shows one collapsed thinking entry', () => {
     const finalMessage: RawMessage = {
       id: 'assistant-final',

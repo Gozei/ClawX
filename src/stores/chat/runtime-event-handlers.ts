@@ -2,6 +2,7 @@ import {
   clearErrorRecoveryTimer,
   clearHistoryPoll,
   collectToolUpdates,
+  createToolResultProcessMessage,
   EMPTY_ASSISTANT_RESPONSE_ERROR,
   extractImagesAsAttachedFiles,
   extractMediaRefs,
@@ -24,6 +25,8 @@ let pendingDeltaMessage: RawMessage | null = null;
 let pendingDeltaUpdates: ToolStatus[] = [];
 let pendingDeltaClearError = false;
 let pendingDeltaFlushHandle: ReturnType<typeof setTimeout> | null = null;
+let pendingFinalRecoveryHandle: ReturnType<typeof setTimeout> | null = null;
+const PENDING_FINAL_RECOVERY_DELAY_MS = 20_000;
 
 function cancelPendingDeltaFlush(): void {
   if (pendingDeltaFlushHandle) {
@@ -36,6 +39,13 @@ function resetPendingDeltaState(): void {
   pendingDeltaMessage = null;
   pendingDeltaUpdates = [];
   pendingDeltaClearError = false;
+}
+
+function clearPendingFinalRecoveryTimer(): void {
+  if (pendingFinalRecoveryHandle) {
+    clearTimeout(pendingFinalRecoveryHandle);
+    pendingFinalRecoveryHandle = null;
+  }
 }
 
 function flushPendingDelta(set: ChatSet): void {
@@ -110,6 +120,78 @@ function isEquivalentRecentAssistantMessage(
   });
 }
 
+function schedulePendingFinalRecovery(
+  set: ChatSet,
+  get: ChatGet,
+): void {
+  clearPendingFinalRecoveryTimer();
+  const sessionKey = (get() as { currentSessionKey?: string }).currentSessionKey;
+
+  pendingFinalRecoveryHandle = setTimeout(() => {
+    pendingFinalRecoveryHandle = null;
+    const state = get();
+    if (
+      (sessionKey && (state as { currentSessionKey?: string }).currentSessionKey !== sessionKey)
+      || !state.pendingFinal
+    ) {
+      return;
+    }
+
+    void state.loadHistory(true).finally(() => {
+      const latest = get();
+      if (
+        (sessionKey && (latest as { currentSessionKey?: string }).currentSessionKey !== sessionKey)
+        || !latest.pendingFinal
+      ) {
+        return;
+      }
+
+      set((s) => {
+        const streamingAssistant = s.streamingMessage && typeof s.streamingMessage === 'object'
+          ? s.streamingMessage as RawMessage
+          : null;
+        const canPromoteStreamingAssistant = !!streamingAssistant
+          && (streamingAssistant.role === 'assistant' || streamingAssistant.role === undefined)
+          && hasNonToolAssistantContent(streamingAssistant)
+          && !isToolResultRole(streamingAssistant.role);
+        const pendingImgs = s.pendingToolImages;
+        const streamingSnapshot = canPromoteStreamingAssistant
+          ? {
+              ...streamingAssistant,
+              role: 'assistant' as const,
+              id: streamingAssistant.id || `pending-final-${Date.now()}`,
+              _attachedFiles: pendingImgs.length > 0
+                ? [...(streamingAssistant._attachedFiles || []), ...pendingImgs]
+                : streamingAssistant._attachedFiles,
+            }
+          : null;
+        const shouldAppendStreamingSnapshot = !!streamingSnapshot
+          && !s.messages.some((message) => (
+            (streamingSnapshot.id && message.id === streamingSnapshot.id)
+            || buildMessageContentKey(message.content) === buildMessageContentKey(streamingSnapshot.content)
+          ));
+
+        return {
+          messages: shouldAppendStreamingSnapshot
+            ? [...s.messages, streamingSnapshot!]
+            : s.messages,
+          sending: false,
+          activeRunId: null,
+          pendingFinal: false,
+          lastUserMessageAt: null,
+          streamingText: '',
+          streamingMessage: null,
+          streamingTools: [],
+          pendingToolImages: [],
+          error: shouldAppendStreamingSnapshot || canPromoteStreamingAssistant
+            ? s.error
+            : (s.error || 'The final reply did not arrive, but you can continue the conversation.'),
+        };
+      });
+    });
+  }, PENDING_FINAL_RECOVERY_DELAY_MS);
+}
+
 export function handleRuntimeEventState(
   set: ChatSet,
   get: ChatGet,
@@ -117,6 +199,7 @@ export function handleRuntimeEventState(
   resolvedState: string,
   runId: string,
 ): void {
+      clearPendingFinalRecoveryTimer();
       switch (resolvedState) {
         case 'started': {
           // Run just started (e.g. from console); show loading immediately.
@@ -151,6 +234,7 @@ export function handleRuntimeEventState(
           if (finalMsg) {
             const updates = collectToolUpdates(finalMsg, resolvedState);
             if (isToolResultRole(finalMsg.role)) {
+              const toolResultProcessMessage = createToolResultProcessMessage(finalMsg);
               // Resolve file path from the streaming assistant message's matching tool call
               const currentStreamForPath = get().streamingMessage as RawMessage | null;
               const matchedPath = (currentStreamForPath && finalMsg.toolCallId)
@@ -201,17 +285,25 @@ export function handleRuntimeEventState(
                     }
                   }
                 }
-                return {
-                  messages: snapshotMsgs.length > 0 ? [...s.messages, ...snapshotMsgs] : s.messages,
-                  streamingText: '',
-                  streamingMessage: null,
-                  pendingFinal: true,
+                if (
+                  toolResultProcessMessage
+                  && !s.messages.some((message) => message.id === toolResultProcessMessage.id)
+                  && !snapshotMsgs.some((message) => message.id === toolResultProcessMessage.id)
+                ) {
+                  snapshotMsgs.push(toolResultProcessMessage);
+                }
+              return {
+                messages: snapshotMsgs.length > 0 ? [...s.messages, ...snapshotMsgs] : s.messages,
+                streamingText: '',
+                streamingMessage: null,
+                pendingFinal: true,
                   pendingToolImages: toolFiles.length > 0
-                    ? [...s.pendingToolImages, ...toolFiles]
-                    : s.pendingToolImages,
-                  streamingTools: updates.length > 0 ? upsertToolStatuses(s.streamingTools, updates) : s.streamingTools,
-                };
+                  ? [...s.pendingToolImages, ...toolFiles]
+                  : s.pendingToolImages,
+                streamingTools: updates.length > 0 ? upsertToolStatuses(s.streamingTools, updates) : s.streamingTools,
+              };
             });
+            schedulePendingFinalRecovery(set, get);
             break;
           }
           const toolOnly = isToolOnlyMessage(finalMsg);
@@ -245,22 +337,22 @@ export function handleRuntimeEventState(
               const alreadyExists = s.messages.some(m => m.id === msgId)
                 || isEquivalentRecentAssistantMessage(s.messages, msgWithImages);
               if (alreadyExists) {
-                return toolOnly ? {
-                  streamingText: '',
-                  streamingMessage: null,
-                  pendingFinal: true,
-                  streamingTools,
+              return toolOnly ? {
+                streamingText: '',
+                streamingMessage: null,
+                pendingFinal: true,
+                streamingTools,
                   ...clearPendingImages,
                 } : {
                   streamingText: '',
                   streamingMessage: null,
                   sending: hasOutput ? false : s.sending,
                   activeRunId: hasOutput ? null : s.activeRunId,
-                  pendingFinal: hasOutput ? false : true,
-                  streamingTools,
-                  ...clearPendingImages,
-                };
-              }
+                pendingFinal: hasOutput ? false : true,
+                streamingTools,
+                ...clearPendingImages,
+              };
+            }
               if (emptyAssistantResponse) {
                 return {
                   messages: [...s.messages, msgWithImages],
@@ -292,6 +384,9 @@ export function handleRuntimeEventState(
                 ...clearPendingImages,
               };
             });
+            if (toolOnly || !hasOutput) {
+              schedulePendingFinalRecovery(set, get);
+            }
             // After the final response, quietly reload history to surface all intermediate
             // tool-use turns (thinking + tool blocks) from the Gateway's authoritative record.
             if (hasOutput && !toolOnly) {
@@ -303,6 +398,7 @@ export function handleRuntimeEventState(
           } else {
             // No message in final event - reload history to get complete data
             set({ streamingText: '', streamingMessage: null, pendingFinal: true });
+            schedulePendingFinalRecovery(set, get);
             get().loadHistory();
           }
           break;
@@ -369,6 +465,7 @@ export function handleRuntimeEventState(
           flushPendingDelta(set);
           clearHistoryPoll();
           clearErrorRecoveryTimer();
+          clearPendingFinalRecoveryTimer();
           set({
             sending: false,
             activeRunId: null,

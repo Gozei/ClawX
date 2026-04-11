@@ -156,6 +156,7 @@ linux:
     - target: rpm
       arch:
         - x64
+        - arm64
   category: Utility
   maintainer: DeepData <public@valuecell.ai>
   vendor: DeepData
@@ -184,5 +185,18 @@ deb:
     - xdg-utils
     - libatspi2.0-0 | libatspi2.0-0t64
     - libuuid1
+  afterInstall: scripts/linux/after-install.sh
+  afterRemove: scripts/linux/after-remove.sh
+
+rpm:
+  depends:
+    - gtk3
+    - libnotify
+    - nss
+    - libXScrnSaver
+    - libXtst
+    - xdg-utils
+    - at-spi2-core
+    - libuuid
   afterInstall: scripts/linux/after-install.sh
   afterRemove: scripts/linux/after-remove.sh

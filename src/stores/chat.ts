@@ -28,6 +28,27 @@ export type {
   ToolStatus,
 } from './chat/types';
 
+type ChatStoreSet = (
+  partial: Partial<ChatState> | ((state: ChatState) => Partial<ChatState>),
+  replace?: false,
+) => void;
+
+type SessionViewSnapshot = Pick<
+  ChatState,
+  | 'messages'
+  | 'loading'
+  | 'error'
+  | 'sending'
+  | 'activeRunId'
+  | 'streamingText'
+  | 'streamingMessage'
+  | 'streamingTools'
+  | 'pendingFinal'
+  | 'lastUserMessageAt'
+  | 'pendingToolImages'
+  | 'thinkingLevel'
+>;
+
 // Module-level timestamp tracking the last chat event received.
 // Used by the safety timeout to avoid false-positive "no response" errors
 // during tool-use conversations where streamingMessage is temporarily cleared
@@ -56,8 +77,38 @@ const _lastHistoryLoadAtBySession = new Map<string, number>();
 const SESSION_LOAD_MIN_INTERVAL_MS = 1_200;
 const HISTORY_LOAD_MIN_INTERVAL_MS = 800;
 const HISTORY_POLL_SILENCE_WINDOW_MS = 2_500;
+const HISTORY_POLL_START_DELAY_MS = 3_000;
+const HISTORY_POLL_INTERVAL_MS = 4_000;
+const HISTORY_INCOMPLETE_RETRY_DELAY_MS = 1_200;
+const HISTORY_INCOMPLETE_RETRY_WINDOW_MS = 120_000;
+const HISTORY_INCOMPLETE_RETRY_LIMIT = 3;
 const CHAT_EVENT_DEDUPE_TTL_MS = 30_000;
 const _chatEventDedupe = new Map<string, number>();
+const _sessionViewSnapshots = new Map<string, SessionViewSnapshot>();
+const _historyIncompleteRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const _historyIncompleteRetryAttempts = new Map<string, number>();
+
+const EMPTY_SESSION_VIEW_SNAPSHOT: SessionViewSnapshot = {
+  messages: [],
+  loading: false,
+  error: null,
+  sending: false,
+  activeRunId: null,
+  streamingText: '',
+  streamingMessage: null,
+  streamingTools: [],
+  pendingFinal: false,
+  lastUserMessageAt: null,
+  pendingToolImages: [],
+  thinkingLevel: null,
+};
+
+let pendingDeltaMessage: RawMessage | null = null;
+let pendingDeltaUpdates: ToolStatus[] = [];
+let pendingDeltaClearError = false;
+let pendingDeltaFlushHandle: ReturnType<typeof setTimeout> | null = null;
+let pendingFinalRecoveryHandle: ReturnType<typeof setTimeout> | null = null;
+const PENDING_FINAL_RECOVERY_DELAY_MS = 20_000;
 
 function clearErrorRecoveryTimer(): void {
   if (_errorRecoveryTimer) {
@@ -71,6 +122,219 @@ function clearHistoryPoll(): void {
     clearTimeout(_historyPollTimer);
     _historyPollTimer = null;
   }
+}
+
+function clearHistoryIncompleteRetry(sessionKey: string): void {
+  const timer = _historyIncompleteRetryTimers.get(sessionKey);
+  if (timer) {
+    clearTimeout(timer);
+    _historyIncompleteRetryTimers.delete(sessionKey);
+  }
+  _historyIncompleteRetryAttempts.delete(sessionKey);
+}
+
+function cloneAttachedFiles(files: AttachedFileMeta[] | undefined): AttachedFileMeta[] | undefined {
+  return files?.map((file) => ({ ...file }));
+}
+
+function cloneMessage(message: RawMessage): RawMessage {
+  return {
+    ...message,
+    _attachedFiles: cloneAttachedFiles(message._attachedFiles),
+  };
+}
+
+function cloneToolStatuses(tools: ToolStatus[]): ToolStatus[] {
+  return tools.map((tool) => ({ ...tool }));
+}
+
+function cloneSessionViewSnapshot(snapshot: SessionViewSnapshot): SessionViewSnapshot {
+  return {
+    ...snapshot,
+    messages: snapshot.messages.map(cloneMessage),
+    streamingMessage: snapshot.streamingMessage && typeof snapshot.streamingMessage === 'object'
+      ? { ...(snapshot.streamingMessage as Record<string, unknown>) }
+      : snapshot.streamingMessage,
+    streamingTools: cloneToolStatuses(snapshot.streamingTools),
+    pendingToolImages: cloneAttachedFiles(snapshot.pendingToolImages) ?? [],
+  };
+}
+
+function buildSessionViewSnapshot(
+  state: Pick<
+    ChatState,
+    | 'messages'
+    | 'loading'
+    | 'error'
+    | 'sending'
+    | 'activeRunId'
+    | 'streamingText'
+    | 'streamingMessage'
+    | 'streamingTools'
+    | 'pendingFinal'
+    | 'lastUserMessageAt'
+    | 'pendingToolImages'
+    | 'thinkingLevel'
+  >,
+): SessionViewSnapshot {
+  return cloneSessionViewSnapshot({
+    messages: state.messages,
+    loading: state.loading,
+    error: state.error,
+    sending: state.sending,
+    activeRunId: state.activeRunId,
+    streamingText: state.streamingText,
+    streamingMessage: state.streamingMessage,
+    streamingTools: state.streamingTools,
+    pendingFinal: state.pendingFinal,
+    lastUserMessageAt: state.lastUserMessageAt,
+    pendingToolImages: state.pendingToolImages,
+    thinkingLevel: state.thinkingLevel,
+  });
+}
+
+function cacheSessionView(
+  state: Pick<
+    ChatState,
+    | 'currentSessionKey'
+    | 'messages'
+    | 'loading'
+    | 'error'
+    | 'sending'
+    | 'activeRunId'
+    | 'streamingText'
+    | 'streamingMessage'
+    | 'streamingTools'
+    | 'pendingFinal'
+    | 'lastUserMessageAt'
+    | 'pendingToolImages'
+    | 'thinkingLevel'
+  >,
+): void {
+  _sessionViewSnapshots.set(state.currentSessionKey, buildSessionViewSnapshot(state));
+}
+
+function clearSessionView(sessionKey: string): void {
+  _sessionViewSnapshots.delete(sessionKey);
+}
+
+function restoreSessionView(sessionKey: string): SessionViewSnapshot {
+  const snapshot = _sessionViewSnapshots.get(sessionKey);
+  return cloneSessionViewSnapshot(snapshot ?? EMPTY_SESSION_VIEW_SNAPSHOT);
+}
+
+function cancelPendingDeltaFlush(): void {
+  if (pendingDeltaFlushHandle) {
+    clearTimeout(pendingDeltaFlushHandle);
+    pendingDeltaFlushHandle = null;
+  }
+}
+
+function resetPendingDeltaState(): void {
+  pendingDeltaMessage = null;
+  pendingDeltaUpdates = [];
+  pendingDeltaClearError = false;
+}
+
+function clearPendingFinalRecoveryTimer(): void {
+  if (pendingFinalRecoveryHandle) {
+    clearTimeout(pendingFinalRecoveryHandle);
+    pendingFinalRecoveryHandle = null;
+  }
+}
+
+function mergePendingDeltaUpdates(updates: ToolStatus[]): void {
+  if (updates.length === 0) return;
+  const merged = new Map<string, ToolStatus>();
+
+  for (const update of pendingDeltaUpdates) {
+    merged.set(update.toolCallId || update.id || update.name, update);
+  }
+
+  for (const update of updates) {
+    merged.set(update.toolCallId || update.id || update.name, update);
+  }
+
+  pendingDeltaUpdates = Array.from(merged.values());
+}
+
+function flushPendingDelta(set: ChatStoreSet): void {
+  if (!pendingDeltaMessage && pendingDeltaUpdates.length === 0 && !pendingDeltaClearError) {
+    return;
+  }
+
+  const nextMessage = pendingDeltaMessage;
+  const nextUpdates = pendingDeltaUpdates;
+  const shouldClearError = pendingDeltaClearError;
+
+  cancelPendingDeltaFlush();
+  resetPendingDeltaState();
+
+  set((state) => ({
+    error: shouldClearError ? null : state.error,
+    streamingMessage: (() => {
+      if (nextMessage && typeof nextMessage === 'object') {
+        const msgRole = nextMessage.role;
+        if (isToolResultRole(msgRole)) return state.streamingMessage;
+        if (state.streamingMessage && nextMessage.content === undefined) {
+          return state.streamingMessage;
+        }
+      }
+      return nextMessage ?? state.streamingMessage;
+    })(),
+    streamingTools: nextUpdates.length > 0
+      ? upsertToolStatuses(state.streamingTools, nextUpdates)
+      : state.streamingTools,
+  }));
+}
+
+function scheduleDeltaFlush(set: ChatStoreSet): void {
+  if (pendingDeltaFlushHandle) return;
+  pendingDeltaFlushHandle = setTimeout(() => {
+    flushPendingDelta(set);
+  }, 16);
+}
+
+function startHistoryPoll(get: () => ChatState, sessionKey: string): void {
+  clearHistoryPoll();
+  clearHistoryIncompleteRetry(sessionKey);
+
+  const pollHistory = () => {
+    const state = get();
+    if (state.currentSessionKey !== sessionKey || !state.sending) {
+      clearHistoryPoll();
+      return;
+    }
+    if (state.streamingMessage) {
+      _historyPollTimer = setTimeout(pollHistory, HISTORY_POLL_INTERVAL_MS);
+      return;
+    }
+    if (Date.now() - _lastChatEventAt < HISTORY_POLL_SILENCE_WINDOW_MS) {
+      _historyPollTimer = setTimeout(pollHistory, HISTORY_POLL_INTERVAL_MS);
+      return;
+    }
+    void state.loadHistory(true);
+    _historyPollTimer = setTimeout(pollHistory, HISTORY_POLL_INTERVAL_MS);
+  };
+
+  _historyPollTimer = setTimeout(pollHistory, HISTORY_POLL_START_DELAY_MS);
+}
+
+function scheduleHistoryIncompleteRetry(get: () => ChatState, sessionKey: string): void {
+  if (_historyIncompleteRetryTimers.has(sessionKey)) return;
+
+  const attempts = _historyIncompleteRetryAttempts.get(sessionKey) ?? 0;
+  if (attempts >= HISTORY_INCOMPLETE_RETRY_LIMIT) return;
+
+  _historyIncompleteRetryAttempts.set(sessionKey, attempts + 1);
+  const timer = setTimeout(() => {
+    _historyIncompleteRetryTimers.delete(sessionKey);
+    const state = get();
+    if (state.currentSessionKey !== sessionKey || state.sending) return;
+    void state.loadHistory(true);
+  }, HISTORY_INCOMPLETE_RETRY_DELAY_MS);
+
+  _historyIncompleteRetryTimers.set(sessionKey, timer);
 }
 
 function pruneChatEventDedupe(now: number): void {
@@ -140,6 +404,105 @@ function isEquivalentRecentAssistantMessage(
     if (role !== candidateRole) return false;
     return buildMessageContentKey(message.content) === candidateContentKey;
   });
+}
+
+function schedulePendingFinalRecovery(set: ChatStoreSet, get: () => ChatState): void {
+  clearPendingFinalRecoveryTimer();
+  const sessionKey = get().currentSessionKey;
+
+  pendingFinalRecoveryHandle = setTimeout(() => {
+    pendingFinalRecoveryHandle = null;
+    const state = get();
+    if (state.currentSessionKey !== sessionKey || !state.pendingFinal) return;
+
+    void state.loadHistory(true).finally(() => {
+      const latest = get();
+      if (latest.currentSessionKey !== sessionKey || !latest.pendingFinal) return;
+
+      set((s) => {
+        const streamingAssistant = s.streamingMessage && typeof s.streamingMessage === 'object'
+          ? s.streamingMessage as RawMessage
+          : null;
+        const canPromoteStreamingAssistant = !!streamingAssistant
+          && (streamingAssistant.role === 'assistant' || streamingAssistant.role === undefined)
+          && !isToolResultRole(streamingAssistant.role)
+          && hasNonToolAssistantContent(streamingAssistant);
+        const pendingImgs = s.pendingToolImages;
+        const streamingSnapshot = canPromoteStreamingAssistant
+          ? {
+              ...streamingAssistant,
+              role: 'assistant' as const,
+              id: streamingAssistant.id || `pending-final-${Date.now()}`,
+              _attachedFiles: pendingImgs.length > 0
+                ? [...(streamingAssistant._attachedFiles || []), ...pendingImgs]
+                : streamingAssistant._attachedFiles,
+            }
+          : null;
+        const shouldAppendStreamingSnapshot = !!streamingSnapshot
+          && !s.messages.some((message) => (
+            (streamingSnapshot.id && message.id === streamingSnapshot.id)
+            || buildMessageContentKey(message.content) === buildMessageContentKey(streamingSnapshot.content)
+          ));
+
+        return {
+          messages: shouldAppendStreamingSnapshot
+            ? [...s.messages, streamingSnapshot!]
+            : s.messages,
+          sending: false,
+          activeRunId: null,
+          pendingFinal: false,
+          lastUserMessageAt: null,
+          streamingText: '',
+          streamingMessage: null,
+          streamingTools: [],
+          pendingToolImages: [],
+          error: shouldAppendStreamingSnapshot || canPromoteStreamingAssistant
+            ? s.error
+            : (s.error || 'The final reply did not arrive, but you can continue the conversation.'),
+        };
+      });
+    });
+  }, PENDING_FINAL_RECOVERY_DELAY_MS);
+}
+
+function finalizeStreamingAssistantIfStale(set: ChatStoreSet, get: () => ChatState): boolean {
+  const state = get();
+  const currentStreaming = state.streamingMessage;
+  if (!currentStreaming || typeof currentStreaming !== 'object') return false;
+
+  const streamingAssistant = currentStreaming as RawMessage;
+  if (isToolResultRole(streamingAssistant.role)) return false;
+  if (!(streamingAssistant.role === 'assistant' || streamingAssistant.role === undefined)) return false;
+  if (!hasNonToolAssistantContent(streamingAssistant)) return false;
+
+  const msgId = streamingAssistant.id || `stale-stream-${Date.now()}`;
+  set((s) => {
+    const alreadyExists = s.messages.some((message) => message.id === msgId);
+    const msgWithImages: RawMessage = s.pendingToolImages.length > 0
+      ? {
+          ...streamingAssistant,
+          role: 'assistant',
+          id: msgId,
+          _attachedFiles: [...(streamingAssistant._attachedFiles || []), ...s.pendingToolImages],
+        }
+      : {
+          ...streamingAssistant,
+          role: 'assistant',
+          id: msgId,
+        };
+    return {
+      messages: alreadyExists ? s.messages : [...s.messages, msgWithImages],
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+    };
+  });
+  return true;
 }
 
 // ── Local image cache ─────────────────────────────────────────
@@ -737,6 +1100,15 @@ function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boo
   return typeof session?.label === 'string' && session.label.trim().length > 0;
 }
 
+function findLastUserMessageIndex(messages: RawMessage[]): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === 'user') {
+      return index;
+    }
+  }
+  return -1;
+}
+
 function isUnusedDraftSession(
   state: Pick<ChatState, 'currentSessionKey' | 'messages' | 'sessions' | 'sessionLabels' | 'sessionLastActivity'>,
   sessionKey: string,
@@ -752,7 +1124,22 @@ function isUnusedDraftSession(
 function buildSessionSwitchPatch(
   state: Pick<
     ChatState,
-    'currentSessionKey' | 'messages' | 'sessions' | 'sessionLabels' | 'sessionLastActivity'
+    | 'currentSessionKey'
+    | 'messages'
+    | 'loading'
+    | 'error'
+    | 'sending'
+    | 'activeRunId'
+    | 'streamingText'
+    | 'streamingMessage'
+    | 'streamingTools'
+    | 'pendingFinal'
+    | 'lastUserMessageAt'
+    | 'pendingToolImages'
+    | 'thinkingLevel'
+    | 'sessions'
+    | 'sessionLabels'
+    | 'sessionLastActivity'
   >,
   nextSessionKey: string,
 ): Partial<ChatState> {
@@ -765,6 +1152,14 @@ function buildSessionSwitchPatch(
   const nextSessions = leavingEmpty
     ? state.sessions.filter((session) => session.key !== state.currentSessionKey)
     : state.sessions;
+  const restoredView = restoreSessionView(nextSessionKey);
+  clearHistoryIncompleteRetry(state.currentSessionKey);
+
+  if (leavingEmpty) {
+    clearSessionView(state.currentSessionKey);
+  } else {
+    cacheSessionView(state);
+  }
 
   return {
     currentSessionKey: nextSessionKey,
@@ -776,15 +1171,7 @@ function buildSessionSwitchPatch(
     sessionLastActivity: leavingEmpty
       ? clearSessionEntryFromMap(state.sessionLastActivity, state.currentSessionKey)
       : state.sessionLastActivity,
-    messages: [],
-    streamingText: '',
-    streamingMessage: null,
-    streamingTools: [],
-    activeRunId: null,
-    error: null,
-    pendingFinal: false,
-    lastUserMessageAt: null,
-    pendingToolImages: [],
+    ...restoredView,
   };
 }
 
@@ -887,6 +1274,10 @@ function normalizeToolStatus(rawStatus: unknown, fallback: 'running' | 'complete
   if (status === 'error' || status === 'failed') return 'error';
   if (status === 'completed' || status === 'success' || status === 'done') return 'completed';
   return fallback;
+}
+
+function normalizeToolName(name: string | undefined): string {
+  return (name || 'tool').trim() || 'tool';
 }
 
 function parseDurationMs(value: unknown): number | undefined {
@@ -998,6 +1389,54 @@ function extractToolResultUpdate(message: unknown, eventState: string): ToolStat
 function mergeToolStatus(existing: ToolStatus['status'], incoming: ToolStatus['status']): ToolStatus['status'] {
   const order: Record<ToolStatus['status'], number> = { running: 0, completed: 1, error: 2 };
   return order[incoming] >= order[existing] ? incoming : existing;
+}
+
+function createToolResultProcessMessage(message: RawMessage): RawMessage | null {
+  if (!isToolResultRole(message.role)) return null;
+
+  const msg = message as RawMessage & {
+    name?: string;
+    status?: string;
+    error?: string;
+  };
+  const details = (msg.details && typeof msg.details === 'object')
+    ? msg.details as Record<string, unknown>
+    : undefined;
+  const toolName = normalizeToolName(
+    typeof msg.toolName === 'string'
+      ? msg.toolName
+      : (typeof msg.name === 'string' ? msg.name : undefined),
+  );
+  const toolCallId = typeof msg.toolCallId === 'string' ? msg.toolCallId : undefined;
+  const outputText = (details && typeof details.aggregated === 'string')
+    ? details.aggregated
+    : extractTextFromContent(msg.content);
+  const errorText = typeof details?.error === 'string'
+    ? details.error
+    : (typeof msg.error === 'string' ? msg.error : '');
+  const detailText = outputText.trim() || errorText.trim() || toolName;
+  const status = errorText.trim()
+    ? 'error'
+    : normalizeToolStatus(msg.status ?? details?.status, 'completed');
+  const durationMs = parseDurationMs(details?.durationMs ?? details?.duration ?? ((msg as unknown as Record<string, unknown>).durationMs));
+
+  return {
+    ...message,
+    role: 'assistant',
+    id: message.id ? `${message.id}-tool-result` : `${toolCallId || toolName}-tool-result`,
+    content: [
+      {
+        type: 'tool_result',
+        id: toolCallId || message.id || toolName,
+        name: toolName,
+        status,
+        durationMs,
+        text: detailText,
+        content: detailText,
+      },
+    ],
+    _attachedFiles: cloneAttachedFiles(message._attachedFiles),
+  };
 }
 
 function upsertToolStatuses(current: ToolStatus[], updates: ToolStatus[]): ToolStatus[] {
@@ -1273,8 +1712,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // This prevents the poll timer from firing after the switch and loading
     // the wrong session's history into the new session's view.
     clearHistoryPoll();
+    clearErrorRecoveryTimer();
+    cancelPendingDeltaFlush();
+    resetPendingDeltaState();
     set((s) => buildSessionSwitchPatch(s, key));
-    get().loadHistory();
+    if (get().sending) {
+      startHistoryPoll(get, key);
+    }
+    void get().loadHistory(get().sending);
   },
 
   // ── Delete session ──
@@ -1304,6 +1749,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (err) {
       console.warn(`[deleteSession] IPC call failed for ${key}:`, err);
     }
+    clearSessionView(key);
+    clearHistoryIncompleteRetry(key);
 
     const { currentSessionKey, sessions } = get();
     const remaining = sessions.filter((s) => s.key !== key);
@@ -1355,6 +1802,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ?? getCanonicalPrefixFromSessions(sessions)
       ?? DEFAULT_CANONICAL_PREFIX;
     const newKey = `${prefix}:session-${Date.now()}`;
+    clearHistoryIncompleteRetry(currentSessionKey);
+    if (leavingEmpty) {
+      clearSessionView(currentSessionKey);
+    } else {
+      cacheSessionView(get());
+    }
     set((s) => ({
       currentSessionKey: newKey,
       currentAgentId: getAgentIdFromSessionKey(newKey),
@@ -1450,6 +1903,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       currentSessionKey,
     );
     if (!isEmptyNonMain) return;
+    clearSessionView(currentSessionKey);
+    clearHistoryIncompleteRetry(currentSessionKey);
     set((s) => ({
       sessions: s.sessions.filter((sess) => sess.key !== currentSessionKey),
       sessionLabels: Object.fromEntries(
@@ -1491,6 +1946,75 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const getPreviewMergeKey = (message: RawMessage): string => (
         `${message.id ?? ''}|${message.role}|${message.timestamp ?? ''}|${getMessageText(message.content)}`
       );
+      const messageExistsIn = (messagesToScan: RawMessage[], candidate: RawMessage): boolean => {
+        if (candidate.id && messagesToScan.some((message) => message.id === candidate.id)) {
+          return true;
+        }
+        const candidateKey = getPreviewMergeKey(candidate);
+        const candidateText = getMessageText(candidate.content).trim();
+        return messagesToScan.some((message) => (
+          getPreviewMergeKey(message) === candidateKey
+          || (
+            candidate.role === 'assistant'
+            && message.role === candidate.role
+            && candidateText.length > 0
+            && getMessageText(message.content).trim() === candidateText
+          )
+        ));
+      };
+      const preservePendingAssistantMessages = (
+        currentMessages: RawMessage[],
+        loadedMessages: RawMessage[],
+        lastUserTimestamp: number | null,
+      ): RawMessage[] => {
+        if (!lastUserTimestamp) return loadedMessages;
+
+        const userMs = toMs(lastUserTimestamp);
+        const localTurnAssistants = currentMessages.filter((message) => (
+          message.role === 'assistant'
+          && !!message.timestamp
+          && toMs(message.timestamp) >= userMs
+        ));
+        const currentStreamingMessage = get().streamingMessage;
+        if (
+          currentStreamingMessage
+          && typeof currentStreamingMessage === 'object'
+          && !isToolResultRole((currentStreamingMessage as RawMessage).role)
+        ) {
+          const streamingAssistant = currentStreamingMessage as RawMessage;
+          const streamingRole = streamingAssistant.role;
+          const streamingTimestamp = typeof streamingAssistant.timestamp === 'number'
+            ? toMs(streamingAssistant.timestamp)
+            : userMs;
+          if (
+            (streamingRole === 'assistant' || streamingRole === undefined)
+            && streamingTimestamp >= userMs
+            && hasNonToolAssistantContent(streamingAssistant)
+          ) {
+            localTurnAssistants.push({
+              ...streamingAssistant,
+              role: 'assistant',
+              timestamp: streamingAssistant.timestamp ?? ((userMs + 1) / 1000),
+            });
+          }
+        }
+        if (localTurnAssistants.length === 0) return loadedMessages;
+
+        let lastMatchedLocalIndex = -1;
+        localTurnAssistants.forEach((message, index) => {
+          if (messageExistsIn(loadedMessages, message)) {
+            lastMatchedLocalIndex = index;
+          }
+        });
+
+        const missingSuffix = localTurnAssistants
+          .slice(lastMatchedLocalIndex + 1)
+          .filter((message) => !messageExistsIn(loadedMessages, message));
+
+        return missingSuffix.length > 0
+          ? [...loadedMessages, ...missingSuffix]
+          : loadedMessages;
+      };
       const mergeHydratedMessages = (
         currentMessages: RawMessage[],
         hydratedMessages: RawMessage[],
@@ -1514,6 +2038,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const applyLoadFailure = (errorMessage: string | null) => {
         if (!isCurrentSession()) return;
+        clearHistoryIncompleteRetry(currentSessionKey);
         set((state) => {
           const hasMessages = state.messages.length > 0;
           return {
@@ -1532,7 +2057,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // Before filtering: attach images/files from tool_result messages to the next assistant message
       const messagesWithToolImages = enrichWithToolResultFiles(rawMessages);
-      const filteredMessages = messagesWithToolImages.filter((msg) => !isToolResultRole(msg.role) && !isInternalMessage(msg));
+      const normalizedMessages = messagesWithToolImages.map((msg) => createToolResultProcessMessage(msg) ?? msg);
+      const filteredMessages = normalizedMessages.filter((msg) => !isToolResultRole(msg.role) && !isInternalMessage(msg));
       // Restore file attachments for user/assistant messages (from cache + text patterns)
       const enrichedMessages = enrichWithCachedImages(filteredMessages);
 
@@ -1543,18 +2069,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const userMsgAt = get().lastUserMessageAt;
       if (get().sending && userMsgAt) {
         const userMsMs = toMs(userMsgAt);
-        const hasRecentUser = enrichedMessages.some(
+        const currentMsgs = get().messages;
+        const optimisticUser = [...currentMsgs].reverse().find(
           (m) => m.role === 'user' && m.timestamp && Math.abs(toMs(m.timestamp) - userMsMs) < 5000,
         );
+        const optimisticUserText = optimisticUser ? getMessageText(optimisticUser.content).trim() : '';
+        const hasRecentUser = enrichedMessages.some((m) => {
+          if (m.role !== 'user') return false;
+          if (m.timestamp && Math.abs(toMs(m.timestamp) - userMsMs) < 5000) {
+            return true;
+          }
+          if (!optimisticUser || !optimisticUserText) return false;
+          const loadedText = getMessageText(m.content).trim();
+          if (!loadedText || loadedText !== optimisticUserText) return false;
+          if (!m.timestamp) return true;
+          return Math.abs(toMs(m.timestamp) - userMsMs) < 60_000;
+        });
         if (!hasRecentUser) {
-          const currentMsgs = get().messages;
-          const optimistic = [...currentMsgs].reverse().find(
-            (m) => m.role === 'user' && m.timestamp && Math.abs(toMs(m.timestamp) - userMsMs) < 5000,
-          );
-          if (optimistic) {
-            finalMessages = [...enrichedMessages, optimistic];
+          if (optimisticUser) {
+            finalMessages = [...enrichedMessages, optimisticUser];
           }
         }
+      }
+      if (get().sending) {
+        finalMessages = preservePendingAssistantMessages(get().messages, finalMessages, userMsgAt);
       }
 
       const {
@@ -1581,9 +2119,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return isAfterHistoryUserMsg(msg);
           })
         : undefined;
+      const historyEmptyAssistant = (historyPendingFinal || shouldEnterHistoryPendingFinal)
+        ? [...filteredMessages].reverse().find((msg) => (
+            msg.role === 'assistant'
+            && isAfterHistoryUserMsg(msg)
+            && isEmptyAssistantResponse(msg)
+          ))
+        : undefined;
+      const trailingUserIndex = findLastUserMessageIndex(finalMessages);
+      const trailingUser = trailingUserIndex >= 0 ? finalMessages[trailingUserIndex] : undefined;
+      const shouldRetryIncompleteHistory = !historyIsSendingNow
+        && !historyPendingFinal
+        && !!trailingUser
+        && typeof trailingUser.timestamp === 'number'
+        && Date.now() - toMs(trailingUser.timestamp) <= HISTORY_INCOMPLETE_RETRY_WINDOW_MS
+        && !finalMessages.slice(trailingUserIndex + 1).some((message) => message.role === 'assistant');
 
-      if (historyRecentAssistant) {
+      if (historyRecentAssistant || historyEmptyAssistant) {
         clearHistoryPoll();
+      }
+      if (shouldRetryIncompleteHistory) {
+        scheduleHistoryIncompleteRetry(get, currentSessionKey);
+      } else {
+        clearHistoryIncompleteRetry(currentSessionKey);
       }
 
       set({
@@ -1600,6 +2158,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
               streamingTools: [],
               pendingToolImages: [],
             }
+          : historyEmptyAssistant
+            ? {
+                sending: false,
+                activeRunId: null,
+                pendingFinal: false,
+                lastUserMessageAt: null,
+                streamingText: '',
+                streamingMessage: null,
+                streamingTools: [],
+                pendingToolImages: [],
+                error: EMPTY_ASSISTANT_RESPONSE_ERROR,
+              }
           : shouldEnterHistoryPendingFinal
             ? { pendingFinal: true }
             : {}),
@@ -1709,11 +2279,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const targetSessionKey = resolveMainSessionKeyForAgent(targetAgentId) ?? get().currentSessionKey;
 
     if (targetSessionKey !== get().currentSessionKey) {
+      clearErrorRecoveryTimer();
+      cancelPendingDeltaFlush();
+      resetPendingDeltaState();
       set((s) => buildSessionSwitchPatch(s, targetSessionKey));
       await get().loadHistory(true);
     }
 
     const currentSessionKey = targetSessionKey;
+    clearHistoryIncompleteRetry(currentSessionKey);
     const existingMessages = get().messages;
     const isFirstUserMessage = !existingMessages.some((message) => message.role === 'user');
     const baseMessage = trimmed || (attachments?.length ? 'Process the attached file(s).' : '');
@@ -1764,30 +2338,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     _lastChatEventAt = Date.now();
     clearHistoryPoll();
     clearErrorRecoveryTimer();
-
-    const POLL_START_DELAY = 3_000;
-    const POLL_INTERVAL = 4_000;
-    const pollHistory = () => {
-      const state = get();
-      if (!state.sending) { clearHistoryPoll(); return; }
-      if (state.streamingMessage) {
-        _historyPollTimer = setTimeout(pollHistory, POLL_INTERVAL);
-        return;
-      }
-      if (Date.now() - _lastChatEventAt < HISTORY_POLL_SILENCE_WINDOW_MS) {
-        _historyPollTimer = setTimeout(pollHistory, POLL_INTERVAL);
-        return;
-      }
-      state.loadHistory(true);
-      _historyPollTimer = setTimeout(pollHistory, POLL_INTERVAL);
-    };
-    _historyPollTimer = setTimeout(pollHistory, POLL_START_DELAY);
+    startHistoryPoll(get, currentSessionKey);
 
     const SAFETY_TIMEOUT_MS = 90_000;
+    const STREAMING_STALE_TIMEOUT_MS = 15_000;
     const checkStuck = () => {
       const state = get();
       if (!state.sending) return;
-      if (state.streamingMessage || state.streamingText) return;
+      if (state.streamingMessage || state.streamingText) {
+        if (Date.now() - _lastChatEventAt >= STREAMING_STALE_TIMEOUT_MS) {
+          const finalized = finalizeStreamingAssistantIfStale(set, get);
+          if (finalized) {
+            clearHistoryPoll();
+            return;
+          }
+        }
+        setTimeout(checkStuck, 10_000);
+        return;
+      }
       if (state.pendingFinal) {
         setTimeout(checkStuck, 10_000);
         return;
@@ -1956,9 +2524,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
+    clearPendingFinalRecoveryTimer();
+
     switch (resolvedState) {
       case 'started': {
         // Run just started (e.g. from console); show loading immediately.
+        clearHistoryIncompleteRetry(currentSessionKey);
         const { sending: currentSending } = get();
         if (!currentSending && runId) {
           set({ sending: true, activeRunId: runId, error: null });
@@ -1969,24 +2540,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Clear any stale error (including RPC timeout) when new data arrives.
         if (_errorRecoveryTimer) {
           clearErrorRecoveryTimer();
-        }
-        if (get().error) {
-          set({ error: null });
+          pendingDeltaClearError = true;
         }
         const updates = collectToolUpdates(event.message, resolvedState);
-        set((s) => ({
-          streamingMessage: (() => {
-            if (event.message && typeof event.message === 'object') {
-              const msgRole = (event.message as RawMessage).role;
-              if (isToolResultRole(msgRole)) return s.streamingMessage;
-            }
-            return event.message ?? s.streamingMessage;
-          })(),
-          streamingTools: updates.length > 0 ? upsertToolStatuses(s.streamingTools, updates) : s.streamingTools,
-        }));
+        if (event.message && typeof event.message === 'object') {
+          pendingDeltaMessage = event.message as RawMessage;
+        }
+        mergePendingDeltaUpdates(updates);
+        scheduleDeltaFlush(set);
         break;
       }
       case 'final': {
+        flushPendingDelta(set);
         clearErrorRecoveryTimer();
         if (get().error) set({ error: null });
         // Message complete - add to history and clear streaming
@@ -1994,6 +2559,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (finalMsg) {
           const updates = collectToolUpdates(finalMsg, resolvedState);
           if (isToolResultRole(finalMsg.role)) {
+            const toolResultProcessMessage = createToolResultProcessMessage(finalMsg);
             // Resolve file path from the streaming assistant message's matching tool call
             const currentStreamForPath = get().streamingMessage as RawMessage | null;
             const matchedPath = (currentStreamForPath && finalMsg.toolCallId)
@@ -2044,6 +2610,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   }
                 }
               }
+              if (
+                toolResultProcessMessage
+                && !s.messages.some((message) => message.id === toolResultProcessMessage.id)
+                && !snapshotMsgs.some((message) => message.id === toolResultProcessMessage.id)
+              ) {
+                snapshotMsgs.push(toolResultProcessMessage);
+              }
               return {
                 messages: snapshotMsgs.length > 0 ? [...s.messages, ...snapshotMsgs] : s.messages,
                 streamingText: '',
@@ -2055,6 +2628,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 streamingTools: updates.length > 0 ? upsertToolStatuses(s.streamingTools, updates) : s.streamingTools,
               };
             });
+            schedulePendingFinalRecovery(set, get);
             break;
           }
           const toolOnly = isToolOnlyMessage(finalMsg);
@@ -2130,27 +2704,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
               streamingMessage: null,
               sending: hasOutput ? false : s.sending,
               activeRunId: hasOutput ? null : s.activeRunId,
-              pendingFinal: hasOutput ? false : true,
-              streamingTools,
-              ...clearPendingImages,
-            };
+                pendingFinal: hasOutput ? false : true,
+                streamingTools,
+                ...clearPendingImages,
+              };
           });
+          if (toolOnly || !hasOutput) {
+            schedulePendingFinalRecovery(set, get);
+          }
           // After the final response, quietly reload history to surface all intermediate
           // tool-use turns (thinking + tool blocks) from the Gateway's authoritative record.
           if (hasOutput && !toolOnly) {
             clearHistoryPoll();
+            clearHistoryIncompleteRetry(currentSessionKey);
             void get().loadHistory(true);
           } else if (emptyAssistantResponse) {
             clearHistoryPoll();
+            clearHistoryIncompleteRetry(currentSessionKey);
           }
         } else {
           // No message in final event - reload history to get complete data
           set({ streamingText: '', streamingMessage: null, pendingFinal: true });
+          schedulePendingFinalRecovery(set, get);
           get().loadHistory();
         }
         break;
       }
       case 'error': {
+        flushPendingDelta(set);
+        clearHistoryIncompleteRetry(currentSessionKey);
         const errorMsg = String(event.errorMessage || 'An error occurred');
         const wasSending = get().sending;
 
@@ -2208,8 +2790,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         break;
       }
       case 'aborted': {
+        flushPendingDelta(set);
         clearHistoryPoll();
         clearErrorRecoveryTimer();
+        clearHistoryIncompleteRetry(currentSessionKey);
+        clearPendingFinalRecoveryTimer();
         set({
           sending: false,
           activeRunId: null,
@@ -2223,6 +2808,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         break;
       }
       default: {
+        flushPendingDelta(set);
         // Unknown or empty state — if we're currently sending and receive an event
         // with a message, attempt to process it as streaming data. This handles
         // edge cases where the Gateway sends events without a state field.

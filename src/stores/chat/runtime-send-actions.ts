@@ -5,6 +5,8 @@ import {
   clearErrorRecoveryTimer,
   clearHistoryPoll,
   getLastChatEventAt,
+  hasNonToolAssistantContent,
+  isToolResultRole,
   setHistoryPollTimer,
   setLastChatEventAt,
   upsertImageCacheEntry,
@@ -52,6 +54,46 @@ function injectAgentExecutionMetadata(message: string, sessionKey: string, isFir
   const metadata = buildAgentExecutionMetadataForSession(sessionKey);
   if (!metadata) return message;
   return message ? `${metadata}${message}` : metadata;
+}
+
+function finalizeStreamingAssistantIfStale(set: ChatSet, get: ChatGet): boolean {
+  const state = get();
+  const currentStreaming = state.streamingMessage;
+  if (!currentStreaming || typeof currentStreaming !== 'object') return false;
+
+  const streamingAssistant = currentStreaming as RawMessage;
+  if (isToolResultRole(streamingAssistant.role)) return false;
+  if (!(streamingAssistant.role === 'assistant' || streamingAssistant.role === undefined)) return false;
+  if (!hasNonToolAssistantContent(streamingAssistant)) return false;
+
+  const msgId = streamingAssistant.id || `stale-stream-${Date.now()}`;
+  set((s) => {
+    const alreadyExists = s.messages.some((message) => message.id === msgId);
+    const msgWithImages: RawMessage = s.pendingToolImages.length > 0
+      ? {
+          ...streamingAssistant,
+          role: 'assistant',
+          id: msgId,
+          _attachedFiles: [...(streamingAssistant._attachedFiles || []), ...s.pendingToolImages],
+        }
+      : {
+          ...streamingAssistant,
+          role: 'assistant',
+          id: msgId,
+        };
+    return {
+      messages: alreadyExists ? s.messages : [...s.messages, msgWithImages],
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+    };
+  });
+  return true;
 }
 
 export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<RuntimeActions, 'sendMessage' | 'abortRun'> {
@@ -163,10 +205,21 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
       setHistoryPollTimer(setTimeout(pollHistory, POLL_START_DELAY));
 
       const SAFETY_TIMEOUT_MS = 90_000;
+      const STREAMING_STALE_TIMEOUT_MS = 15_000;
       const checkStuck = () => {
         const state = get();
         if (!state.sending) return;
-        if (state.streamingMessage || state.streamingText) return;
+        if (state.streamingMessage || state.streamingText) {
+          if (Date.now() - getLastChatEventAt() >= STREAMING_STALE_TIMEOUT_MS) {
+            const finalized = finalizeStreamingAssistantIfStale(set, get);
+            if (finalized) {
+              clearHistoryPoll();
+              return;
+            }
+          }
+          setTimeout(checkStuck, 10_000);
+          return;
+        }
         if (state.pendingFinal) {
           setTimeout(checkStuck, 10_000);
           return;

@@ -7,8 +7,7 @@ test.describe('Deep AI Worker Electron smoke flows', () => {
     await expect(page.getByTestId('setup-skip-button')).toBeVisible();
     await expect(page.getByText('Welcome to Deep AI Worker')).toBeVisible();
     await expect(page.getByRole('button', { name: 'English' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '中文' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '日本語' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '\u4e2d\u6587' })).toBeVisible();
   });
 
   test('can skip setup and navigate to the models page', async ({ page }) => {

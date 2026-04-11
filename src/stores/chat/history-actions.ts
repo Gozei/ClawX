@@ -2,6 +2,7 @@ import { invokeIpc } from '@/lib/api-client';
 import { hostApiFetch } from '@/lib/host-api';
 import {
   clearHistoryPoll,
+  createToolResultProcessMessage,
   EMPTY_ASSISTANT_RESPONSE_ERROR,
   enrichWithCachedImages,
   enrichWithToolResultFiles,
@@ -43,6 +44,75 @@ export function createHistoryActions(
       const getPreviewMergeKey = (message: RawMessage): string => (
         `${message.id ?? ''}|${message.role}|${message.timestamp ?? ''}|${getMessageText(message.content)}`
       );
+      const messageExistsIn = (messagesToScan: RawMessage[], candidate: RawMessage): boolean => {
+        if (candidate.id && messagesToScan.some((message) => message.id === candidate.id)) {
+          return true;
+        }
+        const candidateKey = getPreviewMergeKey(candidate);
+        const candidateText = getMessageText(candidate.content).trim();
+        return messagesToScan.some((message) => (
+          getPreviewMergeKey(message) === candidateKey
+          || (
+            candidate.role === 'assistant'
+            && message.role === candidate.role
+            && candidateText.length > 0
+            && getMessageText(message.content).trim() === candidateText
+          )
+        ));
+      };
+      const preservePendingAssistantMessages = (
+        currentMessages: RawMessage[],
+        loadedMessages: RawMessage[],
+        lastUserTimestamp: number | null,
+      ): RawMessage[] => {
+        if (!lastUserTimestamp) return loadedMessages;
+
+        const userMs = toMs(lastUserTimestamp);
+        const localTurnAssistants = currentMessages.filter((message) => (
+          message.role === 'assistant'
+          && !!message.timestamp
+          && toMs(message.timestamp) >= userMs
+        ));
+        const currentStreamingMessage = get().streamingMessage;
+        if (
+          currentStreamingMessage
+          && typeof currentStreamingMessage === 'object'
+          && !isToolResultRole((currentStreamingMessage as RawMessage).role)
+        ) {
+          const streamingAssistant = currentStreamingMessage as RawMessage;
+          const streamingRole = streamingAssistant.role;
+          const streamingTimestamp = typeof streamingAssistant.timestamp === 'number'
+            ? toMs(streamingAssistant.timestamp)
+            : userMs;
+          if (
+            (streamingRole === 'assistant' || streamingRole === undefined)
+            && streamingTimestamp >= userMs
+            && hasNonToolAssistantContent(streamingAssistant)
+          ) {
+            localTurnAssistants.push({
+              ...streamingAssistant,
+              role: 'assistant',
+              timestamp: streamingAssistant.timestamp ?? ((userMs + 1) / 1000),
+            });
+          }
+        }
+        if (localTurnAssistants.length === 0) return loadedMessages;
+
+        let lastMatchedLocalIndex = -1;
+        localTurnAssistants.forEach((message, index) => {
+          if (messageExistsIn(loadedMessages, message)) {
+            lastMatchedLocalIndex = index;
+          }
+        });
+
+        const missingSuffix = localTurnAssistants
+          .slice(lastMatchedLocalIndex + 1)
+          .filter((message) => !messageExistsIn(loadedMessages, message));
+
+        return missingSuffix.length > 0
+          ? [...loadedMessages, ...missingSuffix]
+          : loadedMessages;
+      };
       const mergeHydratedMessages = (
         currentMessages: RawMessage[],
         hydratedMessages: RawMessage[],
@@ -80,7 +150,8 @@ export function createHistoryActions(
         if (!isCurrentSession()) return;
         // Before filtering: attach images/files from tool_result messages to the next assistant message
         const messagesWithToolImages = enrichWithToolResultFiles(rawMessages);
-        const filteredMessages = messagesWithToolImages.filter((msg) => !isToolResultRole(msg.role) && !isInternalMessage(msg));
+        const normalizedMessages = messagesWithToolImages.map((msg) => createToolResultProcessMessage(msg) ?? msg);
+        const filteredMessages = normalizedMessages.filter((msg) => !isToolResultRole(msg.role) && !isInternalMessage(msg));
         // Restore file attachments for user/assistant messages (from cache + text patterns)
         const enrichedMessages = enrichWithCachedImages(filteredMessages);
 
@@ -103,6 +174,10 @@ export function createHistoryActions(
               finalMessages = [...enrichedMessages, optimistic];
             }
           }
+        }
+
+        if (get().sending) {
+          finalMessages = preservePendingAssistantMessages(get().messages, finalMessages, userMsgAt);
         }
 
         const {
@@ -129,8 +204,15 @@ export function createHistoryActions(
               return isAfterHistoryUserMsg(msg);
             })
           : undefined;
+        const historyEmptyAssistant = (historyPendingFinal || shouldEnterHistoryPendingFinal)
+          ? [...filteredMessages].reverse().find((msg) => (
+              msg.role === 'assistant'
+              && isAfterHistoryUserMsg(msg)
+              && isEmptyAssistantResponse(msg)
+            ))
+          : undefined;
 
-        if (historyRecentAssistant) {
+        if (historyRecentAssistant || historyEmptyAssistant) {
           clearHistoryPoll();
         }
 
@@ -148,6 +230,18 @@ export function createHistoryActions(
                 streamingTools: [],
                 pendingToolImages: [],
               }
+            : historyEmptyAssistant
+              ? {
+                  sending: false,
+                  activeRunId: null,
+                  pendingFinal: false,
+                  lastUserMessageAt: null,
+                  streamingText: '',
+                  streamingMessage: null,
+                  streamingTools: [],
+                  pendingToolImages: [],
+                  error: EMPTY_ASSISTANT_RESPONSE_ERROR,
+                }
             : shouldEnterHistoryPendingFinal
               ? { pendingFinal: true }
               : {}),

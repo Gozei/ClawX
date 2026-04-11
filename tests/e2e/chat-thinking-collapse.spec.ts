@@ -81,16 +81,16 @@ test.describe('Chat thinking collapse', () => {
 
       await expect(page.getByText('请帮我拍一张照片并发给我', { exact: true })).toBeVisible({ timeout: 60_000 });
       await expect(page.getByText('完成，照片已经发送给你。', { exact: true })).toBeVisible({ timeout: 60_000 });
-      await expect(page.getByTestId('chat-turn-thinking-toggle')).toBeVisible();
-      await expect(page.getByTestId('chat-turn-thinking-toggle')).toHaveCount(1);
+      await expect(page.getByTestId('chat-process-toggle')).toBeVisible();
+      await expect(page.getByTestId('chat-process-toggle')).toHaveCount(1);
 
       await expect(page.getByText('我先帮你检查摄像头并准备拍照。', { exact: true })).toHaveCount(0);
       await expect(page.getByText('照片已保存，正在整理给你的最终结果。', { exact: true })).toHaveCount(0);
       await expect(page.getByText('最后再确认输出内容是否完整。', { exact: true })).toHaveCount(0);
 
-      await page.getByTestId('chat-turn-thinking-toggle').click();
+      await page.getByTestId('chat-process-toggle').click();
 
-      await expect(page.getByTestId('chat-turn-thinking-content')).toBeVisible();
+      await expect(page.getByTestId('chat-process-content')).toBeVisible();
       await expect(page.getByText('我先帮你检查摄像头并准备拍照。', { exact: true })).toBeVisible();
       await expect(page.getByText('照片已保存，正在整理给你的最终结果。', { exact: true })).toBeVisible();
       await expect(page.getByText('最后再确认输出内容是否完整。', { exact: true })).toBeVisible();

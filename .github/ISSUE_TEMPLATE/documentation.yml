@@ -18,7 +18,7 @@ body:
     attributes:
       label: Affected Location
       description: Which docs are impacted?
-      placeholder: README.md / README.zh-CN.md / README.ja-JP.md / other
+      placeholder: README.md / README.zh-CN.md / other
     validations:
       required: true
 

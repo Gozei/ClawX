@@ -48,10 +48,12 @@ type SkillSection = {
   skills: Skill[];
 };
 
+const headerActionButtonClasses = 'h-10 rounded-full px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6';
 const actionButtonClasses = 'h-9 rounded-full border-black/10 bg-transparent px-4 text-[13px] font-medium text-muted-foreground shadow-none hover:bg-black/5 hover:text-foreground dark:border-white/10 dark:hover:bg-white/5';
 const iconOutlineButtonClasses = 'h-[36px] w-[36px] border-black/10 bg-transparent text-muted-foreground shadow-none hover:bg-black/5 hover:text-foreground dark:border-white/10 dark:hover:bg-white/5';
-const skillPanelClasses = 'rounded-[24px] border border-black/10 bg-black/5 shadow-none dark:border-white/10 dark:bg-white/5';
-const skillSectionClasses = 'rounded-[28px] border border-black/10 bg-black/5 shadow-none dark:border-white/10 dark:bg-white/5';
+const skillPanelClasses = 'rounded-[24px] border border-black/10 bg-transparent shadow-none dark:border-white/10';
+const skillSectionClasses = 'rounded-[28px] border border-black/10 bg-transparent shadow-none dark:border-white/10';
+const skillInsetCardClasses = 'rounded-2xl bg-black/5 shadow-none dark:bg-white/5';
 const detailInputClasses = 'rounded-xl border-black/10 bg-white text-foreground shadow-none dark:border-white/10 dark:bg-card';
 const skillMetaBadgeClasses = 'border-0 bg-black/[0.04] text-foreground/70 shadow-none dark:bg-white/[0.08] dark:text-white/72';
 
@@ -253,9 +255,9 @@ function SkillDetailDialog({ skill, isOpen, onClose, onToggle, onUninstall, onOp
         side="right"
       >
         <div className="flex-1 overflow-y-auto px-8 py-7">
-          <div className="rounded-[28px] border border-black/10 bg-black/5 px-6 py-6 shadow-none dark:border-white/10 dark:bg-white/5">
+          <div className="rounded-[28px] border border-black/10 bg-transparent px-6 py-6 shadow-none dark:border-white/10">
             <div className="flex items-start gap-4">
-              <div className="relative flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-black/10 bg-white shadow-none dark:border-white/10 dark:bg-card">
+              <div className="relative flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-black/5 bg-black/5 shadow-none dark:border-white/10 dark:bg-white/5">
                 <span className="text-3xl">{skill.icon || '🔧'}</span>
                 {skill.isCore && (
                   <div className="absolute -right-1.5 -top-1.5 rounded-full border border-black/10 bg-background p-1 shadow-none dark:border-white/10 dark:bg-card">
@@ -700,16 +702,17 @@ export function Skills() {
   }
 
   return (
-    <div data-testid="skills-page" className="flex flex-col -m-6 h-[calc(100vh-2.5rem)] overflow-hidden bg-[#f5f7fb] dark:bg-background">
-      <div className="w-full max-w-6xl mx-auto flex flex-col h-full px-10 pt-12 pb-8">
+    <div data-testid="skills-page" className="flex flex-col -m-6 h-[calc(100vh-2.5rem)] overflow-hidden dark:bg-background">
+      <div className="w-full max-w-5xl mx-auto flex flex-col h-full p-10 pt-16">
 
         <PageHeader
+          titleTestId="skills-page-title"
           title={t('title')}
           subtitle={t('subtitle')}
           actions={hasInstalledSkills ? (
             <button
               onClick={handleOpenSkillsFolder}
-              className={cn(actionButtonClasses, 'h-10 shrink-0 transition-colors dark:hover:text-white')}
+              className={cn(headerActionButtonClasses, 'shrink-0 transition-colors')}
             >
               <FolderOpen className="h-4 w-4 mr-2" />
               {t('openFolder')}
@@ -894,11 +897,11 @@ export function Skills() {
                       <div
                         key={skill.id}
                         data-testid={`skills-list-item-${skill.id}`}
-                        className="group flex cursor-pointer flex-row items-center justify-between rounded-2xl border border-black/10 bg-transparent px-4 py-4 transition-colors hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
+                        className={cn(skillInsetCardClasses, 'group flex cursor-pointer flex-row items-center justify-between px-4 py-4 transition-colors hover:bg-black/10 dark:hover:bg-white/10')}
                         onClick={() => setSelectedSkill(skill)}
                       >
                         <div className="flex items-start gap-4 flex-1 overflow-hidden pr-4">
-                          <div className="h-11 w-11 shrink-0 flex items-center justify-center overflow-hidden rounded-2xl border border-black/10 bg-white text-2xl dark:border-white/10 dark:bg-card">
+                          <div className="h-11 w-11 shrink-0 flex items-center justify-center overflow-hidden rounded-2xl border border-black/5 bg-black/5 text-2xl dark:border-white/10 dark:bg-white/5">
                             {skill.icon || '🧩'}
                           </div>
                           <div className="flex flex-col overflow-hidden">
