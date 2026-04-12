@@ -7,7 +7,7 @@
 import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ChevronDown, ChevronRight, ListTodo, Loader2, Network, Sparkles, Workflow } from 'lucide-react';
-import { useChatStore, type RawMessage, type ToolStatus } from '@/stores/chat';
+import { useChatStore, type ChatSendStage, type RawMessage, type ToolStatus } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
@@ -44,6 +44,7 @@ export function Chat() {
   const assistantMessageStyle = useSettingsStore((s) => s.assistantMessageStyle);
   const streamingMessage = useChatStore((s) => s.streamingMessage);
   const streamingTools = useChatStore((s) => s.streamingTools);
+  const sendStage = useChatStore((s) => s.sendStage);
   const pendingFinal = useChatStore((s) => s.pendingFinal);
   const lastUserMessageAt = useChatStore((s) => s.lastUserMessageAt);
   const sendMessage = useChatStore((s) => s.sendMessage);
@@ -271,6 +272,8 @@ export function Chat() {
                   finalPhaseStarted={activeTurnFinalPhaseStarted}
                   showActivity={showProcessActivity}
                   showTyping={!shouldUseProcessLayout && !persistedActiveFinalMessage && !activeTurnFinalStreamingMessage && !pendingFinal && !hasAnyStreamContent}
+                  sending={sending}
+                  sendStage={sendStage}
                   streamingTools={streamingTools}
                 />
               ) : (
@@ -287,12 +290,19 @@ export function Chat() {
 
                   {/* Activity indicator: waiting for next AI turn after tool execution */}
                   {sending && pendingFinal && !activeTurnFinalStreamingMessage && !isStreamingDuplicateOfPersistedAssistant && chatProcessDisplayMode === 'all' && (
-                    <ActivityIndicator phase="tool_processing" />
+                    <ActivityIndicator phase="tool_processing" activityKind="finalizing" />
                   )}
 
                   {/* Typing indicator when sending but no stream content yet */}
                   {sending && !pendingFinal && !hasAnyStreamContent && (
-                    <TypingIndicator />
+                    <ActivityIndicator
+                      phase="tool_processing"
+                      activityKind={sendStage === 'sending_to_gateway'
+                        ? 'sending'
+                        : sendStage === 'awaiting_runtime'
+                          ? 'awaiting'
+                          : 'thinking'}
+                    />
                   )}
                 </>
               )}
@@ -341,6 +351,7 @@ export function Chat() {
 }
 
 type ProcessPhase = 'working' | 'processed';
+type ProcessActivityKind = 'thinking' | 'file' | 'awaiting' | 'sending' | 'finalizing';
 
 function toTimestampMs(timestamp: number | undefined): number | null {
   if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) return null;
@@ -436,15 +447,53 @@ function formatProcessStatus(
   phase: ProcessPhase,
   durationLabel: string,
   language: string | undefined,
+  activityKind: ProcessActivityKind = 'thinking',
+  elapsedMs = 0,
 ): string {
+  const effectiveKind = activityKind === 'file' && elapsedMs < 4_000 ? 'preparing' : activityKind;
   switch (normalizeProcessLocale(language)) {
     case 'zh':
       return phase === 'processed'
         ? `\u5df2\u5904\u7406 ${durationLabel}`
-        : `\u6b63\u5728\u5904\u7406 ${durationLabel}`;
+        : effectiveKind === 'finalizing'
+          ? `\u6b63\u5728\u6574\u7406\u7ed3\u679c ${durationLabel}`
+          : effectiveKind === 'sending'
+            ? `\u6b63\u5728\u63d0\u4ea4\u4efb\u52a1 ${durationLabel}`
+            : effectiveKind === 'awaiting'
+              ? `\u6b63\u5728\u7b49\u5f85\u5f00\u59cb\u5904\u7406 ${durationLabel}`
+          : effectiveKind === 'preparing'
+            ? `\u6b63\u5728\u51c6\u5907\u6587\u4ef6 ${durationLabel}`
+            : effectiveKind === 'file'
+              ? `\u6b63\u5728\u8bfb\u53d6\u6587\u4ef6 ${durationLabel}`
+              : `\u6b63\u5728\u601d\u8003 ${durationLabel}`;
     default:
-      return phase === 'processed' ? `Processed ${durationLabel}` : `Working for ${durationLabel}`;
+      return phase === 'processed'
+        ? `Processed ${durationLabel}`
+        : effectiveKind === 'finalizing'
+          ? `Finalizing ${durationLabel}`
+          : effectiveKind === 'sending'
+            ? `Submitting task ${durationLabel}`
+            : effectiveKind === 'awaiting'
+              ? `Waiting to start ${durationLabel}`
+          : effectiveKind === 'preparing'
+            ? `Preparing file ${durationLabel}`
+            : effectiveKind === 'file'
+              ? `Reading file ${durationLabel}`
+              : `Thinking ${durationLabel}`;
   }
+}
+
+function getActivityKindFromStage(
+  sendStage: ChatSendStage | null,
+  hasAttachments: boolean,
+  finalPhaseStarted: boolean,
+  showActivity: boolean,
+): ProcessActivityKind {
+  if (sendStage === 'finalizing' || finalPhaseStarted || showActivity) return 'finalizing';
+  if (sendStage === 'sending_to_gateway') return 'sending';
+  if (sendStage === 'awaiting_runtime') return 'awaiting';
+  if (sendStage === 'running') return hasAttachments ? 'file' : 'thinking';
+  return hasAttachments ? 'file' : 'thinking';
 }
 
 function hasVisibleProcessContent(
@@ -536,6 +585,7 @@ function ProcessSection({
   completedAtMs,
   showActivity,
   streamingTools,
+  activityKind = 'thinking',
 }: {
   processMessages: RawMessage[];
   processStreamingMessage?: RawMessage | null;
@@ -547,6 +597,7 @@ function ProcessSection({
   completedAtMs?: number;
   showActivity?: boolean;
   streamingTools?: ToolStatus[];
+  activityKind?: ProcessActivityKind;
 }) {
   const { i18n } = useTranslation('chat');
   const visibleMessages = processMessages.filter((message) => (
@@ -558,11 +609,16 @@ function ProcessSection({
       || (chatProcessDisplayMode === 'all' && (streamingTools?.length ?? 0) > 0)
     );
   const hasSection = visibleMessages.length > 0 || hasStreamingProcessContent || !!showActivity;
-  const [collapsed, setCollapsed] = useState(phase === 'processed');
+  const usesStreamProcessStyle = assistantMessageStyle === 'stream';
+  const shouldDefaultCollapse = phase === 'processed' || (phase === 'working' && usesStreamProcessStyle);
+  const [collapsed, setCollapsed] = useState(shouldDefaultCollapse);
   const [nowMs, setNowMs] = useState(Date.now());
   const [frozenCompletedAtMs, setFrozenCompletedAtMs] = useState<number | null>(
     phase === 'processed' ? (completedAtMs ?? Date.now()) : null,
   );
+  useEffect(() => {
+    setCollapsed(shouldDefaultCollapse);
+  }, [shouldDefaultCollapse, startedAtMs]);
 
   useEffect(() => {
     if (phase === 'processed' && frozenCompletedAtMs == null) {
@@ -592,10 +648,11 @@ function ProcessSection({
     phase,
     elapsedLabel,
     i18n?.resolvedLanguage || i18n?.language,
+    activityKind,
+    Math.max(0, effectiveEndMs - startedAtMs),
   );
-  const isCollapsible = phase === 'processed';
+  const isCollapsible = phase === 'processed' || usesStreamProcessStyle;
   const expandedMessageIndex = hasStreamingProcessContent ? -1 : Math.max(visibleMessages.length - 1, 0);
-  const usesStreamProcessStyle = assistantMessageStyle === 'stream';
 
   return (
     <div className="flex gap-3">
@@ -647,7 +704,7 @@ function ProcessSection({
                     message={processStreamingMessage}
                     showThinking={showThinking}
                     chatProcessDisplayMode={chatProcessDisplayMode}
-                    defaultExpanded
+                    defaultExpanded={false}
                     streamingTools={streamingTools}
                   />
                 )}
@@ -677,7 +734,7 @@ function ProcessSection({
               </>
             )}
             {showActivity && (
-              <ProcessActivityIndicator streamStyle={usesStreamProcessStyle} />
+              <ProcessActivityIndicator streamStyle={usesStreamProcessStyle} activityKind={activityKind} />
             )}
           </div>
         )}
@@ -751,6 +808,8 @@ function ActiveTurn({
   finalPhaseStarted,
   showActivity,
   showTyping,
+  sending,
+  sendStage,
   streamingTools,
 }: {
   userMessage: RawMessage;
@@ -765,6 +824,8 @@ function ActiveTurn({
   finalPhaseStarted: boolean;
   showActivity: boolean;
   showTyping: boolean;
+  sending: boolean;
+  sendStage: ChatSendStage | null;
   streamingTools: ToolStatus[];
 }) {
   const hasProcessSection = processMessages.some((message) => (
@@ -778,8 +839,11 @@ function ActiveTurn({
       )
     )
     || showActivity;
+  const hasAttachments = (userMessage._attachedFiles?.length ?? 0) > 0;
+  const activityKind = getActivityKindFromStage(sendStage, hasAttachments, finalPhaseStarted, showActivity);
   const finalHasVisibleContent = hasVisibleFinalContent(finalMessage);
   const finalStreamingHasVisibleContent = hasVisibleFinalContent(finalStreamingMessage);
+  const processPhase: ProcessPhase = finalPhaseStarted && !sending ? 'processed' : 'working';
 
   return (
     <div className={cn('space-y-3', hasProcessSection && (finalHasVisibleContent || finalStreamingHasVisibleContent) && 'space-y-2')}>
@@ -789,13 +853,14 @@ function ActiveTurn({
         <ProcessSection
           processMessages={processMessages}
           processStreamingMessage={processStreamingMessage}
-          phase={finalPhaseStarted ? 'processed' : 'working'}
+          phase={processPhase}
           showThinking={showThinking}
           chatProcessDisplayMode={chatProcessDisplayMode}
           assistantMessageStyle={assistantMessageStyle}
           startedAtMs={startedAtMs}
           showActivity={showActivity}
           streamingTools={streamingTools}
+          activityKind={activityKind}
         />
       )}
 
@@ -819,7 +884,16 @@ function ActiveTurn({
       )}
 
       {!hasProcessSection && !finalHasVisibleContent && !finalStreamingHasVisibleContent && showTyping && (
-        <TypingIndicator />
+        <ProcessSection
+          processMessages={EMPTY_MESSAGES}
+          phase="working"
+          showThinking={showThinking}
+          chatProcessDisplayMode={chatProcessDisplayMode}
+          assistantMessageStyle={assistantMessageStyle}
+          startedAtMs={startedAtMs}
+          showActivity
+          activityKind={activityKind}
+        />
       )}
     </div>
   );
@@ -985,32 +1059,39 @@ function GatewayOfflineState({
 
 // ── Typing Indicator ────────────────────────────────────────────
 
-function TypingIndicator() {
-  return (
-    <div className="flex gap-3">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-1 bg-black/5 dark:bg-white/5 text-foreground">
-        <Sparkles className="h-4 w-4" />
-      </div>
-      <div className="bg-black/5 dark:bg-white/5 text-foreground rounded-2xl px-4 py-3">
-        <div className="flex gap-1">
-          <span className="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-          <span className="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-          <span className="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-        </div>
-      </div>
-    </div>
-  );
+function formatActivityLabel(activityKind: ProcessActivityKind, language: string | undefined): string {
+  switch (normalizeProcessLocale(language)) {
+    case 'zh':
+      if (activityKind === 'finalizing') return '正在整理结果';
+      if (activityKind === 'sending') return '正在提交任务';
+      if (activityKind === 'awaiting') return '正在等待开始处理';
+      if (activityKind === 'file') return '正在读取文件';
+      return '正在思考';
+    default:
+      if (activityKind === 'finalizing') return 'Finalizing result';
+      if (activityKind === 'sending') return 'Submitting task';
+      if (activityKind === 'awaiting') return 'Waiting to start';
+      if (activityKind === 'file') return 'Reading file';
+      return 'Thinking';
+  }
 }
 
 // ── Activity Indicator (shown between tool cycles) ─────────────
 
-function ProcessActivityIndicator({ streamStyle = false }: { streamStyle?: boolean }) {
-  const { t } = useTranslation('chat');
+function ProcessActivityIndicator({
+  streamStyle = false,
+  activityKind = 'thinking',
+}: {
+  streamStyle?: boolean;
+  activityKind?: ProcessActivityKind;
+}) {
+  const { i18n } = useTranslation('chat');
+  const label = formatActivityLabel(activityKind, i18n?.resolvedLanguage || i18n?.language);
   if (streamStyle) {
     return (
       <div className="flex items-center gap-2 px-1.5 py-1 text-sm text-muted-foreground" data-testid="chat-process-activity-stream">
         <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-        <span>{t('process.workingFor', { duration: '...' })}</span>
+        <span>{label}</span>
       </div>
     );
   }
@@ -1019,14 +1100,22 @@ function ProcessActivityIndicator({ streamStyle = false }: { streamStyle?: boole
     <div className="rounded-2xl border border-black/6 bg-white/40 px-4 py-3 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm dark:border-white/8 dark:bg-white/[0.04]">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-        <span>{t('process.workingFor', { duration: '...' })}</span>
+        <span>{label}</span>
       </div>
     </div>
   );
 }
 
-function ActivityIndicator({ phase }: { phase: 'tool_processing' }) {
+function ActivityIndicator({
+  phase,
+  activityKind = 'thinking',
+}: {
+  phase: 'tool_processing';
+  activityKind?: ProcessActivityKind;
+}) {
   void phase;
+  const { i18n } = useTranslation('chat');
+  const label = formatActivityLabel(activityKind, i18n?.resolvedLanguage || i18n?.language);
   return (
     <div className="flex gap-3">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-1 bg-black/5 dark:bg-white/5 text-foreground">
@@ -1035,7 +1124,7 @@ function ActivityIndicator({ phase }: { phase: 'tool_processing' }) {
       <div className="bg-black/5 dark:bg-white/5 text-foreground rounded-2xl px-4 py-3">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-          <span>Processing tool results…</span>
+          <span>{label}</span>
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { invokeIpc } from '@/lib/api-client';
 import { hostApiFetch } from '@/lib/host-api';
-import { getCanonicalPrefixFromSessions, getMessageText, toMs } from './helpers';
+import { CHAT_HISTORY_LABEL_PREFETCH_LIMIT, CHAT_HISTORY_RPC_TIMEOUT_MS, getCanonicalPrefixFromSessions, getMessageText, toMs } from './helpers';
 import { DEFAULT_CANONICAL_PREFIX, DEFAULT_SESSION_KEY, type ChatSession, type RawMessage } from './types';
 import type { ChatGet, ChatSet, SessionHistoryActions } from './store-api';
 
@@ -176,7 +176,8 @@ export function createSessionActions(
                   const r = await invokeIpc(
                     'gateway:rpc',
                     'chat.history',
-                    { sessionKey: session.key, limit: 1000 },
+                    { sessionKey: session.key, limit: CHAT_HISTORY_LABEL_PREFETCH_LIMIT },
+                    CHAT_HISTORY_RPC_TIMEOUT_MS,
                   ) as { success: boolean; result?: Record<string, unknown> };
                   if (!r.success || !r.result) return;
                   const msgs = Array.isArray(r.result.messages) ? r.result.messages as RawMessage[] : [];

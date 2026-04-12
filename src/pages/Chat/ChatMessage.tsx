@@ -441,6 +441,8 @@ function MessageBubble({
 
 function ThinkingBlock({ content }: { content: string }) {
   const [expanded, setExpanded] = useState(false);
+  const preview = content.replace(/\s+/g, ' ').trim();
+  const summary = preview.length > 84 ? `${preview.slice(0, 81)}...` : preview;
 
   return (
     <div className="w-full rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-[14px]">
@@ -450,6 +452,9 @@ function ThinkingBlock({ content }: { content: string }) {
       >
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         <span className="font-medium">Thinking</span>
+        {!expanded && summary ? (
+          <span className="truncate text-[12px] text-muted-foreground/80">{summary}</span>
+        ) : null}
       </button>
       {expanded && (
         <div className="px-3 pb-3 text-muted-foreground">

@@ -16,6 +16,7 @@ const { agentsState, chatState, gatewayState, settingsState, useDeferredValueMoc
     showThinking: true,
     streamingMessage: null as unknown,
     streamingTools: [] as Array<Record<string, unknown>>,
+    sendStage: null as string | null,
     pendingFinal: false,
     lastUserMessageAt: 1000,
     sendMessage: vi.fn(),

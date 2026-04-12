@@ -11,6 +11,7 @@ import type { GatewayStatus } from '../types/gateway';
 let gatewayInitPromise: Promise<void> | null = null;
 let gatewayEventUnsubscribers: Array<() => void> | null = null;
 let gatewayReconcileTimer: ReturnType<typeof setInterval> | null = null;
+let gatewayHistoryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 const gatewayEventDedupe = new Map<string, number>();
 const GATEWAY_EVENT_DEDUPE_TTL_MS = 30_000;
 const LOAD_SESSIONS_MIN_INTERVAL_MS = 1_200;
@@ -107,6 +108,20 @@ function maybeLoadHistory(
   void state.loadHistory(true);
 }
 
+function scheduleLoadHistory(force = false, delayMs = 700): void {
+  if (gatewayHistoryRefreshTimer) {
+    clearTimeout(gatewayHistoryRefreshTimer);
+  }
+  gatewayHistoryRefreshTimer = setTimeout(() => {
+    gatewayHistoryRefreshTimer = null;
+    import('./chat')
+      .then(({ useChatStore }) => {
+        maybeLoadHistory(useChatStore.getState(), force);
+      })
+      .catch(() => {});
+  }, delayMs);
+}
+
 function handleGatewayNotification(notification: { method?: string; params?: Record<string, unknown> } | undefined): void {
   const payload = notification;
   if (!payload || payload.method !== 'agent' || !payload.params || typeof payload.params !== 'object') {
@@ -177,7 +192,7 @@ function handleGatewayNotification(notification: { method?: string; params?: Rec
         const matchesActiveRun = runId != null && state.activeRunId != null && String(runId) === state.activeRunId;
 
         if (matchesCurrentSession || matchesActiveRun) {
-          maybeLoadHistory(state, true);
+          scheduleLoadHistory(true);
         }
         if ((matchesCurrentSession || matchesActiveRun) && state.sending) {
           useChatStore.setState({

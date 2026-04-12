@@ -7,7 +7,7 @@
  * are sent with the message (no base64 over WebSocket).
  */
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { SendHorizontal, Square, X, Paperclip, FileText, Film, Music, FileArchive, File, Loader2, AtSign } from 'lucide-react';
+import { SendHorizontal, Square, X, Paperclip, FileText, Music, FileArchive, File, Loader2, AtSign, FileImage, FileVideo, FileCode2, FileSpreadsheet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { hostApiFetch } from '@/lib/host-api';
@@ -51,12 +51,30 @@ function formatFileSize(bytes: number): string {
 }
 
 function FileIcon({ mimeType, className }: { mimeType: string; className?: string }) {
-  if (mimeType.startsWith('video/')) return <Film className={className} />;
+  if (mimeType.startsWith('image/')) return <FileImage className={className} />;
+  if (mimeType.startsWith('video/')) return <FileVideo className={className} />;
   if (mimeType.startsWith('audio/')) return <Music className={className} />;
+  if (mimeType.includes('sheet') || mimeType.includes('excel') || mimeType.includes('csv')) return <FileSpreadsheet className={className} />;
+  if (mimeType.includes('javascript') || mimeType.includes('typescript') || mimeType.includes('json') || mimeType.includes('xml')) return <FileCode2 className={className} />;
   if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === 'application/xml') return <FileText className={className} />;
   if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('archive') || mimeType.includes('tar') || mimeType.includes('rar') || mimeType.includes('7z')) return <FileArchive className={className} />;
   if (mimeType === 'application/pdf') return <FileText className={className} />;
   return <File className={className} />;
+}
+
+function getFileExtension(fileName: string): string {
+  const ext = fileName.split('.').pop()?.trim();
+  return ext ? ext.toUpperCase() : 'FILE';
+}
+
+function getAttachmentAccentClass(mimeType: string): string {
+  if (mimeType.startsWith('image/')) return 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300';
+  if (mimeType.startsWith('video/')) return 'bg-blue-500/12 text-blue-700 dark:text-blue-300';
+  if (mimeType.startsWith('audio/')) return 'bg-fuchsia-500/12 text-fuchsia-700 dark:text-fuchsia-300';
+  if (mimeType.includes('sheet') || mimeType.includes('excel') || mimeType.includes('csv')) return 'bg-green-500/12 text-green-700 dark:text-green-300';
+  if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('archive') || mimeType.includes('tar') || mimeType.includes('rar') || mimeType.includes('7z')) return 'bg-amber-500/12 text-amber-700 dark:text-amber-300';
+  if (mimeType === 'application/pdf') return 'bg-rose-500/12 text-rose-700 dark:text-rose-300';
+  return 'bg-slate-500/12 text-slate-700 dark:text-slate-300';
 }
 
 /**
@@ -568,25 +586,35 @@ function AttachmentPreview({
   onRemove: () => void;
 }) {
   const isImage = attachment.mimeType.startsWith('image/') && attachment.preview;
+  const accentClass = getAttachmentAccentClass(attachment.mimeType);
+  const extension = getFileExtension(attachment.fileName);
 
   return (
-    <div className="relative group rounded-lg overflow-hidden border border-border">
+    <div className="relative group overflow-hidden rounded-2xl border border-black/8 bg-white/80 shadow-[0_8px_24px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.04]">
       {isImage ? (
-        // Image thumbnail
-        <div className="w-16 h-16">
+        <div className="relative h-20 w-20">
           <img
             src={attachment.preview!}
             alt={attachment.fileName}
-            className="w-full h-full object-cover"
+            className="h-full w-full object-cover"
           />
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent px-2 pb-1.5 pt-4">
+            <div className="truncate text-[10px] font-medium text-white">{extension}</div>
+          </div>
         </div>
       ) : (
-        // Generic file card
-        <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 max-w-[200px]">
-          <FileIcon mimeType={attachment.mimeType} className="h-5 w-5 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 overflow-hidden">
-            <p className="text-xs font-medium truncate">{attachment.fileName}</p>
-            <p className="text-[10px] text-muted-foreground">
+        <div className="flex min-w-[220px] max-w-[260px] items-center gap-3 px-3 py-3">
+          <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl', accentClass)}>
+            <FileIcon mimeType={attachment.mimeType} className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1 overflow-hidden">
+            <div className="flex items-center gap-2">
+              <p className="truncate text-sm font-medium text-foreground">{attachment.fileName}</p>
+              <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-semibold tracking-[0.04em] text-muted-foreground dark:bg-white/8">
+                {extension}
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">
               {attachment.fileSize > 0 ? formatFileSize(attachment.fileSize) : '...'}
             </p>
           </div>
@@ -595,24 +623,24 @@ function AttachmentPreview({
 
       {/* Staging overlay */}
       {attachment.status === 'staging' && (
-        <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+        <div className="absolute inset-0 flex items-center justify-center bg-black/35">
           <Loader2 className="h-4 w-4 text-white animate-spin" />
         </div>
       )}
 
       {/* Error overlay */}
       {attachment.status === 'error' && (
-        <div className="absolute inset-0 bg-destructive/20 flex items-center justify-center">
+        <div className="absolute inset-0 flex items-center justify-center bg-destructive/20">
           <span className="text-[10px] text-destructive font-medium px-1">Error</span>
         </div>
       )}
 
-      {/* Remove button */}
       <button
         onClick={onRemove}
-        className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute right-1.5 top-1.5 rounded-full border border-black/8 bg-white/92 p-1 text-foreground shadow-sm transition-colors hover:bg-white dark:border-white/10 dark:bg-black/70 dark:hover:bg-black"
+        title="Remove file"
       >
-        <X className="h-3 w-3" />
+        <X className="h-3.5 w-3.5" />
       </button>
     </div>
   );
