@@ -516,7 +516,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ content }: { content: string
         onClick={() => setExpanded(!expanded)}
       >
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-        <span className="font-medium">Thinking</span>
+        <span className="font-medium">思考过程</span>
         {!expanded && summary ? (
           <span className="truncate text-[12px] text-muted-foreground/80">{summary}</span>
         ) : null}
@@ -543,6 +543,39 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+function getFileExtension(fileName: string): string {
+  const parts = fileName.split('.');
+  if (parts.length < 2) return 'FILE';
+  return parts.at(-1)?.toUpperCase() || 'FILE';
+}
+
+function getAttachmentAccentClass(mimeType: string): string {
+  if (mimeType === 'application/pdf') return 'bg-rose-500/12 text-rose-700 dark:text-rose-300';
+  if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return 'bg-orange-500/12 text-orange-700 dark:text-orange-300';
+  if (mimeType.includes('word') || mimeType.includes('document') || mimeType === 'text/markdown') return 'bg-blue-500/12 text-blue-700 dark:text-blue-300';
+  if (mimeType.includes('sheet') || mimeType.includes('excel') || mimeType === 'text/csv') return 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300';
+  if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('archive') || mimeType.includes('tar') || mimeType.includes('rar') || mimeType.includes('7z')) {
+    return 'bg-amber-500/12 text-amber-700 dark:text-amber-300';
+  }
+  if (mimeType.startsWith('video/')) return 'bg-violet-500/12 text-violet-700 dark:text-violet-300';
+  if (mimeType.startsWith('audio/')) return 'bg-fuchsia-500/12 text-fuchsia-700 dark:text-fuchsia-300';
+  if (mimeType.startsWith('image/')) return 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300';
+  return 'bg-slate-500/12 text-slate-700 dark:text-slate-300';
+}
+
+function getAttachmentTileClass(fileName: string, mimeType: string): string {
+  const ext = getFileExtension(fileName).toLowerCase();
+  if (ext === 'pdf' || mimeType === 'application/pdf') return 'bg-rose-500 text-white';
+  if (ext === 'ppt' || ext === 'pptx') return 'bg-orange-500 text-white';
+  if (ext === 'doc' || ext === 'docx' || ext === 'md') return 'bg-blue-600 text-white';
+  if (ext === 'xls' || ext === 'xlsx' || ext === 'csv') return 'bg-emerald-600 text-white';
+  if (ext === 'zip' || ext === 'rar' || ext === '7z' || ext === 'tar') return 'bg-amber-600 text-white';
+  if (mimeType.startsWith('video/')) return 'bg-violet-600 text-white';
+  if (mimeType.startsWith('audio/')) return 'bg-fuchsia-600 text-white';
+  if (mimeType.startsWith('image/')) return 'bg-emerald-600 text-white';
+  return 'bg-slate-700 text-white';
+}
+
 function FileIcon({ mimeType, className }: { mimeType: string; className?: string }) {
   if (mimeType.startsWith('video/')) return <Film className={className} />;
   if (mimeType.startsWith('audio/')) return <Music className={className} />;
@@ -558,21 +591,35 @@ const FileCard = memo(function FileCard({ file }: { file: AttachedFileMeta }) {
       invokeIpc('shell:openPath', file.filePath);
     }
   }, [file.filePath]);
+  const accentClass = getAttachmentAccentClass(file.mimeType);
+  const tileClass = getAttachmentTileClass(file.fileName, file.mimeType);
+  const extension = getFileExtension(file.fileName);
 
   return (
-    <div 
+    <div
       className={cn(
-        "flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 py-2.5 bg-black/5 dark:bg-white/5 max-w-[220px]",
-        file.filePath && "cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+        'flex min-w-[220px] max-w-[260px] items-center gap-3 rounded-[22px] border border-black/10 bg-white/56 px-3 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.06)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.045]',
+        file.filePath && 'cursor-pointer hover:bg-white/72 dark:hover:bg-white/[0.08] transition-colors'
       )}
       onClick={handleOpen}
-      title={file.filePath ? "Open file" : undefined}
+      title={file.filePath ? '打开文件' : undefined}
     >
-      <FileIcon mimeType={file.mimeType} className="h-5 w-5 shrink-0 text-muted-foreground" />
-      <div className="min-w-0 overflow-hidden">
-        <p className="text-xs font-medium truncate">{file.fileName}</p>
-        <p className="text-[10px] text-muted-foreground">
-          {file.fileSize > 0 ? formatFileSize(file.fileSize) : 'File'}
+      <div className={cn('relative flex h-14 w-12 shrink-0 flex-col items-center justify-end overflow-hidden rounded-[14px] shadow-sm', tileClass)}>
+        <div className="absolute right-0 top-0 h-4 w-4 bg-white/25 [clip-path:polygon(0_0,100%_0,100%_100%)]" />
+        <FileIcon mimeType={file.mimeType} className="absolute left-2 top-2 h-3.5 w-3.5 opacity-90" />
+        <span className="pb-2 text-[10px] font-bold tracking-[0.08em]">
+          {extension.slice(0, 4)}
+        </span>
+      </div>
+      <div className="min-w-0 flex-1 overflow-hidden">
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-medium text-foreground">{file.fileName}</p>
+          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-[0.04em]', accentClass)}>
+            {extension}
+          </span>
+        </div>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {file.fileSize > 0 ? formatFileSize(file.fileSize) : '文件'}
         </p>
       </div>
     </div>
