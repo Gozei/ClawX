@@ -1143,6 +1143,7 @@ function buildSessionSwitchPatch(
     | 'streamingText'
     | 'streamingMessage'
     | 'streamingTools'
+    | 'sendStage'
     | 'pendingFinal'
     | 'lastUserMessageAt'
     | 'pendingToolImages'
@@ -1168,7 +1169,7 @@ function buildSessionSwitchPatch(
   if (leavingEmpty) {
     clearSessionView(state.currentSessionKey);
   } else {
-    cacheSessionView(state);
+    cacheSessionView({ ...state, sendStage: state.sendStage ?? null });
   }
 
   return {

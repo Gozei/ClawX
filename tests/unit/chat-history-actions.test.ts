@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const invokeIpcMock = vi.fn();
 const hostApiFetchMock = vi.fn();
 const clearHistoryPoll = vi.fn();
+const CHAT_HISTORY_RPC_TIMEOUT_MS = 60_000;
 const createToolResultProcessMessage = vi.fn((message: unknown) => message);
 const EMPTY_ASSISTANT_RESPONSE_ERROR = 'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.';
 const enrichWithCachedImages = vi.fn((messages) => messages);
@@ -45,6 +46,7 @@ vi.mock('@/lib/host-api', () => ({
 
 vi.mock('@/stores/chat/helpers', () => ({
   clearHistoryPoll: (...args: unknown[]) => clearHistoryPoll(...args),
+  CHAT_HISTORY_RPC_TIMEOUT_MS,
   createToolResultProcessMessage: (...args: unknown[]) => createToolResultProcessMessage(...args),
   EMPTY_ASSISTANT_RESPONSE_ERROR,
   enrichWithCachedImages: (...args: unknown[]) => enrichWithCachedImages(...args),

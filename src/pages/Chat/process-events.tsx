@@ -1,11 +1,11 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
 import type { ContentBlock, RawMessage, ToolStatus } from '@/stores/chat';
 import type { ChatProcessDisplayMode } from '@/stores/settings';
 import { cn } from '@/lib/utils';
+
+const MarkdownRenderer = lazy(() => import('./MarkdownRenderer').then((module) => ({ default: module.MarkdownRenderer })));
 
 type ProcessSurface = 'thinking' | 'terminal' | 'code' | 'read' | 'tool' | 'note';
 type ProcessAction = 'generic' | 'browser_start' | 'browser_page' | 'browser' | 'shell' | 'code' | 'read';
@@ -569,9 +569,9 @@ function ProcessEventDetail({ item }: { item: ProcessEventItem }) {
   if (item.kind === 'note' || item.kind === 'thinking') {
     return (
       <div className="prose prose-sm dark:prose-invert max-w-none break-words text-foreground/85 [&>*]:my-2.5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-          {item.detail}
-        </ReactMarkdown>
+        <Suspense fallback={<p className="whitespace-pre-wrap break-words">{item.detail}</p>}>
+          <MarkdownRenderer content={item.detail} />
+        </Suspense>
       </div>
     );
   }

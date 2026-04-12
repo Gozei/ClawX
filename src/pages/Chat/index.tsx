@@ -4,7 +4,7 @@
  * via gateway:rpc IPC. Session selector, thinking toggle, and refresh
  * are in the toolbar; messages render with markdown + streaming.
  */
-import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ChevronDown, ChevronRight, ListTodo, Loader2, Network, Sparkles, Workflow } from 'lucide-react';
 import { useChatStore, type ChatSendStage, type RawMessage, type ToolStatus } from '@/stores/chat';
@@ -25,68 +25,44 @@ import { groupMessagesForDisplay, splitFinalMessageForTurnDisplay } from './hist
 import { getProcessEventItems, ProcessEventMessage } from './process-events';
 
 const EMPTY_MESSAGES: RawMessage[] = [];
+const messageDisplayKeyCache = new WeakMap<RawMessage, string>();
 
-export function Chat() {
-  const { t } = useTranslation('chat');
-  const navigate = useNavigate();
-  const gatewayStatus = useGatewayStore((s) => s.status);
-  const startGateway = useGatewayStore((s) => s.start);
-  const restartGateway = useGatewayStore((s) => s.restart);
-  const isGatewayRunning = gatewayStatus.state === 'running';
-
+const MessageViewport = memo(function MessageViewport({
+  gatewayStatus,
+  isGatewayRunning,
+  onStartGateway,
+  onOpenSettings,
+}: {
+  gatewayStatus: ReturnType<typeof useGatewayStore.getState>['status'];
+  isGatewayRunning: boolean;
+  onStartGateway: () => Promise<void>;
+  onOpenSettings: () => void;
+}) {
   const messages = useChatStore((s) => s.messages);
   const currentSessionKey = useChatStore((s) => s.currentSessionKey);
   const loading = useChatStore((s) => s.loading);
   const sending = useChatStore((s) => s.sending);
-  const error = useChatStore((s) => s.error);
   const showThinking = useChatStore((s) => s.showThinking);
-  const chatProcessDisplayMode = useSettingsStore((s) => s.chatProcessDisplayMode);
-  const assistantMessageStyle = useSettingsStore((s) => s.assistantMessageStyle);
   const streamingMessage = useChatStore((s) => s.streamingMessage);
   const streamingTools = useChatStore((s) => s.streamingTools);
   const sendStage = useChatStore((s) => s.sendStage);
   const pendingFinal = useChatStore((s) => s.pendingFinal);
   const lastUserMessageAt = useChatStore((s) => s.lastUserMessageAt);
-  const sendMessage = useChatStore((s) => s.sendMessage);
-  const abortRun = useChatStore((s) => s.abortRun);
-  const clearError = useChatStore((s) => s.clearError);
-  const fetchAgents = useAgentsStore((s) => s.fetchAgents);
-
-  const cleanupEmptySession = useChatStore((s) => s.cleanupEmptySession);
+  const chatProcessDisplayMode = useSettingsStore((s) => s.chatProcessDisplayMode);
+  const assistantMessageStyle = useSettingsStore((s) => s.assistantMessageStyle);
 
   const safeMessages = Array.isArray(messages) ? messages : EMPTY_MESSAGES;
   const [streamingTimestamp, setStreamingTimestamp] = useState<number>(0);
   const minLoading = useMinLoading(loading && safeMessages.length > 0);
   const { contentRef, scrollRef } = useStickToBottomInstant(currentSessionKey);
 
-  // Load data when gateway is running.
-  // When the store already holds messages for this session (i.e. the user
-  // is navigating *back* to Chat), use quiet mode so the existing messages
-  // stay visible while fresh data loads in the background.  This avoids
-  // an unnecessary messages → spinner → messages flicker.
-  useEffect(() => {
-    return () => {
-      // If the user navigates away without sending any messages, remove the
-      // empty session so it doesn't linger as a ghost entry in the sidebar.
-      cleanupEmptySession();
-    };
-  }, [cleanupEmptySession]);
-
-  useEffect(() => {
-    void fetchAgents();
-  }, [fetchAgents]);
-
-  // Update timestamp when sending starts
   useEffect(() => {
     if (sending && streamingTimestamp === 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStreamingTimestamp(Date.now() / 1000);
     } else if (!sending && streamingTimestamp !== 0) {
       setStreamingTimestamp(0);
     }
   }, [sending, streamingTimestamp]);
-
-  // Gateway not running block has been completely removed so the UI always renders.
 
   const streamMsg = streamingMessage && typeof streamingMessage === 'object'
     ? streamingMessage as unknown as { role?: string; content?: unknown; timestamp?: number }
@@ -116,11 +92,7 @@ export function Chat() {
   const isStreamingDuplicateOfPersistedAssistant = !!latestPersistedAssistant
     && (
       (hasStreamText && latestPersistedAssistantText === streamText.trim())
-      || (
-        !hasStreamText
-        && hasStreamThinking
-        && latestPersistedAssistantThinking === (streamThinking?.trim() ?? '')
-      )
+      || (!hasStreamText && hasStreamThinking && latestPersistedAssistantThinking === (streamThinking?.trim() ?? ''))
     )
     && (!hasStreamImages || latestPersistedAssistantImages.length === streamImages.length)
     && (!hasStreamTools || latestPersistedAssistantTools.length === streamTools.length);
@@ -143,30 +115,29 @@ export function Chat() {
   const activeTurnMessages = useMemo(() => (
     activeTurnStartIndex >= 0 ? safeMessages.slice(activeTurnStartIndex) : EMPTY_MESSAGES
   ), [activeTurnStartIndex, safeMessages]);
-  const activeTurnUserMessage = activeTurnMessages[0]?.role === 'user' ? activeTurnMessages[0] : null;
+  const rawActiveTurnUserMessage = activeTurnMessages[0]?.role === 'user' ? activeTurnMessages[0] : null;
+  const activeTurnUserMessage = useStableMessage(rawActiveTurnUserMessage);
   const displayHistoryMessages = useMemo(() => (
     trimDeferredHistoryForActiveTurn(deferredHistoryMessages, activeTurnUserMessage)
   ), [activeTurnUserMessage, deferredHistoryMessages]);
+  const stableHistoryMessages = useStableMessageList(displayHistoryMessages);
   const activeTurnAssistantMessages = useMemo(() => (
     activeTurnUserMessage
       ? activeTurnMessages.slice(1).filter((message) => message.role === 'assistant')
       : EMPTY_MESSAGES
   ), [activeTurnMessages, activeTurnUserMessage]);
-  const persistedActiveFinalMessage = isStreamingDuplicateOfPersistedAssistant && activeTurnAssistantMessages.length > 0
+  const rawPersistedActiveFinalMessage = isStreamingDuplicateOfPersistedAssistant && activeTurnAssistantMessages.length > 0
     ? activeTurnAssistantMessages[activeTurnAssistantMessages.length - 1]
     : null;
-  const activeTurnProcessMessages = useMemo(() => (
-    persistedActiveFinalMessage
-      ? activeTurnAssistantMessages.slice(0, -1)
-      : activeTurnAssistantMessages
-  ), [activeTurnAssistantMessages, persistedActiveFinalMessage]);
+  const persistedActiveFinalMessage = useStableMessage(rawPersistedActiveFinalMessage);
+  const activeTurnProcessMessages = useStableMessageList(useMemo(() => (
+    persistedActiveFinalMessage ? activeTurnAssistantMessages.slice(0, -1) : activeTurnAssistantMessages
+  ), [activeTurnAssistantMessages, persistedActiveFinalMessage]));
   const streamingSplit = useMemo(() => (
-    streamingDisplayMessage
-      ? splitFinalMessageForTurnDisplay(streamingDisplayMessage)
-      : null
+    streamingDisplayMessage ? splitFinalMessageForTurnDisplay(streamingDisplayMessage) : null
   ), [streamingDisplayMessage]);
-  const streamingProcessMessage = streamingSplit?.collapsedProcessMessage ?? null;
-  const splitStreamingFinalMessage = streamingSplit?.finalDisplayMessage ?? null;
+  const streamingProcessMessage = useStableMessage(streamingSplit?.collapsedProcessMessage ?? null);
+  const splitStreamingFinalMessage = useStableMessage(streamingSplit?.finalDisplayMessage ?? null);
   const hasPersistedProcessMessages = activeTurnProcessMessages.some((message) => (
     hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle)
   ));
@@ -174,20 +145,13 @@ export function Chat() {
     && hasVisibleProcessContent(streamingProcessMessage, showThinking, chatProcessDisplayMode, assistantMessageStyle);
   const hasStreamingFinalMessage = splitStreamingFinalMessage != null
     && hasVisibleFinalContent(splitStreamingFinalMessage);
-  const shouldUseProcessLayout = hasPersistedProcessMessages
-    || hasStreamingProcessMessage
-    || hasStreamToolStatus
-    || pendingFinal;
+  const shouldUseProcessLayout = hasPersistedProcessMessages || hasStreamingProcessMessage || hasStreamToolStatus || pendingFinal;
   const showProcessActivity = shouldUseProcessLayout && pendingFinal && !hasStreamingFinalMessage;
   const activeTurnProcessStreamingMessage = shouldUseProcessLayout
     ? (hasStreamingProcessMessage
         ? streamingProcessMessage
         : hasStreamToolStatus
-          ? {
-              role: 'assistant' as const,
-              content: '',
-              timestamp: streamingDisplayMessage?.timestamp ?? streamingTimestamp,
-            }
+          ? { role: 'assistant' as const, content: '', timestamp: streamingDisplayMessage?.timestamp ?? streamingTimestamp }
           : null)
     : null;
   const activeTurnFinalStreamingMessage = shouldUseProcessLayout
@@ -202,6 +166,185 @@ export function Chat() {
   const isEmpty = safeMessages.length === 0 && !sending;
   const showGatewayOfflineState = !isGatewayRunning && safeMessages.length === 0 && !sending;
   const showSessionLoadingState = loading && safeMessages.length === 0 && !sending;
+
+  return (
+    <>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-5">
+        <div ref={contentRef} className="max-w-4xl mx-auto space-y-4">
+          {showGatewayOfflineState ? (
+            <GatewayOfflineState
+              state={gatewayStatus.state}
+              error={gatewayStatus.error}
+              port={gatewayStatus.port}
+              onStart={onStartGateway}
+              onOpenSettings={onOpenSettings}
+            />
+          ) : showSessionLoadingState ? (
+            <div className="flex min-h-[40vh] items-center justify-center">
+              <div className="bg-background shadow-lg rounded-full p-2.5 border border-border">
+                <LoadingSpinner size="md" />
+              </div>
+            </div>
+          ) : isEmpty ? (
+            <WelcomeScreen />
+          ) : (
+            <>
+              <HistoryMessages
+                messages={stableHistoryMessages}
+                showThinking={showThinking}
+                chatProcessDisplayMode={chatProcessDisplayMode}
+                assistantMessageStyle={assistantMessageStyle}
+              />
+
+              {activeTurnUserMessage ? (
+                <ActiveTurn
+                  key={activeTurnUserMessage.id || `active-turn-${currentSessionKey}`}
+                  userMessage={activeTurnUserMessage}
+                  processMessages={activeTurnProcessMessages}
+                  processStreamingMessage={activeTurnProcessStreamingMessage}
+                  finalMessage={persistedActiveFinalMessage}
+                  finalStreamingMessage={activeTurnFinalStreamingMessage}
+                  showThinking={showThinking}
+                  chatProcessDisplayMode={chatProcessDisplayMode}
+                  assistantMessageStyle={assistantMessageStyle}
+                  startedAtMs={activeTurnStartedAtMs}
+                  finalPhaseStarted={activeTurnFinalPhaseStarted}
+                  showActivity={showProcessActivity}
+                  showTyping={!shouldUseProcessLayout && !persistedActiveFinalMessage && !activeTurnFinalStreamingMessage && !pendingFinal && !hasAnyStreamContent}
+                  sending={sending}
+                  sendStage={sendStage}
+                  streamingTools={streamingTools}
+                />
+              ) : (
+                <>
+                  {activeTurnFinalStreamingMessage && (
+                    <ChatMessage
+                      message={activeTurnFinalStreamingMessage}
+                      showThinking={showThinking}
+                      isStreaming
+                      streamingTools={streamingTools}
+                    />
+                  )}
+                  {sending && pendingFinal && !activeTurnFinalStreamingMessage && !isStreamingDuplicateOfPersistedAssistant && chatProcessDisplayMode === 'all' && (
+                    <ActivityIndicator phase="tool_processing" activityKind="finalizing" />
+                  )}
+                  {sending && !pendingFinal && !hasAnyStreamContent && (
+                    <ActivityIndicator
+                      phase="tool_processing"
+                      activityKind={sendStage === 'sending_to_gateway'
+                        ? 'sending'
+                        : sendStage === 'awaiting_runtime'
+                          ? 'awaiting'
+                          : 'thinking'}
+                    />
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {minLoading && !sending && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/20 backdrop-blur-[1px] rounded-xl pointer-events-auto">
+          <div className="bg-background shadow-lg rounded-full p-2.5 border border-border">
+            <LoadingSpinner size="md" />
+          </div>
+        </div>
+      )}
+    </>
+  );
+});
+
+const ChatErrorBar = memo(function ChatErrorBar() {
+  const { t } = useTranslation('chat');
+  const error = useChatStore((s) => s.error);
+  const clearError = useChatStore((s) => s.clearError);
+
+  if (!error) return null;
+
+  return (
+    <div className="px-4 py-2 bg-destructive/10 border-t border-destructive/20">
+      <div className="max-w-4xl mx-auto flex items-center justify-between">
+        <p className="text-sm text-destructive flex items-center gap-2">
+          <AlertCircle className="h-4 w-4" />
+          {error}
+        </p>
+        <button
+          onClick={clearError}
+          className="text-xs text-destructive/60 hover:text-destructive underline"
+        >
+          {t('common:actions.dismiss')}
+        </button>
+      </div>
+    </div>
+  );
+});
+
+const ChatComposer = memo(function ChatComposer({
+  isGatewayRunning,
+}: {
+  isGatewayRunning: boolean;
+}) {
+  const sendMessage = useChatStore((s) => s.sendMessage);
+  const abortRun = useChatStore((s) => s.abortRun);
+  const sending = useChatStore((s) => s.sending);
+  const messages = useChatStore((s) => s.messages);
+  const isEmpty = (Array.isArray(messages) ? messages : EMPTY_MESSAGES).length === 0 && !sending;
+
+  return (
+    <ChatInput
+      onSend={sendMessage}
+      onStop={abortRun}
+      disabled={!isGatewayRunning}
+      sending={sending}
+      isEmpty={isEmpty}
+    />
+  );
+});
+
+const ChatLoadingOverlay = memo(function ChatLoadingOverlay() {
+  const messages = useChatStore((s) => s.messages);
+  const loading = useChatStore((s) => s.loading);
+  const sending = useChatStore((s) => s.sending);
+  const safeMessages = Array.isArray(messages) ? messages : EMPTY_MESSAGES;
+  const minLoading = useMinLoading(loading && safeMessages.length > 0);
+
+  if (!minLoading || sending) return null;
+
+  return (
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/20 backdrop-blur-[1px] rounded-xl pointer-events-auto">
+      <div className="bg-background shadow-lg rounded-full p-2.5 border border-border">
+        <LoadingSpinner size="md" />
+      </div>
+    </div>
+  );
+});
+
+export function Chat() {
+  const navigate = useNavigate();
+  const gatewayStatus = useGatewayStore((s) => s.status);
+  const startGateway = useGatewayStore((s) => s.start);
+  const restartGateway = useGatewayStore((s) => s.restart);
+  const fetchAgents = useAgentsStore((s) => s.fetchAgents);
+  const cleanupEmptySession = useChatStore((s) => s.cleanupEmptySession);
+
+  // Load data when gateway is running.
+  // When the store already holds messages for this session (i.e. the user
+  // is navigating *back* to Chat), use quiet mode so the existing messages
+  // stay visible while fresh data loads in the background.  This avoids
+  // an unnecessary messages → spinner → messages flicker.
+  useEffect(() => {
+    return () => {
+      // If the user navigates away without sending any messages, remove the
+      // empty session so it doesn't linger as a ghost entry in the sidebar.
+      cleanupEmptySession();
+    };
+  }, [cleanupEmptySession]);
+
+  useEffect(() => {
+    void fetchAgents();
+  }, [fetchAgents]);
 
   const handleStartGateway = async () => {
     try {
@@ -230,122 +373,16 @@ export function Chat() {
       </div>
 
       {/* Messages Area */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-5">
-        <div ref={contentRef} className="max-w-4xl mx-auto space-y-4">
-          {showGatewayOfflineState ? (
-            <GatewayOfflineState
-              state={gatewayStatus.state}
-              error={gatewayStatus.error}
-              port={gatewayStatus.port}
-              onStart={handleStartGateway}
-              onOpenSettings={() => navigate('/settings')}
-            />
-          ) : showSessionLoadingState ? (
-            <div className="flex min-h-[40vh] items-center justify-center">
-              <div className="bg-background shadow-lg rounded-full p-2.5 border border-border">
-                <LoadingSpinner size="md" />
-              </div>
-            </div>
-          ) : isEmpty ? (
-            <WelcomeScreen />
-          ) : (
-            <>
-              <HistoryMessages
-                messages={displayHistoryMessages}
-                showThinking={showThinking}
-                chatProcessDisplayMode={chatProcessDisplayMode}
-                assistantMessageStyle={assistantMessageStyle}
-              />
-
-              {activeTurnUserMessage ? (
-                <ActiveTurn
-                  key={activeTurnUserMessage.id || `active-turn-${currentSessionKey}`}
-                  userMessage={activeTurnUserMessage}
-                  processMessages={activeTurnProcessMessages}
-                  processStreamingMessage={activeTurnProcessStreamingMessage}
-                  finalMessage={persistedActiveFinalMessage}
-                  finalStreamingMessage={activeTurnFinalStreamingMessage}
-                  showThinking={showThinking}
-                  chatProcessDisplayMode={chatProcessDisplayMode}
-                  assistantMessageStyle={assistantMessageStyle}
-                  startedAtMs={activeTurnStartedAtMs}
-                  finalPhaseStarted={activeTurnFinalPhaseStarted}
-                  showActivity={showProcessActivity}
-                  showTyping={!shouldUseProcessLayout && !persistedActiveFinalMessage && !activeTurnFinalStreamingMessage && !pendingFinal && !hasAnyStreamContent}
-                  sending={sending}
-                  sendStage={sendStage}
-                  streamingTools={streamingTools}
-                />
-              ) : (
-                <>
-                  {/* Streaming message */}
-                  {activeTurnFinalStreamingMessage && (
-                    <ChatMessage
-                      message={activeTurnFinalStreamingMessage}
-                      showThinking={showThinking}
-                      isStreaming
-                      streamingTools={streamingTools}
-                    />
-                  )}
-
-                  {/* Activity indicator: waiting for next AI turn after tool execution */}
-                  {sending && pendingFinal && !activeTurnFinalStreamingMessage && !isStreamingDuplicateOfPersistedAssistant && chatProcessDisplayMode === 'all' && (
-                    <ActivityIndicator phase="tool_processing" activityKind="finalizing" />
-                  )}
-
-                  {/* Typing indicator when sending but no stream content yet */}
-                  {sending && !pendingFinal && !hasAnyStreamContent && (
-                    <ActivityIndicator
-                      phase="tool_processing"
-                      activityKind={sendStage === 'sending_to_gateway'
-                        ? 'sending'
-                        : sendStage === 'awaiting_runtime'
-                          ? 'awaiting'
-                          : 'thinking'}
-                    />
-                  )}
-                </>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Error bar */}
-      {error && (
-        <div className="px-4 py-2 bg-destructive/10 border-t border-destructive/20">
-          <div className="max-w-4xl mx-auto flex items-center justify-between">
-            <p className="text-sm text-destructive flex items-center gap-2">
-              <AlertCircle className="h-4 w-4" />
-              {error}
-            </p>
-            <button
-              onClick={clearError}
-              className="text-xs text-destructive/60 hover:text-destructive underline"
-            >
-              {t('common:actions.dismiss')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Input Area */}
-      <ChatInput
-        onSend={sendMessage}
-        onStop={abortRun}
-        disabled={!isGatewayRunning}
-        sending={sending}
-        isEmpty={isEmpty}
+      <MessageViewport
+        gatewayStatus={gatewayStatus}
+        isGatewayRunning={gatewayStatus.state === 'running'}
+        onStartGateway={handleStartGateway}
+        onOpenSettings={() => navigate('/settings')}
       />
 
-      {/* Transparent loading overlay */}
-      {minLoading && !sending && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/20 backdrop-blur-[1px] rounded-xl pointer-events-auto">
-          <div className="bg-background shadow-lg rounded-full p-2.5 border border-border">
-            <LoadingSpinner size="md" />
-          </div>
-        </div>
-      )}
+      <ChatErrorBar />
+      <ChatComposer isGatewayRunning={gatewayStatus.state === 'running'} />
+      <ChatLoadingOverlay />
     </div>
   );
 }
@@ -368,7 +405,43 @@ function findLastUserMessageIndex(messages: RawMessage[]): number {
 }
 
 function buildMessageDisplayKey(message: RawMessage): string {
-  return `${message.id ?? ''}|${message.role}|${message.timestamp ?? ''}|${extractText(message).trim()}`;
+  const cached = messageDisplayKeyCache.get(message);
+  if (cached) return cached;
+
+  const key = `${message.id ?? ''}|${message.role}|${message.timestamp ?? ''}|${extractText(message).trim()}`;
+  messageDisplayKeyCache.set(message, key);
+  return key;
+}
+
+function areMessageListsEquivalent(a: RawMessage[], b: RawMessage[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    if (buildMessageDisplayKey(a[index]) !== buildMessageDisplayKey(b[index])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function useStableMessageList(messages: RawMessage[]): RawMessage[] {
+  const ref = useRef(messages);
+  if (!areMessageListsEquivalent(ref.current, messages)) {
+    ref.current = messages;
+  }
+  return ref.current;
+}
+
+function useStableMessage<T extends RawMessage | null | undefined>(message: T): T {
+  const ref = useRef<T>(message);
+  const current = ref.current;
+  const same = current === message
+    || (!current && !message)
+    || (!!current && !!message && buildMessageDisplayKey(current) === buildMessageDisplayKey(message));
+  if (!same) {
+    ref.current = message;
+  }
+  return ref.current;
 }
 
 function trimDeferredHistoryForActiveTurn(
@@ -795,7 +868,7 @@ function CollapsedProcessTurn({
   );
 }
 
-function ActiveTurn({
+const ActiveTurn = memo(function ActiveTurn({
   userMessage,
   processMessages,
   processStreamingMessage,
@@ -897,7 +970,7 @@ function ActiveTurn({
       )}
     </div>
   );
-}
+});
 
 // ── Welcome Screen ──────────────────────────────────────────────
 
