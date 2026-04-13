@@ -7,7 +7,7 @@
  * are sent with the message (no base64 over WebSocket).
  */
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { SendHorizontal, Square, X, Paperclip, Music, FileArchive, File, Loader2, AtSign, FileCode, FileImage } from 'lucide-react';
+import { SendHorizontal, Square, X, Paperclip, Music, FileArchive, File, Loader2, AtSign, FileCode, FileImage, ChevronDown, Cpu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { hostApiFetch } from '@/lib/host-api';
@@ -16,8 +16,11 @@ import { cn } from '@/lib/utils';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
 import { useChatStore } from '@/stores/chat';
+import { useProviderStore } from '@/stores/providers';
 import { useSettingsStore } from '@/stores/settings';
 import type { AgentSummary } from '@/types/agent';
+import type { ProviderAccount } from '@/lib/providers';
+import { buildProviderListItems } from '@/lib/provider-accounts';
 import { useTranslation } from 'react-i18next';
 
 // ── Types ────────────────────────────────────────────────────────
@@ -39,6 +42,35 @@ interface ChatInputProps {
   disabled?: boolean;
   sending?: boolean;
   isEmpty?: boolean;
+}
+
+type ModelOption = {
+  value: string;
+  label: string;
+};
+
+const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
+const GOOGLE_OAUTH_RUNTIME_PROVIDER = 'google-gemini-cli';
+
+function getRuntimeProviderKey(account: ProviderAccount): string {
+  if (account.authMode === 'oauth_browser') {
+    if (account.vendorId === 'openai') return OPENAI_OAUTH_RUNTIME_PROVIDER;
+    if (account.vendorId === 'google') return GOOGLE_OAUTH_RUNTIME_PROVIDER;
+  }
+  if (account.vendorId === 'custom' || account.vendorId === 'ollama') {
+    const prefix = `${account.vendorId}-`;
+    if (account.id.startsWith(prefix)) {
+      const suffix = account.id.slice(prefix.length);
+      if (suffix.length === 8 && !suffix.includes('-')) {
+        return account.id;
+      }
+    }
+    return `${account.vendorId}-${account.id.replace(/-/g, '').slice(0, 8)}`;
+  }
+  if (account.vendorId === 'minimax-portal-cn') {
+    return 'minimax-portal';
+  }
+  return account.vendorId;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -113,11 +145,22 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
   const isComposingRef = useRef(false);
   const gatewayStatus = useGatewayStore((s) => s.status);
   const agents = useAgentsStore((s) => s.agents);
+  const defaultModelRef = useAgentsStore((s) => s.defaultModelRef);
+  const updateAgentModel = useAgentsStore((s) => s.updateAgentModel);
+  const providerAccounts = useProviderStore((s) => s.accounts);
+  const providerStatuses = useProviderStore((s) => s.statuses);
+  const providerVendors = useProviderStore((s) => s.vendors);
+  const providerDefaultAccountId = useProviderStore((s) => s.defaultAccountId);
+  const refreshProviderSnapshot = useProviderStore((s) => s.refreshProviderSnapshot);
   const chatFontScale = useSettingsStore((s) => s.chatFontScale);
   const currentAgentId = useChatStore((s) => s.currentAgentId);
-  const currentAgentName = useMemo(
-    () => (agents ?? []).find((agent) => agent.id === currentAgentId)?.name ?? currentAgentId,
+  const currentAgent = useMemo(
+    () => (agents ?? []).find((agent) => agent.id === currentAgentId) ?? null,
     [agents, currentAgentId],
+  );
+  const currentAgentName = useMemo(
+    () => currentAgent?.name ?? currentAgentId,
+    [currentAgent, currentAgentId],
   );
   const mentionableAgents = useMemo(
     () => (agents ?? []).filter((agent) => agent.id !== currentAgentId),
@@ -130,6 +173,32 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
   const showAgentPicker = mentionableAgents.length > 0;
   const inputFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
   const metaFontSize = `${Math.round(11 * (chatFontScale / 100) * 10) / 10}px`;
+  const providerItems = useMemo(
+    () => buildProviderListItems(providerAccounts, providerStatuses, providerVendors, providerDefaultAccountId),
+    [providerAccounts, providerDefaultAccountId, providerStatuses, providerVendors],
+  );
+  const modelOptions = useMemo<ModelOption[]>(() => (
+    providerItems.flatMap((item) => {
+      const runtimeProviderKey = getRuntimeProviderKey(item.account);
+      return item.models
+        .filter((model) => model.source !== 'recommended')
+        .slice()
+        .sort((left, right) => left.id.localeCompare(right.id))
+        .map((model) => ({
+          value: `${runtimeProviderKey}/${model.id}`,
+          label: `${item.displayName} / ${model.id}`,
+        }));
+    })
+  ), [providerItems]);
+  const effectiveModelRef = (currentAgent?.overrideModelRef || currentAgent?.modelRef || defaultModelRef || '').trim();
+  const selectedModelValue = useMemo(() => {
+    if (!effectiveModelRef) return '';
+    return modelOptions.some((option) => option.value === effectiveModelRef) ? effectiveModelRef : '';
+  }, [effectiveModelRef, modelOptions]);
+  const selectedModelLabel = useMemo(
+    () => modelOptions.find((option) => option.value === selectedModelValue)?.label || t('composer.selectModel'),
+    [modelOptions, selectedModelValue, t],
+  );
 
   // Auto-resize textarea
   useEffect(() => {
@@ -171,6 +240,11 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
       document.removeEventListener('mousedown', handlePointerDown);
     };
   }, [pickerOpen]);
+
+  useEffect(() => {
+    if (providerAccounts.length > 0 || providerStatuses.length > 0 || providerVendors.length > 0) return;
+    void refreshProviderSnapshot();
+  }, [providerAccounts.length, providerStatuses.length, providerVendors.length, refreshProviderSnapshot]);
 
   // ── File staging via native dialog ─────────────────────────────
 
@@ -404,6 +478,11 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
     [stageBufferFiles],
   );
 
+  const handleModelChange = useCallback(async (nextModelRef: string) => {
+    if (!currentAgentId) return;
+    await updateAgentModel(currentAgentId, nextModelRef || null);
+  }, [currentAgentId, updateAgentModel]);
+
   return (
     <div
       className={cn(
@@ -430,10 +509,10 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
 
         {/* Input Row */}
         <div className={cn(
-          'relative rounded-[30px] border px-2.5 pb-2 pt-2 shadow-[0_18px_48px_rgba(15,23,42,0.10)] backdrop-blur-xl transition-all',
+          'relative rounded-[32px] border px-3 pb-3 pt-3 shadow-[0_20px_56px_rgba(15,23,42,0.12)] backdrop-blur-xl transition-all',
           'bg-[linear-gradient(180deg,rgba(255,255,255,0.84)_0%,rgba(248,250,252,0.72)_100%)] dark:bg-[linear-gradient(180deg,rgba(27,34,46,0.90)_0%,rgba(22,28,38,0.84)_100%)]',
           dragOver ? 'border-primary/60 ring-2 ring-primary/20' : 'border-black/8 dark:border-white/10'
-        )}>
+        )} data-testid="chat-composer">
           {selectedTarget && (
             <div className="px-2.5 pb-1 pt-1">
               <button
@@ -448,59 +527,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
             </div>
           )}
 
-          <div className="flex items-end gap-1.5">
-            {/* Attach Button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-10 w-10 shrink-0 rounded-full text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-white/8"
-              onClick={pickFiles}
-              disabled={disabled || sending}
-              title={t('composer.attachFiles')}
-            >
-              <Paperclip className="h-4 w-4" />
-            </Button>
-
-            {showAgentPicker && (
-              <div ref={pickerRef} className="relative shrink-0">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={cn(
-                    'h-10 w-10 rounded-full text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-white/8',
-                    (pickerOpen || selectedTarget) && 'bg-primary/10 text-primary hover:bg-primary/20'
-                  )}
-                  onClick={() => setPickerOpen((open) => !open)}
-                  disabled={disabled || sending}
-                  title={t('composer.pickAgent')}
-                >
-                  <AtSign className="h-4 w-4" />
-                </Button>
-                {pickerOpen && (
-                  <div className="absolute left-0 bottom-full z-20 mb-2 w-72 overflow-hidden rounded-2xl border border-black/10 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-card">
-                    <div className="px-3 py-2 text-[11px] font-medium text-muted-foreground/80">
-                      {t('composer.agentPickerTitle', { currentAgent: currentAgentName })}
-                    </div>
-                    <div className="max-h-64 overflow-y-auto">
-                      {mentionableAgents.map((agent) => (
-                        <AgentPickerItem
-                          key={agent.id}
-                          agent={agent}
-                          selected={agent.id === targetAgentId}
-                          onSelect={() => {
-                            setTargetAgentId(agent.id);
-                            setPickerOpen(false);
-                            textareaRef.current?.focus();
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Textarea */}
+          <div className="flex items-start gap-2.5">
             <div className="relative flex-1">
               <Textarea
                 ref={textareaRef}
@@ -514,20 +541,20 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
                   isComposingRef.current = false;
                 }}
                 onPaste={handlePaste}
-                placeholder={disabled ? t('composer.gatewayDisconnectedPlaceholder') : ''}
+                placeholder={disabled ? t('composer.gatewayDisconnectedPlaceholder') : t('composer.messagePlaceholder')}
                 disabled={disabled}
-                className="min-h-[42px] max-h-[220px] resize-none border-0 bg-transparent px-2 py-2.5 leading-[1.75] tracking-[0.01em] text-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/52"
+                className="min-h-[62px] max-h-[220px] resize-none border-0 bg-transparent px-3 py-2.5 leading-[1.75] tracking-[0.01em] text-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/52"
                 rows={1}
                 style={{ fontSize: inputFontSize }}
               />
             </div>
 
-            {/* Send Button */}
             <Button
               onClick={sending ? handleStop : handleSend}
               disabled={sending ? !canStop : !canSend}
               size="icon"
-              className={`shrink-0 h-10 w-10 rounded-full transition-colors ${
+              data-testid="chat-send-button"
+              className={`mt-1 shrink-0 h-10 w-10 rounded-full transition-colors ${
                 (sending || canSend)
                   ? 'bg-[linear-gradient(135deg,#4f8df7_0%,#2f6fe4_100%)] text-white shadow-[0_10px_24px_rgba(47,111,228,0.28)] hover:brightness-105'
                   : 'bg-transparent text-muted-foreground/40 hover:bg-transparent'
@@ -541,6 +568,107 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
                 <SendHorizontal className="h-[18px] w-[18px]" strokeWidth={2} />
               )}
             </Button>
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2 px-2">
+            <button
+              type="button"
+              data-testid="chat-attach-button"
+              className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-[13px] font-medium text-foreground/72 transition-colors hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/8"
+              onClick={pickFiles}
+              disabled={disabled || sending}
+              title={t('composer.attachFiles')}
+            >
+              <Paperclip className="h-4 w-4" />
+              <span>{t('composer.attachFiles')}</span>
+            </button>
+
+            {showAgentPicker && (
+              <div ref={pickerRef} className="relative">
+                <button
+                  type="button"
+                  data-testid="chat-agent-picker-button"
+                  className={cn(
+                    'inline-flex h-9 items-center gap-2 rounded-full px-3 text-[13px] font-medium text-foreground/72 transition-colors hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/8',
+                    (pickerOpen || selectedTarget) && 'bg-primary/10 text-primary hover:bg-primary/20'
+                  )}
+                  onClick={() => setPickerOpen((open) => !open)}
+                  disabled={disabled || sending}
+                  title={t('composer.role', 'Role')}
+                >
+                  <AtSign className="h-4 w-4" />
+                  <span>{selectedTarget ? selectedTarget.name : t('composer.role', 'Role')}</span>
+                  {selectedTarget && (
+                    <span
+                      role="button"
+                      aria-label={t('common:actions.clear', 'Clear')}
+                      className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground/80 hover:bg-black/10 hover:text-foreground dark:hover:bg-white/10"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setTargetAgentId(null);
+                        setPickerOpen(false);
+                        textareaRef.current?.focus();
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </span>
+                  )}
+                </button>
+                {pickerOpen && (
+                  <div className="absolute left-0 bottom-full z-20 mb-2 w-72 overflow-hidden rounded-2xl border border-black/10 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-card">
+                    <div className="px-3 py-2 text-[11px] font-medium text-muted-foreground/80">
+                      {t('composer.agentPickerTitle', { currentAgent: currentAgentName })}
+                    </div>
+                    <div className="max-h-64 overflow-y-auto">
+                      {mentionableAgents.map((agent) => (
+                        <AgentPickerItem
+                          key={agent.id}
+                          agent={agent}
+                          selected={agent.id === targetAgentId}
+                          onSelect={() => {
+                            setTargetAgentId((current) => (current === agent.id ? null : agent.id));
+                            setPickerOpen(false);
+                            textareaRef.current?.focus();
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <label
+              data-testid="chat-model-switch"
+              className={cn(
+                'relative inline-flex h-9 min-w-[220px] max-w-full items-center overflow-hidden rounded-full transition-colors',
+                modelOptions.length > 0 ? 'hover:bg-black/5 dark:hover:bg-white/8' : 'opacity-60'
+              )}
+              title={t('composer.switchModel')}
+            >
+              <Cpu className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground/72" />
+              <select
+                className="h-full w-full appearance-none bg-transparent pl-9 pr-9 text-[13px] font-medium text-foreground/72 outline-none disabled:cursor-not-allowed"
+                value={selectedModelValue}
+                onChange={(event) => {
+                  void handleModelChange(event.target.value);
+                }}
+                disabled={disabled || sending || modelOptions.length === 0}
+              >
+                {selectedModelValue === '' && (
+                  <option value="">
+                    {selectedModelLabel}
+                  </option>
+                )}
+                {modelOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            </label>
           </div>
         </div>
         <div className="mt-2.5 flex items-center justify-between gap-2 px-4 text-muted-foreground/58" style={{ fontSize: metaFontSize }}>

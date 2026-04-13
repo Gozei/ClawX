@@ -67,6 +67,7 @@ test.describe('Session pin', () => {
       await expect(page.getByTestId('main-layout')).toBeVisible();
 
       const bravoRow = page.getByTestId(`sidebar-session-${SESSION_B_KEY}`);
+      await expect(bravoRow).toBeVisible({ timeout: 60_000 });
       await bravoRow.hover();
       await page.getByTestId(`sidebar-session-menu-trigger-${SESSION_B_KEY}`).click();
       await expect(page.getByTestId(`sidebar-session-menu-pin-${SESSION_B_KEY}`)).toBeVisible();
@@ -81,6 +82,11 @@ test.describe('Session pin', () => {
       const pinnedSection = page.getByTestId('sidebar-pinned-sessions');
       await expect(pinnedSection.getByText('Bravo session', { exact: true })).toBeVisible();
       await expect(pinnedSection.getByText('Charlie session', { exact: true })).toBeVisible();
+      await expect(page.getByTestId(`sidebar-session-pin-indicator-${SESSION_B_KEY}`)).toBeVisible();
+      await expect(page.getByTestId(`sidebar-session-pin-indicator-${SESSION_C_KEY}`)).toBeVisible();
+
+      await bravoRow.hover();
+      await expect(page.getByTestId(`sidebar-session-menu-trigger-${SESSION_B_KEY}`)).toBeVisible();
 
       const pinnedLabels = await pinnedSection.locator('[title]').evaluateAll((nodes) =>
         nodes.map((node) => node.getAttribute('title')).filter(Boolean),
@@ -104,8 +110,10 @@ test.describe('Session pin', () => {
       await expect(page.getByTestId('main-layout')).toBeVisible();
 
       const pinnedSection = page.getByTestId('sidebar-pinned-sessions');
+      await expect(pinnedSection).toBeVisible({ timeout: 60_000 });
       await expect(pinnedSection.getByText('Charlie session', { exact: true })).toBeVisible({ timeout: 60_000 });
       await expect(pinnedSection.getByText('Bravo session', { exact: true })).toHaveCount(0);
+      await expect(page.getByTestId(`sidebar-session-pin-indicator-${SESSION_C_KEY}`)).toBeVisible();
     } finally {
       await closeElectronApp(relaunchedApp);
     }

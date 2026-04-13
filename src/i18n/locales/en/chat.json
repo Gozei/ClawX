@@ -38,6 +38,9 @@
     "composer": {
         "attachFiles": "Attach files",
         "pickAgent": "Choose role",
+        "selectModel": "Switch model",
+        "switchModel": "Switch model",
+        "messagePlaceholder": "Send a message...",
         "clearTarget": "Clear target role",
         "targetChip": "@{{agent}}",
         "agentPickerTitle": "Route the next message to another role",
