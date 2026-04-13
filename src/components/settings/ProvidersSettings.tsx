@@ -780,7 +780,27 @@ function ProviderCard({
   const handleSetDefaultModel = async (modelIdToSet: string) => {
     setSavingDefaultModel(modelIdToSet);
     try {
-      await onSaveEdits({ updates: { model: modelIdToSet } });
+      const currentConfiguredModelIds = normalizeConfiguredModelIds([
+        account.model || '',
+        ...(account.metadata?.customModels ?? []),
+      ]);
+      const reorderedModelIds = normalizeConfiguredModelIds([
+        modelIdToSet,
+        ...currentConfiguredModelIds.filter((modelId) => modelId !== modelIdToSet),
+      ]);
+      const nextMetadata = { ...(account.metadata ?? {}) };
+      const nextCustomModels = reorderedModelIds.slice(1);
+      if (nextCustomModels.length > 0) {
+        nextMetadata.customModels = nextCustomModels;
+      } else {
+        delete nextMetadata.customModels;
+      }
+      await onSaveEdits({
+        updates: {
+          model: reorderedModelIds[0],
+          metadata: nextMetadata,
+        },
+      });
       toast.success(t('aiProviders.toast.defaultUpdated', '默认模型已更新'));
     } catch (error) {
       toast.error(`${t('aiProviders.toast.failedUpdate')}: ${error}`);

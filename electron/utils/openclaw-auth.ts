@@ -835,6 +835,7 @@ export async function syncProviderConfigToOpenClaw(
         apiKeyEnv: override.apiKeyEnv,
         headers: override.headers,
         modelIds: modelId ? [modelId] : [],
+        mergeExistingModels: true,
       });
       nextProviders = (
         (config.models as Record<string, unknown> | undefined)?.providers as Record<string, Record<string, unknown>> | undefined
