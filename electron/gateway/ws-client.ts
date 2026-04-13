@@ -10,7 +10,11 @@ import { DEFAULT_BRANDING } from '../../shared/branding';
 import { logger } from '../utils/logger';
 
 export const GATEWAY_CHALLENGE_TIMEOUT_MS = 10_000;
-export const GATEWAY_CONNECT_HANDSHAKE_TIMEOUT_MS = 20_000;
+// Gateway 内部 model-pricing 等初始化可能阻塞事件循环 60-70 秒，
+// 其自身 ws handshake timeout 会在 ~67s 后关闭连接。
+// 此超时需大于 Gateway 侧的超时，让 Gateway 先关闭 WS 触发
+// connectGatewaySocket 的自动重连（此时 model-pricing 已完成）。
+export const GATEWAY_CONNECT_HANDSHAKE_TIMEOUT_MS = 90_000;
 
 export async function probeGatewayReady(
   port: number,
@@ -66,16 +70,25 @@ export async function probeGatewayReady(
   });
 }
 
+// 分阶段探测间隔：启动早期慢探测减少对 Gateway 的干扰，
+// 接近就绪时加速以降低响应延迟。
+function getDynamicProbeInterval(elapsedMs: number): number {
+  if (elapsedMs < 30_000) return 2000;
+  if (elapsedMs < 120_000) return 1000;
+  return 500;
+}
+
 export async function waitForGatewayReady(options: {
   port: number;
   getProcessExitCode: () => number | null;
-  retries?: number;
-  intervalMs?: number;
+  maxWaitMs?: number;
 }): Promise<void> {
-  const retries = options.retries ?? 2400;
-  const intervalMs = options.intervalMs ?? 200;
+  const maxWaitMs = options.maxWaitMs ?? 480_000;
+  const startTime = Date.now();
 
-  for (let i = 0; i < retries; i++) {
+  let attempts = 0;
+  while (Date.now() - startTime < maxWaitMs) {
+    attempts++;
     const exitCode = options.getProcessExitCode();
     if (exitCode !== null) {
       logger.error(`Gateway process exited before ready (code=${exitCode})`);
@@ -85,22 +98,25 @@ export async function waitForGatewayReady(options: {
     try {
       const ready = await probeGatewayReady(options.port, 1500);
       if (ready) {
-        logger.debug(`Gateway ready after ${i + 1} attempt(s)`);
+        logger.debug(`Gateway ready after ${attempts} attempt(s)`);
         return;
       }
     } catch {
       // Gateway not ready yet.
     }
 
-    if (i > 0 && i % 10 === 0) {
-      logger.debug(`Still waiting for Gateway... (attempt ${i + 1}/${retries})`);
+    if (attempts > 1 && attempts % 10 === 0) {
+      const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(0);
+      logger.debug(`Still waiting for Gateway... (attempt ${attempts}, ${elapsedSec}s elapsed)`);
     }
 
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    const interval = getDynamicProbeInterval(Date.now() - startTime);
+    await new Promise((resolve) => setTimeout(resolve, interval));
   }
 
-  logger.error(`Gateway failed to become ready after ${retries} attempts on port ${options.port}`);
-  throw new Error(`Gateway failed to start after ${retries} retries (port ${options.port})`);
+  const totalSec = ((Date.now() - startTime) / 1000).toFixed(0);
+  logger.error(`Gateway failed to become ready after ${attempts} attempts (${totalSec}s) on port ${options.port}`);
+  throw new Error(`Gateway failed to start after ${totalSec}s (port ${options.port})`);
 }
 
 export function buildGatewayConnectFrame(options: {
@@ -167,7 +183,14 @@ export function buildGatewayConnectFrame(options: {
   };
 }
 
-export async function connectGatewaySocket(options: {
+// Gateway 内部 model-pricing 等初始化可能阻塞事件循环 ~60 秒。
+// 在此期间 Gateway 能发 connect.challenge 但无法处理 connect RPC，
+// 其自身的 ws handshake timeout 会先关闭连接。
+// 此函数在握手阶段被 Gateway 关闭时自动重试，避免上层重启进程。
+const CONNECT_MAX_RETRIES = 3;
+const CONNECT_RETRY_DELAY_MS = 5_000;
+
+function attemptSingleConnect(options: {
   port: number;
   deviceIdentity: DeviceIdentity | null;
   platform: string;
@@ -177,14 +200,10 @@ export async function connectGatewaySocket(options: {
   onHandshakeComplete: (ws: WebSocket) => void;
   onMessage: (message: unknown) => void;
   onCloseAfterHandshake: (code: number) => void;
-  challengeTimeoutMs?: number;
-  connectTimeoutMs?: number;
+  challengeTimeoutMs: number;
+  connectTimeoutMs: number;
 }): Promise<WebSocket> {
-  logger.debug(`Connecting Gateway WebSocket (ws://localhost:${options.port}/ws)`);
-  const challengeTimeoutMs = options.challengeTimeoutMs ?? GATEWAY_CHALLENGE_TIMEOUT_MS;
-  const connectTimeoutMs = options.connectTimeoutMs ?? GATEWAY_CONNECT_HANDSHAKE_TIMEOUT_MS;
-
-  return await new Promise<WebSocket>((resolve, reject) => {
+  return new Promise<WebSocket>((resolve, reject) => {
     const wsUrl = `ws://localhost:${options.port}/ws`;
     const ws = new WebSocket(wsUrl);
     let handshakeComplete = false;
@@ -246,7 +265,7 @@ export async function connectGatewaySocket(options: {
           ws.close();
           rejectOnce(new Error('Connect handshake timeout'));
         }
-      }, connectTimeoutMs);
+      }, options.connectTimeoutMs);
       handshakeTimeout = requestTimeout;
 
       options.pendingRequests.set(connectId, {
@@ -270,7 +289,7 @@ export async function connectGatewaySocket(options: {
         ws.close();
         rejectOnce(new Error('Timed out waiting for connect.challenge from Gateway'));
       }
-    }, challengeTimeoutMs);
+    }, options.challengeTimeoutMs);
 
     ws.on('open', () => {
       logger.debug('Gateway WebSocket opened, waiting for connect.challenge...');
@@ -327,4 +346,49 @@ export async function connectGatewaySocket(options: {
       }
     });
   });
+}
+
+export async function connectGatewaySocket(options: {
+  port: number;
+  deviceIdentity: DeviceIdentity | null;
+  platform: string;
+  brandingDisplayName?: string;
+  pendingRequests: Map<string, PendingGatewayRequest>;
+  getToken: () => Promise<string>;
+  onHandshakeComplete: (ws: WebSocket) => void;
+  onMessage: (message: unknown) => void;
+  onCloseAfterHandshake: (code: number) => void;
+  challengeTimeoutMs?: number;
+  connectTimeoutMs?: number;
+}): Promise<WebSocket> {
+  const challengeTimeoutMs = options.challengeTimeoutMs ?? GATEWAY_CHALLENGE_TIMEOUT_MS;
+  const connectTimeoutMs = options.connectTimeoutMs ?? GATEWAY_CONNECT_HANDSHAKE_TIMEOUT_MS;
+
+  for (let attempt = 0; attempt <= CONNECT_MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      logger.debug(`Connect retry ${attempt}/${CONNECT_MAX_RETRIES} after ${CONNECT_RETRY_DELAY_MS}ms`);
+      await new Promise((resolve) => setTimeout(resolve, CONNECT_RETRY_DELAY_MS));
+    }
+    // 重试时使用更长的 challenge timeout，因为 Gateway 刚从 model-pricing
+    // 等阻塞操作恢复，可能需要更多时间才能发出 challenge。
+    const effectiveChallengeTimeout = attempt > 0 ? Math.max(challengeTimeoutMs, 30_000) : challengeTimeoutMs;
+    logger.debug(`Connecting Gateway WebSocket (ws://localhost:${options.port}/ws)${attempt > 0 ? ` [retry ${attempt}]` : ''}`);
+    try {
+      return await attemptSingleConnect({
+        ...options,
+        challengeTimeoutMs: effectiveChallengeTimeout,
+        connectTimeoutMs,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      // 仅在 Gateway 主动关闭 WS（handshake 阶段）或 RPC 超时时重试，
+      // 其他错误（如 ECONNREFUSED）直接抛出。
+      const isRetryable = /closed before handshake|handshake timeout/i.test(msg);
+      if (!isRetryable || attempt >= CONNECT_MAX_RETRIES) {
+        throw error;
+      }
+      logger.warn(`Gateway connection attempt ${attempt + 1} failed (${msg}), will retry...`);
+    }
+  }
+  throw new Error('Connect retries exhausted (unreachable)');
 }

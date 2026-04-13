@@ -6,6 +6,7 @@
 import { create } from 'zustand';
 import { buildAgentExecutionMetadata } from '@/lib/agent-execution-context';
 import { hostApiFetch } from '@/lib/host-api';
+import i18n from '@/i18n';
 import { useGatewayStore } from './gateway';
 import { useAgentsStore } from './agents';
 import { buildCronSessionHistoryPath, isCronSessionKey } from './chat/cron-session-utils';
@@ -560,6 +561,74 @@ function getMessageText(content: unknown): string {
       .join('\n');
   }
   return '';
+}
+
+function translateChat(key: string, defaultValue: string, options?: Record<string, unknown>): string {
+  return i18n.t(`chat:${key}`, {
+    defaultValue,
+    ...options,
+  });
+}
+
+function getNoResponseError(): string {
+  return translateChat(
+    'sessionErrors.noResponse',
+    'No response received from the model. The provider may be unavailable or the API key may have insufficient quota. Please check your provider settings.',
+  );
+}
+
+function getSendFailedError(error?: string): string {
+  const detail = typeof error === 'string' ? error.trim() : '';
+  if (!detail || detail === 'Failed to send message') {
+    return translateChat(
+      'sessionErrors.sendFailed',
+      'Failed to send message. Please check the provider or gateway status and try again.',
+    );
+  }
+  return translateChat(
+    'sessionErrors.sendFailedWithDetail',
+    'Failed to send message: {{error}}',
+    { error: detail },
+  );
+}
+
+function getEmptyAssistantResponseError(): string {
+  return translateChat(
+    'sessionErrors.emptyAssistantResponse',
+    'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.',
+  );
+}
+
+function getContinueConversationWarning(): string {
+  return translateChat(
+    'sessionWarnings.finalReplyMissing',
+    'The final reply did not arrive, but you can continue the conversation.',
+  );
+}
+
+function createLocalAssistantMessage(
+  content: string,
+  options?: { isError?: boolean; idPrefix?: string; timestampMs?: number },
+): RawMessage {
+  const timestampMs = options?.timestampMs ?? Date.now();
+  return {
+    id: `${options?.idPrefix || (options?.isError ? 'local-error' : 'local-message')}-${timestampMs}`,
+    role: 'assistant',
+    content,
+    timestamp: timestampMs / 1000,
+    isError: options?.isError === true,
+  };
+}
+
+function appendAssistantMessage(messages: RawMessage[], nextMessage: RawMessage): RawMessage[] {
+  const nextText = getMessageText(nextMessage.content).trim();
+  if (!nextText) return messages;
+  const hasDuplicate = messages.slice(-3).some((message) => (
+    message.role === nextMessage.role
+    && !!message.isError === !!nextMessage.isError
+    && getMessageText(message.content).trim() === nextText
+  ));
+  return hasDuplicate ? messages : [...messages, nextMessage];
 }
 
 /** Extract media file refs from [media attached: <path> (<mime>) | ...] patterns */
@@ -1494,9 +1563,6 @@ function collectToolUpdates(message: unknown, eventState: string): ToolStatus[] 
   updates.push(...extractToolUseUpdates(message));
   return updates;
 }
-
-const EMPTY_ASSISTANT_RESPONSE_ERROR =
-  'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.';
 
 function hasNonToolAssistantContent(message: RawMessage | undefined): boolean {
   if (!message) return false;
@@ -2929,8 +2995,12 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
               };
             }
             if (emptyAssistantResponse) {
+              const emptyReply = createLocalAssistantMessage(getEmptyAssistantResponseError(), {
+                isError: true,
+                idPrefix: 'empty-assistant-response',
+              });
               return {
-                messages: [...s.messages, msgWithImages],
+                messages: appendAssistantMessage([...s.messages, msgWithImages], emptyReply),
                 streamingText: '',
                 streamingMessage: null,
                 sending: false,
@@ -2938,7 +3008,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                 sendStage: null,
                 pendingFinal: false,
                 streamingTools,
-                error: EMPTY_ASSISTANT_RESPONSE_ERROR,
+                error: null,
                 ...clearPendingImages,
               };
             }
@@ -3003,15 +3073,20 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           }
         }
 
-        set({
-          error: errorMsg,
+        const errorReply = createLocalAssistantMessage(getSendFailedError(errorMsg), {
+          isError: true,
+          idPrefix: 'runtime-error',
+        });
+        set((s) => ({
+          messages: appendAssistantMessage(s.messages, errorReply),
+          error: null,
           streamingText: '',
           streamingMessage: null,
           streamingTools: [],
           sendStage: null,
           pendingFinal: false,
           pendingToolImages: [],
-        });
+        }));
 
         // Don't immediately give up: the Gateway often retries internally
         // after transient API failures (e.g. "terminated"). Keep `sending`

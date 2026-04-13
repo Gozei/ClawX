@@ -1,15 +1,20 @@
 import {
+  appendAssistantMessage,
   clearErrorRecoveryTimer,
   clearHistoryPoll,
   collectToolUpdates,
+  createLocalAssistantMessage,
   createToolResultProcessMessage,
-  EMPTY_ASSISTANT_RESPONSE_ERROR,
   extractImagesAsAttachedFiles,
   extractMediaRefs,
   extractRawFilePaths,
   getMessageText,
   getToolCallFilePath,
+  getContinueConversationWarning,
+  getEmptyAssistantResponseError,
+  getSendFailedError,
   hasErrorRecoveryTimer,
+  getLastChatEventAt,
   hasNonToolAssistantContent,
   isEmptyAssistantResponse,
   isToolOnlyMessage,
@@ -27,6 +32,9 @@ let pendingDeltaClearError = false;
 let pendingDeltaFlushHandle: ReturnType<typeof setTimeout> | null = null;
 let pendingFinalRecoveryHandle: ReturnType<typeof setTimeout> | null = null;
 const PENDING_FINAL_RECOVERY_DELAY_MS = 20_000;
+// 如果距离最后一个 chat 事件不超过此时间，recovery 定时器推迟而非强制终止，
+// 以避免在长工具执行期间过早结束流式会话。
+const RECOVERY_ACTIVE_THRESHOLD_MS = 45_000;
 
 function cancelPendingDeltaFlush(): void {
   if (pendingDeltaFlushHandle) {
@@ -127,13 +135,21 @@ function schedulePendingFinalRecovery(
   clearPendingFinalRecoveryTimer();
   const sessionKey = (get() as { currentSessionKey?: string }).currentSessionKey;
 
-  pendingFinalRecoveryHandle = setTimeout(() => {
+  const runRecovery = () => {
     pendingFinalRecoveryHandle = null;
     const state = get();
     if (
       (sessionKey && (state as { currentSessionKey?: string }).currentSessionKey !== sessionKey)
       || !state.pendingFinal
     ) {
+      return;
+    }
+
+    // 如果近期仍有活跃的 chat 事件，说明 Gateway 仍在通信（如长工具执行中），
+    // 推迟 recovery 而非强制终止流式会话。
+    const lastEventAt = getLastChatEventAt();
+    if (lastEventAt && Date.now() - lastEventAt < RECOVERY_ACTIVE_THRESHOLD_MS) {
+      pendingFinalRecoveryHandle = setTimeout(runRecovery, PENDING_FINAL_RECOVERY_DELAY_MS);
       return;
     }
 
@@ -185,11 +201,13 @@ function schedulePendingFinalRecovery(
           pendingToolImages: [],
           error: shouldAppendStreamingSnapshot || canPromoteStreamingAssistant
             ? s.error
-            : (s.error || '最终回复还没有成功到达，但你可以继续当前对话。'),
+            : (s.error || getContinueConversationWarning()),
         };
       });
     });
-  }, PENDING_FINAL_RECOVERY_DELAY_MS);
+  };
+
+  pendingFinalRecoveryHandle = setTimeout(runRecovery, PENDING_FINAL_RECOVERY_DELAY_MS);
 }
 
 export function handleRuntimeEventState(
@@ -216,6 +234,11 @@ export function handleRuntimeEventState(
           if (hasErrorRecoveryTimer()) {
             clearErrorRecoveryTimer();
             pendingDeltaClearError = true;
+          }
+          // 收到新的流式数据，说明 run 仍在进行中，清除 pendingFinal
+          // 防止 pendingFinalRecovery 或 loadHistory 在活跃流式期间误终止会话。
+          if (get().pendingFinal) {
+            set({ pendingFinal: false });
           }
           const updates = collectToolUpdates(event.message, resolvedState);
           if (event.message && typeof event.message === 'object') {
@@ -296,14 +319,15 @@ export function handleRuntimeEventState(
                 messages: snapshotMsgs.length > 0 ? [...s.messages, ...snapshotMsgs] : s.messages,
                 streamingText: '',
                 streamingMessage: null,
-                pendingFinal: true,
+                // tool_result 表示单个工具调用完成，run 仍在继续，
+                // 不应设置 pendingFinal 以免 loadHistory 过早终止流式传输。
+                pendingFinal: s.pendingFinal,
                   pendingToolImages: toolFiles.length > 0
                   ? [...s.pendingToolImages, ...toolFiles]
                   : s.pendingToolImages,
                 streamingTools: updates.length > 0 ? upsertToolStatuses(s.streamingTools, updates) : s.streamingTools,
               };
             });
-            schedulePendingFinalRecovery(set, get);
             break;
           }
           const toolOnly = isToolOnlyMessage(finalMsg);
@@ -354,15 +378,19 @@ export function handleRuntimeEventState(
               };
             }
               if (emptyAssistantResponse) {
+                const emptyReply = createLocalAssistantMessage(getEmptyAssistantResponseError(), {
+                  isError: true,
+                  idPrefix: 'empty-assistant-response',
+                });
                 return {
-                  messages: [...s.messages, msgWithImages],
+                  messages: appendAssistantMessage([...s.messages, msgWithImages], emptyReply),
                   streamingText: '',
                   streamingMessage: null,
                   sending: false,
                   activeRunId: null,
                   pendingFinal: false,
                   streamingTools,
-                  error: EMPTY_ASSISTANT_RESPONSE_ERROR,
+                  error: null,
                   ...clearPendingImages,
                 };
               }
@@ -423,14 +451,19 @@ export function handleRuntimeEventState(
             }
           }
 
-          set({
-            error: errorMsg,
+          const errorReply = createLocalAssistantMessage(getSendFailedError(errorMsg), {
+            isError: true,
+            idPrefix: 'runtime-error',
+          });
+          set((s) => ({
+            messages: appendAssistantMessage(s.messages, errorReply),
+            error: null,
             streamingText: '',
             streamingMessage: null,
             streamingTools: [],
             pendingFinal: false,
             pendingToolImages: [],
-          });
+          }));
 
           // Don't immediately give up: the Gateway often retries internally
           // after transient API failures (e.g. "terminated"). Keep `sending`

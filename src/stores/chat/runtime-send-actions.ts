@@ -2,9 +2,13 @@ import { invokeIpc } from '@/lib/api-client';
 import { buildAgentExecutionMetadata } from '@/lib/agent-execution-context';
 import { useAgentsStore } from '@/stores/agents';
 import {
+  appendAssistantMessage,
   clearErrorRecoveryTimer,
   clearHistoryPoll,
+  createLocalAssistantMessage,
   getLastChatEventAt,
+  getNoResponseError,
+  getSendFailedError,
   hasNonToolAssistantContent,
   isToolResultRole,
   setHistoryPollTimer,
@@ -229,12 +233,22 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
           return;
         }
         clearHistoryPoll();
-        set({
-          error: '暂时没有收到模型回复。可能是服务暂不可用，或当前 API Key 额度不足，请检查提供商设置。',
+        const errorReply = createLocalAssistantMessage(getNoResponseError(), {
+          isError: true,
+          idPrefix: 'no-response',
+        });
+        set((s) => ({
+          messages: appendAssistantMessage(s.messages, errorReply),
+          error: null,
           sending: false,
           activeRunId: null,
           lastUserMessageAt: null,
-        });
+          streamingText: '',
+          streamingMessage: null,
+          streamingTools: [],
+          pendingFinal: false,
+          pendingToolImages: [],
+        }));
       };
       setTimeout(checkStuck, 30_000);
 
@@ -297,13 +311,43 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
 
         if (!result.success) {
           clearHistoryPoll();
-          set({ error: result.error || 'Failed to send message', sending: false });
+          const errorReply = createLocalAssistantMessage(getSendFailedError(result.error), {
+            isError: true,
+            idPrefix: 'send-failed',
+          });
+          set((s) => ({
+            messages: appendAssistantMessage(s.messages, errorReply),
+            error: null,
+            sending: false,
+            activeRunId: null,
+            lastUserMessageAt: null,
+            streamingText: '',
+            streamingMessage: null,
+            streamingTools: [],
+            pendingFinal: false,
+            pendingToolImages: [],
+          }));
         } else if (result.result?.runId) {
           set({ activeRunId: result.result.runId });
         }
       } catch (err) {
         clearHistoryPoll();
-        set({ error: String(err), sending: false });
+        const errorReply = createLocalAssistantMessage(getSendFailedError(String(err)), {
+          isError: true,
+          idPrefix: 'send-exception',
+        });
+        set((s) => ({
+          messages: appendAssistantMessage(s.messages, errorReply),
+          error: null,
+          sending: false,
+          activeRunId: null,
+          lastUserMessageAt: null,
+          streamingText: '',
+          streamingMessage: null,
+          streamingTools: [],
+          pendingFinal: false,
+          pendingToolImages: [],
+        }));
       }
     },
 

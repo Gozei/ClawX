@@ -543,6 +543,7 @@ export function Settings() {
                   {SUPPORTED_LANGUAGES.map((lang) => (
                     <Button
                       key={lang.code}
+                      data-testid={`settings-language-${lang.code}`}
                       variant={language === lang.code ? 'secondary' : 'outline'}
                       className={cn("rounded-full px-5 h-10 border-black/10 dark:border-white/10", language === lang.code ? "bg-black/5 dark:bg-white/10 text-foreground" : "bg-transparent text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5")}
                       onClick={() => setLanguage(lang.code)}

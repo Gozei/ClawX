@@ -1,3 +1,4 @@
+import i18n from '@/i18n';
 import { invokeIpc } from '@/lib/api-client';
 import type { AttachedFileMeta, ChatSession, ContentBlock, RawMessage, ToolStatus } from './types';
 
@@ -88,6 +89,50 @@ function getMessageText(content: unknown): string {
       .join('\n');
   }
   return '';
+}
+
+function translateChat(key: string, defaultValue: string, options?: Record<string, unknown>): string {
+  return i18n.t(`chat:${key}`, {
+    defaultValue,
+    ...options,
+  });
+}
+
+function normalizeErrorDetail(error: string | null | undefined): string | null {
+  if (typeof error !== 'string') return null;
+  const trimmed = error.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function createLocalAssistantMessage(
+  content: string,
+  options?: {
+    isError?: boolean;
+    idPrefix?: string;
+    timestampMs?: number;
+  },
+): RawMessage {
+  const timestampMs = options?.timestampMs ?? Date.now();
+  return {
+    id: `${options?.idPrefix || (options?.isError ? 'local-error' : 'local-message')}-${timestampMs}`,
+    role: 'assistant',
+    content,
+    timestamp: timestampMs / 1000,
+    isError: options?.isError === true,
+  };
+}
+
+function appendAssistantMessage(messages: RawMessage[], nextMessage: RawMessage): RawMessage[] {
+  const nextText = getMessageText(nextMessage.content).trim();
+  if (!nextText) return messages;
+
+  const hasDuplicate = messages.slice(-3).some((message) => (
+    message.role === nextMessage.role
+    && !!message.isError === !!nextMessage.isError
+    && getMessageText(message.content).trim() === nextText
+  ));
+
+  return hasDuplicate ? messages : [...messages, nextMessage];
 }
 
 /** Extract media file refs from [media attached: <path> (<mime>) | ...] patterns */
@@ -838,8 +883,47 @@ function collectToolUpdates(message: unknown, eventState: string): ToolStatus[] 
   return updates;
 }
 
-const EMPTY_ASSISTANT_RESPONSE_ERROR =
-  'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.';
+const EMPTY_ASSISTANT_RESPONSE_ERROR = translateChat(
+  'sessionErrors.emptyAssistantResponse',
+  'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.',
+);
+
+function getEmptyAssistantResponseError(): string {
+  return translateChat(
+    'sessionErrors.emptyAssistantResponse',
+    'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.',
+  );
+}
+
+function getContinueConversationWarning(): string {
+  return translateChat(
+    'sessionWarnings.finalReplyMissing',
+    'The final reply did not arrive, but you can continue the conversation.',
+  );
+}
+
+function getNoResponseError(): string {
+  return translateChat(
+    'sessionErrors.noResponse',
+    'No response received from the model. The provider may be unavailable or the API key may have insufficient quota. Please check your provider settings.',
+  );
+}
+
+function getSendFailedError(error?: string): string {
+  const detail = normalizeErrorDetail(error);
+  if (!detail || detail === 'Failed to send message') {
+    return translateChat(
+      'sessionErrors.sendFailed',
+      'Failed to send message. Please check the provider or gateway status and try again.',
+    );
+  }
+
+  return translateChat(
+    'sessionErrors.sendFailedWithDetail',
+    'Failed to send message: {{error}}',
+    { error: detail },
+  );
+}
 
 function hasNonToolAssistantContent(message: RawMessage | undefined): boolean {
   if (!message) return false;
@@ -856,6 +940,31 @@ function hasNonToolAssistantContent(message: RawMessage | undefined): boolean {
   }
 
   const msg = message as unknown as Record<string, unknown>;
+  if (typeof msg.text === 'string' && msg.text.trim()) return true;
+
+  return false;
+}
+
+/**
+ * 判断 assistant 消息是否包含真正的最终文本回复内容。
+ * 与 hasNonToolAssistantContent 的区别：不把 thinking 块视为"最终内容"。
+ * 仅检查 text / image / attachedFiles / stopReason，用于 loadHistory
+ * 终结判定，避免中间 thinking + tool_use 消息被误判为最终回复。
+ */
+function hasAssistantFinalTextContent(message: RawMessage | undefined): boolean {
+  if (!message) return false;
+  if (Array.isArray(message._attachedFiles) && message._attachedFiles.length > 0) return true;
+  if (typeof message.content === 'string' && message.content.trim()) return true;
+
+  if (Array.isArray(message.content)) {
+    for (const block of message.content as ContentBlock[]) {
+      if (block.type === 'text' && block.text && block.text.trim()) return true;
+      if (block.type === 'image') return true;
+    }
+  }
+
+  const msg = message as unknown as Record<string, unknown>;
+  if (msg.stopReason || msg.stop_reason) return true;
   if (typeof msg.text === 'string' && msg.text.trim()) return true;
 
   return false;
@@ -889,11 +998,17 @@ function getLastChatEventAt(): number {
 }
 
 export {
+  appendAssistantMessage,
   toMs,
   clearErrorRecoveryTimer,
   clearHistoryPoll,
+  createLocalAssistantMessage,
   extractImagesAsAttachedFiles,
   getMessageText,
+  getContinueConversationWarning,
+  getEmptyAssistantResponseError,
+  getNoResponseError,
+  getSendFailedError,
   extractMediaRefs,
   extractRawFilePaths,
   makeAttachedFile,
@@ -910,6 +1025,7 @@ export {
   upsertToolStatuses,
   EMPTY_ASSISTANT_RESPONSE_ERROR,
   hasNonToolAssistantContent,
+  hasAssistantFinalTextContent,
   isEmptyAssistantResponse,
   isToolOnlyMessage,
   setHistoryPollTimer,

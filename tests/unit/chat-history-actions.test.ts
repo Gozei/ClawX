@@ -2,10 +2,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeIpcMock = vi.fn();
 const hostApiFetchMock = vi.fn();
+const appendAssistantMessage = vi.fn((messages: unknown[], message: unknown) => [...messages, message]);
 const clearHistoryPoll = vi.fn();
-const CHAT_HISTORY_RPC_TIMEOUT_MS = 60_000;
+const createLocalAssistantMessage = vi.fn((content: string, options?: { isError?: boolean; idPrefix?: string }) => ({
+  id: `${options?.idPrefix || 'local-message'}-1`,
+  role: 'assistant',
+  content,
+  timestamp: Date.now(),
+  isError: options?.isError === true,
+}));
 const createToolResultProcessMessage = vi.fn((message: unknown) => message);
 const EMPTY_ASSISTANT_RESPONSE_ERROR = 'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.';
+const getEmptyAssistantResponseError = vi.fn(() => EMPTY_ASSISTANT_RESPONSE_ERROR);
 const enrichWithCachedImages = vi.fn((messages) => messages);
 const enrichWithToolResultFiles = vi.fn((messages) => messages);
 const getMessageText = vi.fn((content: unknown) => typeof content === 'string' ? content : '');
@@ -15,6 +23,15 @@ const hasNonToolAssistantContent = vi.fn((message: { content?: unknown; _attache
   if (typeof message.content === 'string') return message.content.trim().length > 0;
   if (Array.isArray(message.content)) return message.content.length > 0;
   return Boolean(message.content);
+});
+const hasAssistantFinalTextContent = vi.fn((message: { content?: unknown; _attachedFiles?: unknown[] } | undefined) => {
+  if (!message) return false;
+  if (Array.isArray(message._attachedFiles) && message._attachedFiles.length > 0) return true;
+  if (typeof message.content === 'string') return message.content.trim().length > 0;
+  if (Array.isArray(message.content)) {
+    return message.content.some((b: Record<string, unknown>) => b.type === 'text' || b.type === 'image');
+  }
+  return false;
 });
 const isEmptyAssistantResponse = vi.fn((message: { role?: string; content?: unknown; _attachedFiles?: unknown[] } | undefined) => {
   if (!message || message.role !== 'assistant') return false;
@@ -45,14 +62,17 @@ vi.mock('@/lib/host-api', () => ({
 }));
 
 vi.mock('@/stores/chat/helpers', () => ({
+  appendAssistantMessage: (...args: unknown[]) => appendAssistantMessage(...args),
   clearHistoryPoll: (...args: unknown[]) => clearHistoryPoll(...args),
-  CHAT_HISTORY_RPC_TIMEOUT_MS,
+  createLocalAssistantMessage: (...args: unknown[]) => createLocalAssistantMessage(...args),
   createToolResultProcessMessage: (...args: unknown[]) => createToolResultProcessMessage(...args),
   EMPTY_ASSISTANT_RESPONSE_ERROR,
+  getEmptyAssistantResponseError: (...args: unknown[]) => getEmptyAssistantResponseError(...args),
   enrichWithCachedImages: (...args: unknown[]) => enrichWithCachedImages(...args),
   enrichWithToolResultFiles: (...args: unknown[]) => enrichWithToolResultFiles(...args),
   getMessageText: (...args: unknown[]) => getMessageText(...args),
   hasNonToolAssistantContent: (...args: unknown[]) => hasNonToolAssistantContent(...args),
+  hasAssistantFinalTextContent: (...args: unknown[]) => hasAssistantFinalTextContent(...args),
   isEmptyAssistantResponse: (...args: unknown[]) => isEmptyAssistantResponse(...args),
   isInternalMessage: (...args: unknown[]) => isInternalMessage(...args),
   isToolResultRole: (...args: unknown[]) => isToolResultRole(...args),
@@ -531,6 +551,13 @@ describe('chat history actions', () => {
     expect(h.read().sending).toBe(false);
     expect(h.read().pendingFinal).toBe(false);
     expect(h.read().lastUserMessageAt).toBeNull();
-    expect(h.read().error).toBe(EMPTY_ASSISTANT_RESPONSE_ERROR);
+    // 空回复的错误信息通过 createLocalAssistantMessage（isError: true）附加到消息列表中，
+    // error 状态被设为 null（不显示全局错误条）。
+    expect(h.read().error).toBeNull();
+    expect(appendAssistantMessage).toHaveBeenCalledTimes(1);
+    expect(createLocalAssistantMessage).toHaveBeenCalledWith(
+      EMPTY_ASSISTANT_RESPONSE_ERROR,
+      { isError: true, idPrefix: 'history-empty-assistant-response' },
+    );
   });
 });

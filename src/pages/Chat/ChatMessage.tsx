@@ -109,6 +109,7 @@ export const ChatMessage = memo(function ChatMessage({
   streamingTools = [],
 }: ChatMessageProps) {
   const isUser = message.role === 'user';
+  const isErrorMessage = !isUser && message.isError === true;
   const role = typeof message.role === 'string' ? message.role.toLowerCase() : '';
   const isToolResult = role === 'toolresult' || role === 'tool_result';
   const text = useMemo(() => extractText(message), [message]);
@@ -153,10 +154,12 @@ export const ChatMessage = memo(function ChatMessage({
             'flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-1',
             hideAvatar
               ? 'opacity-0 pointer-events-none'
-              : 'bg-black/5 dark:bg-white/5 text-foreground',
+              : isErrorMessage
+                ? 'bg-destructive/10 text-destructive'
+                : 'bg-black/5 dark:bg-white/5 text-foreground',
           )}
         >
-          {!hideAvatar && <Sparkles className="h-4 w-4" />}
+          {!hideAvatar && (isErrorMessage ? <AlertCircle className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />)}
         </div>
       )}
 
@@ -208,35 +211,18 @@ export const ChatMessage = memo(function ChatMessage({
           </div>
         )}
 
-        {/* File attachments — images above text for user, file cards below */}
+        {/* File attachments */}
         {isUser && attachedFiles.length > 0 && (
           <div className="flex flex-wrap gap-2">
-            {attachedFiles.map((file, i) => {
-              const isImage = file.mimeType.startsWith('image/');
-              // Skip image attachments if we already have images from content blocks
-              if (isImage && images.length > 0) return null;
-              if (isImage) {
-                return file.preview ? (
-                  <ImageThumbnail
-                    key={`local-${i}`}
-                    src={file.preview}
-                    fileName={file.fileName}
-                    filePath={file.filePath}
-                    mimeType={file.mimeType}
-                    onPreview={() => setLightboxImg({ src: file.preview!, fileName: file.fileName, filePath: file.filePath, mimeType: file.mimeType })}
-                  />
-                ) : (
-                  <div
-                    key={`local-${i}`}
-                    className="w-36 h-36 rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 flex items-center justify-center text-muted-foreground"
-                  >
-                    <File className="h-8 w-8" />
-                  </div>
-                );
-              }
-              // Non-image files → file card
-              return <FileCard key={`local-${i}`} file={file} />;
-            })}
+            {attachedFiles.map((file, i) => (
+              <FileCard
+                key={`local-${i}`}
+                file={file}
+                onPreview={file.preview && file.mimeType.startsWith('image/')
+                  ? () => setLightboxImg({ src: file.preview!, fileName: file.fileName, filePath: file.filePath, mimeType: file.mimeType })
+                  : undefined}
+              />
+            ))}
           </div>
         )}
 
@@ -245,6 +231,7 @@ export const ChatMessage = memo(function ChatMessage({
           <MessageBubble
             text={text}
             isUser={isUser}
+            isError={isErrorMessage}
             isStreaming={isStreaming}
             fontSize={bodyFontSize}
             assistantMessageStyle={assistantMessageStyle}
@@ -274,30 +261,15 @@ export const ChatMessage = memo(function ChatMessage({
         {/* File attachments — assistant messages (below text) */}
         {!isUser && attachedFiles.length > 0 && (
           <div className="flex flex-wrap gap-2">
-            {attachedFiles.map((file, i) => {
-              const isImage = file.mimeType.startsWith('image/');
-              if (isImage && images.length > 0) return null;
-              if (isImage && file.preview) {
-                return (
-                  <ImagePreviewCard
-                    key={`local-${i}`}
-                    src={file.preview}
-                    fileName={file.fileName}
-                    filePath={file.filePath}
-                    mimeType={file.mimeType}
-                    onPreview={() => setLightboxImg({ src: file.preview!, fileName: file.fileName, filePath: file.filePath, mimeType: file.mimeType })}
-                  />
-                );
-              }
-              if (isImage && !file.preview) {
-                return (
-                  <div key={`local-${i}`} className="w-36 h-36 rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 flex items-center justify-center text-muted-foreground">
-                    <File className="h-8 w-8" />
-                  </div>
-                );
-              }
-              return <FileCard key={`local-${i}`} file={file} />;
-            })}
+            {attachedFiles.map((file, i) => (
+              <FileCard
+                key={`local-${i}`}
+                file={file}
+                onPreview={file.preview && file.mimeType.startsWith('image/')
+                  ? () => setLightboxImg({ src: file.preview!, fileName: file.fileName, filePath: file.filePath, mimeType: file.mimeType })
+                  : undefined}
+              />
+            ))}
           </div>
         )}
 
@@ -423,12 +395,14 @@ const MessageHoverBar = memo(function MessageHoverBar({
 const MessageBubble = memo(function MessageBubble({
   text,
   isUser,
+  isError,
   isStreaming,
   fontSize,
   assistantMessageStyle,
 }: {
   text: string;
   isUser: boolean;
+  isError: boolean;
   isStreaming: boolean;
   fontSize: string;
   assistantMessageStyle: AssistantMessageStyle;
@@ -442,13 +416,15 @@ const MessageBubble = memo(function MessageBubble({
 
   return (
     <div
-      data-testid={!isUser ? `chat-assistant-message-${assistantMessageStyle}` : undefined}
+      data-testid={!isUser ? (isError ? 'chat-assistant-error-message' : `chat-assistant-message-${assistantMessageStyle}`) : undefined}
       className={cn(
         'relative',
         usesAssistantStreamStyle ? 'w-full px-1 py-0.5' : 'rounded-[24px] px-4 py-3.5',
         !isUser && !usesAssistantStreamStyle && 'w-full',
         isUser
           ? 'bg-[linear-gradient(135deg,#4f8df7_0%,#2f6fe4_100%)] text-white shadow-[0_12px_28px_rgba(47,111,228,0.24)]'
+          : isError
+            ? 'border border-destructive/25 bg-destructive/8 text-destructive shadow-[0_10px_30px_rgba(220,38,38,0.08)]'
           : usesAssistantStreamStyle
             ? 'bg-transparent text-foreground'
             : 'border border-black/6 bg-white/54 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.06)] backdrop-blur-sm dark:border-white/8 dark:bg-white/[0.045]',
@@ -543,88 +519,62 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-function getFileExtension(fileName: string): string {
-  const parts = fileName.split('.');
-  if (parts.length < 2) return 'FILE';
-  return parts.at(-1)?.toUpperCase() || 'FILE';
+function FileExtIcon({ ext, color, className }: { ext: string; color: string; className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" fill={`${color}20`} />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+      <text x="12" y="18" fontSize="6.5" fontFamily="sans-serif" fontWeight="bold" textAnchor="middle" stroke="none" fill={color}>{ext.toUpperCase()}</text>
+    </svg>
+  );
 }
 
-function getAttachmentAccentClass(mimeType: string): string {
-  if (mimeType === 'application/pdf') return 'bg-rose-500/12 text-rose-700 dark:text-rose-300';
-  if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return 'bg-orange-500/12 text-orange-700 dark:text-orange-300';
-  if (mimeType.includes('word') || mimeType.includes('document') || mimeType === 'text/markdown') return 'bg-blue-500/12 text-blue-700 dark:text-blue-300';
-  if (mimeType.includes('sheet') || mimeType.includes('excel') || mimeType === 'text/csv') return 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300';
-  if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('archive') || mimeType.includes('tar') || mimeType.includes('rar') || mimeType.includes('7z')) {
-    return 'bg-amber-500/12 text-amber-700 dark:text-amber-300';
-  }
-  if (mimeType.startsWith('video/')) return 'bg-violet-500/12 text-violet-700 dark:text-violet-300';
-  if (mimeType.startsWith('audio/')) return 'bg-fuchsia-500/12 text-fuchsia-700 dark:text-fuchsia-300';
-  if (mimeType.startsWith('image/')) return 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300';
-  return 'bg-slate-500/12 text-slate-700 dark:text-slate-300';
+function FileIcon({ mimeType, fileName, className }: { mimeType: string; fileName?: string; className?: string }) {
+  const t = mimeType.toLowerCase();
+  const n = (fileName || '').toLowerCase();
+
+  if (t.startsWith('image/') || t.startsWith('video/') || n.match(/\.(jpg|jpeg|png|gif|webp|mp4|mov|avi|webm)$/i)) return <FileImage color="#8b5cf6" className={className} />;
+  if (t.startsWith('audio/') || n.match(/\.(mp3|wav|ogg|m4a)$/i)) return <Music color="#eab308" className={className} />;
+  if (t.includes('pdf') || n.endsWith('.pdf')) return <FileExtIcon ext="PDF" color="#ef4444" className={className} />;
+  if (t.includes('spreadsheet') || t.includes('excel') || t.includes('csv') || n.match(/\.(xls|xlsx|csv)$/i)) return <FileExtIcon ext="XLS" color="#22c55e" className={className} />;
+  if (t.includes('wordprocessing') || t.includes('msword') || t.includes('document') || n.match(/\.(doc|docx)$/i)) return <FileExtIcon ext="DOC" color="#3b82f6" className={className} />;
+  if (t.includes('presentation') || t.includes('powerpoint') || n.match(/\.(ppt|pptx)$/i)) return <FileExtIcon ext="PPT" color="#f97316" className={className} />;
+  if (t.startsWith('text/') || t === 'application/json' || t === 'application/xml' || n.match(/\.(txt|json|xml|md|csv|log)$/i)) return <FileCode color="#64748b" className={className} />;
+  if (t.includes('zip') || t.includes('compressed') || t.includes('archive') || t.includes('tar') || t.includes('rar') || t.includes('7z') || n.match(/\.(zip|rar|7z|tar|gz)$/i)) return <FileArchive color="#ec4899" className={className} />;
+
+  return <File color="#94a3b8" className={className} />;
 }
 
-function getAttachmentTileClass(fileName: string, mimeType: string): string {
-  const ext = getFileExtension(fileName).toLowerCase();
-  if (ext === 'pdf' || mimeType === 'application/pdf') return 'bg-rose-500 text-white';
-  if (ext === 'ppt' || ext === 'pptx') return 'bg-orange-500 text-white';
-  if (ext === 'doc' || ext === 'docx' || ext === 'md') return 'bg-blue-600 text-white';
-  if (ext === 'xls' || ext === 'xlsx' || ext === 'csv') return 'bg-emerald-600 text-white';
-  if (ext === 'zip' || ext === 'rar' || ext === '7z' || ext === 'tar') return 'bg-amber-600 text-white';
-  if (mimeType.startsWith('video/')) return 'bg-violet-600 text-white';
-  if (mimeType.startsWith('audio/')) return 'bg-fuchsia-600 text-white';
-  if (mimeType.startsWith('image/')) return 'bg-emerald-600 text-white';
-  return 'bg-slate-700 text-white';
-}
-
-function FileIcon({ mimeType, className }: { mimeType: string; className?: string }) {
-  if (mimeType.startsWith('video/')) return <Film className={className} />;
-  if (mimeType.startsWith('audio/')) return <Music className={className} />;
-  if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === 'application/xml') return <FileText className={className} />;
-  if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('archive') || mimeType.includes('tar') || mimeType.includes('rar') || mimeType.includes('7z')) return <FileArchive className={className} />;
-  if (mimeType === 'application/pdf') return <FileText className={className} />;
-  return <File className={className} />;
-}
-
-const FileCard = memo(function FileCard({ file }: { file: AttachedFileMeta }) {
+function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () => void }) {
   const handleOpen = useCallback(() => {
+    if (onPreview) {
+      onPreview();
+      return;
+    }
     if (file.filePath) {
       invokeIpc('shell:openPath', file.filePath);
     }
-  }, [file.filePath]);
-  const accentClass = getAttachmentAccentClass(file.mimeType);
-  const tileClass = getAttachmentTileClass(file.fileName, file.mimeType);
-  const extension = getFileExtension(file.fileName);
+  }, [file.filePath, onPreview]);
 
   return (
-    <div
+    <div 
       className={cn(
-        'flex min-w-[220px] max-w-[260px] items-center gap-3 rounded-[22px] border border-black/10 bg-white/56 px-3 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.06)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.045]',
-        file.filePath && 'cursor-pointer hover:bg-white/72 dark:hover:bg-white/[0.08] transition-colors'
+        "flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 h-14 bg-black/5 dark:bg-white/5 max-w-[220px]",
+        (file.filePath || onPreview) && "cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
       )}
       onClick={handleOpen}
       title={file.filePath ? '打开文件' : undefined}
     >
-      <div className={cn('relative flex h-14 w-12 shrink-0 flex-col items-center justify-end overflow-hidden rounded-[14px] shadow-sm', tileClass)}>
-        <div className="absolute right-0 top-0 h-4 w-4 bg-white/25 [clip-path:polygon(0_0,100%_0,100%_100%)]" />
-        <FileIcon mimeType={file.mimeType} className="absolute left-2 top-2 h-3.5 w-3.5 opacity-90" />
-        <span className="pb-2 text-[10px] font-bold tracking-[0.08em]">
-          {extension.slice(0, 4)}
-        </span>
-      </div>
-      <div className="min-w-0 flex-1 overflow-hidden">
-        <div className="flex items-center gap-2">
-          <p className="truncate text-sm font-medium text-foreground">{file.fileName}</p>
-          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-[0.04em]', accentClass)}>
-            {extension}
-          </span>
-        </div>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          {file.fileSize > 0 ? formatFileSize(file.fileSize) : '文件'}
+      <FileIcon mimeType={file.mimeType} fileName={file.fileName} className="h-8 w-8 shrink-0 drop-shadow-sm" />
+      <div className="min-w-0 overflow-hidden leading-tight flex flex-col justify-center">
+        <p className="text-[13px] font-medium truncate">{file.fileName}</p>
+        <p className="text-[10px] text-muted-foreground">
+          {file.fileSize > 0 ? formatFileSize(file.fileSize) : 'File'}
         </p>
       </div>
     </div>
   );
-});
+}
 
 // ── Image Thumbnail (user bubble — square crop with zoom hint) ──
 

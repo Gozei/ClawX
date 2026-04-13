@@ -1,6 +1,23 @@
 #!/usr/bin/env zx
 
 import 'zx/globals';
+// Windows 无 Git Bash 时 zx 默认的 useBash() 会静默失败，导致未设置 $.quote，
+// 项目路径含空格（如 Deep AI Worker）时 `$` 模板会报 No quote function is defined。
+import os from 'node:os';
+import { usePowerShell, usePwsh } from 'zx';
+
+if (os.platform() === 'win32') {
+  try {
+    usePowerShell();
+  } catch {
+    try {
+      usePwsh();
+    } catch {
+      // 若两者均不可用，后续 git 命令会失败；提示用户检查 PATH
+    }
+  }
+}
+
 import { readFileSync, existsSync, mkdirSync, rmSync, cpSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, dirname, basename, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';

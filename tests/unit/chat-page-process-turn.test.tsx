@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { Chat } from '@/pages/Chat';
 
 const navigateMock = vi.fn();
@@ -18,13 +18,13 @@ const { agentsState, chatState, gatewayState, settingsState } = vi.hoisted(() =>
     showThinking: true,
     streamingMessage: null as unknown,
     streamingTools: [] as Array<Record<string, unknown>>,
-    sendStage: null as string | null,
     pendingFinal: false,
     lastUserMessageAt: 1000,
     sendMessage: vi.fn(),
     abortRun: vi.fn(),
     clearError: vi.fn(),
     cleanupEmptySession: vi.fn(),
+    loadHistory: vi.fn(async () => {}),
   },
   gatewayState: {
     status: { state: 'running', port: 18789 },
@@ -162,7 +162,7 @@ describe('Chat process turn rendering', () => {
 
     expect(screen.getByTestId('chat-process-header')).toBeInTheDocument();
     expect(screen.queryByTestId('chat-process-toggle')).not.toBeInTheDocument();
-    expect(screen.getByTestId('chat-process-status')).toHaveTextContent('Thinking 1s');
+    expect(screen.getByTestId('chat-process-status')).toHaveTextContent('Working for 1s');
     expect(screen.getByTestId('chat-process-content')).toBeInTheDocument();
     expect(screen.getByText('Preparing the camera.')).toBeInTheDocument();
     expect(screen.getAllByTestId('chat-process-avatar')).toHaveLength(1);
@@ -182,18 +182,23 @@ describe('Chat process turn rendering', () => {
 
     render(<Chat />);
 
-    expect(screen.queryByTestId('chat-process-header')).not.toBeInTheDocument();
-    expect(screen.getByTestId('chat-process-toggle')).toBeInTheDocument();
-    expect(screen.getByTestId('chat-process-status')).toHaveTextContent('Thinking 1s');
-    expect(screen.queryByTestId('chat-process-content')).not.toBeInTheDocument();
-    expect(screen.queryByText('Preparing the camera.')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('chat-process-thinking-content')).not.toBeInTheDocument();
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-process-header')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-process-toggle')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-process-status')).toHaveTextContent('Working for 1s');
+    const processContent = screen.getByTestId('chat-process-content');
+    expect(processContent).toBeInTheDocument();
+    expect(screen.getByText('Preparing the camera.')).toBeInTheDocument();
+    expect(within(processContent).getAllByTestId('chat-process-thinking-content').length).toBeGreaterThan(0);
+    expect(within(processContent).queryByTestId('chat-process-event-row')).not.toBeInTheDocument();
+    expect(within(processContent).queryByTestId('chat-process-event-item-row')).not.toBeInTheDocument();
+    expect(within(processContent).queryByTestId('chat-message-content-assistant')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Still checking the setup.').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('chat-process-activity-label')).toHaveTextContent('Thinking');
     expect(screen.getAllByTestId('chat-process-avatar')).toHaveLength(1);
     expect(screen.queryByTestId('chat-assistant-avatar')).not.toBeInTheDocument();
   });
 
-  it('keeps the process section active while the final answer is still streaming', () => {
+  it('keeps all unfinished output inside the process section while the reply is still streaming', () => {
     chatState.pendingFinal = true;
     chatState.streamingMessage = {
       role: 'assistant',
@@ -203,14 +208,16 @@ describe('Chat process turn rendering', () => {
 
     render(<Chat />);
 
-    expect(screen.getByTestId('chat-process-header')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-process-toggle')).not.toBeInTheDocument();
     expect(screen.getByTestId('chat-process-content')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-process-status')).toHaveTextContent('Working for 1s');
     expect(screen.getByText('Photo saved (60KB). You should be able to see it now.')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-final-result-divider')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('chat-process-avatar')).toHaveLength(1);
     expect(screen.queryByTestId('chat-assistant-avatar')).not.toBeInTheDocument();
   });
 
-  it('renders the final assistant reply in stream mode when selected in settings', () => {
+  it('renders streaming final string in stream mode inside the process section while sending', () => {
     settingsState.assistantMessageStyle = 'stream';
     chatState.pendingFinal = true;
     chatState.streamingMessage = {
@@ -221,7 +228,9 @@ describe('Chat process turn rendering', () => {
 
     render(<Chat />);
 
-    expect(screen.getByTestId('chat-assistant-message-stream')).toBeInTheDocument();
+    expect(screen.getByText('Photo saved (60KB). You should be able to see it now.')).toBeInTheDocument();
+    const notes = within(screen.getByTestId('chat-process-content')).getAllByTestId('chat-process-note-content');
+    expect(notes.length).toBeGreaterThanOrEqual(1);
   });
 
   it('collapses persisted process content from a single assistant reply in history', () => {
@@ -250,8 +259,88 @@ describe('Chat process turn rendering', () => {
 
     expect(screen.getByTestId('chat-process-toggle')).toBeInTheDocument();
     expect(screen.queryByTestId('chat-process-content')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-final-result-divider')).not.toBeInTheDocument();
     expect(screen.getByText('Memo is an AI memory layer project.')).toBeInTheDocument();
     expect(screen.getAllByTestId('chat-process-avatar')).toHaveLength(1);
     expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+  });
+
+  it('keeps the process toggle anchored when expanding a collapsed history section', () => {
+    chatState.sending = false;
+    chatState.pendingFinal = false;
+    chatState.streamingMessage = null;
+    settingsState.assistantMessageStyle = 'stream';
+    chatState.messages = [
+      {
+        id: 'user-1',
+        role: 'user',
+        content: 'Check the browser status.',
+        timestamp: 1000,
+      },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'I should inspect the browser state first.' },
+          { type: 'tool_use', id: 'browser-1', name: 'browser', input: { action: 'start', enabled: true } },
+          { type: 'text', text: 'The browser is ready.' },
+        ],
+        timestamp: 1001,
+      },
+    ];
+
+    render(<Chat />);
+
+    const scrollContainer = screen.getByTestId('chat-scroll-container');
+    const toggle = screen.getByTestId('chat-process-toggle');
+    scrollContainer.scrollTop = 120;
+
+    const rect = vi.fn()
+      .mockReturnValueOnce({
+        top: 180,
+        bottom: 200,
+        left: 0,
+        right: 0,
+        width: 0,
+        height: 20,
+        x: 0,
+        y: 180,
+        toJSON: () => ({}),
+      })
+      .mockReturnValueOnce({
+        top: 120,
+        bottom: 140,
+        left: 0,
+        right: 0,
+        width: 0,
+        height: 20,
+        x: 0,
+        y: 120,
+        toJSON: () => ({}),
+      });
+    vi.spyOn(toggle, 'getBoundingClientRect').mockImplementation(rect);
+
+    fireEvent.click(toggle);
+
+    expect(scrollContainer.scrollTop).toBe(60);
+    expect(screen.getByTestId('chat-process-content')).toBeInTheDocument();
+  });
+
+  it('shows a live thinking status indicator during the processing phase in stream mode', () => {
+    settingsState.assistantMessageStyle = 'stream';
+    chatState.pendingFinal = false;
+    chatState.streamingMessage = {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'I should inspect the browser state first.' },
+      ],
+      timestamp: fixedNow / 1000,
+    };
+
+    render(<Chat />);
+
+    expect(screen.getByTestId('chat-process-activity-stream')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-process-activity-label')).toHaveTextContent('Thinking');
+    expect(screen.getByTestId('chat-process-activity-scan')).toBeInTheDocument();
   });
 });

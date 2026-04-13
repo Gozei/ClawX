@@ -89,4 +89,17 @@ describe('ChatMessage', () => {
     expect(screen.getByTestId('chat-assistant-message-stream')).toBeInTheDocument();
     expect(screen.getByTestId('chat-message-content-assistant')).not.toHaveClass('max-w-[80%]');
   });
+
+  it('renders assistant error replies with the dedicated error styling hook', () => {
+    const message: RawMessage = {
+      id: 'assistant-error-1',
+      role: 'assistant',
+      content: 'Provider quota is exhausted.',
+      isError: true,
+    };
+
+    render(<ChatMessage message={message} showThinking={false} />);
+
+    expect(screen.getByTestId('chat-assistant-error-message')).toBeInTheDocument();
+  });
 });
