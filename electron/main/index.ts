@@ -281,6 +281,15 @@ function createMainWindow(): BrowserWindow {
  * Initialize the application
  */
 async function initialize(): Promise<void> {
+  const startupTimelineStart = Date.now();
+  let startupDidFinishLoadLogged = false;
+  let startupWindowVisibleLogged = false;
+  const logStartupStage = (stage: string): void => {
+    const prefix = process.platform === 'win32'
+      ? '[Windows Startup Monitor]'
+      : '[Startup Monitor]';
+    logger.info(`${prefix} stage=${stage} elapsed=${Date.now() - startupTimelineStart}ms`);
+  };
   const userDataMigrationReport = await migrateLegacyUserDataIfNeeded();
 
   // Initialize logger first
@@ -296,6 +305,7 @@ async function initialize(): Promise<void> {
       + ` copied: ${userDataMigrationReport.migratedFiles.join(', ') || 'none'})`,
     );
   }
+  logStartupStage('logger-ready');
 
   if (!isE2EMode) {
     // Warm up network optimization (non-blocking)
@@ -303,16 +313,39 @@ async function initialize(): Promise<void> {
 
     // Apply persisted proxy settings before creating windows or network requests.
     await applyProxySettings();
+    logStartupStage('proxy-ready');
   } else {
     logger.info('Running in E2E mode: startup side effects minimized');
+    logStartupStage('e2e-mode');
   }
 
   // Set application menu
   await createMenu();
+  logStartupStage('menu-ready');
 
   // Create the main window
   const window = createMainWindow();
   attachContextMenu(window.webContents);
+  logStartupStage('main-window-created');
+  window.webContents.once('did-finish-load', () => {
+    if (startupDidFinishLoadLogged) {
+      return;
+    }
+    startupDidFinishLoadLogged = true;
+    logStartupStage('renderer-ready');
+  });
+  window.once('ready-to-show', () => {
+    if (startupWindowVisibleLogged) {
+      return;
+    }
+    startupWindowVisibleLogged = true;
+    const elapsedMs = Date.now() - startupTimelineStart;
+    const prefix = process.platform === 'win32'
+      ? '[Windows Startup Monitor]'
+      : '[Startup Monitor]';
+    logger.info(`${prefix} stage=window-visible elapsed=${elapsedMs}ms`);
+    logger.info(`${prefix} startup-complete elapsed=${elapsedMs}ms`);
+  });
 
   if (!isE2EMode) {
     // These tasks are helpful but not worth blocking first paint, especially on Windows.
@@ -328,6 +361,7 @@ async function initialize(): Promise<void> {
   if (!isE2EMode) {
     void createTray(window);
   }
+  logStartupStage('post-first-paint-tasks-scheduled');
 
   // Override security headers ONLY for the OpenClaw Gateway Control UI.
   // The URL filter ensures this callback only fires for gateway requests,

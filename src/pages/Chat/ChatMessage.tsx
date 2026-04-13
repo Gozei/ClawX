@@ -4,7 +4,7 @@
  * with markdown, thinking sections, images, and tool cards.
  */
 import { useState, useCallback, useEffect, useMemo, memo, lazy, Suspense } from 'react';
-import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, Music, FileArchive, File, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle, FileImage } from 'lucide-react';
+import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, Music, FileArchive, File, FileText, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle, FileImage } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -519,42 +519,141 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-function FileExtIcon({ ext, color, className }: { ext: string; color: string; className?: string }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" fill={`${color}20`} />
-      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
-      <text x="12" y="18" fontSize="6.5" fontFamily="sans-serif" fontWeight="bold" textAnchor="middle" stroke="none" fill={color}>{ext.toUpperCase()}</text>
-    </svg>
-  );
-}
-
 function getFileExtension(fileName?: string): string {
   const ext = fileName?.split('.').pop()?.trim();
   if (!ext) return 'FILE';
   return ext.slice(0, 4).toUpperCase();
 }
 
-function FileIcon({ mimeType, fileName, className }: { mimeType: string; fileName?: string; className?: string }) {
+function getFileVisual(mimeType: string, fileName?: string): {
+  ext: string;
+  label: string;
+  accentClassName: string;
+  badgeClassName: string;
+  Icon: typeof File;
+} {
   const t = mimeType.toLowerCase();
   const n = (fileName || '').toLowerCase();
   const ext = getFileExtension(fileName);
 
-  if (t.startsWith('image/') || t.startsWith('video/') || n.match(/\.(jpg|jpeg|png|gif|webp|mp4|mov|avi|webm)$/i)) return <FileImage color="#8b5cf6" className={className} />;
-  if (t.startsWith('audio/') || n.match(/\.(mp3|wav|ogg|m4a)$/i)) return <Music color="#eab308" className={className} />;
-  if (t.includes('pdf') || n.endsWith('.pdf')) return <FileExtIcon ext="PDF" color="#ef4444" className={className} />;
-  if (t.includes('spreadsheet') || t.includes('excel') || t.includes('csv') || n.match(/\.(xls|xlsx|csv)$/i)) return <FileExtIcon ext="XLS" color="#22c55e" className={className} />;
-  if (t.includes('wordprocessing') || t.includes('msword') || t.includes('document') || n.match(/\.(doc|docx)$/i)) return <FileExtIcon ext="DOC" color="#3b82f6" className={className} />;
-  if (t.includes('presentation') || t.includes('powerpoint') || n.match(/\.(ppt|pptx)$/i)) return <FileExtIcon ext="PPT" color="#f97316" className={className} />;
-  if (t.startsWith('text/') || t === 'application/json' || t === 'application/xml' || n.match(/\.(txt|json|xml|md|csv|log)$/i)) {
-    return <FileExtIcon ext={ext} color="#64748b" className={className} />;
+  if (t.startsWith('image/') || t.startsWith('video/') || n.match(/\.(jpg|jpeg|png|gif|webp|mp4|mov|avi|webm)$/i)) {
+    return {
+      ext,
+      label: t.startsWith('video/') || n.match(/\.(mp4|mov|avi|webm)$/i) ? '视频文件' : '图片文件',
+      accentClassName: 'bg-violet-500/12 text-violet-600 ring-violet-500/15 dark:text-violet-300',
+      badgeClassName: 'bg-violet-500 text-white',
+      Icon: FileImage,
+    };
   }
-  if (t.includes('zip') || t.includes('compressed') || t.includes('archive') || t.includes('tar') || t.includes('rar') || t.includes('7z') || n.match(/\.(zip|rar|7z|tar|gz)$/i)) return <FileArchive color="#ec4899" className={className} />;
+  if (t.startsWith('audio/') || n.match(/\.(mp3|wav|ogg|m4a)$/i)) {
+    return {
+      ext,
+      label: '音频文件',
+      accentClassName: 'bg-amber-500/12 text-amber-600 ring-amber-500/15 dark:text-amber-300',
+      badgeClassName: 'bg-amber-500 text-white',
+      Icon: Music,
+    };
+  }
+  if (t.includes('pdf') || n.endsWith('.pdf')) {
+    return {
+      ext: 'PDF',
+      label: 'PDF 文档',
+      accentClassName: 'bg-red-500/12 text-red-600 ring-red-500/15 dark:text-red-300',
+      badgeClassName: 'bg-red-500 text-white',
+      Icon: FileText,
+    };
+  }
+  if (t.includes('spreadsheet') || t.includes('excel') || t.includes('csv') || n.match(/\.(xls|xlsx|csv)$/i)) {
+    return {
+      ext: n.endsWith('.csv') ? 'CSV' : 'XLS',
+      label: '表格文件',
+      accentClassName: 'bg-emerald-500/12 text-emerald-600 ring-emerald-500/15 dark:text-emerald-300',
+      badgeClassName: 'bg-emerald-500 text-white',
+      Icon: FileText,
+    };
+  }
+  if (t.includes('wordprocessing') || t.includes('msword') || t.includes('document') || n.match(/\.(doc|docx)$/i)) {
+    return {
+      ext: 'DOC',
+      label: '文档文件',
+      accentClassName: 'bg-sky-500/12 text-sky-600 ring-sky-500/15 dark:text-sky-300',
+      badgeClassName: 'bg-sky-500 text-white',
+      Icon: FileText,
+    };
+  }
+  if (t.includes('presentation') || t.includes('powerpoint') || n.match(/\.(ppt|pptx)$/i)) {
+    return {
+      ext: 'PPT',
+      label: '演示文件',
+      accentClassName: 'bg-orange-500/12 text-orange-600 ring-orange-500/15 dark:text-orange-300',
+      badgeClassName: 'bg-orange-500 text-white',
+      Icon: FileText,
+    };
+  }
+  if (t.startsWith('text/') || t === 'application/json' || t === 'application/xml' || n.match(/\.(txt|json|xml|md|csv|log)$/i)) {
+    return {
+      ext,
+      label: ext === 'MD' ? 'Markdown 文件' : '文本文件',
+      accentClassName: 'bg-slate-500/12 text-slate-600 ring-slate-500/15 dark:text-slate-300',
+      badgeClassName: 'bg-slate-600 text-white dark:bg-slate-500',
+      Icon: FileText,
+    };
+  }
+  if (t.includes('zip') || t.includes('compressed') || t.includes('archive') || t.includes('tar') || t.includes('rar') || t.includes('7z') || n.match(/\.(zip|rar|7z|tar|gz)$/i)) {
+    return {
+      ext,
+      label: '压缩文件',
+      accentClassName: 'bg-pink-500/12 text-pink-600 ring-pink-500/15 dark:text-pink-300',
+      badgeClassName: 'bg-pink-500 text-white',
+      Icon: FileArchive,
+    };
+  }
 
-  return <File color="#94a3b8" className={className} />;
+  return {
+    ext,
+    label: '文件',
+    accentClassName: 'bg-slate-400/12 text-slate-500 ring-slate-400/15 dark:text-slate-300',
+    badgeClassName: 'bg-slate-500 text-white dark:bg-slate-400',
+    Icon: File,
+  };
+}
+
+function FileIcon({
+  mimeType,
+  fileName,
+  className,
+}: {
+  mimeType: string;
+  fileName?: string;
+  className?: string;
+}) {
+  const visual = getFileVisual(mimeType, fileName);
+  const { Icon } = visual;
+
+  return (
+    <div
+      data-testid="chat-file-icon"
+      className={cn(
+        'relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ring-1 ring-inset shadow-[0_10px_18px_rgba(15,23,42,0.08)]',
+        visual.accentClassName,
+      )}
+    >
+      <Icon className={cn('h-5.5 w-5.5', className)} />
+      <span
+        data-testid="chat-file-ext-badge"
+        className={cn(
+          'absolute -bottom-1 rounded-md px-1.5 py-[2px] text-[9px] font-bold leading-none shadow-sm',
+          visual.badgeClassName,
+        )}
+      >
+        {visual.ext}
+      </span>
+    </div>
+  );
 }
 
 function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () => void }) {
+  const visual = getFileVisual(file.mimeType, file.fileName);
   const handleOpen = useCallback(() => {
     if (onPreview) {
       onPreview();
@@ -569,18 +668,19 @@ function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () 
     <div
       data-testid="chat-file-card"
       className={cn(
-        "relative group overflow-hidden rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 shadow-sm",
-        (file.filePath || onPreview) && "cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+        "relative group overflow-hidden rounded-2xl border border-black/10 bg-white/80 shadow-[0_14px_34px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.06]",
+        (file.filePath || onPreview) && "cursor-pointer hover:border-black/15 hover:bg-white dark:hover:border-white/15 dark:hover:bg-white/[0.08] transition-colors"
       )}
       onClick={handleOpen}
       title={file.filePath ? '打开文件' : undefined}
     >
-      <div className="flex items-center gap-3 px-3 h-14 min-w-[180px] max-w-[240px]">
-        <FileIcon mimeType={file.mimeType} fileName={file.fileName} className="h-8 w-8 shrink-0 drop-shadow-sm" />
-        <div className="min-w-0 overflow-hidden leading-tight flex flex-col justify-center">
-          <p className="text-[13px] font-medium truncate">{file.fileName}</p>
-          <p className="text-[10px] text-muted-foreground">
-            {file.fileSize > 0 ? formatFileSize(file.fileSize) : 'File'}
+      <div className="flex items-center gap-3 px-3.5 py-3 min-w-[220px] max-w-[280px]">
+        <FileIcon mimeType={file.mimeType} fileName={file.fileName} />
+        <div className="min-w-0 overflow-hidden leading-tight flex flex-col justify-center gap-1">
+          <p className="text-[13px] font-semibold tracking-[-0.01em] truncate">{file.fileName}</p>
+          <p className="text-[11px] text-muted-foreground">
+            {visual.label}
+            {file.fileSize > 0 ? ` · ${formatFileSize(file.fileSize)}` : ''}
           </p>
         </div>
       </div>

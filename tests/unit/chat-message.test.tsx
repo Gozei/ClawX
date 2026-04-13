@@ -122,6 +122,7 @@ describe('ChatMessage', () => {
 
     expect(screen.getByTestId('chat-file-card')).toBeInTheDocument();
     expect(screen.getByText('HEARTBEAT.md')).toBeInTheDocument();
-    expect(screen.getByText('MD')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-file-ext-badge')).toHaveTextContent('MD');
+    expect(screen.getByText(/Markdown 文件/)).toBeInTheDocument();
   });
 });

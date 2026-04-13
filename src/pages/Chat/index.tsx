@@ -48,20 +48,18 @@ export function Chat() {
   const showThinking = useChatStore((s) => s.showThinking);
   const chatProcessDisplayMode = useSettingsStore((s) => s.chatProcessDisplayMode);
   const assistantMessageStyle = useSettingsStore((s) => s.assistantMessageStyle);
-  const streamingMessage = useChatStore((s) => s.streamingMessage);
+  const activeTurnBuffer = useChatStore((s) => s.activeTurnBuffer);
+  const rawStreamingMessage = useChatStore((s) => s.streamingMessage);
   const streamingTools = useChatStore((s) => s.streamingTools);
   const pendingFinal = useChatStore((s) => s.pendingFinal);
-  const lastUserMessageAt = useChatStore((s) => s.lastUserMessageAt);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const abortRun = useChatStore((s) => s.abortRun);
   const clearError = useChatStore((s) => s.clearError);
   const fetchAgents = useAgentsStore((s) => s.fetchAgents);
 
   const cleanupEmptySession = useChatStore((s) => s.cleanupEmptySession);
-  const loadHistory = useChatStore((s) => s.loadHistory);
 
   const safeMessages = Array.isArray(messages) ? messages : EMPTY_MESSAGES;
-  const [streamingTimestamp, setStreamingTimestamp] = useState<number>(0);
   const minLoading = useMinLoading(loading && safeMessages.length > 0);
   const { contentRef, scrollRef } = useStickToBottomInstant(currentSessionKey);
 
@@ -82,132 +80,62 @@ export function Chat() {
     void fetchAgents();
   }, [fetchAgents]);
 
-  // 网关可能晚于 UI 把助手消息写入 chat.history；末尾仍为用户时防抖静默补拉，避免长时间只显示「已处理」而无正文
-  const orphanHistoryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastMessageSig = useMemo(() => {
-    const last = safeMessages.length > 0 ? safeMessages[safeMessages.length - 1] : null;
-    if (!last) return '';
-    return `${currentSessionKey}|${last.id ?? ''}|${last.timestamp ?? ''}|${last.role ?? ''}|${safeMessages.length}`;
-  }, [currentSessionKey, safeMessages]);
-
-  useEffect(() => {
-    if (!isGatewayRunning || sending || loading) {
-      return undefined;
-    }
-    const last = safeMessages.length > 0 ? safeMessages[safeMessages.length - 1] : null;
-    if (!last || last.role !== 'user') {
-      if (orphanHistoryTimerRef.current) {
-        clearTimeout(orphanHistoryTimerRef.current);
-        orphanHistoryTimerRef.current = null;
-      }
-      return undefined;
-    }
-    if (orphanHistoryTimerRef.current) {
-      clearTimeout(orphanHistoryTimerRef.current);
-    }
-    orphanHistoryTimerRef.current = setTimeout(() => {
-      orphanHistoryTimerRef.current = null;
-      void loadHistory(true);
-    }, 1200);
-    return () => {
-      if (orphanHistoryTimerRef.current) {
-        clearTimeout(orphanHistoryTimerRef.current);
-        orphanHistoryTimerRef.current = null;
-      }
-    };
-  }, [isGatewayRunning, lastMessageSig, loadHistory, loading, sending]);
-
-  // Update timestamp when sending starts
-  useEffect(() => {
-    if (sending && streamingTimestamp === 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setStreamingTimestamp(Date.now() / 1000);
-    } else if (!sending && streamingTimestamp !== 0) {
-      setStreamingTimestamp(0);
-    }
-  }, [sending, streamingTimestamp]);
-
   // Gateway not running block has been completely removed so the UI always renders.
-
-  const streamMsg = streamingMessage && typeof streamingMessage === 'object'
-    ? streamingMessage as unknown as { role?: string; content?: unknown; timestamp?: number }
-    : null;
-  const streamText = streamMsg ? extractText(streamMsg) : (typeof streamingMessage === 'string' ? streamingMessage : '');
-  const hasStreamText = streamText.trim().length > 0;
-  const streamThinking = streamMsg ? extractThinking(streamMsg) : null;
-  const hasStreamThinking = showThinking && !!streamThinking && streamThinking.trim().length > 0;
-  const streamTools = streamMsg ? extractToolUse(streamMsg) : [];
-  const hasStreamTools = chatProcessDisplayMode === 'all' && streamTools.length > 0;
-  const streamImages = streamMsg ? extractImages(streamMsg) : [];
-  const hasStreamImages = streamImages.length > 0;
-  const hasStreamToolStatus = chatProcessDisplayMode === 'all' && streamingTools.length > 0;
-  const lastUserTsMs = typeof lastUserMessageAt === 'number'
-    ? (lastUserMessageAt < 1e12 ? lastUserMessageAt * 1000 : lastUserMessageAt)
-    : 0;
-  const latestPersistedAssistant = useMemo(() => [...safeMessages].reverse().find((message) => {
-    if (message.role !== 'assistant') return false;
-    if (!lastUserTsMs || !message.timestamp) return true;
-    const messageTsMs = message.timestamp < 1e12 ? message.timestamp * 1000 : message.timestamp;
-    return messageTsMs >= lastUserTsMs;
-  }), [lastUserTsMs, safeMessages]);
-  const latestPersistedAssistantText = latestPersistedAssistant ? extractText(latestPersistedAssistant).trim() : '';
-  const latestPersistedAssistantThinking = latestPersistedAssistant ? (extractThinking(latestPersistedAssistant)?.trim() ?? '') : '';
-  const latestPersistedAssistantImages = latestPersistedAssistant ? extractImages(latestPersistedAssistant) : [];
-  const latestPersistedAssistantTools = latestPersistedAssistant ? extractToolUse(latestPersistedAssistant) : [];
-  const isStreamingDuplicateOfPersistedAssistant = !!latestPersistedAssistant
-    && (
-      (hasStreamText && latestPersistedAssistantText === streamText.trim())
-      || (
-        !hasStreamText
-        && hasStreamThinking
-        && latestPersistedAssistantThinking === (streamThinking?.trim() ?? '')
-      )
-    )
-    && (!hasStreamImages || latestPersistedAssistantImages.length === streamImages.length)
-    && (!hasStreamTools || latestPersistedAssistantTools.length === streamTools.length);
-  const shouldRenderStreaming = sending
-    && !isStreamingDuplicateOfPersistedAssistant
-    && (hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus);
-  const hasAnyStreamContent = hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus;
-  const streamingDisplayMessage = useMemo(() => (
-    shouldRenderStreaming
-      ? buildStreamingDisplayMessage(streamMsg, streamText, streamingTimestamp)
+  const fallbackStreamMsg = useMemo(() => (
+    !activeTurnBuffer && rawStreamingMessage && typeof rawStreamingMessage === 'object'
+      ? rawStreamingMessage as unknown as { role?: string; content?: unknown; timestamp?: number }
+      : activeTurnBuffer?.streamingDisplayMessage && typeof activeTurnBuffer.streamingDisplayMessage === 'object'
+        ? activeTurnBuffer.streamingDisplayMessage as unknown as { role?: string; content?: unknown; timestamp?: number }
       : null
-  ), [shouldRenderStreaming, streamMsg, streamText, streamingTimestamp]);
-  const activeTurnStartIndex = useMemo(() => (
-    sending ? findLastUserMessageIndex(safeMessages) : -1
-  ), [safeMessages, sending]);
-  const historyMessages = useMemo(() => (
-    activeTurnStartIndex >= 0 ? safeMessages.slice(0, activeTurnStartIndex) : safeMessages
-  ), [activeTurnStartIndex, safeMessages]);
+  ), [activeTurnBuffer, rawStreamingMessage]);
+  const fallbackStreamText = fallbackStreamMsg
+    ? extractText(fallbackStreamMsg)
+    : (!activeTurnBuffer && typeof rawStreamingMessage === 'string' ? rawStreamingMessage : '');
+  const fallbackStreamingDisplayMessage = useMemo(() => (
+    buildStreamingDisplayMessage(fallbackStreamMsg, fallbackStreamText, Date.now() / 1000)
+  ), [fallbackStreamMsg, fallbackStreamText]);
+  const fallbackActiveTurnStartIndex = !activeTurnBuffer && sending ? findLastUserMessageIndex(safeMessages) : -1;
+  const fallbackHistoryMessages = fallbackActiveTurnStartIndex >= 0 ? safeMessages.slice(0, fallbackActiveTurnStartIndex) : safeMessages;
+  const fallbackActiveTurnMessages = fallbackActiveTurnStartIndex >= 0 ? safeMessages.slice(fallbackActiveTurnStartIndex) : EMPTY_MESSAGES;
+  const fallbackActiveTurnUserMessage = fallbackActiveTurnMessages[0]?.role === 'user' ? fallbackActiveTurnMessages[0] : null;
+  const fallbackAssistantMessages = fallbackActiveTurnUserMessage
+    ? fallbackActiveTurnMessages.slice(1).filter((message) => message.role === 'assistant')
+    : EMPTY_MESSAGES;
+  const fallbackLatestPersistedAssistant = !activeTurnBuffer ? [...safeMessages].reverse().find((message) => {
+    if (message.role !== 'assistant') return false;
+    if (!fallbackActiveTurnUserMessage?.timestamp || !message.timestamp) return true;
+    return toTimestampMs(message.timestamp)! >= toTimestampMs(fallbackActiveTurnUserMessage.timestamp)!;
+  }) ?? null : null;
+  const fallbackIsStreamingDuplicate = !activeTurnBuffer
+    && !!fallbackLatestPersistedAssistant
+    && !!fallbackStreamingDisplayMessage
+    && extractText(fallbackLatestPersistedAssistant).trim().length > 0
+    && extractText(fallbackLatestPersistedAssistant).trim() === extractText(fallbackStreamingDisplayMessage).trim();
+  const fallbackPersistedFinalMessage = fallbackIsStreamingDuplicate && fallbackAssistantMessages.length > 0
+    ? fallbackAssistantMessages[fallbackAssistantMessages.length - 1]
+    : null;
+  const fallbackProcessMessages = fallbackPersistedFinalMessage
+    ? fallbackAssistantMessages.slice(0, -1)
+    : fallbackAssistantMessages;
+  const fallbackSplitStreaming = fallbackStreamingDisplayMessage
+    ? splitFinalMessageForTurnDisplay(fallbackStreamingDisplayMessage)
+    : null;
+
+  const historyMessages = activeTurnBuffer?.historyMessages ?? fallbackHistoryMessages;
   const deferredHistoryMessages = useDeferredValue(historyMessages);
-  const activeTurnMessages = useMemo(() => (
-    activeTurnStartIndex >= 0 ? safeMessages.slice(activeTurnStartIndex) : EMPTY_MESSAGES
-  ), [activeTurnStartIndex, safeMessages]);
-  const activeTurnUserMessage = activeTurnMessages[0]?.role === 'user' ? activeTurnMessages[0] : null;
+  const activeTurnUserMessage = activeTurnBuffer?.userMessage ?? fallbackActiveTurnUserMessage;
   const displayHistoryMessages = useMemo(() => (
     trimDeferredHistoryForActiveTurn(deferredHistoryMessages, activeTurnUserMessage)
   ), [activeTurnUserMessage, deferredHistoryMessages]);
-  const activeTurnAssistantMessages = useMemo(() => (
-    activeTurnUserMessage
-      ? activeTurnMessages.slice(1).filter((message) => message.role === 'assistant')
-      : EMPTY_MESSAGES
-  ), [activeTurnMessages, activeTurnUserMessage]);
-  const persistedActiveFinalMessage = isStreamingDuplicateOfPersistedAssistant && activeTurnAssistantMessages.length > 0
-    ? activeTurnAssistantMessages[activeTurnAssistantMessages.length - 1]
-    : null;
-  const activeTurnProcessMessages = useMemo(() => (
-    persistedActiveFinalMessage
-      ? activeTurnAssistantMessages.slice(0, -1)
-      : activeTurnAssistantMessages
-  ), [activeTurnAssistantMessages, persistedActiveFinalMessage]);
-  const streamingSplit = useMemo(() => (
-    streamingDisplayMessage
-      ? splitFinalMessageForTurnDisplay(streamingDisplayMessage)
-      : null
-  ), [streamingDisplayMessage]);
-  const streamingProcessMessage = streamingSplit?.collapsedProcessMessage ?? null;
-  const splitStreamingFinalMessage = streamingSplit?.finalDisplayMessage ?? null;
+  const activeTurnProcessMessages = activeTurnBuffer?.processMessages ?? fallbackProcessMessages;
+  const activeTurnAssistantMessages = activeTurnBuffer?.assistantMessages ?? fallbackAssistantMessages;
+  const persistedActiveFinalMessage = activeTurnBuffer?.persistedFinalMessage ?? fallbackPersistedFinalMessage;
+  const streamingProcessMessage = activeTurnBuffer?.processStreamingMessage ?? fallbackSplitStreaming?.collapsedProcessMessage ?? null;
+  const splitStreamingFinalMessage = activeTurnBuffer?.finalStreamingMessage ?? fallbackSplitStreaming?.finalDisplayMessage ?? fallbackStreamingDisplayMessage;
+  const hasAnyStreamContent = activeTurnBuffer?.hasAnyStreamContent ?? !!fallbackStreamingDisplayMessage;
+  const isStreamingDuplicateOfPersistedAssistant = activeTurnBuffer?.isStreamingDuplicateOfPersistedAssistant ?? fallbackIsStreamingDuplicate;
+  const hasStreamToolStatus = chatProcessDisplayMode === 'all' && streamingTools.length > 0;
+  const streamingDisplayMessage = activeTurnBuffer?.streamingDisplayMessage ?? fallbackStreamingDisplayMessage;
   const hasPersistedProcessMessages = activeTurnProcessMessages.some((message) => (
     hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle)
   ));
@@ -222,22 +150,26 @@ export function Chat() {
     || (sending && (activeTurnAssistantMessages.length > 0 || streamingDisplayMessage != null));
   const showProcessActivity = shouldUseProcessLayout && sending && !hasStreamingFinalMessage;
   const activeTurnProcessStreamingMessage = shouldUseProcessLayout
-    ? (hasStreamingProcessMessage
+    ? (isStreamingDuplicateOfPersistedAssistant
+        ? null
+        : hasStreamingProcessMessage
         ? streamingProcessMessage
-        : hasStreamToolStatus
+        : sending && hasStreamingFinalMessage
+          ? splitStreamingFinalMessage
+        : chatProcessDisplayMode === 'all' && streamingTools.length > 0
           ? {
               role: 'assistant' as const,
               content: '',
-              timestamp: streamingDisplayMessage?.timestamp ?? streamingTimestamp,
+              timestamp: splitStreamingFinalMessage?.timestamp ?? Date.now() / 1000,
             }
           : null)
     : null;
   const activeTurnFinalStreamingMessage = shouldUseProcessLayout
-    ? (hasStreamingFinalMessage ? splitStreamingFinalMessage : null)
-    : streamingDisplayMessage;
+    ? (!sending && hasStreamingFinalMessage && !isStreamingDuplicateOfPersistedAssistant ? splitStreamingFinalMessage : null)
+    : (isStreamingDuplicateOfPersistedAssistant ? null : splitStreamingFinalMessage);
   const activeTurnStartedAtMs = activeTurnUserMessage
-    ? toTimestampMs(activeTurnUserMessage.timestamp) ?? lastUserTsMs
-    : lastUserTsMs;
+    ? (activeTurnBuffer?.startedAtMs ?? toTimestampMs(activeTurnUserMessage.timestamp) ?? Date.now())
+    : (activeTurnBuffer?.startedAtMs ?? Date.now());
 
   const isEmpty = safeMessages.length === 0 && !sending;
   const showGatewayOfflineState = !isGatewayRunning && safeMessages.length === 0 && !sending;

@@ -198,9 +198,12 @@ function handleGatewayNotification(notification: { method?: string; params?: Rec
 
         const matchesCurrentSession = resolvedSessionKey == null || resolvedSessionKey === state.currentSessionKey;
         const matchesActiveRun = runId != null && state.activeRunId != null && String(runId) === state.activeRunId;
+        const shouldDeferHistoryRefresh = shouldDeferCompletedHistoryRefresh(state);
 
         if (matchesCurrentSession || matchesActiveRun) {
-          scheduleLoadHistory(true, shouldDeferCompletedHistoryRefresh(state) ? 3_000 : 700);
+          if (!shouldDeferHistoryRefresh) {
+            scheduleLoadHistory(true, 700);
+          }
         }
         if ((matchesCurrentSession || matchesActiveRun) && (state.sending || matchesActiveRun)) {
           useChatStore.setState({

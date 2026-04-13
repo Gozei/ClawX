@@ -71,8 +71,12 @@ export interface ActiveTurnBuffer {
   historyMessages: RawMessage[];
   userMessage: RawMessage | null;
   assistantMessages: RawMessage[];
+  processMessages: RawMessage[];
   latestPersistedAssistant: RawMessage | null;
+  persistedFinalMessage: RawMessage | null;
   streamingDisplayMessage: RawMessage | null;
+  processStreamingMessage: RawMessage | null;
+  finalStreamingMessage: RawMessage | null;
   startedAtMs: number | null;
   hasAnyStreamContent: boolean;
   isStreamingDuplicateOfPersistedAssistant: boolean;

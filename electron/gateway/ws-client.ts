@@ -85,6 +85,9 @@ export async function waitForGatewayReady(options: {
 }): Promise<void> {
   const maxWaitMs = options.maxWaitMs ?? 480_000;
   const startTime = Date.now();
+  const logPrefix = process.platform === 'win32'
+    ? '[Windows Gateway Monitor]'
+    : '[Gateway Monitor]';
 
   let attempts = 0;
   while (Date.now() - startTime < maxWaitMs) {
@@ -98,16 +101,22 @@ export async function waitForGatewayReady(options: {
     try {
       const ready = await probeGatewayReady(options.port, 1500);
       if (ready) {
-        logger.debug(`Gateway ready after ${attempts} attempt(s)`);
+        const elapsedMs = Date.now() - startTime;
+        logger.info(
+          `${logPrefix} wait-ready outcome=success port=${options.port} attempts=${attempts} elapsed=${elapsedMs}ms`,
+        );
         return;
       }
     } catch {
       // Gateway not ready yet.
     }
 
-    if (attempts > 1 && attempts % 10 === 0) {
+    const monitorInterval = process.platform === 'win32' ? 5 : 10;
+    if (attempts > 1 && attempts % monitorInterval === 0) {
       const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(0);
-      logger.debug(`Still waiting for Gateway... (attempt ${attempts}, ${elapsedSec}s elapsed)`);
+      logger.info(
+        `${logPrefix} wait-ready outcome=pending port=${options.port} attempts=${attempts} elapsed=${elapsedSec}s`,
+      );
     }
 
     const interval = getDynamicProbeInterval(Date.now() - startTime);

@@ -1700,6 +1700,48 @@ function buildStreamingDisplayMessageForState(state: Pick<ChatState, 'streamingM
       }) as RawMessage;
 }
 
+function isProcessContentBlock(block: ContentBlock): boolean {
+  return block.type === 'thinking'
+    || block.type === 'tool_use'
+    || block.type === 'toolCall'
+    || block.type === 'tool_result'
+    || block.type === 'toolResult';
+}
+
+function splitAssistantMessageForActiveTurn(message: RawMessage | null): {
+  processMessage: RawMessage | null;
+  finalMessage: RawMessage | null;
+} {
+  if (!message || !Array.isArray(message.content)) {
+    return {
+      processMessage: null,
+      finalMessage: message,
+    };
+  }
+
+  const processBlocks = (message.content as ContentBlock[]).filter((block) => isProcessContentBlock(block));
+  if (processBlocks.length === 0) {
+    return {
+      processMessage: null,
+      finalMessage: message,
+    };
+  }
+
+  const nonProcessBlocks = (message.content as ContentBlock[]).filter((block) => !isProcessContentBlock(block));
+  return {
+    processMessage: {
+      ...message,
+      id: message.id ? `${message.id}-process` : message.id,
+      content: processBlocks,
+      _attachedFiles: [],
+    },
+    finalMessage: {
+      ...message,
+      content: nonProcessBlocks,
+    },
+  };
+}
+
 function deriveActiveTurnBuffer(
   state: Pick<
     ChatState,
@@ -1750,13 +1792,25 @@ function deriveActiveTurnBuffer(
     )
     && (streamImageCount === 0 || latestPersistedAssistantImageCount === streamImageCount)
     && (streamToolCount === 0 || latestPersistedAssistantToolCount === streamToolCount);
+  const persistedFinalSource = isStreamingDuplicateOfPersistedAssistant && assistantMessages.length > 0
+    ? assistantMessages[assistantMessages.length - 1]
+    : null;
+  const splitPersistedFinal = splitAssistantMessageForActiveTurn(persistedFinalSource);
+  const splitStreaming = splitAssistantMessageForActiveTurn(streamingDisplayMessage);
+  const processMessages = splitPersistedFinal.processMessage
+    ? [...assistantMessages.slice(0, -1), splitPersistedFinal.processMessage]
+    : (persistedFinalSource ? assistantMessages.slice(0, -1) : assistantMessages);
 
   return {
     historyMessages,
     userMessage,
     assistantMessages,
+    processMessages,
     latestPersistedAssistant,
+    persistedFinalMessage: splitPersistedFinal.finalMessage,
     streamingDisplayMessage,
+    processStreamingMessage: splitStreaming.processMessage,
+    finalStreamingMessage: splitStreaming.finalMessage,
     startedAtMs: userMessage?.timestamp ? toMs(userMessage.timestamp) : lastUserTsMs || null,
     hasAnyStreamContent,
     isStreamingDuplicateOfPersistedAssistant,
