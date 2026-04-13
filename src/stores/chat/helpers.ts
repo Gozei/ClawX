@@ -1,5 +1,6 @@
 import i18n from '@/i18n';
 import { invokeIpc } from '@/lib/api-client';
+import { normalizeAppError } from '@/lib/error-model';
 import type { AttachedFileMeta, ChatSession, ContentBlock, RawMessage, ToolStatus } from './types';
 
 export const CHAT_HISTORY_RPC_TIMEOUT_MS = 60_000;
@@ -102,6 +103,111 @@ function normalizeErrorDetail(error: string | null | undefined): string | null {
   if (typeof error !== 'string') return null;
   const trimmed = error.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function localizeChatErrorDetail(error?: string | null): string | null {
+  const detail = normalizeErrorDetail(error);
+  if (!detail) return null;
+
+  let normalizedDetail = detail;
+  while (/^Error:\s*/i.test(normalizedDetail)) {
+    normalizedDetail = normalizedDetail.replace(/^Error:\s*/i, '').trim();
+  }
+  if (!normalizedDetail || normalizedDetail === 'Failed to send message') {
+    return null;
+  }
+
+  const appError = normalizeAppError(new Error(normalizedDetail));
+  switch (appError.code) {
+    case 'AUTH_INVALID':
+      return translateChat(
+        'sessionErrorDetails.authInvalid',
+        'Authentication failed. Check API key or login status and try again.',
+      );
+    case 'TIMEOUT':
+      return translateChat(
+        'sessionErrorDetails.timeout',
+        'Request timed out. Please try again.',
+      );
+    case 'RATE_LIMIT':
+      return translateChat(
+        'sessionErrorDetails.rateLimit',
+        'Too many requests. Please wait and try again.',
+      );
+    case 'PERMISSION':
+      return translateChat(
+        'sessionErrorDetails.permission',
+        'Permission denied. Check your configuration and try again.',
+      );
+    case 'CHANNEL_UNAVAILABLE':
+      return translateChat(
+        'sessionErrorDetails.channelUnavailable',
+        'Service channel unavailable. Restart the app or gateway and try again.',
+      );
+    case 'NETWORK':
+      return translateChat(
+        'sessionErrorDetails.network',
+        'Network error. Please verify connectivity and try again.',
+      );
+    case 'CONFIG':
+      return translateChat(
+        'sessionErrorDetails.config',
+        'Configuration is invalid. Please review your settings and try again.',
+      );
+    case 'GATEWAY':
+      if (/not connected/i.test(normalizedDetail)) {
+        return translateChat(
+          'sessionErrorDetails.gatewayNotConnected',
+          'Gateway not connected.',
+        );
+      }
+      return translateChat(
+        'sessionErrorDetails.gatewayUnavailable',
+        'Gateway is unavailable. Start or restart the gateway and try again.',
+      );
+    default:
+      return normalizedDetail;
+  }
+}
+
+function getChatNoticeMessage(error?: string | null): string | null {
+  return localizeChatErrorDetail(error);
+}
+
+function getSendFailedError(error?: string): string {
+  const detail = localizeChatErrorDetail(error);
+  if (!detail) {
+    return translateChat(
+      'sessionErrors.sendFailed',
+      'Failed to send message. Please check the provider or gateway status and try again.',
+    );
+  }
+  return translateChat(
+    'sessionErrors.sendFailedWithDetail',
+    'Failed to send message: {{error}}',
+    { error: detail },
+  );
+}
+
+function getNoResponseError(): string {
+  return translateChat(
+    'sessionErrors.noResponse',
+    'No response received from the model. The provider may be unavailable or the API key may have insufficient quota. Please check your provider settings.',
+  );
+}
+
+function getEmptyAssistantResponseError(): string {
+  return translateChat(
+    'sessionErrors.emptyAssistantResponse',
+    'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.',
+  );
+}
+
+function getContinueConversationWarning(): string {
+  return translateChat(
+    'sessionWarnings.finalReplyMissing',
+    'The final reply did not arrive, but you can continue the conversation.',
+  );
 }
 
 function createLocalAssistantMessage(
@@ -888,43 +994,6 @@ const EMPTY_ASSISTANT_RESPONSE_ERROR = translateChat(
   'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.',
 );
 
-function getEmptyAssistantResponseError(): string {
-  return translateChat(
-    'sessionErrors.emptyAssistantResponse',
-    'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.',
-  );
-}
-
-function getContinueConversationWarning(): string {
-  return translateChat(
-    'sessionWarnings.finalReplyMissing',
-    'The final reply did not arrive, but you can continue the conversation.',
-  );
-}
-
-function getNoResponseError(): string {
-  return translateChat(
-    'sessionErrors.noResponse',
-    'No response received from the model. The provider may be unavailable or the API key may have insufficient quota. Please check your provider settings.',
-  );
-}
-
-function getSendFailedError(error?: string): string {
-  const detail = normalizeErrorDetail(error);
-  if (!detail || detail === 'Failed to send message') {
-    return translateChat(
-      'sessionErrors.sendFailed',
-      'Failed to send message. Please check the provider or gateway status and try again.',
-    );
-  }
-
-  return translateChat(
-    'sessionErrors.sendFailedWithDetail',
-    'Failed to send message: {{error}}',
-    { error: detail },
-  );
-}
-
 function hasNonToolAssistantContent(message: RawMessage | undefined): boolean {
   if (!message) return false;
   if (Array.isArray(message._attachedFiles) && message._attachedFiles.length > 0) return true;
@@ -1007,6 +1076,7 @@ export {
   getMessageText,
   getContinueConversationWarning,
   getEmptyAssistantResponseError,
+  getChatNoticeMessage,
   getNoResponseError,
   getSendFailedError,
   extractMediaRefs,

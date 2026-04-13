@@ -342,17 +342,20 @@ export function Chat() {
         </div>
       </div>
 
-      {/* Error bar */}
+      {/* Session notice bar */}
       {error && (
-        <div className="px-4 py-2 bg-destructive/10 border-t border-destructive/20">
+        <div
+          className="border-t border-amber-500/20 bg-amber-500/10 px-4 py-2"
+          data-testid="chat-session-notice"
+        >
           <div className="max-w-4xl mx-auto flex items-center justify-between">
-            <p className="text-sm text-destructive flex items-center gap-2">
+            <p className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-300">
               <AlertCircle className="h-4 w-4" />
               {error}
             </p>
             <button
               onClick={clearError}
-              className="text-xs text-destructive/60 hover:text-destructive underline"
+              className="text-xs text-amber-700/70 underline hover:text-amber-700 dark:text-amber-300/70 dark:hover:text-amber-300"
             >
               {t('common:actions.dismiss')}
             </button>

@@ -122,6 +122,11 @@ function getResolvedModel(
 }
 
 function getCanonicalProviderKey(account: ProviderAccount, vendor?: ProviderVendorInfo): string {
+  // 自定义提供商按账号独立展示，避免不同账号模型被合并到同一张卡片
+  if (account.vendorId === 'custom') {
+    return `custom-account:${account.id}`;
+  }
+
   const friendly = getFriendlyProviderIdentity(account);
   if (friendly.canonicalKey) {
     return friendly.canonicalKey;

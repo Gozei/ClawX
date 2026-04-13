@@ -58,6 +58,17 @@
         "sendFailedWithDetail": "消息发送失败：{{error}}",
         "emptyAssistantResponse": "当前提供商返回了空响应。请检查提供商 Base URL、API 协议、模型和 API Key。"
     },
+    "sessionErrorDetails": {
+        "authInvalid": "鉴权失败，请检查 API Key 或登录状态后重试。",
+        "timeout": "请求超时，请稍后重试。",
+        "rateLimit": "请求过于频繁，请稍后再试。",
+        "permission": "权限不足，请检查配置后重试。",
+        "channelUnavailable": "服务通道暂不可用，请重启应用或网关后重试。",
+        "network": "网络异常，请检查连接后重试。",
+        "config": "当前配置无效，请检查设置后重试。",
+        "gatewayNotConnected": "网关未连接。",
+        "gatewayUnavailable": "网关暂不可用，请启动或重启网关后重试。"
+    },
     "sessionWarnings": {
         "finalReplyMissing": "最终回复暂未到达，但你仍然可以继续当前会话。",
         "assistantMissingInUI": "助手回复可能已写入会话，但当前显示模式无法展示。请尝试工具栏「刷新聊天」、打开「显示思考过程」或「过程详情」，或稍等网关同步后再试。"

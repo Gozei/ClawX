@@ -248,6 +248,8 @@ test.describe('Deep AI Worker provider lifecycle', () => {
       await expect(
         betaChip
       ).toHaveClass(/bg-blue-500\/10/);
+      await page.getByTestId(`provider-edit-test-model-${TEST_CUSTOM_PROVIDER_ID}`).click();
+      await expect(page.getByText(/model-alpha/)).toBeVisible();
 
       const testButton = page.getByTestId(`provider-edit-test-${TEST_CUSTOM_PROVIDER_ID}`);
       const saveButton = page.getByTestId(`provider-edit-save-${TEST_CUSTOM_PROVIDER_ID}`);

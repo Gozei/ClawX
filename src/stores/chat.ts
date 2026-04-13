@@ -5,6 +5,7 @@
  */
 import { create } from 'zustand';
 import { buildAgentExecutionMetadata } from '@/lib/agent-execution-context';
+import { normalizeAppError } from '@/lib/error-model';
 import { hostApiFetch } from '@/lib/host-api';
 import i18n from '@/i18n';
 import { useGatewayStore } from './gateway';
@@ -570,15 +571,73 @@ function translateChat(key: string, defaultValue: string, options?: Record<strin
   });
 }
 
-function getNoResponseError(): string {
-  return translateChat(
-    'sessionErrors.noResponse',
-    'No response received from the model. The provider may be unavailable or the API key may have insufficient quota. Please check your provider settings.',
-  );
+function localizeChatErrorDetail(error?: string): string | null {
+  const detail = typeof error === 'string' ? error.trim() : '';
+  if (!detail) return null;
+
+  let normalizedDetail = detail;
+  while (/^Error:\s*/i.test(normalizedDetail)) {
+    normalizedDetail = normalizedDetail.replace(/^Error:\s*/i, '').trim();
+  }
+  if (!normalizedDetail || normalizedDetail === 'Failed to send message') {
+    return null;
+  }
+
+  const appError = normalizeAppError(new Error(normalizedDetail));
+  switch (appError.code) {
+    case 'AUTH_INVALID':
+      return translateChat(
+        'sessionErrorDetails.authInvalid',
+        'Authentication failed. Check API key or login status and try again.',
+      );
+    case 'TIMEOUT':
+      return translateChat(
+        'sessionErrorDetails.timeout',
+        'Request timed out. Please try again.',
+      );
+    case 'RATE_LIMIT':
+      return translateChat(
+        'sessionErrorDetails.rateLimit',
+        'Too many requests. Please wait and try again.',
+      );
+    case 'PERMISSION':
+      return translateChat(
+        'sessionErrorDetails.permission',
+        'Permission denied. Check your configuration and try again.',
+      );
+    case 'CHANNEL_UNAVAILABLE':
+      return translateChat(
+        'sessionErrorDetails.channelUnavailable',
+        'Service channel unavailable. Restart the app or gateway and try again.',
+      );
+    case 'NETWORK':
+      return translateChat(
+        'sessionErrorDetails.network',
+        'Network error. Please verify connectivity and try again.',
+      );
+    case 'CONFIG':
+      return translateChat(
+        'sessionErrorDetails.config',
+        'Configuration is invalid. Please review your settings and try again.',
+      );
+    case 'GATEWAY':
+      if (/not connected/i.test(normalizedDetail)) {
+        return translateChat(
+          'sessionErrorDetails.gatewayNotConnected',
+          'Gateway not connected.',
+        );
+      }
+      return translateChat(
+        'sessionErrorDetails.gatewayUnavailable',
+        'Gateway is unavailable. Start or restart the gateway and try again.',
+      );
+    default:
+      return normalizedDetail;
+  }
 }
 
 function getSendFailedError(error?: string): string {
-  const detail = typeof error === 'string' ? error.trim() : '';
+  const detail = localizeChatErrorDetail(error) || '';
   if (!detail || detail === 'Failed to send message') {
     return translateChat(
       'sessionErrors.sendFailed',
@@ -599,12 +658,7 @@ function getEmptyAssistantResponseError(): string {
   );
 }
 
-function getContinueConversationWarning(): string {
-  return translateChat(
-    'sessionWarnings.finalReplyMissing',
-    'The final reply did not arrive, but you can continue the conversation.',
-  );
-}
+const EMPTY_ASSISTANT_RESPONSE_ERROR = getEmptyAssistantResponseError();
 
 function createLocalAssistantMessage(
   content: string,
@@ -2749,10 +2803,26 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         const errorMsg = result.error || 'Failed to send message';
         if (isRecoverableChatSendTimeout(errorMsg)) {
           console.warn(`[sendMessage] Recoverable chat.send timeout, keeping poll alive: ${errorMsg}`);
-          set({ error: errorMsg });
+          set({ error: localizeChatErrorDetail(errorMsg) || errorMsg });
         } else {
           clearHistoryPoll();
-          set({ error: errorMsg, sending: false, sendStage: null });
+          const errorReply = createLocalAssistantMessage(getSendFailedError(errorMsg), {
+            isError: true,
+            idPrefix: 'send-failed',
+          });
+          set((s) => ({
+            messages: appendAssistantMessage(s.messages, errorReply),
+            error: null,
+            sending: false,
+            activeRunId: null,
+            sendStage: null,
+            lastUserMessageAt: null,
+            streamingText: '',
+            streamingMessage: null,
+            streamingTools: [],
+            pendingFinal: false,
+            pendingToolImages: [],
+          }));
         }
       } else if (result.result?.runId) {
         set({ activeRunId: result.result.runId, sendStage: 'awaiting_runtime' });
@@ -2763,10 +2833,26 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       const errStr = String(err);
       if (isRecoverableChatSendTimeout(errStr)) {
         console.warn(`[sendMessage] Recoverable chat.send timeout, keeping poll alive: ${errStr}`);
-        set({ error: errStr, sendStage: 'awaiting_runtime' });
+        set({ error: localizeChatErrorDetail(errStr) || errStr, sendStage: 'awaiting_runtime' });
       } else {
         clearHistoryPoll();
-        set({ error: errStr, sending: false, sendStage: null });
+        const errorReply = createLocalAssistantMessage(getSendFailedError(errStr), {
+          isError: true,
+          idPrefix: 'send-exception',
+        });
+        set((s) => ({
+          messages: appendAssistantMessage(s.messages, errorReply),
+          error: null,
+          sending: false,
+          activeRunId: null,
+          sendStage: null,
+          lastUserMessageAt: null,
+          streamingText: '',
+          streamingMessage: null,
+          streamingTools: [],
+          pendingFinal: false,
+          pendingToolImages: [],
+        }));
       }
     }
   },
@@ -2786,7 +2872,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         { sessionKey: currentSessionKey },
       );
     } catch (err) {
-      set({ error: String(err) });
+      set({ error: localizeChatErrorDetail(String(err)) || String(err) });
     }
   },
 

@@ -59,6 +59,7 @@ export interface ProviderConfig {
   apiProtocol?: ProviderProtocol;
   headers?: Record<string, string>;
   model?: string;
+  metadata?: ProviderAccount['metadata'];
   fallbackModels?: string[];
   fallbackProviderIds?: string[];
   enabled: boolean;
@@ -132,6 +133,7 @@ export interface ProviderAccount {
     email?: string;
     resourceUrl?: string;
     customModels?: string[];
+    modelProtocols?: Record<string, ProviderProtocol>;
     modelUsageTags?: Record<string, string[]>;
   };
   createdAt: string;

@@ -7,6 +7,7 @@ import {
   clearHistoryPoll,
   createLocalAssistantMessage,
   getLastChatEventAt,
+  getChatNoticeMessage,
   getNoResponseError,
   getSendFailedError,
   hasNonToolAssistantContent,
@@ -367,7 +368,7 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
           { sessionKey: currentSessionKey },
         );
       } catch (err) {
-        set({ error: String(err) });
+        set({ error: getChatNoticeMessage(String(err)) || String(err) });
       }
     },
 

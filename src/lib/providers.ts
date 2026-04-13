@@ -128,6 +128,7 @@ export interface ProviderAccount {
     email?: string;
     resourceUrl?: string;
     customModels?: string[];
+    modelProtocols?: Record<string, 'openai-completions' | 'openai-responses' | 'anthropic-messages'>;
     modelUsageTags?: Record<string, string[]>;
   };
   createdAt: string;
