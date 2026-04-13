@@ -1,6 +1,9 @@
 import { invokeIpc } from '@/lib/api-client';
 import type { AttachedFileMeta, ChatSession, ContentBlock, RawMessage, ToolStatus } from './types';
 
+export const CHAT_HISTORY_RPC_TIMEOUT_MS = 60_000;
+export const CHAT_HISTORY_LABEL_PREFETCH_LIMIT = 50;
+
 // Module-level timestamp tracking the last chat event received.
 // Used by the safety timeout to avoid false-positive "no response" errors
 // during tool-use conversations where streamingMessage is temporarily cleared

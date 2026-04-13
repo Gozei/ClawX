@@ -1,20 +1,22 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
 import type { ContentBlock, RawMessage, ToolStatus } from '@/stores/chat';
 import type { ChatProcessDisplayMode } from '@/stores/settings';
 import { cn } from '@/lib/utils';
 
+const MarkdownRenderer = lazy(() => import('./MarkdownRenderer').then((module) => ({ default: module.MarkdownRenderer })));
+
 type ProcessSurface = 'thinking' | 'terminal' | 'code' | 'read' | 'tool' | 'note';
 type ProcessAction = 'generic' | 'browser_start' | 'browser_page' | 'browser' | 'shell' | 'code' | 'read';
+type ProcessSubject = 'file' | 'search' | 'browser' | 'shell' | 'code' | 'generic';
 
 type ProcessEventItem = {
   key: string;
   kind: 'thinking' | 'tool_call' | 'tool_result' | 'tool_status' | 'note';
   surface: ProcessSurface;
   action?: ProcessAction;
+  subject?: ProcessSubject;
   title: string;
   label?: string;
   preview?: string;
@@ -64,7 +66,12 @@ function normalizeToolName(name: string | undefined): string {
   return (name || 'tool').trim() || 'tool';
 }
 
-function classifySurface(toolName: string | undefined, payload: unknown): { surface: ProcessSurface; title: string; action?: ProcessAction } {
+function classifySurface(toolName: string | undefined, payload: unknown): {
+  surface: ProcessSurface;
+  title: string;
+  action?: ProcessAction;
+  subject?: ProcessSubject;
+} {
   const normalizedName = normalizeToolName(toolName);
   const lowerName = normalizedName.toLowerCase();
   const payloadText = formatUnknownContent(payload).toLowerCase();
@@ -96,6 +103,7 @@ function classifySurface(toolName: string | undefined, payload: unknown): { surf
       surface: 'tool',
       title: normalizedName,
       action: looksLikeBrowserStart ? 'browser_start' : (looksLikePageOpen ? 'browser_page' : 'browser'),
+      subject: 'browser',
     };
   }
 
@@ -105,7 +113,7 @@ function classifySurface(toolName: string | undefined, payload: unknown): { surf
     || lowerName.includes('command')
     || payloadText.includes('"command"')
   ) {
-    return { surface: 'terminal', title: 'Shell', action: 'shell' };
+    return { surface: 'terminal', title: 'Shell', action: 'shell', subject: 'shell' };
   }
 
   if (
@@ -116,7 +124,7 @@ function classifySurface(toolName: string | undefined, payload: unknown): { surf
     || payloadText.includes('*** begin patch')
     || payloadText.includes('"patch"')
   ) {
-    return { surface: 'code', title: 'Code', action: 'code' };
+    return { surface: 'code', title: 'Code', action: 'code', subject: 'code' };
   }
 
   if (
@@ -127,10 +135,27 @@ function classifySurface(toolName: string | undefined, payload: unknown): { surf
     || payloadText.includes('"path"')
     || payloadText.includes('"file_path"')
   ) {
-    return { surface: 'read', title: 'Read', action: 'read' };
+    const looksLikeFileRead = lowerName.includes('read')
+      || lowerName.includes('open')
+      || payloadText.includes('"path"')
+      || payloadText.includes('"file_path"')
+      || payloadText.includes('"filepath"')
+      || payloadText.includes('"file"');
+    const looksLikeSearch = lowerName.includes('search')
+      || lowerName.includes('find')
+      || payloadText.includes('"query"')
+      || payloadText.includes('"pattern"')
+      || payloadText.includes('"keywords"');
+
+    return {
+      surface: 'read',
+      title: 'Read',
+      action: 'read',
+      subject: looksLikeSearch && !looksLikeFileRead ? 'search' : 'file',
+    };
   }
 
-  return { surface: 'tool', title: normalizedName, action: 'generic' };
+  return { surface: 'tool', title: normalizedName, action: 'generic', subject: 'generic' };
 }
 
 function getToolPreview(payload: unknown): string | undefined {
@@ -176,7 +201,7 @@ function createToolCallItem(
   statusMap: Map<string, ToolStatus>,
 ): ProcessEventItem {
   const toolName = normalizeToolName(block.name);
-  const { surface, title, action } = classifySurface(toolName, block.input ?? block.arguments);
+  const { surface, title, action, subject } = classifySurface(toolName, block.input ?? block.arguments);
   const key = block.id || toolName;
   const status = statusMap.get(key) || statusMap.get(toolName);
   const detail = formatUnknownContent(block.input ?? block.arguments);
@@ -186,6 +211,7 @@ function createToolCallItem(
     kind: 'tool_call',
     surface,
     action,
+    subject,
     title,
     label: toolName,
     preview: status?.summary || getToolPreview(block.input ?? block.arguments),
@@ -202,7 +228,7 @@ function createToolResultItem(
   statusMap: Map<string, ToolStatus>,
 ): ProcessEventItem {
   const toolName = normalizeToolName(block.name);
-  const { surface, title, action } = classifySurface(toolName, block.content ?? block.text);
+  const { surface, title, action, subject } = classifySurface(toolName, block.content ?? block.text);
   const key = block.id || toolName;
   const status = statusMap.get(key) || statusMap.get(toolName);
   const detail = formatUnknownContent(block.content ?? block.text ?? '');
@@ -213,6 +239,7 @@ function createToolResultItem(
     kind: 'tool_result',
     surface,
     action,
+    subject,
     title,
     label: toolName,
     preview,
@@ -240,12 +267,13 @@ function createUnmatchedStatusItems(
       return !key || !matchedKeys.has(key);
     })
     .map((tool) => {
-      const { surface, title, action } = classifySurface(tool.name, tool.summary);
+      const { surface, title, action, subject } = classifySurface(tool.name, tool.summary);
       return {
         key: `tool-status-${tool.toolCallId || tool.id || tool.name}`,
         kind: 'tool_status' as const,
         surface,
         action,
+        subject,
         title,
         label: normalizeToolName(tool.name),
         preview: tool.summary,
@@ -412,11 +440,119 @@ function formatEventStatusLabel(item: ProcessEventItem, language: string | undef
   return labels[item.action || 'generic'][status];
 }
 
+function formatAggregateCount(subject: ProcessSubject, count: number, language: 'zh' | 'en'): string {
+  if (language === 'zh') {
+    switch (subject) {
+      case 'file':
+        return `${count} 个文件`;
+      case 'search':
+        return `${count} 次检索`;
+      case 'browser':
+        return `${count} 个页面步骤`;
+      case 'shell':
+        return `${count} 条命令`;
+      case 'code':
+        return `${count} 处代码改动`;
+      default:
+        return `${count} 个任务`;
+    }
+  }
+
+  switch (subject) {
+    case 'file':
+      return `${count} file${count === 1 ? '' : 's'}`;
+    case 'search':
+      return `${count} search${count === 1 ? '' : 'es'}`;
+    case 'browser':
+      return `${count} browser step${count === 1 ? '' : 's'}`;
+    case 'shell':
+      return `${count} command${count === 1 ? '' : 's'}`;
+    case 'code':
+      return `${count} code edit${count === 1 ? '' : 's'}`;
+    default:
+      return `${count} task${count === 1 ? '' : 's'}`;
+  }
+}
+
+function formatAggregateLabel(
+  counts: Map<ProcessSubject, number>,
+  language: 'zh' | 'en',
+  isRunning: boolean,
+): string | null {
+  const orderedEntries = (['file', 'search', 'browser', 'shell', 'code', 'generic'] as const)
+    .map((subject) => [subject, counts.get(subject) ?? 0] as const)
+    .filter(([, count]) => count > 0);
+
+  if (orderedEntries.length === 0) return null;
+
+  if (orderedEntries.length === 1) {
+    const [subject, count] = orderedEntries[0];
+    if (language === 'zh') {
+      switch (subject) {
+        case 'file':
+          return `${isRunning ? '正在浏览' : '已浏览'} ${count} 个文件`;
+        case 'search':
+          return `${isRunning ? '正在检索' : '已检索'} ${count} 次`;
+        case 'shell':
+          return `${isRunning ? '正在执行' : '已执行'} ${count} 条命令`;
+        case 'code':
+          return `${isRunning ? '正在修改' : '已修改'} ${count} 处代码`;
+        case 'browser':
+          return `${isRunning ? '正在浏览' : '已浏览'} ${count} 个页面步骤`;
+        default:
+          return `${isRunning ? '正在处理' : '已处理'} ${count} 个任务`;
+      }
+    }
+
+    switch (subject) {
+      case 'file':
+        return `${isRunning ? 'Exploring' : 'Explored'} ${formatAggregateCount(subject, count, language)}`;
+      case 'search':
+        return `${isRunning ? 'Running' : 'Ran'} ${formatAggregateCount(subject, count, language)}`;
+      case 'shell':
+        return `${isRunning ? 'Running' : 'Ran'} ${formatAggregateCount(subject, count, language)}`;
+      case 'code':
+        return `${isRunning ? 'Editing' : 'Edited'} ${formatAggregateCount(subject, count, language)}`;
+      case 'browser':
+        return `${isRunning ? 'Browsing' : 'Browsed'} ${formatAggregateCount(subject, count, language)}`;
+      default:
+        return `${isRunning ? 'Working on' : 'Completed'} ${formatAggregateCount(subject, count, language)}`;
+    }
+  }
+
+  const parts = orderedEntries.map(([subject, count]) => formatAggregateCount(subject, count, language));
+  if (language === 'zh') {
+    return `${isRunning ? '正在处理' : '已处理'} ${parts.join('、')}`;
+  }
+
+  return `${isRunning ? 'Working on' : 'Completed'} ${parts.join(', ')}`;
+}
+
 function buildMessageSummary(items: ProcessEventItem[], language: string | undefined): { label: string; preview?: string; durationMs?: number } {
+  const locale = normalizeLocale(language);
+  const structuredItems = items.filter((item) => item.kind !== 'note' && item.kind !== 'thinking');
+  const runningItems = structuredItems.filter((item) => item.status === 'running');
+  const summaryItems = runningItems.length > 0 ? runningItems : structuredItems;
+
+  if (summaryItems.length > 1) {
+    const counts = new Map<ProcessSubject, number>();
+    for (const item of summaryItems) {
+      const subject = item.subject || 'generic';
+      counts.set(subject, (counts.get(subject) ?? 0) + 1);
+    }
+    const label = formatAggregateLabel(counts, locale, runningItems.length > 0);
+    if (label) {
+      return {
+        label,
+        durationMs: summaryItems.reduce((max, item) => Math.max(max, item.durationMs ?? 0), 0) || undefined,
+      };
+    }
+  }
+
   const primary = items.find((item) => item.kind !== 'note' && item.kind !== 'thinking') || items[0];
   if (!primary) {
     return {
-      label: normalizeLocale(language) === 'zh' ? '已处理' : 'Processed',
+      label: locale === 'zh' ? '已处理' : 'Processed',
     };
   }
 
@@ -433,9 +569,9 @@ function ProcessEventDetail({ item }: { item: ProcessEventItem }) {
   if (item.kind === 'note' || item.kind === 'thinking') {
     return (
       <div className="prose prose-sm dark:prose-invert max-w-none break-words text-foreground/85 [&>*]:my-2.5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-          {item.detail}
-        </ReactMarkdown>
+        <Suspense fallback={<p className="whitespace-pre-wrap break-words">{item.detail}</p>}>
+          <MarkdownRenderer content={item.detail} />
+        </Suspense>
       </div>
     );
   }

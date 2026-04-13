@@ -82,4 +82,45 @@ describe('ProcessEventMessage', () => {
     expect(within(row).getByText(/"enabled": true/)).toBeInTheDocument();
     expect(within(row).getByTestId('chat-process-event-toggle-icon')).toHaveClass('opacity-100');
   });
+
+  it('summarizes multiple running read/search actions with concrete counts', () => {
+    render(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-3',
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'read-1', name: 'read_file', input: { path: 'src/runtime-send-actions.ts' } },
+            { type: 'tool_use', id: 'read-2', name: 'open_file', input: { file_path: 'src/ChatInput.tsx' } },
+            { type: 'tool_use', id: 'search-1', name: 'search_code', input: { query: 'sendWithMedia' } },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="all"
+        streamingTools={[
+          {
+            id: 'read-1',
+            toolCallId: 'read-1',
+            name: 'read_file',
+            status: 'running',
+          },
+          {
+            id: 'read-2',
+            toolCallId: 'read-2',
+            name: 'open_file',
+            status: 'running',
+          },
+          {
+            id: 'search-1',
+            toolCallId: 'search-1',
+            name: 'search_code',
+            status: 'running',
+          },
+        ]}
+      />,
+    );
+
+    const row = screen.getByTestId('chat-process-event-row');
+    expect(within(row).getByTestId('chat-process-event-summary')).toHaveTextContent('Working on 2 files, 1 search');
+  });
 });

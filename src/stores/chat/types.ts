@@ -61,6 +61,23 @@ export interface ToolStatus {
   updatedAt: number;
 }
 
+export type ChatSendStage =
+  | 'sending_to_gateway'
+  | 'awaiting_runtime'
+  | 'running'
+  | 'finalizing';
+
+export interface ActiveTurnBuffer {
+  historyMessages: RawMessage[];
+  userMessage: RawMessage | null;
+  assistantMessages: RawMessage[];
+  latestPersistedAssistant: RawMessage | null;
+  streamingDisplayMessage: RawMessage | null;
+  startedAtMs: number | null;
+  hasAnyStreamContent: boolean;
+  isStreamingDuplicateOfPersistedAssistant: boolean;
+}
+
 export interface ChatState {
   // Messages
   messages: RawMessage[];
@@ -73,10 +90,12 @@ export interface ChatState {
   streamingText: string;
   streamingMessage: unknown | null;
   streamingTools: ToolStatus[];
+  sendStage: ChatSendStage | null;
   pendingFinal: boolean;
   lastUserMessageAt: number | null;
   /** Images collected from tool results, attached to the next assistant message */
   pendingToolImages: AttachedFileMeta[];
+  activeTurnBuffer?: ActiveTurnBuffer;
 
   // Sessions
   sessions: ChatSession[];

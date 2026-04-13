@@ -139,14 +139,14 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
       const currentSessionKey = targetSessionKey;
       const existingMessages = get().messages;
       const isFirstUserMessage = !existingMessages.some((message) => message.role === 'user');
-      const baseMessage = trimmed || (attachments?.length ? 'Process the attached file(s).' : '');
+      const baseMessage = trimmed || (attachments?.length ? '请处理我上传的附件。' : '');
       const messageForGateway = injectAgentExecutionMetadata(baseMessage, currentSessionKey, isFirstUserMessage);
 
       // Add user message optimistically (with local file metadata for UI display)
       const nowMs = Date.now();
       const userMsg: RawMessage = {
         role: 'user',
-        content: messageForGateway || (attachments?.length ? '(file attached)' : ''),
+        content: messageForGateway || (attachments?.length ? '（已附加文件）' : ''),
         timestamp: nowMs / 1000,
         id: crypto.randomUUID(),
         _attachedFiles: attachments?.map(a => ({
@@ -230,7 +230,7 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
         }
         clearHistoryPoll();
         set({
-          error: 'No response received from the model. The provider may be unavailable or the API key may have insufficient quota. Please check your provider settings.',
+          error: '暂时没有收到模型回复。可能是服务暂不可用，或当前 API Key 额度不足，请检查提供商设置。',
           sending: false,
           activeRunId: null,
           lastUserMessageAt: null,
@@ -269,7 +269,7 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
             'chat:sendWithMedia',
             {
               sessionKey: currentSessionKey,
-              message: messageForGateway || 'Process the attached file(s).',
+              message: messageForGateway || '请处理我上传的附件。',
               deliver: false,
               idempotencyKey,
               media: attachments.map((a) => ({
