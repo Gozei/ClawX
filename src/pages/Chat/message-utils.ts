@@ -70,6 +70,12 @@ function summarizeSystemHeartbeatNoise(text: string): string {
     return text;
   }
 
+  // Hide heartbeat-only prompt injection from the visible chat transcript.
+  // It's internal workspace context, not user-authored content.
+  if (execCount === 0 && otherSystemLineCount === 0 && heartbeatLineCount > 0) {
+    return '';
+  }
+
   const summaryLines: string[] = [];
   if (execCount > 0) {
     let execSummary = `系统事件：已记录 ${execCount} 个后台执行结果`;
