@@ -17,7 +17,7 @@ const seededMessages = [
     id: 'assistant-1',
     role: 'assistant',
     content: [
-      { type: 'thinking', thinking: 'Check the browser before replying.' },
+      { type: 'thinking', thinking: '### Browser checklist\n\n1. **Check the browser** before replying.' },
       { type: 'tool_use', id: 'browser-1', name: 'browser', input: { action: 'start', enabled: true } },
     ],
     timestamp: Math.floor(Date.now() / 1000) - 4,
@@ -92,7 +92,10 @@ test.describe.skip('Chat process stream style', () => {
       const processContent = page.getByTestId('chat-process-content');
       await expect(processContent).toBeVisible();
       await expect(processContent.getByTestId('chat-process-event-row')).toHaveCount(1);
+      await expect(processContent.getByText('Browser checklist')).toBeVisible();
       await expect(processContent.getByText('Check the browser before replying.')).toBeVisible();
+      await expect(processContent.getByText('### Browser checklist')).toHaveCount(0);
+      await expect(processContent.getByText('**Check the browser** before replying.')).toHaveCount(0);
       await expect(processContent.getByText('Browser opened')).toBeVisible();
       await expect(processContent.getByText(/"action": "start"/)).toBeVisible();
       await expect(processContent.getByText('Thinking')).toHaveCount(0);

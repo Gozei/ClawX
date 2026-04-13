@@ -12,6 +12,7 @@ import { invokeIpc } from '@/lib/api-client';
 import type { RawMessage, AttachedFileMeta } from '@/stores/chat';
 import { useSettingsStore, type AssistantMessageStyle } from '@/stores/settings';
 import { extractText, extractThinking, extractImages, extractToolUse, formatTimestamp } from './message-utils';
+import { StreamingMarkdownPreview } from './StreamingMarkdownPreview';
 
 interface ChatMessageProps {
   message: RawMessage;
@@ -433,9 +434,16 @@ const MessageBubble = memo(function MessageBubble({
       {isUser ? (
         <p className="whitespace-pre-wrap break-words break-all leading-[1.82]" style={{ fontSize }}>{text}</p>
       ) : isStreaming ? (
-        <div className={cn('whitespace-pre-wrap break-words break-all leading-[1.82]', usesAssistantStreamStyle && 'prose prose-sm dark:prose-invert max-w-none')} style={{ fontSize }}>
-          {text}
-          <span className="inline-block w-2 h-4 bg-foreground/50 animate-pulse ml-0.5 align-[-2px]" />
+        <div className={cn(usesAssistantStreamStyle && 'max-w-none')} style={{ fontSize }}>
+          <StreamingMarkdownPreview
+            content={text}
+            trailingCursor
+            className={cn(
+              usesAssistantStreamStyle
+                ? 'space-y-2.5 text-[0.985em] text-foreground/94'
+                : 'space-y-2 text-[0.97em] text-foreground/92',
+            )}
+          />
         </div>
       ) : (
         <div className={cn('prose prose-sm dark:prose-invert max-w-none break-words break-all leading-[1.82]', usesAssistantStreamStyle && '[&>*]:my-3 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0')} style={{ fontSize }}>

@@ -1,4 +1,5 @@
-import { memo, useEffect, useMemo, useState, lazy, Suspense } from 'react';
+/* eslint-disable react-refresh/only-export-components */
+import { memo, useMemo, useState, lazy, Suspense } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ContentBlock, RawMessage, ToolStatus } from '@/stores/chat';
@@ -594,13 +595,9 @@ const ProcessEventRow = memo(function ProcessEventRow({
 }) {
   const isDirectContent = item.kind === 'note' || item.kind === 'thinking';
   const canExpand = !!item.detail;
-  const [expanded, setExpanded] = useState(defaultExpanded && canExpand && !isDirectContent);
+  const [expanded, setExpanded] = useState(() => defaultExpanded && canExpand && !isDirectContent);
   const durationLabel = formatDuration(item.durationMs);
   const summaryLabel = formatEventStatusLabel(item, language);
-
-  useEffect(() => {
-    setExpanded(defaultExpanded && canExpand && !isDirectContent);
-  }, [canExpand, defaultExpanded, isDirectContent, item.key]);
 
   if (isDirectContent) {
     return (
@@ -701,11 +698,7 @@ export const ProcessEventMessage = memo(function ProcessEventMessage({
     }
     return -1;
   }, [items]);
-  const [expanded, setExpanded] = useState(defaultExpanded);
-
-  useEffect(() => {
-    setExpanded(defaultExpanded);
-  }, [defaultExpanded, message.id, items.length]);
+  const [expanded, setExpanded] = useState(() => defaultExpanded);
 
   if (items.length === 0) return null;
 

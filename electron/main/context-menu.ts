@@ -1,4 +1,4 @@
-import { Menu, type WebContents } from 'electron';
+import { BrowserWindow, Menu, type WebContents } from 'electron';
 
 function hasSelection(selectionText?: string): boolean {
   return Boolean(selectionText && selectionText.trim().length > 0);
@@ -32,6 +32,6 @@ export function attachContextMenu(webContents: WebContents): void {
       return;
     }
 
-    Menu.buildFromTemplate(template).popup({ window: webContents.getOwnerBrowserWindow() ?? undefined });
+    Menu.buildFromTemplate(template).popup({ window: BrowserWindow.fromWebContents(webContents) ?? undefined });
   });
 }

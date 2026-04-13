@@ -63,7 +63,7 @@ interface AgentStudioConfig extends Record<string, unknown> {
   outputContract?: string;
   skillIds?: string[];
   workflowSteps?: string[];
-  workflowNodes?: AgentWorkflowNodeConfig[];
+  workflowNodes?: AgentWorkflowNode[];
   triggerModes?: string[];
 }
 
@@ -223,36 +223,38 @@ function normalizeProfileType(value: unknown): AgentSummary['profileType'] {
 
 function normalizeWorkflowNodes(value: unknown): AgentWorkflowNode[] {
   if (!Array.isArray(value)) return [];
-  return value
-    .map((item, index) => {
-      if (!item || typeof item !== 'object') return null;
-      const source = item as AgentWorkflowNodeConfig;
-      const type = typeof source.type === 'string' ? source.type.trim() : '';
-      const normalizedType = ['instruction', 'skill', 'model', 'channel', 'agent'].includes(type) ? type as AgentWorkflowNode['type'] : 'instruction';
-      const title = typeof source.title === 'string' ? source.title.trim() : '';
-      if (!title) return null;
-      const target = typeof source.target === 'string' ? source.target.trim() : '';
-      const onFailure = typeof source.onFailure === 'string' ? source.onFailure.trim() : '';
-      const inputSpec = typeof source.inputSpec === 'string' ? source.inputSpec.trim() : '';
-      const outputSpec = typeof source.outputSpec === 'string' ? source.outputSpec.trim() : '';
-      const modelRef = typeof source.modelRef === 'string' ? source.modelRef.trim() : '';
-      const code = typeof source.code === 'string' ? source.code.trim() : '';
-      const normalizedOnFailure = ['continue', 'retry', 'handoff'].includes(onFailure)
-        ? onFailure as AgentWorkflowNode['onFailure']
-        : 'continue';
-      return {
-        id: typeof source.id === 'string' && source.id.trim() ? source.id.trim() : `step-${index + 1}`,
-        type: normalizedType,
-        title,
-        ...(target ? { target } : {}),
-        onFailure: normalizedOnFailure,
-        ...(inputSpec ? { inputSpec } : {}),
-        ...(outputSpec ? { outputSpec } : {}),
-        ...(modelRef ? { modelRef } : {}),
-        ...(code ? { code } : {}),
-      };
-    })
-    .filter((item): item is AgentWorkflowNode => Boolean(item));
+  const normalized: AgentWorkflowNode[] = [];
+  for (const [index, item] of value.entries()) {
+    if (!item || typeof item !== 'object') continue;
+    const source = item as AgentWorkflowNodeConfig;
+    const type = typeof source.type === 'string' ? source.type.trim() : '';
+    const normalizedType = ['instruction', 'skill', 'model', 'channel', 'agent'].includes(type)
+      ? type as AgentWorkflowNode['type']
+      : 'instruction';
+    const title = typeof source.title === 'string' ? source.title.trim() : '';
+    if (!title) continue;
+    const target = typeof source.target === 'string' ? source.target.trim() : '';
+    const onFailure = typeof source.onFailure === 'string' ? source.onFailure.trim() : '';
+    const inputSpec = typeof source.inputSpec === 'string' ? source.inputSpec.trim() : '';
+    const outputSpec = typeof source.outputSpec === 'string' ? source.outputSpec.trim() : '';
+    const modelRef = typeof source.modelRef === 'string' ? source.modelRef.trim() : '';
+    const code = typeof source.code === 'string' ? source.code.trim() : '';
+    const normalizedOnFailure = ['continue', 'retry', 'handoff'].includes(onFailure)
+      ? onFailure as AgentWorkflowNode['onFailure']
+      : 'continue';
+    normalized.push({
+      id: typeof source.id === 'string' && source.id.trim() ? source.id.trim() : `step-${index + 1}`,
+      type: normalizedType,
+      title,
+      ...(target ? { target } : {}),
+      onFailure: normalizedOnFailure,
+      ...(inputSpec ? { inputSpec } : {}),
+      ...(outputSpec ? { outputSpec } : {}),
+      ...(modelRef ? { modelRef } : {}),
+      ...(code ? { code } : {}),
+    });
+  }
+  return normalized;
 }
 
 function summarizeWorkflowNode(node: AgentWorkflowNode): string {

@@ -497,7 +497,14 @@ function ProviderCard({
     return () => {
       active = false;
     };
-  }, [isEditing]);
+  }, [
+    account,
+    isEditing,
+    item,
+    onGetStoredKey,
+    typeInfo?.codePlanPresetBaseUrl,
+    typeInfo?.codePlanPresetModelId,
+  ]);
 
   useEffect(() => {
     setModelTestResults((current) => Object.fromEntries(
@@ -694,15 +701,6 @@ function ProviderCard({
           return;
         }
 
-        const nextPassedModelIds = modelIds.filter((model) => {
-          const result = mergedResults[model];
-          const modelConfigKey = getModelTestConfigKey(model);
-          const isCurrentConfig = (modelsRequiringTest.includes(model) ? modelConfigKey : modelTestConfigKeys[model]) === modelConfigKey;
-          return isCurrentConfig && Boolean(result?.valid);
-        });
-        if (nextPassedModelIds.length > 0) {
-        }
-
         toast.success(t('aiProviders.toast.testAllModelsPassed', '{{count}} 个模型测试通过', {
           count: modelsRequiringTest.length,
         }));
@@ -740,27 +738,15 @@ function ProviderCard({
       }
 
       const result = await runConnectionTest(modelOverride, modelProtocolMap[modelOverride]);
-      const nextResults = { ...modelTestResults, [modelOverride]: result };
-      const nextConfigKeys = { ...modelTestConfigKeys, [modelOverride]: getModelTestConfigKey(modelOverride) };
       setModelTestResults((current) => ({ ...current, [modelOverride]: result }));
       setModelTestConfigKeys((current) => ({ ...current, [modelOverride]: getModelTestConfigKey(modelOverride) }));
       if (!result.valid) {
         toast.error(result.error || t('aiProviders.toast.testFailed', '连接测试失败'));
-      } else if (modelIds.every((model) => nextConfigKeys[model] === getModelTestConfigKey(model) && nextResults[model]?.valid)) {
-        toast.success(buildTestSuccessMessage(result));
       } else {
         toast.success(buildTestSuccessMessage(result));
       }
     } catch (error) {
       toast.error(`${t('aiProviders.toast.testFailed', '连接测试失败')}: ${error}`);
-      const nextResults = {
-        ...modelTestResults,
-        [modelOverride]: {
-          valid: false,
-          error: String(error),
-          model: modelOverride,
-        },
-      };
       setModelTestResults((current) => ({
         ...current,
         [modelOverride]: {
@@ -770,8 +756,6 @@ function ProviderCard({
         },
       }));
       setModelTestConfigKeys((current) => ({ ...current, [modelOverride]: getModelTestConfigKey(modelOverride) }));
-      if (modelIds.every((model) => modelTestConfigKeys[model] === getModelTestConfigKey(model) && nextResults[model]?.valid)) {
-      }
     } finally {
       setTestingModelId(null);
     }

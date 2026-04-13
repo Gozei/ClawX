@@ -175,7 +175,7 @@ async function runDoctorCommandWithArgs(
         stderr,
         command,
         cwd: openclawDir,
-        error: error instanceof Error ? error.message : String(error),
+        error: String(error),
       });
     });
 

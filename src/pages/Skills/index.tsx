@@ -474,8 +474,8 @@ export function Skills() {
     }
   }, [fetchSkills, isGatewayRunning]);
 
-  const safeSkills = Array.isArray(skills) ? skills : [];
   const normalizedQuery = searchQuery.toLowerCase().trim();
+  const safeSkills = useMemo(() => (Array.isArray(skills) ? skills : []), [skills]);
 
   const skillMeta = useMemo(() => (
     safeSkills.map((skill) => ({
@@ -605,7 +605,7 @@ export function Skills() {
     }
   }, [enableSkill, disableSkill, t]);
 
-  const hasInstalledSkills = safeSkills.some(s => !s.isBundled);
+  const hasInstalledSkills = safeSkills.some((s) => !s.isBundled);
 
   const handleOpenSkillsFolder = useCallback(async () => {
     try {
@@ -1020,7 +1020,7 @@ export function Skills() {
             {!searching && searchResults.length > 0 && (
               <div className="flex flex-col gap-1">
                 {searchResults.map((skill) => {
-                  const isInstalled = safeSkills.some(s => s.id === skill.slug || s.name === skill.name);
+                  const isInstalled = safeSkills.some((s) => s.id === skill.slug || s.name === skill.name);
                   const isInstallLoading = !!installing[skill.slug];
 
                   return (

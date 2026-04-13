@@ -145,7 +145,7 @@ export class ClawHubService {
             const isWin = process.platform === 'win32';
             const useShell = isWin && !this.useNodeRunner;
             const { NODE_OPTIONS: _nodeOptions, ...baseEnv } = process.env;
-            const env = {
+            const env: NodeJS.ProcessEnv = {
                 ...baseEnv,
                 CI: 'true',
                 FORCE_COLOR: '0',
@@ -354,20 +354,20 @@ export class ClawHubService {
             }
 
             const lines = output.split('\n').filter(l => l.trim());
-            return lines.map(line => {
+            return lines.flatMap(line => {
                 const cleanLine = this.stripAnsi(line);
                 const match = cleanLine.match(/^(\S+)\s+v?(\d+\.\S+)/);
                 if (match) {
                     const slug = match[1];
-                    return {
+                    return [{
                         slug,
                         version: match[2],
                         source: 'openclaw-managed',
                         baseDir: path.join(this.workDir, 'skills', slug),
-                    };
+                    }];
                 }
-                return null;
-            }).filter((s): s is ClawHubInstalledSkillResult => s !== null);
+                return [];
+            });
         } catch (error) {
             console.error('ClawHub list error:', error);
             return [];

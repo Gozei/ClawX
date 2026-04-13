@@ -38,7 +38,6 @@ import { createSignalQuitHandler } from './signal-quit';
 import { acquireProcessInstanceFileLock } from './process-instance-lock';
 import { getSetting } from '../utils/store';
 import { ensureBuiltinSkillsInstalled, ensurePreinstalledSkillsInstalled } from '../utils/skill-config';
-import { ensureAllBundledPluginsInstalled } from '../utils/plugin-install';
 import { startHostApiServer } from '../api/server';
 import { HostEventBus } from '../api/event-bus';
 import { deviceOAuthManager } from '../utils/device-oauth';
@@ -79,7 +78,7 @@ app.disableHardwareAcceleration();
 // on X11 it supplements the StartupWMClass matching.
 // Must be called before app.whenReady() / before any window is created.
 if (process.platform === 'linux') {
-  app.setDesktopName('clawx.desktop');
+  (app as Electron.App & { setDesktopName?: (name: string) => void }).setDesktopName?.('clawx.desktop');
 }
 
 // Prevent multiple instances of the app from running simultaneously.
@@ -284,11 +283,30 @@ async function initialize(): Promise<void> {
   const startupTimelineStart = Date.now();
   let startupDidFinishLoadLogged = false;
   let startupWindowVisibleLogged = false;
+  let workspaceSyncInFlight: Promise<void> | null = null;
   const logStartupStage = (stage: string): void => {
     const prefix = process.platform === 'win32'
       ? '[Windows Startup Monitor]'
       : '[Startup Monitor]';
     logger.info(`${prefix} stage=${stage} elapsed=${Date.now() - startupTimelineStart}ms`);
+  };
+  const scheduleWorkspaceBootstrapSync = (reason: string): void => {
+    if (isE2EMode) return;
+    if (workspaceSyncInFlight) {
+      logger.debug(`Workspace bootstrap sync already in flight, skipping duplicate request (${reason})`);
+      return;
+    }
+
+    workspaceSyncInFlight = Promise.all([
+      ensureClawXContext().catch((error) => {
+        logger.warn(`Failed to merge Deep AI Worker context into workspace (${reason}):`, error);
+      }),
+      syncAllAgentWorkspaceStudioContexts().catch((error) => {
+        logger.warn(`Failed to sync agent studio context into workspace (${reason}):`, error);
+      }),
+    ]).then(() => undefined).finally(() => {
+      workspaceSyncInFlight = null;
+    });
   };
   const userDataMigrationReport = await migrateLegacyUserDataIfNeeded();
 
@@ -428,15 +446,6 @@ async function initialize(): Promise<void> {
     });
   }
 
-  // Pre-deploy/upgrade bundled OpenClaw plugins (dingtalk, wecom, feishu, wechat)
-  // to ~/.openclaw/extensions/ so they are always up-to-date after an app update.
-  // Note: qqbot was moved to a built-in channel in OpenClaw 3.31.
-  if (!isE2EMode) {
-    void ensureAllBundledPluginsInstalled().catch((error) => {
-      logger.warn('Failed to install/upgrade bundled plugins:', error);
-    });
-  }
-
   // Bridge gateway and host-side events before any auto-start logic runs, so
   // renderer subscribers observe the full startup lifecycle.
   gatewayManager.on('status', (status: GatewayStatus) => {
@@ -445,12 +454,7 @@ async function initialize(): Promise<void> {
       void updateTrayStatus(status.state);
     }
     if (status.state === 'running' && !isE2EMode) {
-    void ensureClawXContext().catch((error) => {
-      logger.warn('Failed to re-merge Deep AI Worker context after gateway reconnect:', error);
-    });
-    void syncAllAgentWorkspaceStudioContexts().catch((error) => {
-      logger.warn('Failed to sync agent studio context after gateway reconnect:', error);
-    });
+      scheduleWorkspaceBootstrapSync('gateway-running');
     }
   });
 
@@ -545,16 +549,11 @@ async function initialize(): Promise<void> {
     logger.info('Gateway auto-start disabled in settings');
   }
 
-  // Merge ClawX context snippets into the workspace bootstrap files.
-  // The gateway seeds workspace files asynchronously after its HTTP server
-  // is ready, so ensureClawXContext will retry until the target files appear.
   if (!isE2EMode) {
-    void ensureClawXContext().catch((error) => {
-      logger.warn('Failed to merge Deep AI Worker context into workspace:', error);
-    });
-    void syncAllAgentWorkspaceStudioContexts().catch((error) => {
-      logger.warn('Failed to sync agent studio context into workspace:', error);
-    });
+    // Seed existing workspace files early when possible; if the gateway later
+    // creates missing bootstrap files, the running-state hook above will pick
+    // them up without duplicating this work.
+    scheduleWorkspaceBootstrapSync('startup');
   }
 
   // Auto-install openclaw CLI and shell completions (non-blocking).

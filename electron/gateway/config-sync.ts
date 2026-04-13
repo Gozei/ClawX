@@ -1,6 +1,6 @@
 import { app } from 'electron';
 import path from 'path';
-import { existsSync, readFileSync, mkdirSync, rmSync, readdirSync, renameSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync, rmSync, readdirSync, renameSync, type Dirent } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
@@ -104,20 +104,21 @@ function dingtalkExtensionReferencesLegacyTelegramCore(extRoot: string): boolean
   const maxFiles = 120;
   while (stack.length > 0 && scanned < maxFiles) {
     const dir = stack.pop()!;
-    let entries: ReturnType<typeof readdirSync>;
+    let entries: Dirent[];
     try {
       entries = readdirSync(fsPath(dir), { withFileTypes: true });
     } catch {
       continue;
     }
     for (const ent of entries) {
-      if (ent.name === 'node_modules' || ent.name === '.git') continue;
-      const full = join(dir, ent.name);
+      const entryName = String(ent.name);
+      if (entryName === 'node_modules' || entryName === '.git') continue;
+      const full = join(dir, entryName);
       if (ent.isDirectory()) {
         stack.push(full);
         continue;
       }
-      if (!/\.(ts|tsx|js|mjs|cjs)$/i.test(ent.name)) continue;
+      if (!/\.(ts|tsx|js|mjs|cjs)$/i.test(entryName)) continue;
       scanned++;
       let text: string;
       try {
@@ -470,6 +471,9 @@ export async function prepareGatewayLaunchContext(port: number): Promise<Gateway
     OPENCLAW_SKIP_CHANNELS: skipChannels ? '1' : '',
     CLAWDBOT_SKIP_CHANNELS: skipChannels ? '1' : '',
     OPENCLAW_NO_RESPAWN: '1',
+    // Bonjour/mDNS repeatedly probes and conflicts on some Windows machines,
+    // which can delay Gateway startup without helping the local desktop app.
+    OPENCLAW_DISABLE_BONJOUR: process.platform === 'win32' ? '1' : '',
   };
 
   return {

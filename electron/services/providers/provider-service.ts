@@ -39,6 +39,33 @@ import { logger } from '../../utils/logger';
 const GOOGLE_OAUTH_RUNTIME_PROVIDER = 'google-gemini-cli';
 const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
 
+function extractModelIdsFromOpenClawEntry(entry: Record<string, unknown>): string[] {
+  const rawModels = Array.isArray(entry.models) ? entry.models : [];
+  const ids = rawModels.map((model) => {
+    if (typeof model === 'string') return model.trim();
+    if (model && typeof model === 'object' && typeof (model as Record<string, unknown>).id === 'string') {
+      return ((model as Record<string, unknown>).id as string).trim();
+    }
+    return '';
+  }).filter(Boolean);
+
+  return [...new Set(ids)];
+}
+
+function parseDefaultModelRef(defaultModel: string | undefined): { providerKey?: string; modelId?: string } {
+  if (!defaultModel) return {};
+  const trimmed = defaultModel.trim();
+  if (!trimmed) return {};
+  const separatorIndex = trimmed.indexOf('/');
+  if (separatorIndex === -1) {
+    return { modelId: trimmed };
+  }
+  return {
+    providerKey: trimmed.slice(0, separatorIndex),
+    modelId: trimmed.slice(separatorIndex + 1),
+  };
+}
+
 function getSuppressedProviderKeysForAccount(account: Pick<ProviderAccount, 'id' | 'vendorId'>): string[] {
   const keys = new Set<string>([account.id]);
   const runtimeKey = getOpenClawProviderKeyForType(account.vendorId, account.id);
@@ -179,9 +206,7 @@ export class ProviderService {
     existingVendorIds: Set<string>,
     defaultModel: string | undefined,
   ): ProviderAccount[] {
-    const defaultModelProvider = defaultModel?.includes('/')
-      ? defaultModel.split('/')[0]
-      : undefined;
+    const { providerKey: defaultModelProvider, modelId: defaultModelId } = parseDefaultModelRef(defaultModel);
 
     const now = new Date().toISOString();
     const built: ProviderAccount[] = [];
@@ -206,20 +231,16 @@ export class ProviderService {
 
       const baseUrl = typeof entry.baseUrl === 'string' ? entry.baseUrl : definition?.providerConfig?.baseUrl;
 
-      // Infer model from the default model if it belongs to this provider
-      let model: string | undefined;
-      if (defaultModelProvider === key && defaultModel) {
-        model = defaultModel;
-      } else if (definition?.defaultModelId) {
-        model = definition.defaultModelId;
-      } else if (Array.isArray(entry.models) && entry.models.length > 0) {
-        const firstModel = entry.models[0];
-        if (typeof firstModel === 'string') {
-          model = firstModel;
-        } else if (firstModel && typeof firstModel === 'object' && typeof (firstModel as Record<string, unknown>).id === 'string') {
-          model = (firstModel as Record<string, unknown>).id as string;
-        }
+      const entryModelIds = extractModelIdsFromOpenClawEntry(entry);
+      let configuredModelIds = entryModelIds;
+
+      if (defaultModelProvider === key && defaultModelId) {
+        configuredModelIds = [defaultModelId, ...entryModelIds.filter((modelId) => modelId !== defaultModelId)];
+      } else if (configuredModelIds.length === 0 && definition?.defaultModelId) {
+        configuredModelIds = [definition.defaultModelId];
       }
+
+      const [primaryModel, ...customModels] = configuredModelIds;
 
       const account: ProviderAccount = {
         id: key,
@@ -231,11 +252,12 @@ export class ProviderService {
         headers: (entry.headers && typeof entry.headers === 'object'
           ? (entry.headers as Record<string, string>)
           : undefined),
-        model,
+        model: primaryModel,
         enabled: true,
         isDefault: false,
         createdAt: now,
         updatedAt: now,
+        metadata: customModels.length > 0 ? { customModels } : undefined,
       };
 
       built.push(account);

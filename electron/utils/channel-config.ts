@@ -625,7 +625,7 @@ function migrateLegacyChannelConfigToAccounts(
     const legacyPayload = getLegacyChannelPayload(channelSection);
     const legacyKeys = Object.keys(legacyPayload);
     const existingAccounts = getChannelAccountsMap(channelSection);
-    const hasAccounts = Boolean(existingAccounts) && Object.keys(existingAccounts).length > 0;
+    const hasAccounts = existingAccounts !== undefined && Object.keys(existingAccounts).length > 0;
 
     if (legacyKeys.length === 0) {
         if (hasAccounts && typeof channelSection.defaultAccount !== 'string') {
@@ -1241,7 +1241,10 @@ export async function setChannelEnabled(channelType: string, enabled: boolean): 
                 if (!currentConfig.plugins.entries) currentConfig.plugins.entries = {};
                 if (!currentConfig.plugins.entries[resolvedChannelType]) currentConfig.plugins.entries[resolvedChannelType] = {};
             }
-            currentConfig.plugins.entries[resolvedChannelType].enabled = enabled;
+            const plugins = currentConfig.plugins ?? (currentConfig.plugins = {});
+            const pluginEntries = plugins.entries ?? (plugins.entries = {});
+            const pluginEntry = pluginEntries[resolvedChannelType] ?? (pluginEntries[resolvedChannelType] = {});
+            pluginEntry.enabled = enabled;
             syncBuiltinChannelsWithPluginAllowlist(currentConfig);
             await writeOpenClawConfig(currentConfig);
             console.log(`Set plugin channel ${resolvedChannelType} enabled: ${enabled}`);

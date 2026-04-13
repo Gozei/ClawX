@@ -57,11 +57,32 @@ function SummaryCard({ title, value, description, href, icon, status }: SummaryC
   );
 }
 
-function formatUptime(uptimeSeconds?: number): string {
-  if (!uptimeSeconds || uptimeSeconds <= 0) return 'Unknown';
+function formatUptime(uptimeSeconds?: number): string | null {
+  if (!uptimeSeconds || uptimeSeconds <= 0) return null;
   if (uptimeSeconds < 60) return `${Math.round(uptimeSeconds)}s`;
   if (uptimeSeconds < 3600) return `${Math.round(uptimeSeconds / 60)}m`;
   return `${Math.round(uptimeSeconds / 3600)}h`;
+}
+
+function formatGatewayDescription(status: {
+  state: string;
+  port: number;
+  uptime?: number;
+}): string {
+  const uptime = formatUptime(status.uptime);
+  if (status.state === 'running') {
+    return uptime ? `端口 ${status.port} · 已运行 ${uptime}` : `端口 ${status.port} · 已连接`;
+  }
+  if (status.state === 'starting') {
+    return `端口 ${status.port} · 正在启动`;
+  }
+  if (status.state === 'reconnecting') {
+    return `端口 ${status.port} · 正在重连`;
+  }
+  if (status.state === 'error') {
+    return `端口 ${status.port} · 连接异常`;
+  }
+  return `端口 ${status.port} · 已停止`;
 }
 
 function formatRelativeTime(value?: string): string {
@@ -125,17 +146,18 @@ export function Dashboard() {
     degraded: channels.filter((channel) => channel.status === 'error').length,
   }), [channels]);
 
-  const safeJobs = Array.isArray(jobs) ? jobs : [];
-
-  const cronSummary = useMemo(() => ({
-    total: safeJobs.length,
-    enabled: safeJobs.filter((job) => job.enabled).length,
-    failed: safeJobs.filter((job) => job.lastRun && !job.lastRun.success).length,
-    nextRun: safeJobs
-      .map((job) => job.nextRun)
-      .filter((value): value is string => Boolean(value))
-      .sort()[0],
-  }), [safeJobs]);
+  const cronSummary = useMemo(() => {
+    const safeJobs = Array.isArray(jobs) ? jobs : [];
+    return {
+      total: safeJobs.length,
+      enabled: safeJobs.filter((job) => job.enabled).length,
+      failed: safeJobs.filter((job) => job.lastRun && !job.lastRun.success).length,
+      nextRun: safeJobs
+        .map((job) => job.nextRun)
+        .filter((value): value is string => Boolean(value))
+        .sort()[0],
+    };
+  }, [jobs]);
 
   const issueList = useMemo<DashboardIssue[]>(() => {
     const issues: DashboardIssue[] = [];
@@ -231,7 +253,7 @@ export function Dashboard() {
           <SummaryCard
             title="Gateway"
             value={gatewayStatus.state === 'running' ? '在线' : gatewayStatus.state === 'error' ? '异常' : gatewayStatus.state === 'starting' ? '启动中' : gatewayStatus.state === 'reconnecting' ? '重连中' : '离线'}
-            description={`端口 ${gatewayStatus.port} · 运行 ${formatUptime(gatewayStatus.uptime)}`}
+            description={formatGatewayDescription(gatewayStatus)}
             href="/settings"
             icon={<Server className="h-5 w-5" />}
             status={<StatusBadge status={gatewayStatus.state === 'running' ? 'running' : gatewayStatus.state === 'starting' ? 'starting' : gatewayStatus.state === 'reconnecting' ? 'reconnecting' : gatewayStatus.state === 'error' ? 'error' : 'stopped'} label={gatewayStatus.state === 'running' ? '运行中' : gatewayStatus.state === 'starting' ? '启动中' : gatewayStatus.state === 'reconnecting' ? '重连中' : gatewayStatus.state === 'error' ? '异常' : '已停止'} />}

@@ -133,6 +133,7 @@ export function buildGatewayConnectFrame(options: {
   token: string;
   deviceIdentity: DeviceIdentity | null;
   platform: string;
+  brandingDisplayName?: string;
 }): { connectId: string; frame: Record<string, unknown> } {
   const connectId = `connect-${Date.now()}`;
   const role = 'operator';

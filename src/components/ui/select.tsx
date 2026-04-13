@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 /**
  * Select Component
  * Styled native select matching shadcn/ui conventions

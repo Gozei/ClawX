@@ -556,8 +556,8 @@ export async function removeProviderFromOpenClaw(provider: string): Promise<void
           console.log(`Removed deleted provider "${provider}" from agents.defaults.model.primary`);
         }
 
-        const currentFallbacks = (managedProviders.defaultFallbacks ?? []).length > 0
-          ? managedProviders.defaultFallbacks
+        const currentFallbacks: string[] = (managedProviders.defaultFallbacks ?? []).length > 0
+          ? [...(managedProviders.defaultFallbacks ?? [])]
           : (Array.isArray(modelCfg.fallbacks) ? (modelCfg.fallbacks as string[]) : []);
         const filtered = currentFallbacks.filter((fb) => !fb.startsWith(prefix));
         if (filtered.length !== currentFallbacks.length) {

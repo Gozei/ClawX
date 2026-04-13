@@ -46,7 +46,7 @@ export function buildAgentExecutionMetadata(agent: AgentSummary): string | null 
   if (!payload) return null;
   const playbook = buildSharedExecutionPlaybook(agent);
   const playbookSection = playbook.length > 0
-    ? `Execution playbook:\n${playbook.map((line) => `- ${line}`).join('\n')}\n\n`
+    ? `Execution playbook:\n${playbook.map((line: string) => `- ${line}`).join('\n')}\n\n`
     : '';
   return `Conversation info (untrusted metadata): \`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\`\n${playbookSection}`;
 }

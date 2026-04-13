@@ -36,8 +36,6 @@ export function Chat() {
   const { t } = useTranslation('chat');
   const navigate = useNavigate();
   const gatewayStatus = useGatewayStore((s) => s.status);
-  const startGateway = useGatewayStore((s) => s.start);
-  const restartGateway = useGatewayStore((s) => s.restart);
   const isGatewayRunning = gatewayStatus.state === 'running';
 
   const messages = useChatStore((s) => s.messages);
@@ -91,13 +89,19 @@ export function Chat() {
   const fallbackStreamText = fallbackStreamMsg
     ? extractText(fallbackStreamMsg)
     : (!activeTurnBuffer && typeof rawStreamingMessage === 'string' ? rawStreamingMessage : '');
-  const fallbackStreamingDisplayMessage = useMemo(() => (
-    buildStreamingDisplayMessage(fallbackStreamMsg, fallbackStreamText, Date.now() / 1000)
-  ), [fallbackStreamMsg, fallbackStreamText]);
   const fallbackActiveTurnStartIndex = !activeTurnBuffer && sending ? findLastUserMessageIndex(safeMessages) : -1;
   const fallbackHistoryMessages = fallbackActiveTurnStartIndex >= 0 ? safeMessages.slice(0, fallbackActiveTurnStartIndex) : safeMessages;
   const fallbackActiveTurnMessages = fallbackActiveTurnStartIndex >= 0 ? safeMessages.slice(fallbackActiveTurnStartIndex) : EMPTY_MESSAGES;
   const fallbackActiveTurnUserMessage = fallbackActiveTurnMessages[0]?.role === 'user' ? fallbackActiveTurnMessages[0] : null;
+  const fallbackStreamingTimestamp = fallbackStreamMsg?.timestamp
+    ?? fallbackActiveTurnUserMessage?.timestamp
+    ?? safeMessages[safeMessages.length - 1]?.timestamp
+    ?? 0;
+  const fallbackStreamingDisplayMessage = buildStreamingDisplayMessage(
+    fallbackStreamMsg,
+    fallbackStreamText,
+    fallbackStreamingTimestamp,
+  );
   const fallbackAssistantMessages = fallbackActiveTurnUserMessage
     ? fallbackActiveTurnMessages.slice(1).filter((message) => message.role === 'assistant')
     : EMPTY_MESSAGES;
@@ -160,7 +164,7 @@ export function Chat() {
           ? {
               role: 'assistant' as const,
               content: '',
-              timestamp: splitStreamingFinalMessage?.timestamp ?? Date.now() / 1000,
+              timestamp: splitStreamingFinalMessage?.timestamp ?? activeTurnUserMessage?.timestamp ?? 0,
             }
           : null)
     : null;
@@ -168,24 +172,12 @@ export function Chat() {
     ? (!sending && hasStreamingFinalMessage && !isStreamingDuplicateOfPersistedAssistant ? splitStreamingFinalMessage : null)
     : (isStreamingDuplicateOfPersistedAssistant ? null : splitStreamingFinalMessage);
   const activeTurnStartedAtMs = activeTurnUserMessage
-    ? (activeTurnBuffer?.startedAtMs ?? toTimestampMs(activeTurnUserMessage.timestamp) ?? Date.now())
-    : (activeTurnBuffer?.startedAtMs ?? Date.now());
+    ? (activeTurnBuffer?.startedAtMs ?? toTimestampMs(activeTurnUserMessage.timestamp) ?? toTimestampMs(safeMessages[safeMessages.length - 1]?.timestamp) ?? 0)
+    : (activeTurnBuffer?.startedAtMs ?? toTimestampMs(safeMessages[safeMessages.length - 1]?.timestamp) ?? 0);
 
   const isEmpty = safeMessages.length === 0 && !sending;
-  const showGatewayOfflineState = !isGatewayRunning && safeMessages.length === 0 && !sending;
+  const showGatewayStartupInline = !isGatewayRunning && safeMessages.length === 0 && !sending;
   const showSessionLoadingState = loading && safeMessages.length === 0 && !sending;
-
-  const handleStartGateway = async () => {
-    try {
-      if (gatewayStatus.state === 'error') {
-        await restartGateway();
-      } else {
-        await startGateway();
-      }
-    } catch {
-      // keep the page calm; gateway errors are surfaced by store status
-    }
-  };
 
   return (
     <div
@@ -204,22 +196,23 @@ export function Chat() {
       {/* Messages Area */}
       <div ref={scrollRef} data-testid="chat-scroll-container" data-chat-scroll-container="true" className="flex-1 overflow-y-auto px-4 py-5">
         <div ref={contentRef} className="max-w-4xl mx-auto space-y-4">
-          {showGatewayOfflineState ? (
-            <GatewayOfflineState
-              state={gatewayStatus.state}
-              error={gatewayStatus.error}
-              port={gatewayStatus.port}
-              onStart={handleStartGateway}
-              onOpenSettings={() => navigate('/settings')}
-            />
-          ) : showSessionLoadingState ? (
+          {showSessionLoadingState ? (
             <div className="flex min-h-[40vh] items-center justify-center">
               <div className="bg-background shadow-lg rounded-full p-2.5 border border-border">
                 <LoadingSpinner size="md" />
               </div>
             </div>
           ) : isEmpty ? (
-            <WelcomeScreen />
+            <WelcomeScreen
+              gatewayHint={showGatewayStartupInline ? {
+                state: gatewayStatus.state,
+                error: gatewayStatus.error,
+                port: gatewayStatus.port,
+                pid: gatewayStatus.pid,
+                reconnectAttempts: gatewayStatus.reconnectAttempts,
+              } : null}
+              onOpenSettings={() => navigate('/settings')}
+            />
           ) : (
             <>
               <HistoryMessages
@@ -332,6 +325,10 @@ function findProcessScrollContainer(element: HTMLElement | null): HTMLElement | 
 function toTimestampMs(timestamp: number | undefined): number | null {
   if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) return null;
   return timestamp < 1e12 ? timestamp * 1000 : timestamp;
+}
+
+function resolveMessageTimestampMs(message: RawMessage | null | undefined, fallbackMs = 0): number {
+  return toTimestampMs(message?.timestamp) ?? fallbackMs;
 }
 
 function findLastUserMessageIndex(messages: RawMessage[]): number {
@@ -550,20 +547,10 @@ function ProcessSection({
   const hasSection = visibleMessages.length > 0 || hasStreamingProcessContent || !!showActivity;
   // 仅有过程区、下方没有「最终回复」气泡时默认展开，避免只看见「已处理」一行误以为空白
   const [collapsed, setCollapsed] = useState(() => phase === 'processed' && !!showFinalDivider);
-  const [nowMs, setNowMs] = useState(Date.now());
-  const [frozenCompletedAtMs, setFrozenCompletedAtMs] = useState<number | null>(
-    phase === 'processed' ? (completedAtMs ?? Date.now()) : null,
-  );
+  const [nowMs, setNowMs] = useState(() => completedAtMs ?? startedAtMs);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
   const expandAnchorTopRef = useRef<number | null>(null);
   const expandScrollContainerRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    if (phase === 'processed' && frozenCompletedAtMs == null) {
-      setFrozenCompletedAtMs(completedAtMs ?? Date.now());
-      setCollapsed(!!showFinalDivider);
-    }
-  }, [completedAtMs, frozenCompletedAtMs, phase, showFinalDivider]);
 
   useEffect(() => {
     if (phase !== 'working') return undefined;
@@ -593,7 +580,7 @@ function ProcessSection({
   if (!hasSection) return null;
 
   const effectiveEndMs = phase === 'processed'
-    ? (frozenCompletedAtMs ?? completedAtMs ?? nowMs)
+    ? (completedAtMs ?? nowMs)
     : nowMs;
   const elapsedLabel = formatProcessDuration(
     Math.max(0, effectiveEndMs - startedAtMs),
@@ -764,13 +751,14 @@ function CollapsedProcessTurn({
 
       {hasProcessSection && (
         <ProcessSection
+          key={`collapsed:${userMessage.id ?? userMessage.timestamp ?? 'unknown'}:${finalMessage.id ?? finalMessage.timestamp ?? 'unknown'}`}
           processMessages={processMessages}
           phase="processed"
           showThinking={showThinking}
           chatProcessDisplayMode={chatProcessDisplayMode}
           assistantMessageStyle={assistantMessageStyle}
-          startedAtMs={toTimestampMs(userMessage.timestamp) ?? Date.now()}
-          completedAtMs={toTimestampMs(finalMessage.timestamp) ?? Date.now()}
+          startedAtMs={resolveMessageTimestampMs(userMessage)}
+          completedAtMs={resolveMessageTimestampMs(finalMessage, resolveMessageTimestampMs(userMessage))}
           showFinalDivider={finalHasVisibleContent}
         />
       )}
@@ -861,6 +849,7 @@ function ActiveTurn({
 
       {hasProcessSection && (
         <ProcessSection
+          key={`active:${userMessage.id ?? userMessage.timestamp ?? 'unknown'}:${sending ? 'working' : 'processed'}:${finalMessage?.id ?? finalMessage?.timestamp ?? 'none'}`}
           processMessages={liveProcessMessages}
           processStreamingMessage={processStreamingMessage}
           phase="working"
@@ -902,9 +891,22 @@ function ActiveTurn({
 
 // ── Welcome Screen ──────────────────────────────────────────────
 
-function WelcomeScreen() {
-  const { t } = useTranslation('chat');
+function WelcomeScreen({
+  gatewayHint,
+  onOpenSettings,
+}: {
+  gatewayHint: {
+    state: string;
+    error?: string;
+    port: number;
+    pid?: number;
+    reconnectAttempts?: number;
+  } | null;
+  onOpenSettings: () => void;
+}) {
+  const { t, i18n } = useTranslation('chat');
   const branding = useBranding();
+  const [elapsedMs, setElapsedMs] = useState(0);
   const quickActions = [
     {
       key: 'askQuestions',
@@ -926,10 +928,102 @@ function WelcomeScreen() {
     },
   ];
 
+  const isZh = (i18n?.resolvedLanguage || i18n?.language || '').startsWith('zh');
+  const isStarting = gatewayHint?.state === 'starting' || gatewayHint?.state === 'reconnecting';
+  const isError = gatewayHint?.state === 'error';
+
+  useEffect(() => {
+    if (!gatewayHint || !isStarting) {
+      setElapsedMs(0);
+      return undefined;
+    }
+    setElapsedMs(0);
+    const timer = setInterval(() => {
+      setElapsedMs((current) => current + 1000);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [gatewayHint, isStarting]);
+
+  const gatewayStatusTitle = isStarting
+    ? (isZh ? '正在连接工作引擎' : 'Connecting the workspace engine')
+    : isError
+      ? (isZh ? '工作引擎暂时不可用' : 'The workspace engine is temporarily unavailable')
+      : (isZh ? '工作引擎尚未启动' : 'The workspace engine is not running');
+  const gatewayStatusDescription = isStarting
+    ? (isZh ? 'Gateway 正在后台启动，界面已经就绪，稍后即可开始对话。' : 'The Gateway is starting in the background. The interface is ready and chat will be available shortly.')
+    : isError
+      ? (isZh ? '你可以先浏览页面内容，也可以打开设置检查运行环境。' : 'You can keep browsing the page or open settings to inspect the runtime.')
+      : (isZh ? '启动后即可开始新对话或恢复现有会话。' : 'Start it when you are ready to begin a new conversation.');
+  const elapsedLabel = elapsedMs > 0 ? formatProcessDuration(elapsedMs, i18n?.resolvedLanguage || i18n?.language) : null;
+  const gatewayStatusMeta = gatewayHint ? [
+    `port ${gatewayHint.port}`,
+    gatewayHint.pid ? `pid ${gatewayHint.pid}` : null,
+    gatewayHint.reconnectAttempts ? (isZh ? `重试 ${gatewayHint.reconnectAttempts}` : `retry ${gatewayHint.reconnectAttempts}`) : null,
+    elapsedLabel ? (isZh ? `已等待 ${elapsedLabel}` : `waiting ${elapsedLabel}`) : null,
+  ].filter(Boolean).join('  ·  ') : '';
+
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
       <div className="w-full max-w-5xl px-2">
         <div className="mx-auto max-w-3xl text-center">
+          {gatewayHint ? (
+            <div className="mx-auto mb-5 max-w-2xl rounded-[22px] border border-white/10 bg-white/[0.045] px-[clamp(14px,2.2vw,20px)] py-[clamp(12px,2vw,16px)] text-left shadow-[0_14px_36px_rgba(2,6,23,0.12)] backdrop-blur-sm">
+              <div className="flex items-start gap-3">
+                <div className={cn(
+                  "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border",
+                  isError
+                    ? 'border-amber-400/24 bg-amber-400/12 text-amber-300'
+                    : 'border-primary/20 bg-primary/10 text-primary',
+                )}>
+                  {isError ? (
+                    <AlertCircle className="h-4 w-4" />
+                  ) : (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="text-[clamp(13px,2vw,15px)] font-medium text-foreground">
+                      {gatewayStatusTitle}
+                    </div>
+                    <div className={cn(
+                      'inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium',
+                      isError
+                        ? 'bg-amber-400/12 text-amber-200'
+                        : 'bg-emerald-400/12 text-emerald-200',
+                    )}>
+                      {isError ? (isZh ? '需要关注' : 'Attention') : (isZh ? '后台启动中' : 'Starting')}
+                    </div>
+                  </div>
+                  <div className="mt-1 text-[clamp(11px,1.8vw,13px)] leading-5 text-foreground/62">
+                    {gatewayStatusDescription}
+                  </div>
+                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/8">
+                    <div
+                      className={cn('h-full rounded-full transition-[width] duration-500', isError ? 'bg-amber-400/80' : 'bg-primary/80')}
+                      style={{ width: isError ? '82%' : isStarting ? (elapsedMs > 30000 ? '78%' : elapsedMs > 12000 ? '62%' : elapsedMs > 4000 ? '44%' : '26%') : '16%' }}
+                    />
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[clamp(10px,1.7vw,12px)] text-foreground/42">
+                    <span>{gatewayStatusMeta}</span>
+                    <button
+                      type="button"
+                      onClick={onOpenSettings}
+                      className="rounded-full border border-white/10 px-2.5 py-1 text-foreground/62 transition hover:bg-white/[0.05] hover:text-foreground"
+                    >
+                      {isZh ? '打开设置' : 'Open settings'}
+                    </button>
+                  </div>
+                  {gatewayHint.error ? (
+                    <div className="mt-2 text-[11px] leading-5 text-amber-200/80">
+                      {gatewayHint.error}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-foreground/42">
             <Sparkles className="h-3.5 w-3.5 text-primary/80" />
             <span>{t('welcome.eyebrow', { appName: branding.productName })}</span>
@@ -974,90 +1068,6 @@ function WelcomeScreen() {
   );
 }
 
-function GatewayOfflineState({
-  state,
-  error,
-  port,
-  onStart,
-  onOpenSettings,
-}: {
-  state: string;
-  error?: string;
-  port: number;
-  onStart: () => Promise<void>;
-  onOpenSettings: () => void;
-}) {
-  const { t } = useTranslation('chat');
-  const branding = useBranding();
-  const [pending, setPending] = useState(false);
-
-  const title = state === 'starting' || state === 'reconnecting'
-    ? t('offline.startingTitle')
-    : state === 'error'
-      ? t('offline.errorTitle')
-      : t('offline.stoppedTitle');
-  const description = state === 'starting' || state === 'reconnecting'
-    ? t('offline.startingDesc', { appName: branding.productName, port })
-    : state === 'error'
-      ? t('offline.errorDesc', { appName: branding.productName })
-      : t('offline.stoppedDesc', { appName: branding.productName, port });
-
-  const handleClick = async () => {
-    setPending(true);
-    try {
-      await onStart();
-    } finally {
-      setPending(false);
-    }
-  };
-
-  return (
-    <div className="flex min-h-[60vh] items-center justify-center">
-      <div className="w-full max-w-2xl rounded-[28px] border border-black/8 bg-white/80 px-8 py-10 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.04]">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#eff6ff] text-[#2563eb] dark:bg-[#172554] dark:text-[#93c5fd]">
-          {pending || state === 'starting' || state === 'reconnecting' ? (
-            <Loader2 className="h-6 w-6 animate-spin" />
-          ) : (
-            <Sparkles className="h-6 w-6" />
-          )}
-        </div>
-
-        <div className="mt-6 text-center">
-          <h2 className="text-3xl font-semibold tracking-tight text-foreground">{title}</h2>
-            <p className="mx-auto mt-3 max-w-xl text-[15px] leading-7 text-foreground/65">
-            {description}
-          </p>
-        </div>
-
-        {error ? (
-          <div className="mt-6 rounded-2xl border border-amber-200/70 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
-            <div className="font-medium">{t('offline.errorDetail')}</div>
-            <div className="mt-1 break-words opacity-85">{error}</div>
-          </div>
-        ) : null}
-
-        <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-          <button
-            type="button"
-            onClick={handleClick}
-            disabled={pending || state === 'starting' || state === 'reconnecting'}
-            className="rounded-full bg-[#2563eb] px-5 py-2.5 text-[14px] font-medium text-white transition hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {state === 'error' ? t('offline.retry') : t('offline.startNow')}
-          </button>
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            className="rounded-full border border-black/10 bg-white px-5 py-2.5 text-[14px] font-medium text-foreground/80 transition hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]"
-          >
-            {t('offline.openSettings')}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Typing Indicator ────────────────────────────────────────────
 
 function TypingIndicator() {
@@ -1086,23 +1096,65 @@ function ProcessActivityIndicator({
   streamStyle?: boolean;
   label?: string | null;
 }) {
-  const { t } = useTranslation('chat');
+  const { t, i18n } = useTranslation('chat');
   const resolvedLabel = label || t('process.workingFor', { duration: '...' });
+  const language = i18n?.resolvedLanguage || i18n?.language;
+  const isZh = language?.startsWith('zh');
+  const activityPhrases = isZh
+    ? ['理解问题', '检索资料', '整理回答']
+    : ['Understanding', 'Retrieving', 'Composing'];
+  const [phraseIndex, setPhraseIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setPhraseIndex((current) => (current + 1) % activityPhrases.length);
+    }, 1800);
+    return () => clearInterval(timer);
+  }, [activityPhrases.length]);
+
+  const capsuleLabel = `${activityPhrases[phraseIndex]}${isZh ? '中' : ' in progress'}`;
+  const detailLabel = isZh ? '推理链路活跃' : 'Reasoning pipeline active';
 
   const statusBody = (
     <>
-      <div
-        aria-hidden="true"
-        data-testid="chat-process-activity-scan"
-        className="relative h-1.5 overflow-hidden rounded-full bg-black/[0.05] dark:bg-white/[0.08]"
-      >
-        <div
-          className="absolute inset-y-0 -left-1/3 w-1/3 rounded-full bg-gradient-to-r from-transparent via-black/15 to-transparent dark:via-white/25"
-          style={{ animation: 'chat-process-scan 1.6s linear infinite' }}
-        />
+      <div className="inline-flex max-w-full items-center gap-3 rounded-[20px] border border-primary/12 bg-[linear-gradient(180deg,rgba(59,130,246,0.10),rgba(59,130,246,0.04))] px-3.5 py-2.5 shadow-[0_10px_30px_rgba(59,130,246,0.10)] dark:border-primary/14 dark:bg-[linear-gradient(180deg,rgba(59,130,246,0.14),rgba(59,130,246,0.05))]">
+        <span
+          aria-hidden="true"
+          data-testid="chat-process-activity-scan"
+          className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center"
+        >
+          <span className="absolute inset-0 rounded-full bg-primary/[0.10]" />
+          <span className="absolute inset-[3px] rounded-full border border-primary/18" />
+          <span
+            className="absolute inset-[2px] rounded-full border border-primary/28"
+            style={{ animation: 'chat-thinking-pulse 1.8s ease-out infinite' }}
+          />
+          <span className="relative flex items-center gap-0.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary/90" style={{ animation: 'chat-thinking-dot 1.2s ease-in-out infinite' }} />
+            <span className="h-1.5 w-1.5 rounded-full bg-primary/75" style={{ animation: 'chat-thinking-dot 1.2s ease-in-out 0.18s infinite' }} />
+            <span className="h-1.5 w-1.5 rounded-full bg-primary/60" style={{ animation: 'chat-thinking-dot 1.2s ease-in-out 0.36s infinite' }} />
+          </span>
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-[13px] font-semibold tracking-[-0.01em] text-foreground/86 dark:text-foreground/88">
+            {capsuleLabel}
+          </span>
+          <span className="mt-0.5 block truncate text-[11px] text-foreground/48 dark:text-foreground/50">
+            {detailLabel}
+          </span>
+        </span>
       </div>
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+      <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
+        <span className="inline-flex h-2 w-2 rounded-full bg-primary/80 shadow-[0_0_12px_rgba(59,130,246,0.5)]" />
+        <span
+          aria-hidden="true"
+          className="inline-flex h-1 w-10 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/[0.08]"
+        >
+          <span
+            className="h-full w-1/2 rounded-full bg-gradient-to-r from-primary/35 via-primary/85 to-primary/35"
+            style={{ animation: 'chat-thinking-slide 1.4s ease-in-out infinite' }}
+          />
+        </span>
         <span data-testid="chat-process-activity-label">{resolvedLabel}</span>
       </div>
     </>
@@ -1111,16 +1163,16 @@ function ProcessActivityIndicator({
   if (streamStyle) {
     return (
       <div className="max-w-sm space-y-2 px-1.5 py-1" data-testid="chat-process-activity-stream">
-        <style>{'@keyframes chat-process-scan { 0% { transform: translateX(0); opacity: 0.15; } 50% { opacity: 1; } 100% { transform: translateX(420%); opacity: 0.15; } }'}</style>
+        <style>{'@keyframes chat-thinking-pulse { 0% { transform: scale(0.82); opacity: 0.0; } 35% { opacity: 0.38; } 100% { transform: scale(1.55); opacity: 0; } } @keyframes chat-thinking-dot { 0%, 100% { transform: translateY(0); opacity: 0.55; } 50% { transform: translateY(-2px); opacity: 1; } } @keyframes chat-thinking-slide { 0% { transform: translateX(-70%); opacity: 0.4; } 50% { opacity: 1; } 100% { transform: translateX(140%); opacity: 0.45; } }'}</style>
         {statusBody}
       </div>
     );
   }
 
   return (
-    <div className="rounded-2xl border border-black/6 bg-white/40 px-4 py-3 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm dark:border-white/8 dark:bg-white/[0.04]">
-      <style>{'@keyframes chat-process-scan { 0% { transform: translateX(0); opacity: 0.15; } 50% { opacity: 1; } 100% { transform: translateX(420%); opacity: 0.15; } }'}</style>
-      <div className="space-y-2">
+    <div className="rounded-[22px] border border-black/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.34),rgba(255,255,255,0.18))] px-4 py-3 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm dark:border-white/8 dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.025))]">
+      <style>{'@keyframes chat-thinking-pulse { 0% { transform: scale(0.82); opacity: 0.0; } 35% { opacity: 0.38; } 100% { transform: scale(1.55); opacity: 0; } } @keyframes chat-thinking-dot { 0%, 100% { transform: translateY(0); opacity: 0.55; } 50% { transform: translateY(-2px); opacity: 1; } } @keyframes chat-thinking-slide { 0% { transform: translateX(-70%); opacity: 0.4; } 50% { opacity: 1; } 100% { transform: translateX(140%); opacity: 0.45; } }'}</style>
+      <div className="space-y-2.5">
         {statusBody}
       </div>
     </div>

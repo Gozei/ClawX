@@ -241,7 +241,6 @@ export class GatewayManager extends EventEmitter {
     try {
       await runGatewayStartupSequence({
         port: this.status.port,
-        ownedPid: this.process?.pid,
         shouldWaitForPortFree: process.platform === 'win32',
         resetStartupStderrLines: () => {
           this.recentStartupStderrLines = [];

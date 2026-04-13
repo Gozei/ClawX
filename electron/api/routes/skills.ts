@@ -1,4 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'http';
+import type {
+  ClawHubInstallParams,
+  ClawHubSearchParams,
+  ClawHubUninstallParams,
+} from '../../gateway/clawhub';
 import { getAllSkillConfigs, updateSkillConfig } from '../../utils/skill-config';
 import type { HostApiContext } from '../context';
 import { parseJsonBody, sendJson } from '../route-utils';
@@ -33,7 +38,7 @@ export async function handleSkillRoutes(
 
   if (url.pathname === '/api/clawhub/search' && req.method === 'POST') {
     try {
-      const body = await parseJsonBody<Record<string, unknown>>(req);
+      const body = await parseJsonBody<ClawHubSearchParams>(req);
       sendJson(res, 200, {
         success: true,
         results: await ctx.clawHubService.search(body),
@@ -46,7 +51,7 @@ export async function handleSkillRoutes(
 
   if (url.pathname === '/api/clawhub/install' && req.method === 'POST') {
     try {
-      const body = await parseJsonBody<Record<string, unknown>>(req);
+      const body = await parseJsonBody<ClawHubInstallParams>(req);
       await ctx.clawHubService.install(body);
       sendJson(res, 200, { success: true });
     } catch (error) {
@@ -57,7 +62,7 @@ export async function handleSkillRoutes(
 
   if (url.pathname === '/api/clawhub/uninstall' && req.method === 'POST') {
     try {
-      const body = await parseJsonBody<Record<string, unknown>>(req);
+      const body = await parseJsonBody<ClawHubUninstallParams>(req);
       await ctx.clawHubService.uninstall(body);
       sendJson(res, 200, { success: true });
     } catch (error) {

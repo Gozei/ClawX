@@ -80,8 +80,16 @@ function flushBufferSync(): void {
   writeBuffer = [];
 }
 
+const LOGGER_EXIT_HANDLER_KEY = '__clawxLoggerExitHandlerRegistered';
+const loggerProcessState = process as NodeJS.Process & {
+  [LOGGER_EXIT_HANDLER_KEY]?: boolean;
+};
+
 // Ensure all buffered data reaches disk before the process exits.
-process.on('exit', flushBufferSync);
+if (!loggerProcessState[LOGGER_EXIT_HANDLER_KEY]) {
+  process.on('exit', flushBufferSync);
+  loggerProcessState[LOGGER_EXIT_HANDLER_KEY] = true;
+}
 
 // ── Initialisation ───────────────────────────────────────────────
 

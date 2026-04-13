@@ -73,6 +73,36 @@ export async function handleProviderRoutes(
     return true;
   }
 
+  if (url.pathname === '/api/provider-drafts/test' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{
+        accountId?: string | null;
+        vendorId: string;
+        apiKey?: string | null;
+        model?: string;
+        baseUrl?: string;
+        apiProtocol?: string;
+      }>(req);
+      const existing = body.accountId ? await providerService.getAccount(body.accountId) : null;
+      const vendorId = body.vendorId || existing?.vendorId;
+      if (!vendorId) {
+        sendJson(res, 400, { valid: false, error: 'Provider vendor is required' });
+        return true;
+      }
+
+      const apiKey = body.apiKey?.trim() || (body.accountId ? await getApiKey(body.accountId) : '') || '';
+      const result = await testProviderConnection(vendorId, apiKey, {
+        model: body.model || existing?.model,
+        baseUrl: body.baseUrl || existing?.baseUrl,
+        apiProtocol: body.apiProtocol || existing?.apiProtocol,
+      });
+      sendJson(res, result.valid ? 200 : 400, result);
+    } catch (error) {
+      sendJson(res, 500, { valid: false, error: String(error) });
+    }
+    return true;
+  }
+
   if (url.pathname === '/api/provider-accounts/default' && req.method === 'GET') {
     sendJson(res, 200, { accountId: await providerService.getDefaultAccountId() ?? null });
     return true;

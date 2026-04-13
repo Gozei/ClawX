@@ -847,7 +847,7 @@ function AgentSettingsModal({
   const safeChannelTypes = useMemo(() => toSafeStringArray(agent.channelTypes), [agent.channelTypes]);
   const safeSkillIds = useMemo(() => toSafeStringArray(agent.skillIds), [agent.skillIds]);
   const safeWorkflowSteps = useMemo(() => toSafeStringArray(agent.workflowSteps), [agent.workflowSteps]);
-  const safeWorkflowNodes = useMemo(() => normalizeWorkflowNodesFromAgent(agent), [agent.workflowNodes, agent.workflowSteps]);
+  const safeWorkflowNodes = useMemo(() => normalizeWorkflowNodesFromAgent(agent), [agent]);
   const safeTriggerModes = useMemo(() => toSafeStringArray(agent.triggerModes), [agent.triggerModes]);
   const safeDescription = useMemo(() => toSafeText(agent.description), [agent.description]);
   const safeObjective = useMemo(() => toSafeText(agent.objective), [agent.objective]);
@@ -893,7 +893,18 @@ function AgentSettingsModal({
     setWorkflowNodes(safeWorkflowNodes);
     setSelectedTriggerModes(safeTriggerModes.length > 0 ? safeTriggerModes : ['manual']);
     setSkillQuery('');
-  }, [agent.id]);
+  }, [
+    agent.id,
+    safeAgentName,
+    safeBoundaries,
+    safeDescription,
+    safeObjective,
+    safeOutputContract,
+    safeProfileType,
+    safeSkillIds,
+    safeTriggerModes,
+    safeWorkflowNodes,
+  ]);
 
   useEffect(() => {
     void fetchSkills();

@@ -90,6 +90,24 @@ describe('ChatMessage', () => {
     expect(screen.getByTestId('chat-message-content-assistant')).not.toHaveClass('max-w-[80%]');
   });
 
+  it('lightly formats markdown markers while the assistant reply is still streaming', () => {
+    settingsState.assistantMessageStyle = 'stream';
+
+    const message: RawMessage = {
+      id: 'assistant-streaming-markdown',
+      role: 'assistant',
+      content: '### 内容分类\n\n1. **人工智能与大模型技术**\n- LM 技术报告',
+    };
+
+    render(<ChatMessage message={message} showThinking={false} isStreaming />);
+
+    expect(screen.getByText('内容分类')).toBeInTheDocument();
+    expect(screen.getByText('1.')).toBeInTheDocument();
+    expect(screen.getByText('人工智能与大模型技术')).toBeInTheDocument();
+    expect(screen.queryByText('### 内容分类')).not.toBeInTheDocument();
+    expect(screen.queryByText('**人工智能与大模型技术**')).not.toBeInTheDocument();
+  });
+
   it('renders assistant error replies with the dedicated error styling hook', () => {
     const message: RawMessage = {
       id: 'assistant-error-1',

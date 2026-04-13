@@ -198,6 +198,30 @@ describe('Chat process turn rendering', () => {
     expect(screen.queryByTestId('chat-assistant-avatar')).not.toBeInTheDocument();
   });
 
+  it('lightly formats markdown-looking thinking content in the live process stream', () => {
+    settingsState.assistantMessageStyle = 'stream';
+    chatState.pendingFinal = false;
+    chatState.streamingMessage = {
+      role: 'assistant',
+      content: [
+        {
+          type: 'thinking',
+          thinking: '### 内容分类\n\n1. **人工智能与大模型技术**\n- LM 技术报告',
+        },
+      ],
+      timestamp: fixedNow / 1000,
+    };
+
+    render(<Chat />);
+
+    const processContent = screen.getByTestId('chat-process-content');
+    expect(processContent).toBeInTheDocument();
+    expect(within(processContent).getByText('内容分类')).toBeInTheDocument();
+    expect(within(processContent).getByText('人工智能与大模型技术')).toBeInTheDocument();
+    expect(within(processContent).queryByText('### 内容分类')).not.toBeInTheDocument();
+    expect(within(processContent).queryByText('**人工智能与大模型技术**')).not.toBeInTheDocument();
+  });
+
   it('keeps all unfinished output inside the process section while the reply is still streaming', () => {
     chatState.pendingFinal = true;
     chatState.streamingMessage = {
