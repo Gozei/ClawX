@@ -102,4 +102,26 @@ describe('ChatMessage', () => {
 
     expect(screen.getByTestId('chat-assistant-error-message')).toBeInTheDocument();
   });
+
+  it('renders assistant file attachments with the richer file card treatment', () => {
+    const message: RawMessage = {
+      id: 'assistant-file-1',
+      role: 'assistant',
+      content: 'Generated file ready.',
+      _attachedFiles: [
+        {
+          fileName: 'HEARTBEAT.md',
+          fileSize: 193,
+          mimeType: 'text/markdown',
+          filePath: '/tmp/HEARTBEAT.md',
+        },
+      ],
+    };
+
+    render(<ChatMessage message={message} showThinking={false} />);
+
+    expect(screen.getByTestId('chat-file-card')).toBeInTheDocument();
+    expect(screen.getByText('HEARTBEAT.md')).toBeInTheDocument();
+    expect(screen.getByText('MD')).toBeInTheDocument();
+  });
 });

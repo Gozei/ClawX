@@ -69,7 +69,7 @@ type ProviderTestResult = {
   latencyMs?: number;
 };
 type ProviderModelChipState = 'passed' | 'failed' | 'untested';
-type ModelProtocol = ProviderAccount['apiProtocol'];
+type ModelProtocol = NonNullable<ProviderAccount['apiProtocol']>;
 type EditableModelRow = { id: string; protocol: ModelProtocol };
 
 function normalizeFallbackProviderIds(ids?: string[]): string[] {
@@ -133,6 +133,15 @@ function buildEditableModelRows(item: ProviderListItem, account: ProviderAccount
     id,
     protocol: protocolMap[id] || defaultProtocol,
   }));
+}
+
+function buildModelProtocolRecord(rows: EditableModelRow[]): Record<string, ModelProtocol> {
+  return Object.fromEntries(
+    rows.flatMap((row) => {
+      const id = row.id.trim();
+      return id ? [[id, row.protocol] as const] : [];
+    }),
+  ) as Record<string, ModelProtocol>;
 }
 
 function configuredModelIdsEqual(a?: string[], b?: string[]): boolean {
@@ -428,10 +437,8 @@ function ProviderCard({
   const [editingUsageModelId, setEditingUsageModelId] = useState<string | null>(null);
   const [usageTagsDraft, setUsageTagsDraft] = useState('');
   const [arkMode, setArkMode] = useState<ArkMode>('apikey');
-  const [testResult, setTestResult] = useState<ProviderTestResult | null>(null);
   const [modelTestResults, setModelTestResults] = useState<Record<string, ProviderTestResult>>({});
   const [modelTestConfigKeys, setModelTestConfigKeys] = useState<Record<string, string>>({});
-  const [validatedTestSignature, setValidatedTestSignature] = useState<string | null>(null);
 
   const typeInfo = PROVIDER_TYPE_INFO.find((t) => t.id === account.vendorId);
   const providerDocsUrl = getProviderDocsUrl(typeInfo, i18n.language);
@@ -451,14 +458,7 @@ function ProviderCard({
     () => normalizeConfiguredModelIds(modelRows.map((row) => row.id)),
     [modelRows],
   );
-  const modelProtocolMap = useMemo(
-    () => Object.fromEntries(
-      modelRows
-        .map((row) => [row.id.trim(), row.protocol] as const)
-        .filter(([id]) => Boolean(id)),
-    ) as Record<string, ModelProtocol>,
-    [modelRows],
-  );
+  const modelProtocolMap = useMemo(() => buildModelProtocolRecord(modelRows), [modelRows]);
 
   useEffect(() => {
     let active = true;
@@ -475,8 +475,6 @@ function ProviderCard({
       setFallbackProviderIds(normalizeFallbackProviderIds(account.fallbackAccountIds));
       setModelTestResults({});
       setModelTestConfigKeys({});
-      setValidatedTestSignature(null);
-      setTestResult(null);
       setArkMode(
         isArkCodePlanMode(
           account.vendorId,
@@ -517,9 +515,11 @@ function ProviderCard({
   const hasMeaningfulApiKeyUpdate = Boolean(normalizedNewKey) && apiKeyChanged;
   const resolvedBaseUrl = baseUrl.trim() || account.baseUrl || undefined;
   const defaultRowProtocol = modelRows[0]?.protocol;
-  const resolvedProtocol = (account.vendorId === 'custom' || account.vendorId === 'ollama')
-    ? (defaultRowProtocol || apiProtocol || account.apiProtocol)
-    : account.apiProtocol;
+  const resolvedProtocol: ModelProtocol = (
+    (account.vendorId === 'custom' || account.vendorId === 'ollama')
+      ? (defaultRowProtocol || apiProtocol || account.apiProtocol)
+      : account.apiProtocol
+  ) || 'openai-completions';
   const currentModelTestConfigKey = JSON.stringify({
     apiKey: normalizedNewKey || normalizedInitialStoredKey,
     baseUrl: resolvedBaseUrl || '',
@@ -539,8 +539,6 @@ function ProviderCard({
   const failedModelIds = modelIds.filter((model) => modelTestConfigKeys[model] === getModelTestConfigKey(model) && modelTestResults[model] && !modelTestResults[model].valid);
   const passedModelIds = modelIds.filter((model) => modelTestConfigKeys[model] === getModelTestConfigKey(model) && modelTestResults[model]?.valid);
   const modelsRequiringTest = modelIds.filter((model) => !(modelTestConfigKeys[model] === getModelTestConfigKey(model) && modelTestResults[model]?.valid));
-  const hasValidatedCurrentTests = validatedTestSignature === currentTestSignature;
-
   const getModelChipState = (model: string): ProviderModelChipState => {
     if (modelTestConfigKeys[model] !== getModelTestConfigKey(model)) {
       return 'untested';
@@ -558,8 +556,6 @@ function ProviderCard({
   };
   useEffect(() => {
     if (!isEditing) return;
-    setValidatedTestSignature(null);
-    setTestResult(null);
   }, [isEditing, currentTestSignature]);
 
   const runConnectionTest = async (modelOverride?: string, protocolOverride?: ModelProtocol) => {
@@ -617,34 +613,6 @@ function ProviderCard({
     return nextResults;
   };
 
-  const buildBatchTestSummary = (
-    modelsToTest: string[],
-    results: Record<string, ProviderTestResult>,
-  ): ProviderTestResult => {
-    const failures = modelsToTest
-      .map((model) => results[model])
-      .filter((result): result is ProviderTestResult & { model: string } => Boolean(result?.model) && !result.valid);
-    const passedCount = modelsToTest.length - failures.length;
-    const latencyValues = modelsToTest
-      .map((model) => results[model]?.latencyMs)
-      .filter((latency): latency is number => typeof latency === 'number');
-
-    return {
-      valid: failures.length === 0,
-      model: modelsToTest.join(', '),
-      output: t('aiProviders.toast.batchTestSummary', '{{passed}} / {{total}} 个模型测试通过', {
-        passed: passedCount,
-        total: modelsToTest.length,
-      }),
-      error: failures.length > 0
-        ? failures.map((result) => `${result.model}: ${result.error || t('aiProviders.toast.testFailed', '连接测试失败')}`).join('\n')
-        : undefined,
-      latencyMs: latencyValues.length > 0
-        ? Math.round(latencyValues.reduce((sum, value) => sum + value, 0) / latencyValues.length)
-        : undefined,
-    };
-  };
-
   const buildTestSuccessMessage = (result: ProviderTestResult): string => {
     const parts = [
       result.model ? `${t('aiProviders.toast.testModel', '模型')}: ${result.model}` : '',
@@ -661,7 +629,6 @@ function ProviderCard({
       return;
     }
     setModelRows((current) => ([...current, { id: '', protocol: resolvedProtocol || 'openai-completions' }]));
-    setTestResult(null);
   };
 
   const handleRemoveModelId = (rowIndex: number, modelIdToRemove: string) => {
@@ -676,21 +643,18 @@ function ProviderCard({
       delete next[modelIdToRemove];
       return next;
     });
-    setTestResult(null);
   };
 
   const handleModelRowChange = (rowIndex: number, nextId: string) => {
     setModelRows((current) => current.map((row, index) => (
       index === rowIndex ? { ...row, id: nextId } : row
     )));
-    setTestResult(null);
   };
 
   const handleModelRowProtocolChange = (rowIndex: number, protocol: ModelProtocol) => {
     setModelRows((current) => current.map((row, index) => (
       index === rowIndex ? { ...row, protocol } : row
     )));
-    setTestResult(null);
   };
 
   const handleProviderTestConnection = async () => {
@@ -710,8 +674,6 @@ function ProviderCard({
 
         if (modelsRequiringTest.length === 0) {
           if (passedModelIds.length > 0) {
-            setValidatedTestSignature(currentTestSignature);
-            setTestResult(buildBatchTestSummary(modelIds, modelTestResults));
             toast.success(t('aiProviders.toast.reusePassedModelTests', '已沿用已通过的模型测试结果'));
           }
           return;
@@ -719,9 +681,6 @@ function ProviderCard({
 
         const results = await runBatchModelTests(modelsRequiringTest);
         const mergedResults = { ...modelTestResults, ...results };
-        const summary = buildBatchTestSummary(modelIds, mergedResults);
-        setTestResult(summary);
-
         const nextFailedModelIds = modelIds.filter((model) => {
           const result = mergedResults[model];
           const modelConfigKey = getModelTestConfigKey(model);
@@ -729,7 +688,6 @@ function ProviderCard({
           return isCurrentConfig && result && !result.valid;
         });
         if (nextFailedModelIds.length > 0) {
-          setValidatedTestSignature(null);
           toast.error(t('aiProviders.toast.testFailedModels', '以下模型测试失败：{{models}}', {
             models: nextFailedModelIds.join(', '),
           }));
@@ -743,7 +701,6 @@ function ProviderCard({
           return isCurrentConfig && Boolean(result?.valid);
         });
         if (nextPassedModelIds.length > 0) {
-          setValidatedTestSignature(currentTestSignature);
         }
 
         toast.success(t('aiProviders.toast.testAllModelsPassed', '{{count}} 个模型测试通过', {
@@ -753,7 +710,6 @@ function ProviderCard({
       }
 
       const result = await runConnectionTest();
-      setTestResult(result);
 
       if (!result.valid) {
         toast.error(result.error || t('aiProviders.toast.testFailed', '连接测试失败'));
@@ -789,10 +745,8 @@ function ProviderCard({
       setModelTestResults((current) => ({ ...current, [modelOverride]: result }));
       setModelTestConfigKeys((current) => ({ ...current, [modelOverride]: getModelTestConfigKey(modelOverride) }));
       if (!result.valid) {
-        setValidatedTestSignature(null);
         toast.error(result.error || t('aiProviders.toast.testFailed', '连接测试失败'));
       } else if (modelIds.every((model) => nextConfigKeys[model] === getModelTestConfigKey(model) && nextResults[model]?.valid)) {
-        setValidatedTestSignature(currentTestSignature);
         toast.success(buildTestSuccessMessage(result));
       } else {
         toast.success(buildTestSuccessMessage(result));
@@ -816,9 +770,7 @@ function ProviderCard({
         },
       }));
       setModelTestConfigKeys((current) => ({ ...current, [modelOverride]: getModelTestConfigKey(modelOverride) }));
-      setValidatedTestSignature(null);
       if (modelIds.every((model) => modelTestConfigKeys[model] === getModelTestConfigKey(model) && nextResults[model]?.valid)) {
-        setValidatedTestSignature(currentTestSignature);
       }
     } finally {
       setTestingModelId(null);
@@ -914,19 +866,15 @@ function ProviderCard({
           }
           setProviderTesting(true);
           const testResults = await runBatchModelTests(modelIds);
-          const summary = buildBatchTestSummary(modelIds, testResults);
-          setTestResult(summary);
           setProviderTesting(false);
           const failedIds = modelIds.filter((modelId) => !testResults[modelId]?.valid);
           if (failedIds.length > 0) {
-            setValidatedTestSignature(null);
             toast.error(t('aiProviders.toast.testFailedModels', '以下模型测试失败：{{models}}', {
               models: failedIds.join(', '),
             }));
             setSaving(false);
             return;
           }
-          setValidatedTestSignature(currentTestSignature);
           toast.success(t('aiProviders.toast.testAllModelsPassed', '{{count}} 个模型测试通过', {
             count: modelIds.length,
           }));
@@ -950,17 +898,18 @@ function ProviderCard({
           const nextCustomModels = modelIds.slice(1);
           const currentCustomModels = normalizeConfiguredModelIds(account.metadata?.customModels);
           if (configuredModelIdsEqual(nextCustomModels, currentCustomModels) === false) {
-            const nextMetadata = { ...(account.metadata ?? {}) };
+            const nextMetadata: NonNullable<ProviderAccount['metadata']> = { ...(account.metadata ?? {}) };
             if (nextCustomModels.length > 0) {
               nextMetadata.customModels = nextCustomModels;
             } else {
               delete nextMetadata.customModels;
             }
             const nextModelProtocols = Object.fromEntries(
-              modelIds
-                .map((modelId) => [modelId, modelProtocolMap[modelId]] as const)
-                .filter(([, protocol]) => Boolean(protocol)),
-            );
+              modelIds.flatMap((modelId) => {
+                const protocol = modelProtocolMap[modelId];
+                return protocol ? [[modelId, protocol] as const] : [];
+              }),
+            ) as Record<string, ModelProtocol>;
             if (Object.keys(nextModelProtocols).length > 0) {
               nextMetadata.modelProtocols = nextModelProtocols;
             } else {
@@ -970,18 +919,19 @@ function ProviderCard({
           } else {
             const currentProtocols = getModelProtocolMap(account);
             const nextProtocols = Object.fromEntries(
-              modelIds
-                .map((modelId) => [modelId, modelProtocolMap[modelId]] as const)
-                .filter(([, protocol]) => Boolean(protocol)),
+              modelIds.flatMap((modelId) => {
+                const protocol = modelProtocolMap[modelId];
+                return protocol ? [[modelId, protocol] as const] : [];
+              }),
             ) as Record<string, ModelProtocol>;
             if (JSON.stringify(currentProtocols) !== JSON.stringify(nextProtocols)) {
-              const nextMetadata = { ...(account.metadata ?? {}) } as Record<string, unknown>;
+              const nextMetadata: NonNullable<ProviderAccount['metadata']> = { ...(account.metadata ?? {}) };
               if (Object.keys(nextProtocols).length > 0) {
                 nextMetadata.modelProtocols = nextProtocols;
               } else {
                 delete nextMetadata.modelProtocols;
               }
-              updates.metadata = nextMetadata as ProviderAccount['metadata'];
+              updates.metadata = nextMetadata;
             }
           }
         }
@@ -1348,8 +1298,8 @@ function ProviderCard({
                         setArkMode('apikey');
                         setBaseUrl(typeInfo?.defaultBaseUrl || '');
                         if (modelIds[0] === codePlanPreset.modelId) {
-                          setModelIds((current) => normalizeConfiguredModelIds([
-                            typeInfo?.defaultModelId || '',
+                          setModelRows((current) => ([
+                            { id: typeInfo?.defaultModelId || '', protocol: resolvedProtocol },
                             ...current.slice(1),
                           ]));
                         }
@@ -1363,7 +1313,10 @@ function ProviderCard({
                       onClick={() => {
                         setArkMode('codeplan');
                         setBaseUrl(codePlanPreset.baseUrl);
-                        setModelIds((current) => normalizeConfiguredModelIds([codePlanPreset.modelId, ...current.slice(1)]));
+                        setModelRows((current) => ([
+                          { id: codePlanPreset.modelId, protocol: resolvedProtocol },
+                          ...current.slice(1),
+                        ]));
                       }}
                       className={cn("flex-1 py-1.5 px-3 rounded-lg border transition-colors", arkMode === 'codeplan' ? "bg-white dark:bg-card border-black/20 dark:border-white/20 shadow-sm font-medium" : "border-transparent bg-black/5 dark:bg-white/5 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10")}
                     >
@@ -1749,7 +1702,7 @@ function AddProviderDialog({
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [modelRows, setModelRows] = useState<EditableModelRow[]>([{ id: '', protocol: 'openai-completions' }]);
-  const [apiProtocol, setApiProtocol] = useState<ProviderAccount['apiProtocol']>('openai-completions');
+  const [apiProtocol] = useState<ProviderAccount['apiProtocol']>('openai-completions');
   const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
   const [userAgent, setUserAgent] = useState('');
   const [arkMode, setArkMode] = useState<ArkMode>('apikey');
@@ -1796,18 +1749,13 @@ function AddProviderDialog({
     () => normalizeConfiguredModelIds(modelRows.map((row) => row.id)),
     [modelRows],
   );
-  const modelProtocolMap = useMemo(
-    () => Object.fromEntries(
-      modelRows
-        .map((row) => [row.id.trim(), row.protocol] as const)
-        .filter(([id]) => Boolean(id)),
-    ) as Record<string, ModelProtocol>,
-    [modelRows],
-  );
+  const modelProtocolMap = useMemo(() => buildModelProtocolRecord(modelRows), [modelRows]);
   const defaultModelId = modelIds[0] || '';
-  const resolvedProtocol = (selectedType === 'custom' || selectedType === 'ollama')
-    ? (modelProtocolMap[defaultModelId] || apiProtocol)
-    : apiProtocol;
+  const resolvedProtocol: ModelProtocol = (
+    (selectedType === 'custom' || selectedType === 'ollama')
+      ? (modelProtocolMap[defaultModelId] || apiProtocol)
+      : apiProtocol
+  ) || 'openai-completions';
   const preferredOAuthMode = selectedVendor?.supportedAuthModes.includes('oauth_browser')
     ? 'oauth_browser'
     : (selectedVendor?.supportedAuthModes.includes('oauth_device')
@@ -2029,6 +1977,11 @@ function AddProviderDialog({
         return;
       }
 
+      const metadata: ProviderAccount['metadata'] = {
+        ...(modelIds.length > 1 ? { customModels: modelIds.slice(1) } : {}),
+        ...(Object.keys(modelProtocolMap).length > 0 ? { modelProtocols: modelProtocolMap } : {}),
+      };
+
       await onAdd(
         selectedType,
         name || (typeInfo?.id === 'custom' ? t('aiProviders.custom') : typeInfo?.name) || selectedType,
@@ -2038,10 +1991,7 @@ function AddProviderDialog({
           apiProtocol: (selectedType === 'custom' || selectedType === 'ollama') ? resolvedProtocol : undefined,
           headers: userAgent.trim() ? { 'User-Agent': userAgent.trim() } : undefined,
           model: resolveProviderModelForSave(typeInfo, defaultModelId, devModeUnlocked),
-          metadata: {
-            ...(modelIds.length > 1 ? { customModels: modelIds.slice(1) } : {}),
-            ...(Object.keys(modelProtocolMap).length > 0 ? { modelProtocols: modelProtocolMap } : {}),
-          },
+          metadata,
           authMode: useOAuthFlow ? (preferredOAuthMode || 'oauth_device') : selectedType === 'ollama'
             ? 'local'
             : (isOAuth && supportsApiKey && authMode === 'apikey')

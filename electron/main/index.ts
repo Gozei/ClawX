@@ -301,12 +301,8 @@ async function initialize(): Promise<void> {
     // Warm up network optimization (non-blocking)
     void warmupNetworkOptimization();
 
-    // Initialize Telemetry early
-    await initTelemetry();
-
     // Apply persisted proxy settings before creating windows or network requests.
     await applyProxySettings();
-    await syncLaunchAtStartupSettingFromStore();
   } else {
     logger.info('Running in E2E mode: startup side effects minimized');
   }
@@ -317,6 +313,16 @@ async function initialize(): Promise<void> {
   // Create the main window
   const window = createMainWindow();
   attachContextMenu(window.webContents);
+
+  if (!isE2EMode) {
+    // These tasks are helpful but not worth blocking first paint, especially on Windows.
+    void initTelemetry().catch((error) => {
+      logger.warn('Failed to initialize telemetry during startup:', error);
+    });
+    void syncLaunchAtStartupSettingFromStore().catch((error) => {
+      logger.warn('Failed to sync launch-at-startup setting during startup:', error);
+    });
+  }
 
   // Create system tray
   if (!isE2EMode) {

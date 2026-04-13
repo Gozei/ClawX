@@ -7,7 +7,7 @@
  * are sent with the message (no base64 over WebSocket).
  */
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { SendHorizontal, Square, X, Paperclip, FileText, Film, Music, FileArchive, File, Loader2, AtSign, FileCode, FileSpreadsheet, FileImage } from 'lucide-react';
+import { SendHorizontal, Square, X, Paperclip, Music, FileArchive, File, Loader2, AtSign, FileCode, FileImage } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { hostApiFetch } from '@/lib/host-api';
@@ -74,11 +74,6 @@ function FileIcon({ mimeType, fileName, className }: { mimeType: string; fileNam
   if (t.includes('zip') || t.includes('compressed') || t.includes('archive') || t.includes('tar') || t.includes('rar') || t.includes('7z') || n.match(/\.(zip|rar|7z|tar|gz)$/i)) return <FileArchive color="#ec4899" className={className} />;
 
   return <File color="#94a3b8" className={className} />;
-}
-
-function getFileExtension(fileName: string): string {
-  const ext = fileName.split('.').pop()?.trim();
-  return ext ? ext.toUpperCase() : 'FILE';
 }
 
 /**

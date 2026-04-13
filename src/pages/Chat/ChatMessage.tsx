@@ -4,7 +4,7 @@
  * with markdown, thinking sections, images, and tool cards.
  */
 import { useState, useCallback, useEffect, useMemo, memo, lazy, Suspense } from 'react';
-import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, Music, FileArchive, File, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle, FileCode, FileImage } from 'lucide-react';
+import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, Music, FileArchive, File, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle, FileImage } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -529,9 +529,16 @@ function FileExtIcon({ ext, color, className }: { ext: string; color: string; cl
   );
 }
 
+function getFileExtension(fileName?: string): string {
+  const ext = fileName?.split('.').pop()?.trim();
+  if (!ext) return 'FILE';
+  return ext.slice(0, 4).toUpperCase();
+}
+
 function FileIcon({ mimeType, fileName, className }: { mimeType: string; fileName?: string; className?: string }) {
   const t = mimeType.toLowerCase();
   const n = (fileName || '').toLowerCase();
+  const ext = getFileExtension(fileName);
 
   if (t.startsWith('image/') || t.startsWith('video/') || n.match(/\.(jpg|jpeg|png|gif|webp|mp4|mov|avi|webm)$/i)) return <FileImage color="#8b5cf6" className={className} />;
   if (t.startsWith('audio/') || n.match(/\.(mp3|wav|ogg|m4a)$/i)) return <Music color="#eab308" className={className} />;
@@ -539,7 +546,9 @@ function FileIcon({ mimeType, fileName, className }: { mimeType: string; fileNam
   if (t.includes('spreadsheet') || t.includes('excel') || t.includes('csv') || n.match(/\.(xls|xlsx|csv)$/i)) return <FileExtIcon ext="XLS" color="#22c55e" className={className} />;
   if (t.includes('wordprocessing') || t.includes('msword') || t.includes('document') || n.match(/\.(doc|docx)$/i)) return <FileExtIcon ext="DOC" color="#3b82f6" className={className} />;
   if (t.includes('presentation') || t.includes('powerpoint') || n.match(/\.(ppt|pptx)$/i)) return <FileExtIcon ext="PPT" color="#f97316" className={className} />;
-  if (t.startsWith('text/') || t === 'application/json' || t === 'application/xml' || n.match(/\.(txt|json|xml|md|csv|log)$/i)) return <FileCode color="#64748b" className={className} />;
+  if (t.startsWith('text/') || t === 'application/json' || t === 'application/xml' || n.match(/\.(txt|json|xml|md|csv|log)$/i)) {
+    return <FileExtIcon ext={ext} color="#64748b" className={className} />;
+  }
   if (t.includes('zip') || t.includes('compressed') || t.includes('archive') || t.includes('tar') || t.includes('rar') || t.includes('7z') || n.match(/\.(zip|rar|7z|tar|gz)$/i)) return <FileArchive color="#ec4899" className={className} />;
 
   return <File color="#94a3b8" className={className} />;
@@ -557,20 +566,23 @@ function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () 
   }, [file.filePath, onPreview]);
 
   return (
-    <div 
+    <div
+      data-testid="chat-file-card"
       className={cn(
-        "flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 h-14 bg-black/5 dark:bg-white/5 max-w-[220px]",
+        "relative group overflow-hidden rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 shadow-sm",
         (file.filePath || onPreview) && "cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
       )}
       onClick={handleOpen}
       title={file.filePath ? '打开文件' : undefined}
     >
-      <FileIcon mimeType={file.mimeType} fileName={file.fileName} className="h-8 w-8 shrink-0 drop-shadow-sm" />
-      <div className="min-w-0 overflow-hidden leading-tight flex flex-col justify-center">
-        <p className="text-[13px] font-medium truncate">{file.fileName}</p>
-        <p className="text-[10px] text-muted-foreground">
-          {file.fileSize > 0 ? formatFileSize(file.fileSize) : 'File'}
-        </p>
+      <div className="flex items-center gap-3 px-3 h-14 min-w-[180px] max-w-[240px]">
+        <FileIcon mimeType={file.mimeType} fileName={file.fileName} className="h-8 w-8 shrink-0 drop-shadow-sm" />
+        <div className="min-w-0 overflow-hidden leading-tight flex flex-col justify-center">
+          <p className="text-[13px] font-medium truncate">{file.fileName}</p>
+          <p className="text-[10px] text-muted-foreground">
+            {file.fileSize > 0 ? formatFileSize(file.fileSize) : 'File'}
+          </p>
+        </div>
       </div>
     </div>
   );
