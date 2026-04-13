@@ -81,29 +81,6 @@ function getFileExtension(fileName: string): string {
   return ext ? ext.toUpperCase() : 'FILE';
 }
 
-function getAttachmentAccentClass(mimeType: string): string {
-  if (mimeType.startsWith('image/')) return 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300';
-  if (mimeType.startsWith('video/')) return 'bg-blue-500/12 text-blue-700 dark:text-blue-300';
-  if (mimeType.startsWith('audio/')) return 'bg-fuchsia-500/12 text-fuchsia-700 dark:text-fuchsia-300';
-  if (mimeType.includes('sheet') || mimeType.includes('excel') || mimeType.includes('csv')) return 'bg-green-500/12 text-green-700 dark:text-green-300';
-  if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('archive') || mimeType.includes('tar') || mimeType.includes('rar') || mimeType.includes('7z')) return 'bg-amber-500/12 text-amber-700 dark:text-amber-300';
-  if (mimeType === 'application/pdf') return 'bg-rose-500/12 text-rose-700 dark:text-rose-300';
-  return 'bg-slate-500/12 text-slate-700 dark:text-slate-300';
-}
-
-function getAttachmentTileClass(fileName: string, mimeType: string): string {
-  const ext = getFileExtension(fileName).toLowerCase();
-  if (ext === 'pdf' || mimeType === 'application/pdf') return 'bg-rose-500 text-white';
-  if (ext === 'ppt' || ext === 'pptx') return 'bg-orange-500 text-white';
-  if (ext === 'doc' || ext === 'docx') return 'bg-blue-600 text-white';
-  if (ext === 'xls' || ext === 'xlsx' || ext === 'csv') return 'bg-emerald-600 text-white';
-  if (ext === 'zip' || ext === 'rar' || ext === '7z' || ext === 'tar') return 'bg-amber-600 text-white';
-  if (mimeType.startsWith('video/')) return 'bg-violet-600 text-white';
-  if (mimeType.startsWith('audio/')) return 'bg-fuchsia-600 text-white';
-  if (mimeType.startsWith('image/')) return 'bg-emerald-600 text-white';
-  return 'bg-slate-700 text-white';
-}
-
 /**
  * Read a browser File object as base64 string (without the data URL prefix).
  */
@@ -612,43 +589,17 @@ function AttachmentPreview({
   attachment: FileAttachment;
   onRemove: () => void;
 }) {
-  const isImage = attachment.mimeType.startsWith('image/') && attachment.preview;
-
   return (
-    <div className="relative group overflow-hidden rounded-2xl border border-black/8 bg-white/80 shadow-[0_8px_24px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.04]">
-      {isImage ? (
-        <div className="relative h-20 w-20">
-          <img
-            src={attachment.preview!}
-            alt={attachment.fileName}
-            className="h-full w-full object-cover"
-          />
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent px-2 pb-1.5 pt-4">
-            <div className="truncate text-[10px] font-medium text-white">{extension}</div>
-          </div>
+    <div className="relative group overflow-hidden rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 shadow-sm">
+      <div className="flex items-center gap-3 px-3 h-14 min-w-[180px] max-w-[240px]">
+        <FileIcon mimeType={attachment.mimeType} fileName={attachment.fileName} className="h-8 w-8 shrink-0 drop-shadow-sm" />
+        <div className="min-w-0 overflow-hidden leading-tight flex flex-col justify-center">
+          <p className="text-[13px] font-medium truncate">{attachment.fileName}</p>
+          <p className="text-[10px] text-muted-foreground">
+            {attachment.fileSize > 0 ? formatFileSize(attachment.fileSize) : '...'}
+          </p>
         </div>
-      ) : (
-        <div className="flex min-w-[220px] max-w-[260px] items-center gap-3 px-3 py-3">
-          <div className={cn('relative flex h-14 w-12 shrink-0 flex-col items-center justify-end overflow-hidden rounded-[14px] shadow-sm', tileClass)}>
-            <div className="absolute right-0 top-0 h-4 w-4 bg-white/25 [clip-path:polygon(0_0,100%_0,100%_100%)]" />
-            <FileIcon mimeType={attachment.mimeType} className="absolute left-2 top-2 h-3.5 w-3.5 opacity-90" />
-            <span className="pb-2 text-[10px] font-bold tracking-[0.08em]">
-              {extension.slice(0, 4)}
-            </span>
-          </div>
-          <div className="min-w-0 flex-1 overflow-hidden">
-            <div className="flex items-center gap-2">
-              <p className="truncate text-sm font-medium text-foreground">{attachment.fileName}</p>
-              <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-[0.04em]', accentClass)}>
-                {extension}
-              </span>
-            </div>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              {attachment.fileSize > 0 ? formatFileSize(attachment.fileSize) : '...'}
-            </p>
-          </div>
-        </div>
-      )}
+      </div>
 
       {/* Staging overlay */}
       {attachment.status === 'staging' && (
