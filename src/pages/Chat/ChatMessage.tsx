@@ -3,10 +3,8 @@
  * Renders user / assistant / system / toolresult messages
  * with markdown, thinking sections, images, and tool cards.
  */
-import { useState, useCallback, useEffect, memo } from 'react';
+import { useState, useCallback, useEffect, useMemo, memo, lazy, Suspense } from 'react';
 import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, FileText, Film, Music, FileArchive, File, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -34,6 +32,66 @@ interface ChatMessageProps {
 
 interface ExtractedImage { url?: string; data?: string; mimeType: string; }
 
+const messageSignatureCache = new WeakMap<RawMessage, string>();
+const MarkdownRenderer = lazy(() => import('./MarkdownRenderer').then((module) => ({ default: module.MarkdownRenderer })));
+
+function buildMessageSignature(message: RawMessage): string {
+  const cached = messageSignatureCache.get(message);
+  if (cached) return cached;
+
+  const text = extractText(message);
+  const thinking = extractThinking(message) ?? '';
+  const images = extractImages(message);
+  const tools = extractToolUse(message);
+  const attachedFiles = message._attachedFiles ?? [];
+  const signature = [
+    message.id ?? '',
+    message.role,
+    message.timestamp ?? '',
+    text,
+    thinking,
+    images.map((image) => `${image.mimeType}:${image.data.length}`).join(','),
+    tools.map((tool) => `${tool.id}:${tool.name}:${JSON.stringify(tool.input)}`).join(','),
+    attachedFiles.map((file) => `${file.fileName}:${file.filePath ?? ''}:${file.mimeType}:${file.fileSize}`).join(','),
+  ].join('|');
+
+  messageSignatureCache.set(message, signature);
+  return signature;
+}
+
+function areStreamingToolsEqual(
+  prevTools: ChatMessageProps['streamingTools'] = [],
+  nextTools: ChatMessageProps['streamingTools'] = [],
+): boolean {
+  if (prevTools === nextTools) return true;
+  if (prevTools.length !== nextTools.length) return false;
+  for (let index = 0; index < prevTools.length; index += 1) {
+    const prev = prevTools[index];
+    const next = nextTools[index];
+    if (
+      prev?.id !== next?.id
+      || prev?.toolCallId !== next?.toolCallId
+      || prev?.name !== next?.name
+      || prev?.status !== next?.status
+      || prev?.durationMs !== next?.durationMs
+      || prev?.summary !== next?.summary
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areChatMessagePropsEqual(prev: ChatMessageProps, next: ChatMessageProps): boolean {
+  return prev.showThinking === next.showThinking
+    && prev.isStreaming === next.isStreaming
+    && prev.hideAvatar === next.hideAvatar
+    && prev.reserveAvatarSpace === next.reserveAvatarSpace
+    && prev.constrainWidth === next.constrainWidth
+    && buildMessageSignature(prev.message) === buildMessageSignature(next.message)
+    && areStreamingToolsEqual(prev.streamingTools, next.streamingTools);
+}
+
 /** Resolve an ExtractedImage to a displayable src string, or null if not possible. */
 function imageSrc(img: ExtractedImage): string | null {
   if (img.url) return img.url;
@@ -53,21 +111,23 @@ export const ChatMessage = memo(function ChatMessage({
   const isUser = message.role === 'user';
   const role = typeof message.role === 'string' ? message.role.toLowerCase() : '';
   const isToolResult = role === 'toolresult' || role === 'tool_result';
-  const text = extractText(message);
+  const text = useMemo(() => extractText(message), [message]);
   const hasText = text.trim().length > 0;
-  const thinking = extractThinking(message);
-  const images = extractImages(message);
-  const tools = extractToolUse(message);
+  const thinking = useMemo(() => extractThinking(message), [message]);
+  const images = useMemo(() => extractImages(message), [message]);
+  const tools = useMemo(() => extractToolUse(message), [message]);
   const chatProcessDisplayMode = useSettingsStore((state) => state.chatProcessDisplayMode);
   const assistantMessageStyle = useSettingsStore((state) => state.assistantMessageStyle);
   const chatFontScale = useSettingsStore((state) => state.chatFontScale);
   const usesAssistantStreamStyle = !isUser && assistantMessageStyle === 'stream';
   const visibleThinking = showThinking ? thinking : null;
-  const visibleTools = chatProcessDisplayMode === 'all' ? tools : [];
+  const visibleTools = useMemo(() => (
+    chatProcessDisplayMode === 'all' ? tools : []
+  ), [chatProcessDisplayMode, tools]);
   const bodyFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
   const metaFontSize = `${Math.round(12 * (chatFontScale / 100) * 10) / 10}px`;
 
-  const attachedFiles = message._attachedFiles || [];
+  const attachedFiles = useMemo(() => message._attachedFiles || [], [message._attachedFiles]);
   const [lightboxImg, setLightboxImg] = useState<{ src: string; fileName: string; filePath?: string; base64?: string; mimeType?: string } | null>(null);
 
   // Never render tool result messages in chat UI
@@ -265,7 +325,7 @@ export const ChatMessage = memo(function ChatMessage({
       )}
     </div>
   );
-});
+}, areChatMessagePropsEqual);
 
 function formatDuration(durationMs?: number): string | null {
   if (!durationMs || !Number.isFinite(durationMs)) return null;
@@ -273,7 +333,7 @@ function formatDuration(durationMs?: number): string | null {
   return `${(durationMs / 1000).toFixed(1)}s`;
 }
 
-function ToolStatusBar({
+const ToolStatusBar = memo(function ToolStatusBar({
   tools,
 }: {
   tools: Array<{
@@ -315,11 +375,11 @@ function ToolStatusBar({
       })}
     </div>
   );
-}
+});
 
 // ── Message hover bar (timestamp + copy, shown on group hover) ──
 
-function MessageHoverBar({
+const MessageHoverBar = memo(function MessageHoverBar({
   text,
   timestamp,
   metaFontSize,
@@ -356,11 +416,11 @@ function MessageHoverBar({
       </Button>
     </div>
   );
-}
+});
 
 // ── Message Bubble ──────────────────────────────────────────────
 
-function MessageBubble({
+const MessageBubble = memo(function MessageBubble({
   text,
   isUser,
   isStreaming,
@@ -374,6 +434,11 @@ function MessageBubble({
   assistantMessageStyle: AssistantMessageStyle;
 }) {
   const usesAssistantStreamStyle = !isUser && assistantMessageStyle === 'stream';
+  const markdownFallback = (
+    <p className="whitespace-pre-wrap break-words break-all leading-[1.82]" style={{ fontSize }}>
+      {text}
+    </p>
+  );
 
   return (
     <div
@@ -398,49 +463,51 @@ function MessageBubble({
         </div>
       ) : (
         <div className={cn('prose prose-sm dark:prose-invert max-w-none break-words break-all leading-[1.82]', usesAssistantStreamStyle && '[&>*]:my-3 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0')} style={{ fontSize }}>
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              code({ className, children, ...props }) {
-                const match = /language-(\w+)/.exec(className || '');
-                const isInline = !match && !className;
-                if (isInline) {
+          <Suspense fallback={markdownFallback}>
+            <MarkdownRenderer
+              content={text}
+              components={{
+                code({ className, children, ...props }) {
+                  const match = /language-(\w+)/.exec(className || '');
+                  const isInline = !match && !className;
+                  if (isInline) {
+                    return (
+                      <code className="bg-background/50 px-1.5 py-0.5 rounded text-sm font-mono break-words break-all" {...props}>
+                        {children}
+                      </code>
+                    );
+                  }
                   return (
-                    <code className="bg-background/50 px-1.5 py-0.5 rounded text-sm font-mono break-words break-all" {...props}>
-                      {children}
-                    </code>
+                    <pre className="bg-background/50 rounded-lg p-4 overflow-x-auto">
+                      <code className={cn('text-sm font-mono', className)} {...props}>
+                        {children}
+                      </code>
+                    </pre>
                   );
-                }
-                return (
-                  <pre className="bg-background/50 rounded-lg p-4 overflow-x-auto">
-                    <code className={cn('text-sm font-mono', className)} {...props}>
+                },
+                a({ href, children }) {
+                  return (
+                    <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-words break-all">
                       {children}
-                    </code>
-                  </pre>
-                );
-              },
-              a({ href, children }) {
-                return (
-                  <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-words break-all">
-                    {children}
-                  </a>
-                );
-              },
-            }}
-          >
-            {text}
-          </ReactMarkdown>
+                    </a>
+                  );
+                },
+              }}
+            />
+          </Suspense>
         </div>
       )}
 
     </div>
   );
-}
+});
 
 // ── Thinking Block ──────────────────────────────────────────────
 
-function ThinkingBlock({ content }: { content: string }) {
+const ThinkingBlock = memo(function ThinkingBlock({ content }: { content: string }) {
   const [expanded, setExpanded] = useState(false);
+  const preview = content.replace(/\s+/g, ' ').trim();
+  const summary = preview.length > 84 ? `${preview.slice(0, 81)}...` : preview;
 
   return (
     <div className="w-full rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-[14px]">
@@ -449,18 +516,23 @@ function ThinkingBlock({ content }: { content: string }) {
         onClick={() => setExpanded(!expanded)}
       >
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-        <span className="font-medium">Thinking</span>
+        <span className="font-medium">思考过程</span>
+        {!expanded && summary ? (
+          <span className="truncate text-[12px] text-muted-foreground/80">{summary}</span>
+        ) : null}
       </button>
       {expanded && (
         <div className="px-3 pb-3 text-muted-foreground">
           <div className="prose prose-sm dark:prose-invert max-w-none opacity-75">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            <Suspense fallback={<p className="whitespace-pre-wrap break-words">{content}</p>}>
+              <MarkdownRenderer content={content} />
+            </Suspense>
           </div>
         </div>
       )}
     </div>
   );
-}
+});
 
 // ── File Card (for user-uploaded non-image files) ───────────────
 
@@ -469,6 +541,39 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function getFileExtension(fileName: string): string {
+  const parts = fileName.split('.');
+  if (parts.length < 2) return 'FILE';
+  return parts.at(-1)?.toUpperCase() || 'FILE';
+}
+
+function getAttachmentAccentClass(mimeType: string): string {
+  if (mimeType === 'application/pdf') return 'bg-rose-500/12 text-rose-700 dark:text-rose-300';
+  if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return 'bg-orange-500/12 text-orange-700 dark:text-orange-300';
+  if (mimeType.includes('word') || mimeType.includes('document') || mimeType === 'text/markdown') return 'bg-blue-500/12 text-blue-700 dark:text-blue-300';
+  if (mimeType.includes('sheet') || mimeType.includes('excel') || mimeType === 'text/csv') return 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300';
+  if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('archive') || mimeType.includes('tar') || mimeType.includes('rar') || mimeType.includes('7z')) {
+    return 'bg-amber-500/12 text-amber-700 dark:text-amber-300';
+  }
+  if (mimeType.startsWith('video/')) return 'bg-violet-500/12 text-violet-700 dark:text-violet-300';
+  if (mimeType.startsWith('audio/')) return 'bg-fuchsia-500/12 text-fuchsia-700 dark:text-fuchsia-300';
+  if (mimeType.startsWith('image/')) return 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300';
+  return 'bg-slate-500/12 text-slate-700 dark:text-slate-300';
+}
+
+function getAttachmentTileClass(fileName: string, mimeType: string): string {
+  const ext = getFileExtension(fileName).toLowerCase();
+  if (ext === 'pdf' || mimeType === 'application/pdf') return 'bg-rose-500 text-white';
+  if (ext === 'ppt' || ext === 'pptx') return 'bg-orange-500 text-white';
+  if (ext === 'doc' || ext === 'docx' || ext === 'md') return 'bg-blue-600 text-white';
+  if (ext === 'xls' || ext === 'xlsx' || ext === 'csv') return 'bg-emerald-600 text-white';
+  if (ext === 'zip' || ext === 'rar' || ext === '7z' || ext === 'tar') return 'bg-amber-600 text-white';
+  if (mimeType.startsWith('video/')) return 'bg-violet-600 text-white';
+  if (mimeType.startsWith('audio/')) return 'bg-fuchsia-600 text-white';
+  if (mimeType.startsWith('image/')) return 'bg-emerald-600 text-white';
+  return 'bg-slate-700 text-white';
 }
 
 function FileIcon({ mimeType, className }: { mimeType: string; className?: string }) {
@@ -480,36 +585,50 @@ function FileIcon({ mimeType, className }: { mimeType: string; className?: strin
   return <File className={className} />;
 }
 
-function FileCard({ file }: { file: AttachedFileMeta }) {
+const FileCard = memo(function FileCard({ file }: { file: AttachedFileMeta }) {
   const handleOpen = useCallback(() => {
     if (file.filePath) {
       invokeIpc('shell:openPath', file.filePath);
     }
   }, [file.filePath]);
+  const accentClass = getAttachmentAccentClass(file.mimeType);
+  const tileClass = getAttachmentTileClass(file.fileName, file.mimeType);
+  const extension = getFileExtension(file.fileName);
 
   return (
-    <div 
+    <div
       className={cn(
-        "flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 py-2.5 bg-black/5 dark:bg-white/5 max-w-[220px]",
-        file.filePath && "cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+        'flex min-w-[220px] max-w-[260px] items-center gap-3 rounded-[22px] border border-black/10 bg-white/56 px-3 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.06)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.045]',
+        file.filePath && 'cursor-pointer hover:bg-white/72 dark:hover:bg-white/[0.08] transition-colors'
       )}
       onClick={handleOpen}
-      title={file.filePath ? "Open file" : undefined}
+      title={file.filePath ? '打开文件' : undefined}
     >
-      <FileIcon mimeType={file.mimeType} className="h-5 w-5 shrink-0 text-muted-foreground" />
-      <div className="min-w-0 overflow-hidden">
-        <p className="text-xs font-medium truncate">{file.fileName}</p>
-        <p className="text-[10px] text-muted-foreground">
-          {file.fileSize > 0 ? formatFileSize(file.fileSize) : 'File'}
+      <div className={cn('relative flex h-14 w-12 shrink-0 flex-col items-center justify-end overflow-hidden rounded-[14px] shadow-sm', tileClass)}>
+        <div className="absolute right-0 top-0 h-4 w-4 bg-white/25 [clip-path:polygon(0_0,100%_0,100%_100%)]" />
+        <FileIcon mimeType={file.mimeType} className="absolute left-2 top-2 h-3.5 w-3.5 opacity-90" />
+        <span className="pb-2 text-[10px] font-bold tracking-[0.08em]">
+          {extension.slice(0, 4)}
+        </span>
+      </div>
+      <div className="min-w-0 flex-1 overflow-hidden">
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-medium text-foreground">{file.fileName}</p>
+          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-[0.04em]', accentClass)}>
+            {extension}
+          </span>
+        </div>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {file.fileSize > 0 ? formatFileSize(file.fileSize) : '文件'}
         </p>
       </div>
     </div>
   );
-}
+});
 
 // ── Image Thumbnail (user bubble — square crop with zoom hint) ──
 
-function ImageThumbnail({
+const ImageThumbnail = memo(function ImageThumbnail({
   src,
   fileName,
   filePath,
@@ -536,11 +655,11 @@ function ImageThumbnail({
       </div>
     </div>
   );
-}
+});
 
 // ── Image Preview Card (assistant bubble — natural size with overlay actions) ──
 
-function ImagePreviewCard({
+const ImagePreviewCard = memo(function ImagePreviewCard({
   src,
   fileName,
   filePath,
@@ -567,11 +686,11 @@ function ImagePreviewCard({
       </div>
     </div>
   );
-}
+});
 
 // ── Image Lightbox ───────────────────────────────────────────────
 
-function ImageLightbox({
+const ImageLightbox = memo(function ImageLightbox({
   src,
   fileName,
   filePath,
@@ -645,11 +764,11 @@ function ImageLightbox({
     </div>,
     document.body,
   );
-}
+});
 
 // ── Tool Card ───────────────────────────────────────────────────
 
-function ToolCard({ name, input }: { name: string; input: unknown }) {
+const ToolCard = memo(function ToolCard({ name, input }: { name: string; input: unknown }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -673,4 +792,4 @@ function ToolCard({ name, input }: { name: string; input: unknown }) {
       )}
     </div>
   );
-}
+});

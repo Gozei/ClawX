@@ -215,9 +215,9 @@ export function formatTimestamp(timestamp: unknown): string {
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
 
-  if (diffMs < 60000) return 'just now';
-  if (diffMs < 3600000) return `${Math.floor(diffMs / 60000)}m ago`;
-  if (diffMs < 86400000) return `${Math.floor(diffMs / 3600000)}h ago`;
+  if (diffMs < 60000) return '刚刚';
+  if (diffMs < 3600000) return `${Math.floor(diffMs / 60000)} 分钟前`;
+  if (diffMs < 86400000) return `${Math.floor(diffMs / 3600000)} 小时前`;
 
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }

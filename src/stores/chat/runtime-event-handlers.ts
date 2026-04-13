@@ -185,7 +185,7 @@ function schedulePendingFinalRecovery(
           pendingToolImages: [],
           error: shouldAppendStreamingSnapshot || canPromoteStreamingAssistant
             ? s.error
-            : (s.error || 'The final reply did not arrive, but you can continue the conversation.'),
+            : (s.error || '最终回复还没有成功到达，但你可以继续当前对话。'),
         };
       });
     });

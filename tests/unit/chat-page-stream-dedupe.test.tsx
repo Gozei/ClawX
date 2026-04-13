@@ -17,6 +17,7 @@ const { agentsState, chatState, gatewayState, settingsState } = vi.hoisted(() =>
     showThinking: true,
     streamingMessage: null as unknown,
     streamingTools: [] as Array<Record<string, unknown>>,
+    sendStage: null as string | null,
     pendingFinal: false,
     lastUserMessageAt: 1000,
     sendMessage: vi.fn(),
@@ -142,7 +143,7 @@ describe('Chat streaming dedupe', () => {
   it('does not render a duplicate streaming bubble when the same assistant reply is already persisted', () => {
     render(<Chat />);
 
-    expect(screen.getByTestId('chat-process-toggle')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-process-header')).toBeInTheDocument();
     expect(screen.getAllByText('Photo saved (60KB). You should be able to see it now.')).toHaveLength(1);
   });
 });

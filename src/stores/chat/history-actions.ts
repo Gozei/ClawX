@@ -1,6 +1,7 @@
 import { invokeIpc } from '@/lib/api-client';
 import { hostApiFetch } from '@/lib/host-api';
 import {
+  CHAT_HISTORY_RPC_TIMEOUT_MS,
   clearHistoryPoll,
   createToolResultProcessMessage,
   EMPTY_ASSISTANT_RESPONSE_ERROR,
@@ -294,7 +295,8 @@ export function createHistoryActions(
         const result = await invokeIpc(
           'gateway:rpc',
           'chat.history',
-          { sessionKey: currentSessionKey, limit: 200 }
+          { sessionKey: currentSessionKey, limit: 200 },
+          CHAT_HISTORY_RPC_TIMEOUT_MS,
         ) as { success: boolean; result?: Record<string, unknown>; error?: string };
 
         if (result.success && result.result) {

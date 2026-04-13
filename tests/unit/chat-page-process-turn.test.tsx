@@ -18,6 +18,7 @@ const { agentsState, chatState, gatewayState, settingsState } = vi.hoisted(() =>
     showThinking: true,
     streamingMessage: null as unknown,
     streamingTools: [] as Array<Record<string, unknown>>,
+    sendStage: null as string | null,
     pendingFinal: false,
     lastUserMessageAt: 1000,
     sendMessage: vi.fn(),
@@ -161,7 +162,7 @@ describe('Chat process turn rendering', () => {
 
     expect(screen.getByTestId('chat-process-header')).toBeInTheDocument();
     expect(screen.queryByTestId('chat-process-toggle')).not.toBeInTheDocument();
-    expect(screen.getByTestId('chat-process-status')).toHaveTextContent('Working for 1s');
+    expect(screen.getByTestId('chat-process-status')).toHaveTextContent('Thinking 1s');
     expect(screen.getByTestId('chat-process-content')).toBeInTheDocument();
     expect(screen.getByText('Preparing the camera.')).toBeInTheDocument();
     expect(screen.getAllByTestId('chat-process-avatar')).toHaveLength(1);
@@ -181,23 +182,18 @@ describe('Chat process turn rendering', () => {
 
     render(<Chat />);
 
-    expect(screen.getByTestId('chat-process-header')).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-process-toggle')).not.toBeInTheDocument();
-    expect(screen.getByTestId('chat-process-status')).toHaveTextContent('Working for 1s');
-    const processContent = screen.getByTestId('chat-process-content');
-    expect(processContent).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-process-header')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-process-toggle')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-process-status')).toHaveTextContent('Thinking 1s');
+    expect(screen.queryByTestId('chat-process-content')).not.toBeInTheDocument();
     expect(screen.queryByText('Preparing the camera.')).not.toBeInTheDocument();
-    expect(within(processContent).getAllByTestId('chat-process-event-row').length).toBeGreaterThan(0);
-    expect(within(processContent).getByTestId('chat-process-thinking-content')).toBeInTheDocument();
-    expect(within(processContent).queryByTestId('chat-process-event-item-row')).not.toBeInTheDocument();
-    expect(within(processContent).queryByTestId('chat-message-content-assistant')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-process-thinking-content')).not.toBeInTheDocument();
     expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Still checking the setup.').length).toBeGreaterThan(0);
     expect(screen.getAllByTestId('chat-process-avatar')).toHaveLength(1);
     expect(screen.queryByTestId('chat-assistant-avatar')).not.toBeInTheDocument();
   });
 
-  it('auto-collapses the process section as soon as the final answer starts streaming', () => {
+  it('keeps the process section active while the final answer is still streaming', () => {
     chatState.pendingFinal = true;
     chatState.streamingMessage = {
       role: 'assistant',
@@ -207,8 +203,8 @@ describe('Chat process turn rendering', () => {
 
     render(<Chat />);
 
-    expect(screen.getByTestId('chat-process-toggle')).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-process-content')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-process-header')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-process-content')).toBeInTheDocument();
     expect(screen.getByText('Photo saved (60KB). You should be able to see it now.')).toBeInTheDocument();
     expect(screen.getAllByTestId('chat-process-avatar')).toHaveLength(1);
     expect(screen.queryByTestId('chat-assistant-avatar')).not.toBeInTheDocument();
