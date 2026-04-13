@@ -122,6 +122,14 @@ function scheduleLoadHistory(force = false, delayMs = 700): void {
   }, delayMs);
 }
 
+function shouldDeferCompletedHistoryRefresh(state: {
+  sending?: boolean;
+  pendingFinal?: boolean;
+  activeTurnBuffer?: { hasAnyStreamContent?: boolean } | null;
+}): boolean {
+  return !!state.sending || !!state.pendingFinal || !!state.activeTurnBuffer?.hasAnyStreamContent;
+}
+
 function handleGatewayNotification(notification: { method?: string; params?: Record<string, unknown> } | undefined): void {
   const payload = notification;
   if (!payload || payload.method !== 'agent' || !payload.params || typeof payload.params !== 'object') {
@@ -192,10 +200,11 @@ function handleGatewayNotification(notification: { method?: string; params?: Rec
         const matchesActiveRun = runId != null && state.activeRunId != null && String(runId) === state.activeRunId;
 
         if (matchesCurrentSession || matchesActiveRun) {
-          scheduleLoadHistory(true);
+          scheduleLoadHistory(true, shouldDeferCompletedHistoryRefresh(state) ? 3_000 : 700);
         }
-        if ((matchesCurrentSession || matchesActiveRun) && state.sending) {
+        if ((matchesCurrentSession || matchesActiveRun) && (state.sending || matchesActiveRun)) {
           useChatStore.setState({
+            sending: state.sending || matchesActiveRun,
             pendingFinal: true,
             error: null,
           });

@@ -16,6 +16,7 @@ export const initialChatState: Pick<
   | 'pendingFinal'
   | 'lastUserMessageAt'
   | 'pendingToolImages'
+  | 'activeTurnBuffer'
   | 'sessions'
   | 'currentSessionKey'
   | 'currentAgentId'
@@ -36,6 +37,16 @@ export const initialChatState: Pick<
   pendingFinal: false,
   lastUserMessageAt: null,
   pendingToolImages: [],
+  activeTurnBuffer: {
+    historyMessages: [],
+    userMessage: null,
+    assistantMessages: [],
+    latestPersistedAssistant: null,
+    streamingDisplayMessage: null,
+    startedAtMs: null,
+    hasAnyStreamContent: false,
+    isStreamingDuplicateOfPersistedAssistant: false,
+  },
 
   sessions: [],
   currentSessionKey: DEFAULT_SESSION_KEY,

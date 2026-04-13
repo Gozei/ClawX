@@ -13,6 +13,7 @@ import { CHAT_HISTORY_LABEL_PREFETCH_LIMIT, CHAT_HISTORY_RPC_TIMEOUT_MS } from '
 import {
   DEFAULT_CANONICAL_PREFIX,
   DEFAULT_SESSION_KEY,
+  type ActiveTurnBuffer,
   type AttachedFileMeta,
   type ChatSession,
   type ChatState,
@@ -22,6 +23,7 @@ import {
 } from './chat/types';
 
 export type {
+  ActiveTurnBuffer,
   AttachedFileMeta,
   ChatSession,
   ContentBlock,
@@ -1523,31 +1525,209 @@ function isEmptyAssistantResponse(message: RawMessage | undefined): boolean {
   return !hasNonToolAssistantContent(message);
 }
 
+function extractThinkingFromContent(content: unknown): string {
+  if (!Array.isArray(content)) return '';
+  const parts: string[] = [];
+  for (const block of content as ContentBlock[]) {
+    if (block.type === 'thinking' && block.thinking?.trim()) {
+      parts.push(block.thinking.trim());
+    }
+  }
+  return parts.join('\n');
+}
+
+function countImageBlocks(content: unknown): number {
+  if (!Array.isArray(content)) return 0;
+  let count = 0;
+  for (const block of content as ContentBlock[]) {
+    if (block.type === 'image') count += 1;
+  }
+  return count;
+}
+
+function countToolBlocks(message: RawMessage | null | undefined): number {
+  if (!message) return 0;
+  let count = 0;
+  if (Array.isArray(message.content)) {
+    for (const block of message.content as ContentBlock[]) {
+      if (block.type === 'tool_use' || block.type === 'toolCall') count += 1;
+    }
+  }
+  const toolCalls = (message as unknown as Record<string, unknown>).tool_calls ?? (message as unknown as Record<string, unknown>).toolCalls;
+  if (count === 0 && Array.isArray(toolCalls)) {
+    count = toolCalls.length;
+  }
+  return count;
+}
+
+function buildStreamingDisplayMessageForState(state: Pick<ChatState, 'streamingMessage' | 'streamingText'>): RawMessage | null {
+  const streamMsg = state.streamingMessage && typeof state.streamingMessage === 'object'
+    ? state.streamingMessage as { role?: string; content?: unknown; timestamp?: number }
+    : null;
+  const streamText = streamMsg ? getMessageText(streamMsg.content) : state.streamingText;
+  if (!streamMsg && !streamText.trim()) return null;
+  return (streamMsg
+    ? {
+        ...(streamMsg as Record<string, unknown>),
+        role: (typeof streamMsg.role === 'string' ? streamMsg.role : 'assistant') as RawMessage['role'],
+        content: streamMsg.content ?? streamText,
+        timestamp: streamMsg.timestamp ?? Date.now() / 1000,
+      }
+    : {
+        role: 'assistant' as const,
+        content: streamText,
+        timestamp: Date.now() / 1000,
+      }) as RawMessage;
+}
+
+function deriveActiveTurnBuffer(
+  state: Pick<
+    ChatState,
+    | 'messages'
+    | 'sending'
+    | 'streamingMessage'
+    | 'streamingText'
+    | 'lastUserMessageAt'
+  >,
+): ActiveTurnBuffer {
+  const safeMessages = Array.isArray(state.messages) ? state.messages : [];
+  const activeTurnStartIndex = state.sending ? findLastUserMessageIndex(safeMessages) : -1;
+  const historyMessages = activeTurnStartIndex >= 0 ? safeMessages.slice(0, activeTurnStartIndex) : safeMessages;
+  const activeTurnMessages = activeTurnStartIndex >= 0 ? safeMessages.slice(activeTurnStartIndex) : [];
+  const userMessage = activeTurnMessages[0]?.role === 'user' ? activeTurnMessages[0] : null;
+  const assistantMessages = userMessage
+    ? activeTurnMessages.slice(1).filter((message) => message.role === 'assistant')
+    : [];
+  const lastUserTsMs = typeof state.lastUserMessageAt === 'number'
+    ? (state.lastUserMessageAt < 1e12 ? state.lastUserMessageAt * 1000 : state.lastUserMessageAt)
+    : 0;
+  const latestPersistedAssistant = [...safeMessages].reverse().find((message) => {
+    if (message.role !== 'assistant') return false;
+    if (!lastUserTsMs || !message.timestamp) return true;
+    const messageTsMs = message.timestamp < 1e12 ? message.timestamp * 1000 : message.timestamp;
+    return messageTsMs >= lastUserTsMs;
+  }) ?? null;
+  const streamingDisplayMessage = buildStreamingDisplayMessageForState(state);
+  const streamText = streamingDisplayMessage ? getMessageText(streamingDisplayMessage.content).trim() : '';
+  const streamThinking = streamingDisplayMessage ? extractThinkingFromContent(streamingDisplayMessage.content).trim() : '';
+  const streamImageCount = streamingDisplayMessage ? countImageBlocks(streamingDisplayMessage.content) : 0;
+  const streamToolCount = countToolBlocks(streamingDisplayMessage);
+  const latestPersistedAssistantText = latestPersistedAssistant ? getMessageText(latestPersistedAssistant.content).trim() : '';
+  const latestPersistedAssistantThinking = latestPersistedAssistant ? extractThinkingFromContent(latestPersistedAssistant.content).trim() : '';
+  const latestPersistedAssistantImageCount = latestPersistedAssistant ? countImageBlocks(latestPersistedAssistant.content) : 0;
+  const latestPersistedAssistantToolCount = countToolBlocks(latestPersistedAssistant);
+  const hasAnyStreamContent = !!streamingDisplayMessage
+    && (
+      streamText.length > 0
+      || streamThinking.length > 0
+      || streamImageCount > 0
+      || streamToolCount > 0
+    );
+  const isStreamingDuplicateOfPersistedAssistant = !!latestPersistedAssistant
+    && (
+      (streamText.length > 0 && latestPersistedAssistantText === streamText)
+      || (streamText.length === 0 && streamThinking.length > 0 && latestPersistedAssistantThinking === streamThinking)
+    )
+    && (streamImageCount === 0 || latestPersistedAssistantImageCount === streamImageCount)
+    && (streamToolCount === 0 || latestPersistedAssistantToolCount === streamToolCount);
+
+  return {
+    historyMessages,
+    userMessage,
+    assistantMessages,
+    latestPersistedAssistant,
+    streamingDisplayMessage,
+    startedAtMs: userMessage?.timestamp ? toMs(userMessage.timestamp) : lastUserTsMs || null,
+    hasAnyStreamContent,
+    isStreamingDuplicateOfPersistedAssistant,
+  };
+}
+
+function hasLiveTurnSignal(state: Pick<
+  ChatState,
+  | 'messages'
+  | 'sending'
+  | 'streamingMessage'
+  | 'streamingText'
+  | 'streamingTools'
+  | 'lastUserMessageAt'
+>): boolean {
+  if (!state.sending) return false;
+  if (state.streamingMessage && typeof state.streamingMessage === 'object') return true;
+  if (typeof state.streamingText === 'string' && state.streamingText.trim().length > 0) return true;
+  if (state.streamingTools.length > 0) return true;
+
+  const userMsTs = state.lastUserMessageAt ? toMs(state.lastUserMessageAt) : 0;
+  return state.messages.some((message) => (
+    message.role === 'assistant'
+    && !!message.timestamp
+    && (!userMsTs || toMs(message.timestamp) >= userMsTs)
+  ));
+}
+
 // ── Store ────────────────────────────────────────────────────────
 
-export const useChatStore = create<ChatState>((set, get) => ({
-  messages: [],
-  loading: false,
-  error: null,
+export const useChatStore = create<ChatState>((baseSet, get) => {
+  const set: ChatStoreSet = (partial, replace = false) => {
+    baseSet((state) => {
+      const patch = typeof partial === 'function' ? partial(state) : partial;
+      const nextState = { ...state, ...patch } as ChatState;
+      return {
+        ...patch,
+        activeTurnBuffer: deriveActiveTurnBuffer(nextState),
+      };
+    }, replace);
+  };
 
-  sending: false,
-  activeRunId: null,
-  streamingText: '',
-  streamingMessage: null,
-  streamingTools: [],
-  sendStage: null,
-  pendingFinal: false,
-  lastUserMessageAt: null,
-  pendingToolImages: [],
+  const initialState: Omit<ChatState,
+    | 'loadSessions'
+    | 'switchSession'
+    | 'newSession'
+    | 'renameSession'
+    | 'toggleSessionPin'
+    | 'deleteSession'
+    | 'cleanupEmptySession'
+    | 'loadHistory'
+    | 'sendMessage'
+    | 'abortRun'
+    | 'handleChatEvent'
+    | 'toggleThinking'
+    | 'refresh'
+    | 'clearError'
+  > = {
+    messages: [],
+    loading: false,
+    error: null,
 
-  sessions: [],
-  currentSessionKey: DEFAULT_SESSION_KEY,
-  currentAgentId: 'main',
-  sessionLabels: {},
-  sessionLastActivity: {},
+    sending: false,
+    activeRunId: null,
+    streamingText: '',
+    streamingMessage: null,
+    streamingTools: [],
+    sendStage: null,
+    pendingFinal: false,
+    lastUserMessageAt: null,
+    pendingToolImages: [],
+    activeTurnBuffer: deriveActiveTurnBuffer({
+      messages: [],
+      sending: false,
+      streamingMessage: null,
+      streamingText: '',
+      lastUserMessageAt: null,
+    }),
 
-  showThinking: true,
-  thinkingLevel: null,
+    sessions: [],
+    currentSessionKey: DEFAULT_SESSION_KEY,
+    currentAgentId: 'main',
+    sessionLabels: {},
+    sessionLastActivity: {},
+
+    showThinking: true,
+    thinkingLevel: null,
+  };
+
+  return {
+  ...initialState,
 
   // ── Load sessions via sessions.list ──
 
@@ -2048,6 +2228,45 @@ export const useChatStore = create<ChatState>((set, get) => ({
             : message;
         });
       };
+      const mergeDeferredCurrentTurnMessages = (
+        currentMessages: RawMessage[],
+        hydratedMessages: RawMessage[],
+        lastUserTimestamp: number | null,
+      ): { messages: RawMessage[]; appendedProcessCount: number } => {
+        const mergedCurrent = mergeHydratedMessages(currentMessages, hydratedMessages);
+        if (!lastUserTimestamp) return { messages: mergedCurrent, appendedProcessCount: 0 };
+
+        const userMs = toMs(lastUserTimestamp);
+        const existingKeys = new Set(mergedCurrent.map((message) => getPreviewMergeKey(message)));
+        const deferredProcessMessages = hydratedMessages.filter((message) => (
+          message.role === 'assistant'
+          && !!message.timestamp
+          && toMs(message.timestamp) >= userMs
+          && !hasNonToolAssistantContent(message)
+          && !existingKeys.has(getPreviewMergeKey(message))
+        ));
+
+        if (deferredProcessMessages.length === 0) {
+          return { messages: mergedCurrent, appendedProcessCount: 0 };
+        }
+
+        const lastUserIndex = findLastUserMessageIndex(mergedCurrent);
+        if (lastUserIndex < 0) {
+          return {
+            messages: [...mergedCurrent, ...deferredProcessMessages].sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0)),
+            appendedProcessCount: deferredProcessMessages.length,
+          };
+        }
+
+        const beforeTurn = mergedCurrent.slice(0, lastUserIndex + 1);
+        const turnTail = [...mergedCurrent.slice(lastUserIndex + 1), ...deferredProcessMessages].sort(
+          (left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0),
+        );
+        return {
+          messages: [...beforeTurn, ...turnTail],
+          appendedProcessCount: deferredProcessMessages.length,
+        };
+      };
 
       const applyLoadFailure = (errorMessage: string | null) => {
         if (!isCurrentSession()) return;
@@ -2113,6 +2332,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         lastUserMessageAt: historyLastUserMessageAt,
         sending: historyIsSendingNow,
       } = get();
+      const liveTurnSignal = hasLiveTurnSignal(get());
 
       const historyUserMsTs = historyLastUserMessageAt ? toMs(historyLastUserMessageAt) : 0;
       const isAfterHistoryUserMsg = (msg: RawMessage): boolean => {
@@ -2120,7 +2340,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return toMs(msg.timestamp) >= historyUserMsTs;
       };
 
-      const shouldEnterHistoryPendingFinal = historyIsSendingNow && !historyPendingFinal && [...filteredMessages].reverse().some((msg) => {
+      const shouldEnterHistoryPendingFinal = historyIsSendingNow && !historyPendingFinal && !liveTurnSignal && [...filteredMessages].reverse().some((msg) => {
         if (msg.role !== 'assistant') return false;
         return isAfterHistoryUserMsg(msg);
       });
@@ -2148,6 +2368,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         && Date.now() - toMs(trailingUser.timestamp) <= HISTORY_INCOMPLETE_RETRY_WINDOW_MS
         && !finalMessages.slice(trailingUserIndex + 1).some((message) => message.role === 'assistant');
 
+      const shouldDeferHistoryCurrentTurn = historyIsSendingNow && !historyPendingFinal && liveTurnSignal;
+      const deferredMergeResult = shouldDeferHistoryCurrentTurn
+        ? mergeDeferredCurrentTurnMessages(get().messages, finalMessages, historyLastUserMessageAt)
+        : { messages: finalMessages, appendedProcessCount: 0 };
+      const mergedMessagesForActiveSend = deferredMergeResult.messages;
+
       if (historyRecentAssistant || historyEmptyAssistant) {
         clearHistoryPoll();
       }
@@ -2158,10 +2384,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       set({
-        messages: finalMessages,
+        messages: mergedMessagesForActiveSend,
         thinkingLevel,
         loading: false,
-        ...(historyRecentAssistant
+        ...(historyRecentAssistant && !shouldDeferHistoryCurrentTurn
           ? {
               sending: false,
               activeRunId: null,
@@ -2172,7 +2398,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               streamingTools: [],
               pendingToolImages: [],
             }
-          : historyEmptyAssistant
+          : historyEmptyAssistant && !shouldDeferHistoryCurrentTurn
             ? {
                 sending: false,
                 activeRunId: null,
@@ -2185,7 +2411,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 pendingToolImages: [],
                 error: EMPTY_ASSISTANT_RESPONSE_ERROR,
               }
-          : shouldEnterHistoryPendingFinal
+          : shouldEnterHistoryPendingFinal || (shouldDeferHistoryCurrentTurn && deferredMergeResult.appendedProcessCount > 0)
             ? { pendingFinal: true, sendStage: 'finalizing' }
             : {}),
       });
@@ -2195,7 +2421,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // displayName (e.g. the configured agent name "ClawX") instead.
       const isMainSession = currentSessionKey.endsWith(':main');
       if (!isMainSession) {
-        const firstUserMsg = finalMessages.find((m) => m.role === 'user');
+        const firstUserMsg = mergedMessagesForActiveSend.find((m) => m.role === 'user');
         if (firstUserMsg) {
           const labelText = getMessageText(firstUserMsg.content).trim();
           set((s) => {
@@ -2212,7 +2438,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       // Record last activity time from the last message in history
-      const lastMsg = finalMessages[finalMessages.length - 1];
+      const lastMsg = mergedMessagesForActiveSend[mergedMessagesForActiveSend.length - 1];
       if (lastMsg?.timestamp) {
         const lastAt = toMs(lastMsg.timestamp);
         set((s) => ({
@@ -2221,11 +2447,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       // Async: load missing image previews from disk (updates in background)
-      loadMissingPreviews(finalMessages).then((updated) => {
+      loadMissingPreviews(mergedMessagesForActiveSend).then((updated) => {
         if (!isCurrentSession()) return;
         if (updated) {
           set((state) => ({
-            messages: mergeHydratedMessages(state.messages, finalMessages),
+            messages: mergeHydratedMessages(state.messages, mergedMessagesForActiveSend),
           }));
         }
       });
@@ -2868,4 +3094,5 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   clearError: () => set({ error: null }),
-}));
+  };
+});

@@ -4,7 +4,7 @@
  * via gateway:rpc IPC. Session selector, thinking toggle, and refresh
  * are in the toolbar; messages render with markdown + streaming.
  */
-import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ChevronDown, ChevronRight, ListTodo, Loader2, Network, Sparkles, Workflow } from 'lucide-react';
 import { useChatStore, type ChatSendStage, type RawMessage, type ToolStatus } from '@/stores/chat';
@@ -48,6 +48,7 @@ const MessageViewport = memo(function MessageViewport({
   const sendStage = useChatStore((s) => s.sendStage);
   const pendingFinal = useChatStore((s) => s.pendingFinal);
   const lastUserMessageAt = useChatStore((s) => s.lastUserMessageAt);
+  const activeTurnBuffer = useChatStore((s) => s.activeTurnBuffer);
   const chatProcessDisplayMode = useSettingsStore((s) => s.chatProcessDisplayMode);
   const assistantMessageStyle = useSettingsStore((s) => s.assistantMessageStyle);
 
@@ -79,53 +80,62 @@ const MessageViewport = memo(function MessageViewport({
   const lastUserTsMs = typeof lastUserMessageAt === 'number'
     ? (lastUserMessageAt < 1e12 ? lastUserMessageAt * 1000 : lastUserMessageAt)
     : 0;
-  const latestPersistedAssistant = useMemo(() => [...safeMessages].reverse().find((message) => {
+  const fallbackLatestPersistedAssistant = useMemo(() => [...safeMessages].reverse().find((message) => {
     if (message.role !== 'assistant') return false;
     if (!lastUserTsMs || !message.timestamp) return true;
     const messageTsMs = message.timestamp < 1e12 ? message.timestamp * 1000 : message.timestamp;
     return messageTsMs >= lastUserTsMs;
   }), [lastUserTsMs, safeMessages]);
+  const latestPersistedAssistant = activeTurnBuffer?.latestPersistedAssistant ?? fallbackLatestPersistedAssistant;
   const latestPersistedAssistantText = latestPersistedAssistant ? extractText(latestPersistedAssistant).trim() : '';
   const latestPersistedAssistantThinking = latestPersistedAssistant ? (extractThinking(latestPersistedAssistant)?.trim() ?? '') : '';
   const latestPersistedAssistantImages = latestPersistedAssistant ? extractImages(latestPersistedAssistant) : [];
   const latestPersistedAssistantTools = latestPersistedAssistant ? extractToolUse(latestPersistedAssistant) : [];
-  const isStreamingDuplicateOfPersistedAssistant = !!latestPersistedAssistant
+  const fallbackIsStreamingDuplicateOfPersistedAssistant = !!latestPersistedAssistant
     && (
       (hasStreamText && latestPersistedAssistantText === streamText.trim())
       || (!hasStreamText && hasStreamThinking && latestPersistedAssistantThinking === (streamThinking?.trim() ?? ''))
     )
     && (!hasStreamImages || latestPersistedAssistantImages.length === streamImages.length)
     && (!hasStreamTools || latestPersistedAssistantTools.length === streamTools.length);
+  const isStreamingDuplicateOfPersistedAssistant = activeTurnBuffer?.isStreamingDuplicateOfPersistedAssistant ?? fallbackIsStreamingDuplicateOfPersistedAssistant;
   const shouldRenderStreaming = sending
     && !isStreamingDuplicateOfPersistedAssistant
     && (hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus);
-  const hasAnyStreamContent = hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus;
-  const streamingDisplayMessage = useMemo(() => (
+  const fallbackHasAnyStreamContent = hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus;
+  const hasAnyStreamContent = activeTurnBuffer?.hasAnyStreamContent ?? fallbackHasAnyStreamContent;
+  const fallbackStreamingDisplayMessage = useMemo(() => (
     shouldRenderStreaming
       ? buildStreamingDisplayMessage(streamMsg, streamText, streamingTimestamp)
       : null
   ), [shouldRenderStreaming, streamMsg, streamText, streamingTimestamp]);
+  const streamingDisplayMessage = activeTurnBuffer?.streamingDisplayMessage ?? fallbackStreamingDisplayMessage;
   const activeTurnStartIndex = useMemo(() => (
     sending ? findLastUserMessageIndex(safeMessages) : -1
   ), [safeMessages, sending]);
-  const historyMessages = useMemo(() => (
+  const fallbackHistoryMessages = useMemo(() => (
     activeTurnStartIndex >= 0 ? safeMessages.slice(0, activeTurnStartIndex) : safeMessages
   ), [activeTurnStartIndex, safeMessages]);
+  const historyMessages = activeTurnBuffer?.historyMessages ?? fallbackHistoryMessages;
   const deferredHistoryMessages = useDeferredValue(historyMessages);
-  const activeTurnMessages = useMemo(() => (
+  const fallbackActiveTurnMessages = useMemo(() => (
     activeTurnStartIndex >= 0 ? safeMessages.slice(activeTurnStartIndex) : EMPTY_MESSAGES
   ), [activeTurnStartIndex, safeMessages]);
-  const rawActiveTurnUserMessage = activeTurnMessages[0]?.role === 'user' ? activeTurnMessages[0] : null;
+  const activeTurnMessages = activeTurnBuffer?.userMessage
+    ? [activeTurnBuffer.userMessage, ...(activeTurnBuffer.assistantMessages ?? EMPTY_MESSAGES)]
+    : fallbackActiveTurnMessages;
+  const rawActiveTurnUserMessage = activeTurnBuffer?.userMessage ?? (activeTurnMessages[0]?.role === 'user' ? activeTurnMessages[0] : null);
   const activeTurnUserMessage = useStableMessage(rawActiveTurnUserMessage);
   const displayHistoryMessages = useMemo(() => (
     trimDeferredHistoryForActiveTurn(deferredHistoryMessages, activeTurnUserMessage)
   ), [activeTurnUserMessage, deferredHistoryMessages]);
   const stableHistoryMessages = useStableMessageList(displayHistoryMessages);
-  const activeTurnAssistantMessages = useMemo(() => (
+  const fallbackActiveTurnAssistantMessages = useMemo(() => (
     activeTurnUserMessage
       ? activeTurnMessages.slice(1).filter((message) => message.role === 'assistant')
       : EMPTY_MESSAGES
   ), [activeTurnMessages, activeTurnUserMessage]);
+  const activeTurnAssistantMessages = activeTurnBuffer?.assistantMessages ?? fallbackActiveTurnAssistantMessages;
   const rawPersistedActiveFinalMessage = isStreamingDuplicateOfPersistedAssistant && activeTurnAssistantMessages.length > 0
     ? activeTurnAssistantMessages[activeTurnAssistantMessages.length - 1]
     : null;
@@ -159,9 +169,10 @@ const MessageViewport = memo(function MessageViewport({
     : streamingDisplayMessage;
   const activeTurnFinalPhaseStarted = shouldUseProcessLayout
     && (hasStreamingFinalMessage || persistedActiveFinalMessage != null);
-  const activeTurnStartedAtMs = activeTurnUserMessage
-    ? toTimestampMs(activeTurnUserMessage.timestamp) ?? lastUserTsMs
-    : lastUserTsMs;
+  const activeTurnStartedAtMs = activeTurnBuffer?.startedAtMs
+    ?? (activeTurnUserMessage
+      ? toTimestampMs(activeTurnUserMessage.timestamp) ?? lastUserTsMs
+      : lastUserTsMs);
 
   const isEmpty = safeMessages.length === 0 && !sending;
   const showGatewayOfflineState = !isGatewayRunning && safeMessages.length === 0 && !sending;
@@ -442,6 +453,84 @@ function useStableMessage<T extends RawMessage | null | undefined>(message: T): 
     ref.current = message;
   }
   return ref.current;
+}
+
+function mergeAppendOnlyMessages(previous: RawMessage[], next: RawMessage[]): RawMessage[] {
+  if (next.length === 0) return previous.length === 0 ? previous : EMPTY_MESSAGES;
+  if (previous.length === 0) return next;
+
+  const previousByKey = new Map(previous.map((message) => [buildMessageDisplayKey(message), message] as const));
+  let changed = previous.length !== next.length;
+  const merged = next.map((message) => {
+    const key = buildMessageDisplayKey(message);
+    const current = previousByKey.get(key);
+    if (!current) {
+      changed = true;
+      return message;
+    }
+    if (current !== message) {
+      changed = true;
+    }
+    return current === message ? current : message;
+  });
+
+  return changed ? merged : previous;
+}
+
+function useAppendOnlyMessageList(turnKey: string, messages: RawMessage[]): RawMessage[] {
+  const [buffer, setBuffer] = useState<RawMessage[]>(messages);
+  const prevTurnKeyRef = useRef(turnKey);
+
+  useEffect(() => {
+    if (prevTurnKeyRef.current !== turnKey) {
+      prevTurnKeyRef.current = turnKey;
+      setBuffer(messages);
+      return;
+    }
+
+    const nextBuffer = mergeAppendOnlyMessages(buffer, messages);
+    if (nextBuffer !== buffer) {
+      startTransition(() => {
+        setBuffer(nextBuffer);
+      });
+    }
+  }, [buffer, messages, turnKey]);
+
+  return buffer;
+}
+
+function useBufferedMessage(
+  turnKey: string,
+  message: RawMessage | null | undefined,
+  retainWhenMissing = false,
+): RawMessage | null {
+  const [buffer, setBuffer] = useState<RawMessage | null>(message ?? null);
+  const prevTurnKeyRef = useRef(turnKey);
+
+  useEffect(() => {
+    if (prevTurnKeyRef.current !== turnKey) {
+      prevTurnKeyRef.current = turnKey;
+      setBuffer(message ?? null);
+      return;
+    }
+
+    if (!message) {
+      if (!retainWhenMissing && buffer !== null) {
+        setBuffer(null);
+      }
+      return;
+    }
+
+    if (buffer && buildMessageDisplayKey(buffer) === buildMessageDisplayKey(message)) {
+      return;
+    }
+
+    startTransition(() => {
+      setBuffer(message);
+    });
+  }, [buffer, message, retainWhenMissing, turnKey]);
+
+  return buffer;
 }
 
 function trimDeferredHistoryForActiveTurn(
@@ -901,6 +990,7 @@ const ActiveTurn = memo(function ActiveTurn({
   sendStage: ChatSendStage | null;
   streamingTools: ToolStatus[];
 }) {
+  const turnKey = userMessage.id || `turn-${startedAtMs}`;
   const hasProcessSection = processMessages.some((message) => (
     hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle)
   ))
@@ -914,18 +1004,92 @@ const ActiveTurn = memo(function ActiveTurn({
     || showActivity;
   const hasAttachments = (userMessage._attachedFiles?.length ?? 0) > 0;
   const activityKind = getActivityKindFromStage(sendStage, hasAttachments, finalPhaseStarted, showActivity);
-  const finalHasVisibleContent = hasVisibleFinalContent(finalMessage);
-  const finalStreamingHasVisibleContent = hasVisibleFinalContent(finalStreamingMessage);
+  return (
+    <div className="space-y-3">
+      <ChatMessage message={userMessage} showThinking={showThinking} />
+      <StreamingAssistantTurn
+        turnKey={turnKey}
+        processMessages={processMessages}
+        processStreamingMessage={processStreamingMessage}
+        finalMessage={finalMessage}
+        finalStreamingMessage={finalStreamingMessage}
+        showThinking={showThinking}
+        chatProcessDisplayMode={chatProcessDisplayMode}
+        assistantMessageStyle={assistantMessageStyle}
+        startedAtMs={startedAtMs}
+        sending={sending}
+        showActivity={showActivity}
+        showTyping={showTyping}
+        activityKind={activityKind}
+        finalPhaseStarted={finalPhaseStarted}
+        streamingTools={streamingTools}
+        hasProcessSection={hasProcessSection}
+      />
+    </div>
+  );
+});
+
+const StreamingAssistantTurn = memo(function StreamingAssistantTurn({
+  turnKey,
+  processMessages,
+  processStreamingMessage,
+  finalMessage,
+  finalStreamingMessage,
+  showThinking,
+  chatProcessDisplayMode,
+  assistantMessageStyle,
+  startedAtMs,
+  sending,
+  showActivity,
+  showTyping,
+  activityKind,
+  finalPhaseStarted,
+  streamingTools,
+  hasProcessSection,
+}: {
+  turnKey: string;
+  processMessages: RawMessage[];
+  processStreamingMessage?: RawMessage | null;
+  finalMessage?: RawMessage | null;
+  finalStreamingMessage?: RawMessage | null;
+  showThinking: boolean;
+  chatProcessDisplayMode: ChatProcessDisplayMode;
+  assistantMessageStyle: AssistantMessageStyle;
+  startedAtMs: number;
+  sending: boolean;
+  showActivity: boolean;
+  showTyping: boolean;
+  activityKind: ProcessActivityKind;
+  finalPhaseStarted: boolean;
+  streamingTools: ToolStatus[];
+  hasProcessSection: boolean;
+}) {
+  const bufferedProcessMessages = useAppendOnlyMessageList(turnKey, processMessages);
+  const bufferedProcessStreamingMessage = useBufferedMessage(`${turnKey}:process`, processStreamingMessage, sending);
+  const bufferedFinalMessage = useBufferedMessage(`${turnKey}:final`, finalMessage, true);
+  const bufferedFinalStreamingMessage = useBufferedMessage(`${turnKey}:final-stream`, finalStreamingMessage, sending);
   const processPhase: ProcessPhase = finalPhaseStarted && !sending ? 'processed' : 'working';
+  const finalHasVisibleContent = hasVisibleFinalContent(bufferedFinalMessage);
+  const finalStreamingHasVisibleContent = hasVisibleFinalContent(bufferedFinalStreamingMessage);
+  const hasVisibleProcessSection = bufferedProcessMessages.some((message) => (
+    hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle)
+  ))
+    || (
+      !!bufferedProcessStreamingMessage
+      && (
+        hasVisibleProcessContent(bufferedProcessStreamingMessage, showThinking, chatProcessDisplayMode, assistantMessageStyle)
+        || (chatProcessDisplayMode === 'all' && streamingTools.length > 0)
+      )
+    )
+    || showActivity
+    || hasProcessSection;
 
   return (
-    <div className={cn('space-y-3', hasProcessSection && (finalHasVisibleContent || finalStreamingHasVisibleContent) && 'space-y-2')}>
-      <ChatMessage message={userMessage} showThinking={showThinking} />
-
-      {hasProcessSection && (
+    <div className={cn('space-y-3', hasVisibleProcessSection && (finalHasVisibleContent || finalStreamingHasVisibleContent) && 'space-y-2')}>
+      {hasVisibleProcessSection && (
         <ProcessSection
-          processMessages={processMessages}
-          processStreamingMessage={processStreamingMessage}
+          processMessages={bufferedProcessMessages}
+          processStreamingMessage={bufferedProcessStreamingMessage}
           phase={processPhase}
           showThinking={showThinking}
           chatProcessDisplayMode={chatProcessDisplayMode}
@@ -937,26 +1101,26 @@ const ActiveTurn = memo(function ActiveTurn({
         />
       )}
 
-      {finalHasVisibleContent && finalMessage && (
+      {finalHasVisibleContent && bufferedFinalMessage && (
         <ChatMessage
-          message={finalMessage}
+          message={bufferedFinalMessage}
           showThinking={false}
-          hideAvatar={hasProcessSection}
-          reserveAvatarSpace={hasProcessSection}
+          hideAvatar={hasVisibleProcessSection}
+          reserveAvatarSpace={hasVisibleProcessSection}
         />
       )}
 
-      {finalStreamingHasVisibleContent && finalStreamingMessage && (
+      {finalStreamingHasVisibleContent && bufferedFinalStreamingMessage && (
         <ChatMessage
-          message={finalStreamingMessage}
+          message={bufferedFinalStreamingMessage}
           showThinking={false}
-          hideAvatar={hasProcessSection}
-          reserveAvatarSpace={hasProcessSection}
+          hideAvatar={hasVisibleProcessSection}
+          reserveAvatarSpace={hasVisibleProcessSection}
           isStreaming
         />
       )}
 
-      {!hasProcessSection && !finalHasVisibleContent && !finalStreamingHasVisibleContent && showTyping && (
+      {!hasVisibleProcessSection && !finalHasVisibleContent && !finalStreamingHasVisibleContent && showTyping && (
         <ProcessSection
           processMessages={EMPTY_MESSAGES}
           phase="working"
