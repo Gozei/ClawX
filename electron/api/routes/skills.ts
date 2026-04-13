@@ -44,6 +44,15 @@ export async function handleSkillRoutes(
     return true;
   }
 
+  if (url.pathname === '/api/clawhub/sources' && req.method === 'GET') {
+    try {
+      sendJson(res, 200, { success: true, results: await ctx.clawHubService.listSources() });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
   if (url.pathname === '/api/clawhub/install' && req.method === 'POST') {
     try {
       const body = await parseJsonBody<Record<string, unknown>>(req);

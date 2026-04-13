@@ -33,6 +33,9 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
         expect(Math.abs(channelsTitleBox.y - skillsTitleBox.y)).toBeLessThan(2);
       }
 
+      await page.getByRole('button', { name: /安装技能/i }).click();
+      await expect(page.getByTestId('skills-marketplace-source-select')).toBeVisible();
+
       await page.getByTestId('sidebar-nav-settings').click();
       await expect(page.getByTestId('settings-page')).toBeVisible();
       await expect(page.getByTestId('settings-page-title')).toHaveCSS('font-size', '30px');

@@ -6,7 +6,7 @@
 /**
  * Skill data structure
  */
-export interface Skill {
+export interface SkillSnapshot {
   id: string;
   slug?: string;
   name: string;
@@ -16,13 +16,26 @@ export interface Skill {
   version?: string;
   author?: string;
   configurable?: boolean;
-  config?: Record<string, unknown>;
   isCore?: boolean;
   isBundled?: boolean;
   dependencies?: string[];
   source?: string;
   baseDir?: string;
   filePath?: string;
+  missing?: string[];
+  ready?: boolean;
+  requirementsSummary?: string;
+  homepage?: string;
+  installed?: boolean;
+  sourceId?: string;
+  sourceLabel?: string;
+}
+
+export interface SkillConfigDetail {
+  id: string;
+  config?: Record<string, unknown>;
+  apiKey?: string;
+  env?: Record<string, string>;
 }
 
 /**
@@ -51,6 +64,17 @@ export interface MarketplaceSkill {
   author?: string;
   downloads?: number;
   stars?: number;
+  sourceId?: string;
+  sourceLabel?: string;
+}
+
+export interface SkillSource {
+  id: string;
+  label: string;
+  enabled: boolean;
+  site: string;
+  registry?: string;
+  workdir: string;
 }
 
 /**

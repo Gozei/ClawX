@@ -18,6 +18,7 @@ import {
   FileCode,
   Globe,
   Copy,
+  ChevronDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -449,7 +450,7 @@ export function Skills() {
   const [installSheetOpen, setInstallSheetOpen] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [selectedSource, setSelectedSource] = useState<SkillSourceCategory>('all');
-  const [selectedKeyCategory, setSelectedKeyCategory] = useState<SkillKeyCategory>('all');
+  const [selectedMarketplaceSource, setSelectedMarketplaceSource] = useState('all');
 
   const isGatewayRunning = gatewayStatus.state === 'running';
   const [showGatewayWarning, setShowGatewayWarning] = useState(false);
@@ -560,7 +561,18 @@ export function Skills() {
       noKeyCount: skillsInSection.filter((skill) => !skillRequiresKey(skill)).length,
       skills: skillsInSection,
     };
-  }).filter((section) => section.skills.length > 0), [filteredSkills, sourceStats.clawBuiltIn, sourceStats.custom, sourceStats.hubMarket, t]);
+  }, [filteredSkills, sourceStats.clawBuiltIn, sourceStats.custom, sourceStats.hubMarket, t]);
+
+  const sources = useMemo(() => [
+    { id: 'claw-built-in', label: t('marketplace.sources.clawBuiltIn', '官方内置') },
+    { id: 'hub-market', label: t('marketplace.sources.hubMarket', 'ClawHub 市场') },
+    { id: 'custom', label: t('marketplace.sources.custom', '自定义 / 第三方') },
+  ], [t]);
+
+  const getMarketplaceSourceLabel = (skill: any, defaultVal: string) => {
+    const source = sources.find(s => s.id === skill.sourceId);
+    return source ? source.label : defaultVal;
+  };
 
   const bulkToggleVisible = useCallback(async (enable: boolean) => {
     const candidates = filteredSkills.filter((skill) => !skill.isCore && skill.enabled !== enable);
@@ -669,9 +681,9 @@ export function Skills() {
     return () => clearTimeout(timer);
   }, [installQuery, installSheetOpen, searchSkills]);
 
-  const handleInstall = useCallback(async (slug: string) => {
+  const handleInstall = useCallback(async (slug: string, sourceId?: string) => {
     try {
-      await installSkill(slug);
+      await installSkill(slug, undefined, sourceId);
       await enableSkill(slug);
       toast.success(t('toast.installed'));
     } catch (err) {
@@ -684,14 +696,17 @@ export function Skills() {
     }
   }, [installSkill, enableSkill, t, skillsDirPath]);
 
-  const handleUninstall = useCallback(async (slug: string) => {
+  const handleUninstall = useCallback(async (slug: string, sourceId?: string) => {
     try {
-      await uninstallSkill(slug);
+      await uninstallSkill(slug, sourceId);
+      if (selectedSkill?.slug === slug) {
+         setSelectedSkill(null);
+      }
       toast.success(t('toast.uninstalled'));
     } catch (err) {
       toast.error(t('toast.failedUninstall') + ': ' + String(err));
     }
-  }, [uninstallSkill, t]);
+  }, [uninstallSkill, selectedSkill, t]);
 
   if (loading) {
     return (
@@ -963,114 +978,117 @@ export function Skills() {
 
       <Sheet open={installSheetOpen} onOpenChange={setInstallSheetOpen}>
         <SheetContent
-          className="w-full sm:max-w-[560px] p-0 flex flex-col border-l border-black/10 dark:border-white/10 bg-background dark:bg-card shadow-[0_0_40px_rgba(0,0,0,0.2)]"
+          className="w-full sm:max-w-[700px] p-0 flex flex-col bg-white dark:bg-slate-900 shadow-2xl border-l-0 sm:rounded-l-3xl overflow-hidden"
           side="right"
         >
-          <div className="px-7 py-6 border-b border-black/10 dark:border-white/10">
-            <h2 className="text-[24px] font-serif text-foreground font-normal tracking-tight">{t('marketplace.installDialogTitle')}</h2>
-            <p className="mt-1 text-[13px] text-foreground/70">{t('marketplace.installDialogSubtitle')}</p>
-            <div className="mt-4 flex flex-col md:flex-row gap-2">
-              <div className="relative flex items-center bg-black/5 dark:bg-white/5 rounded-xl px-3 py-2 border border-black/10 dark:border-white/10 flex-1">
-                <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <Input
-                  placeholder={t('searchMarketplace')}
-                  value={installQuery}
-                  onChange={(e) => setInstallQuery(e.target.value)}
-                  className="ml-2 h-auto border-0 bg-transparent p-0 shadow-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[13px]"
-                />
-                {installQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setInstallQuery('')}
-                    className="text-foreground/50 hover:text-foreground shrink-0 ml-1"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
+          {/* 市场头部 */}
+          <div className="p-6 border-b border-slate-100 dark:border-white/10 flex justify-between items-center bg-white dark:bg-slate-900 z-10 shrink-0">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-indigo-600 dark:bg-indigo-500/20 rounded-2xl flex items-center justify-center shadow-md dark:shadow-none">
+                <Package className="w-6 h-6 text-white dark:text-indigo-400" />
               </div>
-              <Button
-                variant="outline"
-                disabled
-                className="h-10 rounded-xl border-black/10 dark:border-white/10 bg-transparent text-muted-foreground"
-              >
-                {t('marketplace.sourceLabel')}: {t('marketplace.sourceClawHub')}
-              </Button>
+              <div>
+                <h2 className="text-2xl font-bold text-slate-900 dark:text-white">ClawHub Marketplace</h2>
+                <p className="text-slate-500 dark:text-white/50 text-xs mt-0.5">{t('marketplace.installDialogSubtitle', '发现并安装社区与官方构建的技能')}</p>
+              </div>
             </div>
+            <button onClick={() => setInstallSheetOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-white/10 rounded-full text-slate-400 transition-colors">
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-6 py-4">
+          <div className="px-6 py-4 bg-slate-50 dark:bg-slate-900 border-b border-slate-100 dark:border-white/10 flex gap-3 items-center shrink-0">
+            <div className="relative flex-1">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input 
+                type="text" 
+                value={installQuery}
+                onChange={(e) => setInstallQuery(e.target.value)}
+                placeholder={t('searchMarketplace', '搜索 slug, 名称或功能...')} 
+                className="w-full pl-10 pr-4 py-3 border border-slate-200 dark:border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-white/5 dark:text-white" 
+              />
+            </div>
+            <div className="relative">
+              <select
+                data-testid="skills-marketplace-source-select"
+                value={selectedMarketplaceSource}
+                onChange={(e) => setSelectedMarketplaceSource(e.target.value)}
+                className="appearance-none w-[180px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-xl h-[46px] text-[13px] font-medium text-slate-700 dark:text-white focus:ring-indigo-500 shadow-sm focus:ring-2 focus:outline-none pl-3.5 pr-9 cursor-pointer"
+              >
+                <option value="all">{t('marketplace.sources.all', '全部来源')}</option>
+                {sources.map((source: any) => (
+                  <option key={source.id} value={source.id}>
+                    {source.label}
+                  </option>
+                ))}
+              </select>
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                 <ChevronDown className="w-4 h-4" />
+              </div>
+            </div>
+            {installQuery && (
+              <button onClick={() => setInstallQuery('')} className="px-4 py-3 bg-white dark:bg-white/10 border border-slate-200 dark:border-transparent text-sm font-medium rounded-xl hover:bg-slate-100 dark:hover:bg-white/20 dark:text-white transition-colors">
+                {t('common.clear', '清空')}
+              </button>
+            )}
+          </div>
+
+          {/* 市场列表 */}
+          <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50 dark:bg-slate-900">
             {searchError && (
-              <div className="mb-4 p-4 rounded-xl border border-destructive/50 bg-destructive/10 text-destructive text-sm font-medium flex items-center gap-2">
+              <div className="mb-6 p-4 rounded-xl border border-destructive/50 bg-destructive/10 text-destructive text-sm font-medium flex items-center gap-3">
                 <AlertCircle className="h-5 w-5 shrink-0" />
-                <span>
-                  {['searchTimeoutError', 'searchRateLimitError', 'timeoutError', 'rateLimitError'].includes(searchError.replace('Error: ', ''))
-                    ? t(`toast.${searchError.replace('Error: ', '')}`, { path: skillsDirPath })
-                    : t('marketplace.searchError')}
-                </span>
+                <span>{searchError}</span>
               </div>
             )}
 
             {searching && (
-              <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+              <div className="flex flex-col items-center justify-center py-20 text-slate-400">
                 <LoadingSpinner size="lg" />
-                <p className="mt-4 text-sm">{t('marketplace.searching')}</p>
+                <p className="mt-4 text-sm">{t('marketplace.searching', '正在搜索市场...')}</p>
               </div>
             )}
 
             {!searching && searchResults.length > 0 && (
-              <div className="flex flex-col gap-1">
-                {searchResults.map((skill) => {
-                  const isInstalled = safeSkills.some(s => s.id === skill.slug || s.name === skill.name);
-                  const isInstallLoading = !!installing[skill.slug];
+              <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
+                {searchResults.map((skill: any) => {
+                  const isInstalled = safeSkills.some(s => (s.id === skill.slug || s.name === skill.name) && (!skill.sourceId || !s.sourceId || s.sourceId === skill.sourceId));
+                  const installKey = skill.sourceId ? `${skill.sourceId}:${skill.slug}` : skill.slug;
+                  const isInstallLoading = !!installing[installKey];
 
                   return (
-                    <div
-                      key={skill.slug}
-                      className="group flex flex-row items-center justify-between py-3.5 px-3 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer border-b border-black/5 dark:border-white/5 last:border-0"
-                      onClick={() => invokeIpc('shell:openExternal', `https://clawhub.ai/s/${skill.slug}`)}
-                    >
-                      <div className="flex items-start gap-4 flex-1 overflow-hidden pr-4">
-                        <div className="h-10 w-10 shrink-0 flex items-center justify-center text-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 rounded-xl overflow-hidden">
-                          📦
-                        </div>
-                        <div className="flex flex-col overflow-hidden">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h3 className="text-[15px] font-semibold text-foreground truncate">{skill.name}</h3>
-                            {skill.author && (
-                              <span className="text-xs text-muted-foreground">• {skill.author}</span>
-                            )}
+                    <div key={skill.slug} className="bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 p-5 rounded-2xl hover:border-blue-500/50 hover:shadow-md transition-all flex flex-col justify-between h-full">
+                      <div>
+                        <div className="flex justify-between items-start mb-3">
+                          <div className="w-12 h-12 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl flex items-center justify-center text-2xl">
+                            📦
                           </div>
-                          <p className="text-[13.5px] text-muted-foreground line-clamp-1 pr-6 leading-relaxed">
-                            {skill.description}
-                          </p>
+                          {skill.author === 'openclaw' && (
+                            <span className="text-[10px] font-bold px-2 py-1 bg-black/5 dark:bg-white/10 text-foreground/50 rounded uppercase">Official</span>
+                          )}
+                        </div>
+                        <h4 className="font-bold text-foreground mb-1 line-clamp-1">{skill.name}</h4>
+                        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed mb-1">{skill.description}</p>
+                        <p className="text-[10px] text-muted-foreground/60 font-mono">@{skill.author || 'community'}/{skill.slug}</p>
+                        <div className="mt-2">
+                          <span className="text-[10px] font-bold px-2 py-1 bg-black/5 dark:bg-white/10 text-muted-foreground rounded border border-black/5 dark:border-white/5">
+                            {getMarketplaceSourceLabel(skill, t('marketplace.sourceUnknown', '未知来源'))}
+                          </span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-4 shrink-0" onClick={e => e.stopPropagation()}>
-                        {skill.version && (
-                          <span className="text-[13px] font-mono text-muted-foreground mr-2">
-                            v{skill.version}
-                          </span>
-                        )}
+                      <div className="mt-4 flex justify-between items-center border-t border-black/5 dark:border-white/5 pt-3">
+                        <span className="text-xs text-muted-foreground/60 flex items-center gap-1 font-mono">
+                          v{skill.version || '1.0.0'}
+                        </span>
+                        
                         {isInstalled ? (
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={() => handleUninstall(skill.slug)}
-                            disabled={isInstallLoading}
-                            className="h-8 shadow-none"
-                          >
-                            {isInstallLoading ? <LoadingSpinner size="sm" /> : <Trash2 className="h-3.5 w-3.5" />}
-                          </Button>
+                          <button onClick={() => handleUninstall(skill.slug, skill.sourceId)} disabled={isInstallLoading} className="text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 px-3 py-1.5 rounded-lg hover:bg-amber-500/20 transition-colors flex items-center gap-1">
+                            {isInstallLoading ? <LoadingSpinner size="sm" /> : <Trash2 className="w-3 h-3" />} {t('detail.uninstall', '卸载')}
+                          </button>
                         ) : (
-                          <Button
-                            variant="default"
-                            size="sm"
-                            onClick={() => handleInstall(skill.slug)}
-                            disabled={isInstallLoading}
-                            className="h-8 px-4 rounded-full shadow-none font-medium text-xs"
-                          >
-                            {isInstallLoading ? <LoadingSpinner size="sm" /> : t('marketplace.install', 'Install')}
-                          </Button>
+                          <button onClick={() => handleInstall(skill.slug, skill.sourceId)} disabled={isInstallLoading} className="text-xs font-bold bg-foreground text-background px-3 py-1.5 rounded-lg hover:opacity-90 transition-opacity flex items-center gap-1 shadow-sm">
+                            {isInstallLoading ? <LoadingSpinner size="sm" /> : <RefreshCw className="w-3 h-3" />} {t('marketplace.install', '安装')}
+                          </button>
                         )}
                       </div>
                     </div>
@@ -1080,9 +1098,9 @@ export function Skills() {
             )}
 
             {!searching && searchResults.length === 0 && !searchError && (
-              <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-                <Package className="h-10 w-10 mb-4 opacity-50" />
-                <p>{installQuery.trim() ? t('marketplace.noResults') : t('marketplace.emptyPrompt')}</p>
+              <div className="flex flex-col items-center justify-center py-20 text-muted-foreground opacity-50">
+                <Package className="h-12 w-12 mb-4" />
+                <p>{installQuery.trim() ? t('marketplace.noResults', '未找到相关技能') : t('marketplace.emptyPrompt', '输入关键词搜索技能')}</p>
               </div>
             )}
           </div>
