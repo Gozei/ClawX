@@ -49,6 +49,7 @@ export function UpdateSettings() {
     switch (status) {
       case 'checking':
       case 'downloading':
+      case 'installing':
         return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />;
       case 'available':
         return <Download className="h-4 w-4 text-primary" />;
@@ -74,6 +75,8 @@ export function UpdateSettings() {
         return t('updates.status.available', { version: updateInfo?.version });
       case 'downloaded':
         return t('updates.status.downloaded', { version: updateInfo?.version });
+      case 'installing':
+        return t('updates.status.installing');
       case 'error':
         return error || t('updates.status.failed');
       case 'not-available':
@@ -97,6 +100,13 @@ export function UpdateSettings() {
           <Button disabled variant="outline" size="sm">
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
             {t('updates.action.downloading')}
+          </Button>
+        );
+      case 'installing':
+        return (
+          <Button disabled variant="outline" size="sm">
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            {t('updates.action.installing')}
           </Button>
         );
       case 'available':
@@ -201,7 +211,7 @@ export function UpdateSettings() {
       )}
 
       {/* Error Details */}
-      {status === 'error' && error && (
+      {error && (status === 'error' || status === 'downloaded') && (
         <div className="rounded-lg bg-red-50 dark:bg-red-900/10 p-4 text-red-600 dark:text-red-400 text-sm">
           <p className="font-medium mb-1">{t('updates.errorDetails')}</p>
           <p>{error}</p>

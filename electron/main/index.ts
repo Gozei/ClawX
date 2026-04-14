@@ -20,7 +20,7 @@ import { ClawHubService } from '../gateway/clawhub';
 import { ensureClawXContext, repairClawXOnlyBootstrapFiles } from '../utils/openclaw-workspace';
 import { syncAllAgentWorkspaceStudioContexts } from '../utils/agent-config';
 import { autoInstallCliIfNeeded, generateCompletionCache, installCompletionToProfile } from '../utils/openclaw-cli';
-import { isQuitting, setQuitting } from './app-state';
+import { isQuitting, isUpdateInstallQuit, setQuitting } from './app-state';
 import { applyProxySettings } from './proxy';
 import { syncLaunchAtStartupSettingFromStore } from './launch-at-startup';
 import {
@@ -79,6 +79,10 @@ app.disableHardwareAcceleration();
 // Must be called before app.whenReady() / before any window is created.
 if (process.platform === 'linux') {
   (app as Electron.App & { setDesktopName?: (name: string) => void }).setDesktopName?.('clawx.desktop');
+  // Linux desktop environments are more likely to surface Chromium's hang
+  // monitor during update handoff. Disable it so brief installer waits do not
+  // trigger a misleading "not responding" prompt.
+  app.commandLine.appendSwitch('disable-hang-monitor');
 }
 
 // Prevent multiple instances of the app from running simultaneously.
@@ -635,7 +639,10 @@ if (gotTheLock) {
   });
 
   app.on('before-quit', (event) => {
-    setQuitting();
+    const updateInstallQuit = isUpdateInstallQuit();
+    if (!updateInstallQuit) {
+      setQuitting();
+    }
     const action = requestQuitLifecycleAction(quitLifecycleState);
 
     if (action === 'allow-quit') {
@@ -656,18 +663,31 @@ if (gotTheLock) {
       logger.warn('gatewayManager.stop() error during quit:', err);
     });
     const timeoutPromise = new Promise<'timeout'>((resolve) => {
-      setTimeout(() => resolve('timeout'), 5000);
+      setTimeout(() => resolve('timeout'), updateInstallQuit ? 1200 : 5000);
     });
 
     void Promise.race([stopPromise.then(() => 'stopped' as const), timeoutPromise]).then((result) => {
       if (result === 'timeout') {
-        logger.warn('Gateway shutdown timed out during app quit; proceeding with forced quit');
+        logger.warn(
+          updateInstallQuit
+            ? 'Gateway shutdown timed out during update install; forcing quit quickly so the installer can continue'
+            : 'Gateway shutdown timed out during app quit; proceeding with forced quit',
+        );
         void gatewayManager.forceTerminateOwnedProcessForQuit().then((terminated) => {
           if (terminated) {
-            logger.warn('Forced gateway process termination completed after quit timeout');
+            logger.warn(
+              updateInstallQuit
+                ? 'Forced gateway process termination completed for update install'
+                : 'Forced gateway process termination completed after quit timeout',
+            );
           }
         }).catch((err) => {
-          logger.warn('Forced gateway termination failed after quit timeout:', err);
+          logger.warn(
+            updateInstallQuit
+              ? 'Forced gateway termination failed during update install:'
+              : 'Forced gateway termination failed after quit timeout:',
+            err,
+          );
         });
       }
       markQuitCleanupCompleted(quitLifecycleState);

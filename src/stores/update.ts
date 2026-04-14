@@ -27,6 +27,7 @@ export type UpdateStatus =
   | 'not-available'
   | 'downloading'
   | 'downloaded'
+  | 'installing'
   | 'error';
 
 interface UpdateState {
@@ -38,12 +39,13 @@ interface UpdateState {
   isInitialized: boolean;
   /** Seconds remaining before auto-install, or null if inactive. */
   autoInstallCountdown: number | null;
+  installPhaseStartedAt: number | null;
 
   // Actions
   init: () => Promise<void>;
   checkForUpdates: () => Promise<void>;
   downloadUpdate: () => Promise<void>;
-  installUpdate: () => void;
+  installUpdate: () => Promise<void>;
   cancelAutoInstall: () => Promise<void>;
   setChannel: (channel: 'stable' | 'beta' | 'dev') => Promise<void>;
   setAutoDownload: (enable: boolean) => Promise<void>;
@@ -58,6 +60,7 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
   error: null,
   isInitialized: false,
   autoInstallCountdown: null,
+  installPhaseStartedAt: null,
 
   init: async () => {
     if (get().isInitialized) return;
@@ -83,6 +86,7 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
         updateInfo: status.info || null,
         progress: status.progress || null,
         error: status.error || null,
+        installPhaseStartedAt: status.status === 'installing' ? Date.now() : null,
       });
     } catch (error) {
       console.error('Failed to get update status:', error);
@@ -103,6 +107,9 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
         updateInfo: status.info || null,
         progress: status.progress || null,
         error: status.error || null,
+        installPhaseStartedAt: status.status === 'installing'
+          ? (get().installPhaseStartedAt ?? Date.now())
+          : null,
       });
     });
 
@@ -186,8 +193,28 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
     }
   },
 
-  installUpdate: () => {
-    void invokeIpc('update:install');
+  installUpdate: async () => {
+    set({
+      status: 'installing',
+      error: null,
+      installPhaseStartedAt: Date.now(),
+    });
+    try {
+      const result = await invokeIpc<{ success: boolean; error?: string }>('update:install');
+      if (!result?.success) {
+        set({
+          status: 'downloaded',
+          error: result?.error || 'Failed to start update installation',
+          installPhaseStartedAt: null,
+        });
+      }
+    } catch (error) {
+      set({
+        status: 'downloaded',
+        error: String(error),
+        installPhaseStartedAt: null,
+      });
+    }
   },
 
   cancelAutoInstall: async () => {
@@ -214,5 +241,5 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
     }
   },
 
-  clearError: () => set({ error: null, status: 'idle' }),
+  clearError: () => set({ error: null, status: 'idle', installPhaseStartedAt: null }),
 }));

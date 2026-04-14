@@ -16,7 +16,7 @@ import { setQuitting } from './app-state';
 const OSS_BASE_URL = 'https://deep-ai-worker-1253696187.cos.ap-guangzhou.myqcloud.com';
 
 export interface UpdateStatus {
-  status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
+  status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'installing' | 'error';
   info?: UpdateInfo;
   progress?: ProgressInfo;
   error?: string;
@@ -281,7 +281,25 @@ export class AppUpdater extends EventEmitter {
    */
   quitAndInstall(): void {
     logger.info('[Updater] quitAndInstall called');
-    setQuitting();
+    this.clearAutoInstallTimer();
+    this.updateStatus({
+      status: 'installing',
+      info: this.status.info,
+      progress: undefined,
+      error: undefined,
+    });
+    this.sendToRenderer('update:install-started', {
+      platform: process.platform,
+      version: this.status.info?.version,
+    });
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.setProgressBar(2);
+      this.mainWindow.setClosable(true);
+      this.mainWindow.setSkipTaskbar(true);
+      this.mainWindow.blur();
+      this.mainWindow.hide();
+    }
+    setQuitting(true, 'update-install');
     autoUpdater.quitAndInstall();
   }
 
