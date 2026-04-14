@@ -14,7 +14,13 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { ChatToolbar } from './ChatToolbar';
-import { extractImages, extractText, extractThinking, extractToolUse, mergeThinkingMessages } from './message-utils';
+import {
+  assistantMessageShowsInChat,
+  extractImages,
+  extractText,
+  extractThinking,
+  extractToolUse,
+} from './message-utils';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { useBranding } from '@/lib/branding';
@@ -125,10 +131,6 @@ export function Chat() {
   const displayHistoryMessages = useMemo(() => (
     trimDeferredHistoryForActiveTurn(deferredHistoryMessages, activeTurnUserMessage)
   ), [activeTurnUserMessage, deferredHistoryMessages]);
-  const mergedHistoryMessages = useMemo(
-    () => mergeThinkingMessages(displayHistoryMessages),
-    [displayHistoryMessages],
-  );
   const activeTurnProcessMessages = activeTurnBuffer?.processMessages ?? fallbackProcessMessages;
   const activeTurnAssistantMessages = activeTurnBuffer?.assistantMessages ?? fallbackAssistantMessages;
   const persistedActiveFinalMessage = activeTurnBuffer?.persistedFinalMessage ?? fallbackPersistedFinalMessage;
@@ -214,7 +216,7 @@ export function Chat() {
           ) : (
             <>
               <HistoryMessages
-                messages={mergedHistoryMessages}
+                messages={displayHistoryMessages}
                 showThinking={showThinking}
                 chatProcessDisplayMode={chatProcessDisplayMode}
                 assistantMessageStyle={assistantMessageStyle}
