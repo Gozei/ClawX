@@ -75,7 +75,11 @@ function removeDeletedTarget(groups: ChannelGroupItem[], target: DeleteTarget): 
   return groups.filter((group) => group.channelType !== target.channelType);
 }
 
-export function Channels() {
+type ChannelsProps = {
+  embedded?: boolean;
+};
+
+export function Channels({ embedded = false }: ChannelsProps) {
   const { t } = useTranslation('channels');
   const gatewayStatus = useGatewayStore((state) => state.status);
   const lastGatewayStateRef = useRef(gatewayStatus.state);
@@ -226,15 +230,27 @@ export function Channels() {
 
   if (loading && !hasStableValue) {
     return (
-      <div data-testid="channels-page" className="flex flex-col -m-6 dark:bg-background min-h-[calc(100vh-2.5rem)] items-center justify-center">
+      <div
+        data-testid="channels-page"
+        className={cn(
+          'flex flex-col dark:bg-background items-center justify-center',
+          embedded ? 'h-full min-h-0' : '-m-6 min-h-[calc(100vh-2.5rem)]',
+        )}
+      >
         <LoadingSpinner size="lg" />
       </div>
     );
   }
 
   return (
-    <div data-testid="channels-page" className="flex flex-col -m-6 dark:bg-background h-[calc(100vh-2.5rem)] overflow-hidden">
-      <div className="w-full max-w-5xl mx-auto flex flex-col h-full p-10 pt-16">
+    <div
+      data-testid="channels-page"
+      className={cn(
+        'flex flex-col dark:bg-background overflow-hidden',
+        embedded ? 'h-full min-h-0' : '-m-6 h-[calc(100vh-2.5rem)]',
+      )}
+    >
+      <div className={cn('w-full max-w-5xl mx-auto flex flex-col h-full', embedded ? 'p-6 md:p-8 pt-6' : 'p-10 pt-16')}>
         <PageHeader
           titleTestId="channels-page-title"
           title={t('title')}

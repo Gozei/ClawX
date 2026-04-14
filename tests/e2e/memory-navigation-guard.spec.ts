@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { closeElectronApp, expect, getStableWindow, test } from './fixtures/electron';
+import { closeElectronApp, expect, getStableWindow, openChannelsFromSettings, openModelsFromSettings, openSettingsHub, test } from './fixtures/electron';
 
 type ProcessSample = {
   rssMb: number;
@@ -19,10 +19,10 @@ const MAX_RSS_GROWTH_MB = 180;
 const MAX_PEAK_OVER_BASELINE_MB = 240;
 
 const routes = [
-  { route: '/models', navTestId: 'sidebar-nav-models', pageTestId: 'models-page' },
-  { route: '/agents', navTestId: 'sidebar-nav-agents', pageTestId: 'agents-page' },
-  { route: '/channels', navTestId: 'sidebar-nav-channels', pageTestId: 'channels-page' },
-  { route: '/settings', navTestId: 'sidebar-nav-settings', pageTestId: 'settings-page' },
+  { route: '/models', pageTestId: 'models-page', navigate: openModelsFromSettings },
+  { route: '/agents', pageTestId: 'agents-page', navigate: async (page: Awaited<ReturnType<typeof getStableWindow>>) => { await page.getByTestId('sidebar-nav-agents').click(); } },
+  { route: '/channels', pageTestId: 'channels-page', navigate: openChannelsFromSettings },
+  { route: '/settings', pageTestId: 'settings-page', navigate: openSettingsHub },
 ] as const;
 
 function collectDescendantPids(rootPid: number): number[] {
@@ -95,7 +95,7 @@ test.describe('Deep AI Worker navigation memory guard', () => {
 
       for (let cycle = 1; cycle <= NAVIGATION_CYCLES; cycle += 1) {
         for (const routeConfig of routes) {
-          await page.getByTestId(routeConfig.navTestId).click();
+          await routeConfig.navigate(page);
           await expect(page.getByTestId(routeConfig.pageTestId)).toBeVisible();
           await page.waitForTimeout(SETTLE_DELAY_MS);
 

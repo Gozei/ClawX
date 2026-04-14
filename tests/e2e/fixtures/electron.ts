@@ -191,6 +191,29 @@ export async function completeSetup(page: Page): Promise<void> {
   await expect(page.getByTestId('main-layout')).toBeVisible();
 }
 
+export async function openSettingsHub(page: Page): Promise<void> {
+  await page.getByTestId('sidebar-nav-settings').click();
+  await expect(page.getByTestId('settings-hub-sheet-container')).toBeVisible();
+  await expect(page.getByTestId('settings-hub-menu-settings')).toBeVisible();
+}
+
+export async function closeSettingsHub(page: Page): Promise<void> {
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('settings-hub-sheet-container')).toHaveCount(0);
+}
+
+export async function openModelsFromSettings(page: Page): Promise<void> {
+  await openSettingsHub(page);
+  await page.getByTestId('settings-hub-menu-models').click();
+  await expect(page.getByTestId('models-page')).toBeVisible();
+}
+
+export async function openChannelsFromSettings(page: Page): Promise<void> {
+  await openSettingsHub(page);
+  await page.getByTestId('settings-hub-menu-channels').click();
+  await expect(page.getByTestId('channels-page')).toBeVisible();
+}
+
 export { closeElectronApp };
 export { getStableWindow };
 export { expect };

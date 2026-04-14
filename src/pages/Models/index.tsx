@@ -29,7 +29,11 @@ const WINDOWS_USAGE_FETCH_MAX_ATTEMPTS = 3;
 const USAGE_FETCH_RETRY_DELAY_MS = 1500;
 const USAGE_AUTO_REFRESH_INTERVAL_MS = 15_000;
 
-export function Models() {
+type ModelsProps = {
+  embedded?: boolean;
+};
+
+export function Models({ embedded = false }: ModelsProps) {
   const { t } = useTranslation(['dashboard', 'settings']);
   const gatewayStatus = useGatewayStore((state) => state.status);
   const devModeUnlocked = useSettingsStore((state) => state.devModeUnlocked);
@@ -282,8 +286,14 @@ export function Models() {
   const usageRefreshing = isGatewayRunning && fetchState.status === 'loading' && visibleUsageHistory.length > 0;
 
   return (
-    <div data-testid="models-page" className="flex flex-col -m-6 dark:bg-background h-[calc(100vh-2.5rem)] overflow-hidden">
-      <div className="w-full max-w-5xl mx-auto flex flex-col h-full p-10 pt-16">
+    <div
+      data-testid="models-page"
+      className={cn(
+        'flex flex-col dark:bg-background overflow-hidden',
+        embedded ? 'h-full min-h-0' : '-m-6 h-[calc(100vh-2.5rem)]',
+      )}
+    >
+      <div className={cn('w-full max-w-5xl mx-auto flex flex-col h-full', embedded ? 'p-6 md:p-8 pt-6' : 'p-10 pt-16')}>
         
         <PageHeader
           title={t('dashboard:models.title')}

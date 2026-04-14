@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { completeSetup, expect, test } from './fixtures/electron';
+import { completeSetup, expect, openModelsFromSettings, test } from './fixtures/electron';
 
 const TEST_PROVIDER_ID = 'moonshot-e2e';
 const TEST_PROVIDER_LABEL = 'Moonshot E2E';
@@ -177,7 +177,7 @@ test.describe('Deep AI Worker provider lifecycle', () => {
     await completeSetup(page);
     await seedTestProvider(page);
 
-    await page.getByTestId('sidebar-nav-models').click();
+    await openModelsFromSettings(page);
     await expect(page.getByTestId('providers-settings')).toBeVisible();
     await expect(page.getByTestId(`provider-card-${TEST_PROVIDER_ID}`)).toHaveCSS('border-top-width', '1px');
     await expect(page.getByTestId(`provider-card-${TEST_PROVIDER_ID}`)).toContainText(TEST_PROVIDER_LABEL);
@@ -193,7 +193,7 @@ test.describe('Deep AI Worker provider lifecycle', () => {
     await completeSetup(page);
     await seedTestProvider(page);
 
-    await page.getByTestId('sidebar-nav-models').click();
+    await openModelsFromSettings(page);
     await expect(page.getByTestId(`provider-card-${TEST_PROVIDER_ID}`)).toContainText(TEST_PROVIDER_LABEL);
 
     await page.getByTestId(`provider-card-${TEST_PROVIDER_ID}`).hover();
@@ -208,7 +208,7 @@ test.describe('Deep AI Worker provider lifecycle', () => {
       await relaunchedPage.waitForLoadState('domcontentloaded');
       await expect(relaunchedPage.getByTestId('main-layout')).toBeVisible();
 
-      await relaunchedPage.getByTestId('sidebar-nav-models').click();
+      await openModelsFromSettings(relaunchedPage);
       await expect(relaunchedPage.getByTestId('providers-settings')).toBeVisible();
       await expect(relaunchedPage.getByTestId(`provider-card-${TEST_PROVIDER_ID}`)).toHaveCount(0);
       await expect(relaunchedPage.getByText(TEST_PROVIDER_LABEL)).toHaveCount(0);
@@ -224,7 +224,7 @@ test.describe('Deep AI Worker provider lifecycle', () => {
       await completeSetup(page);
       await seedCustomProvider(page, mockServer.baseUrl);
 
-      await page.getByTestId('sidebar-nav-models').click();
+      await openModelsFromSettings(page);
       await expect(page.getByTestId('providers-settings')).toBeVisible();
       const providerCard = page.getByTestId(`provider-card-${TEST_CUSTOM_PROVIDER_ID}`);
       await expect(providerCard).toContainText(TEST_CUSTOM_PROVIDER_LABEL);
@@ -302,7 +302,7 @@ test.describe('Deep AI Worker provider lifecycle', () => {
     await completeSetup(page);
     await seedMergedCustomProviders(page);
 
-    await page.getByTestId('sidebar-nav-models').click();
+    await openModelsFromSettings(page);
     await expect(page.getByTestId('providers-settings')).toBeVisible();
 
     const providerCard = page.locator('[data-testid^="provider-card-"]').filter({ hasText: TEST_MERGED_PROVIDER_LABEL }).first();
@@ -319,4 +319,3 @@ test.describe('Deep AI Worker provider lifecycle', () => {
     await expect(providerCard).toContainText('qwen3.5-plus');
   });
 });
-

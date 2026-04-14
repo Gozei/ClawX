@@ -1,6 +1,44 @@
 {
   "title": "Settings",
   "subtitle": "Configure your {{appName}} experience",
+  "settingsHub": {
+    "title": "Settings Menu",
+    "subtitle": "Manage models, channels, appearance, and system settings from one place.",
+    "menu": {
+      "models": "Models",
+      "channels": "Channels",
+      "theme": "Theme",
+      "language": "Language",
+      "checkUpdates": "Check for Updates",
+      "settings": "Settings",
+      "console": ">_ OpenClaw Console"
+    },
+    "theme": {
+      "light": "light",
+      "dark": "dark",
+      "changed": "Switched to {{theme}} theme"
+    },
+    "language": {
+      "changed": "Language switched to {{language}}"
+    },
+    "update": {
+      "checking": "Checking",
+      "downloading": "Downloading",
+      "available": "New version",
+      "latest": "You already have the latest version",
+      "failed": "Failed to check for updates",
+      "dialogTitle": "Update Available",
+      "dialogMessage": "A newer version v{{version}} is available. Download it now?",
+      "downloadedMessage": "Version v{{version}} has finished downloading. Click to install and restart the app.",
+      "downloadedReady": "The update has finished downloading. Click to install and restart the app.",
+      "confirm": "Update Now",
+      "installing": "Installing and restarting...",
+      "started": "Update download started"
+    },
+    "console": {
+      "failed": "Failed to open OpenClaw Console"
+    }
+  },
   "appearance": {
     "title": "General",
     "description": "Customize the look and feel",

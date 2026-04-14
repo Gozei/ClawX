@@ -7,7 +7,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
-  Network,
   Bot,
   Puzzle,
   Clock,
@@ -15,9 +14,6 @@ import {
   PanelLeftClose,
   PanelLeft,
   Plus,
-  Terminal,
-  ExternalLink,
-  Cpu,
   MoreHorizontal,
   Pin,
 } from 'lucide-react';
@@ -29,10 +25,10 @@ import { useAgentsStore } from '@/stores/agents';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { hostApiFetch } from '@/lib/host-api';
 import { useTranslation } from 'react-i18next';
 import { AppLogo } from '@/components/branding/AppLogo';
 import { useBranding } from '@/lib/branding';
+import { SettingsHub } from '@/components/settings/SettingsHub';
 
 interface NavItemProps {
   to: string;
@@ -136,28 +132,12 @@ export function Sidebar() {
   const getSessionLabel = (key: string, displayName?: string, label?: string) =>
     sessionLabels[key] ?? label ?? displayName ?? key;
 
-  const openDevConsole = async () => {
-    try {
-      const result = await hostApiFetch<{
-        success: boolean;
-        url?: string;
-        error?: string;
-      }>('/api/gateway/control-ui');
-      if (result.success && result.url) {
-        window.electron.openExternal(result.url);
-      } else {
-        console.error('Failed to get Dev Console URL:', result.error);
-      }
-    } catch (err) {
-      console.error('Error opening Dev Console:', err);
-    }
-  };
-
   const { t, i18n } = useTranslation(['common', 'chat']);
   const [sessionToDelete, setSessionToDelete] = useState<{ key: string; label: string } | null>(null);
   const [editingSessionKey, setEditingSessionKey] = useState<string | null>(null);
   const [editingSessionName, setEditingSessionName] = useState('');
   const [openSessionMenuKey, setOpenSessionMenuKey] = useState<string | null>(null);
+  const [settingsHubOpen, setSettingsHubOpen] = useState(false);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
   const isSubmittingRenameRef = useRef(false);
@@ -194,6 +174,21 @@ export function Sidebar() {
       document.removeEventListener('keydown', handleEscape);
     };
   }, [openSessionMenuKey]);
+
+  useEffect(() => {
+    if (!settingsHubOpen) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSettingsHubOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [settingsHubOpen]);
 
   const agentNameById = useMemo(
     () => Object.fromEntries((agents ?? []).map((agent) => [agent.id, agent.name])),
@@ -426,9 +421,7 @@ export function Sidebar() {
 
   const navItems = [
     { to: '/dashboard', icon: <LayoutDashboard className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.dashboard'), testId: 'sidebar-nav-dashboard' },
-    { to: '/models', icon: <Cpu className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.models'), testId: 'sidebar-nav-models' },
     { to: '/agents', icon: <Bot className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.agents'), testId: 'sidebar-nav-agents' },
-    { to: '/channels', icon: <Network className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.channels'), testId: 'sidebar-nav-channels' },
     { to: '/skills', icon: <Puzzle className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.skills'), testId: 'sidebar-nav-skills' },
     { to: '/cron', icon: <Clock className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.cronTasks'), testId: 'sidebar-nav-cron' },
   ];
@@ -523,49 +516,34 @@ export function Sidebar() {
       )}
 
       {/* Footer */}
-      <div className="mt-auto border-t border-black/5 p-2.5">
-        <NavLink
-            to="/settings"
-            data-testid="sidebar-nav-settings"
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-all duration-200',
-                'text-foreground/78 hover:bg-[#eef3fb] dark:hover:bg-white/5',
-                isActive && 'bg-white text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10',
-                sidebarCollapsed ? 'justify-center px-0' : ''
-              )
-            }
-          >
-          {({ isActive }) => (
-            <>
-              <div className={cn("flex shrink-0 items-center justify-center", isActive ? "text-primary" : "text-muted-foreground")}>
-                <SettingsIcon className="h-[18px] w-[18px]" strokeWidth={2} />
-              </div>
-              {!sidebarCollapsed && <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{t('sidebar.settings')}</span>}
-            </>
-          )}
-        </NavLink>
-
+      <div className="relative mt-auto border-t border-black/5 p-2.5">
         <Button
-          data-testid="sidebar-open-dev-console"
+          data-testid="sidebar-nav-settings"
           variant="ghost"
           className={cn(
-            'mt-1 flex h-auto w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-all duration-200',
+            'flex h-auto w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-all duration-200',
             'text-foreground/78 hover:bg-[#eef3fb] dark:hover:bg-white/5',
-            sidebarCollapsed ? 'justify-center px-0' : 'justify-start'
+            sidebarCollapsed ? 'justify-center px-0' : 'justify-start',
           )}
-          onClick={openDevConsole}
+          onClick={() => setSettingsHubOpen(true)}
         >
           <div className="flex shrink-0 items-center justify-center text-muted-foreground">
-            <Terminal className="h-[18px] w-[18px]" strokeWidth={2} />
+            <SettingsIcon className="h-[18px] w-[18px]" strokeWidth={2} />
           </div>
-          {!sidebarCollapsed && (
-            <>
-              <span className="flex-1 text-left overflow-hidden text-ellipsis whitespace-nowrap">{t('common:sidebar.openClawPage')}</span>
-              <ExternalLink className="h-3 w-3 shrink-0 ml-auto opacity-50 text-muted-foreground" />
-            </>
-          )}
+          {!sidebarCollapsed && <span className="flex-1 text-left overflow-hidden text-ellipsis whitespace-nowrap">{t('sidebar.settings')}</span>}
         </Button>
+
+        {settingsHubOpen && (
+          <div
+            data-testid="settings-hub-sheet-container"
+            className="absolute bottom-full left-2.5 z-[130] mb-2 flex w-fit flex-col bg-transparent"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="w-fit">
+              <SettingsHub mode="sheet" onRequestClose={() => setSettingsHubOpen(false)} />
+            </div>
+          </div>
+        )}
       </div>
 
       <ConfirmDialog
@@ -583,6 +561,14 @@ export function Sidebar() {
         }}
         onCancel={() => setSessionToDelete(null)}
       />
+
+      {settingsHubOpen && (
+        <div
+          className="fixed inset-0 z-[120] bg-black/28 dark:bg-black/52"
+          onClick={() => setSettingsHubOpen(false)}
+        />
+      )}
+
     </aside>
   );
 }
