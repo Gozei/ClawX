@@ -19,6 +19,7 @@ import {
   ExternalLink,
   Cpu,
   MoreHorizontal,
+  Pin,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
@@ -32,14 +33,6 @@ import { hostApiFetch } from '@/lib/host-api';
 import { useTranslation } from 'react-i18next';
 import { AppLogo } from '@/components/branding/AppLogo';
 import { useBranding } from '@/lib/branding';
-
-type SessionBucketKey =
-  | 'today'
-  | 'yesterday'
-  | 'withinWeek'
-  | 'withinTwoWeeks'
-  | 'withinMonth'
-  | 'older';
 
 interface NavItemProps {
   to: string;
@@ -89,24 +82,6 @@ function NavItem({ to, icon, label, badge, collapsed, onClick, testId }: NavItem
   );
 }
 
-function getSessionBucket(activityMs: number, nowMs: number): SessionBucketKey {
-  if (!activityMs || activityMs <= 0) return 'older';
-
-  const now = new Date(nowMs);
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
-
-  if (activityMs >= startOfToday) return 'today';
-  if (activityMs >= startOfYesterday) return 'yesterday';
-
-  const daysAgo = (startOfToday - activityMs) / (24 * 60 * 60 * 1000);
-  if (daysAgo <= 7) return 'withinWeek';
-  if (daysAgo <= 14) return 'withinTwoWeeks';
-  if (daysAgo <= 30) return 'withinMonth';
-  return 'older';
-}
-
-const INITIAL_NOW_MS = Date.now();
 const SESSION_NAME_MAX_CHARS = 30;
 
 function limitSessionName(value: string): string {
@@ -180,20 +155,12 @@ export function Sidebar() {
 
   const { t, i18n } = useTranslation(['common', 'chat']);
   const [sessionToDelete, setSessionToDelete] = useState<{ key: string; label: string } | null>(null);
-  const [nowMs, setNowMs] = useState(INITIAL_NOW_MS);
   const [editingSessionKey, setEditingSessionKey] = useState<string | null>(null);
   const [editingSessionName, setEditingSessionName] = useState('');
   const [openSessionMenuKey, setOpenSessionMenuKey] = useState<string | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
   const isSubmittingRenameRef = useRef(false);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 60 * 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     void fetchAgents();
@@ -360,9 +327,20 @@ export function Sidebar() {
         {!isEditing && (
           <div
             ref={isMenuOpen ? sessionMenuRef : null}
-            className="absolute right-1"
+            className="absolute right-1 flex items-center"
             data-testid={`sidebar-session-menu-root-${s.key}`}
           >
+            {s.pinned && (
+              <div
+                data-testid={`sidebar-session-pin-indicator-${s.key}`}
+                className={cn(
+                  'pointer-events-none absolute right-0 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/60 transition-all',
+                  isMenuOpen ? 'opacity-0' : 'opacity-100 group-hover:opacity-0',
+                )}
+              >
+                <Pin className="h-3.5 w-3.5 fill-current rotate-45" />
+              </div>
+            )}
             <button
               aria-label="Session actions"
               data-testid={`sidebar-session-menu-trigger-${s.key}`}
@@ -434,19 +412,6 @@ export function Sidebar() {
     );
   };
 
-  const sessionBuckets: Array<{ key: SessionBucketKey; label: string; sessions: typeof sessions }> = [
-    { key: 'today', label: t('chat:historyBuckets.today'), sessions: [] },
-    { key: 'yesterday', label: t('chat:historyBuckets.yesterday'), sessions: [] },
-    { key: 'withinWeek', label: t('chat:historyBuckets.withinWeek'), sessions: [] },
-    { key: 'withinTwoWeeks', label: t('chat:historyBuckets.withinTwoWeeks'), sessions: [] },
-    { key: 'withinMonth', label: t('chat:historyBuckets.withinMonth'), sessions: [] },
-    { key: 'older', label: t('chat:historyBuckets.older'), sessions: [] },
-  ];
-  const sessionBucketMap = Object.fromEntries(sessionBuckets.map((bucket) => [bucket.key, bucket])) as Record<
-    SessionBucketKey,
-    (typeof sessionBuckets)[number]
-  >;
-
   const pinnedSessions = [...sessions]
     .filter((session) => session.pinned)
     .sort((a, b) => {
@@ -458,11 +423,6 @@ export function Sidebar() {
   const unpinnedSessions = [...sessions]
     .filter((session) => !session.pinned)
     .sort((a, b) => (sessionLastActivity[b.key] ?? 0) - (sessionLastActivity[a.key] ?? 0));
-
-  for (const session of unpinnedSessions) {
-    const bucketKey = getSessionBucket(sessionLastActivity[session.key] ?? 0, nowMs);
-    sessionBucketMap[bucketKey].sessions.push(session);
-  }
 
   const navItems = [
     { to: '/dashboard', icon: <LayoutDashboard className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.dashboard'), testId: 'sidebar-nav-dashboard' },
@@ -545,25 +505,20 @@ export function Sidebar() {
 
       {/* Session list — below Settings, only when expanded */}
       {!sidebarCollapsed && sessions.length > 0 && (
-        <div className="mt-3 flex-1 overflow-y-auto overflow-x-hidden px-2.5 space-y-1 pb-3">
+        <div className="mt-3 flex-1 overflow-y-auto overflow-x-hidden px-2.5 pb-3">
           {pinnedSessions.length > 0 && (
-            <div className="pt-2" data-testid="sidebar-pinned-sessions">
+            <div data-testid="sidebar-pinned-sessions">
               <div className="px-3 pb-1 text-[11px] font-medium text-muted-foreground/70 tracking-[0.01em]">
                 Pinned
               </div>
               {pinnedSessions.map(renderSessionRow)}
             </div>
           )}
-          {sessionBuckets.map((bucket) => (
-            bucket.sessions.length > 0 ? (
-              <div key={bucket.key} className="pt-2">
-                <div className="px-3 pb-1 text-[11px] font-medium text-muted-foreground/70 tracking-[0.01em]">
-                  {bucket.label}
-                </div>
-                {bucket.sessions.map(renderSessionRow)}
-              </div>
-            ) : null
-          ))}
+          {unpinnedSessions.length > 0 && (
+            <div data-testid="sidebar-session-list">
+              {unpinnedSessions.map(renderSessionRow)}
+            </div>
+          )}
         </div>
       )}
 

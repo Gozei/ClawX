@@ -3,6 +3,26 @@ import { extractText } from '@/pages/Chat/message-utils';
 import type { RawMessage } from '@/stores/chat';
 
 describe('chat message utils', () => {
+  it('hides heartbeat-only prompt injection from user-visible chat text', () => {
+    const message: RawMessage = {
+      id: 'heartbeat-only-1',
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: [
+            '如果存在 HEARTBEAT.md（工作区上下文），请读取并严格遵循。如果当前没有需要处理的事项，请回复 HEARTBEAT_OK。',
+            '读取 HEARTBEAT.md 时，请使用工作区文件 /Users/example/.openclaw/workspace/HEARTBEAT.md。',
+            '当前时间：Monday, April 13th, 2026 - 12:04（Asia/Shanghai）',
+          ].join('\n'),
+        },
+      ],
+      timestamp: 1713000000,
+    };
+
+    expect(extractText(message)).toBe('');
+  });
+
   it('compacts system exec and heartbeat noise in user messages', () => {
     const message: RawMessage = {
       id: 'system-noise-1',

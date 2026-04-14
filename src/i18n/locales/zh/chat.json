@@ -38,6 +38,9 @@
     "composer": {
         "attachFiles": "添加文件",
         "pickAgent": "选择 Role",
+        "selectModel": "切换模型",
+        "switchModel": "切换模型",
+        "messagePlaceholder": "发送消息...",
         "clearTarget": "清除目标 Role",
         "targetChip": "@{{agent}}",
         "agentPickerTitle": "将下一条消息直接发送给其他 Role",
