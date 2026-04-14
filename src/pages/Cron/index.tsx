@@ -222,7 +222,7 @@ function SelectField({ className, children, ...props }: SelectFieldProps) {
     <div className="relative">
       <Select
         className={cn(
-          'h-[44px] rounded-xl border-black/10 dark:border-white/10 bg-background text-[13px] pr-10 [background-image:none] appearance-none',
+          'h-[44px] rounded-lg border-black/10 dark:border-white/10 bg-background text-[13px] pr-10 [background-image:none] appearance-none',
           className,
         )}
         {...props}

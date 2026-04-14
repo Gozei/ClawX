@@ -12,6 +12,7 @@ describe('Settings Store', () => {
       theme: 'system',
       language: 'en',
       sidebarCollapsed: false,
+      sidebarWidth: 256,
       devModeUnlocked: false,
       gatewayAutoStart: true,
       gatewayPort: 18789,
@@ -40,6 +41,12 @@ describe('Settings Store', () => {
     const { setSidebarCollapsed } = useSettingsStore.getState();
     setSidebarCollapsed(true);
     expect(useSettingsStore.getState().sidebarCollapsed).toBe(true);
+  });
+
+  it('should update sidebar width', () => {
+    const { setSidebarWidth } = useSettingsStore.getState();
+    setSidebarWidth(320);
+    expect(useSettingsStore.getState().sidebarWidth).toBe(320);
   });
   
   it('should unlock dev mode', () => {

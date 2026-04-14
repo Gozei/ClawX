@@ -470,6 +470,7 @@ function schedulePendingFinalRecovery(set: ChatStoreSet, get: () => ChatState): 
           streamingMessage: null,
           streamingTools: [],
           pendingToolImages: [],
+          sessionRunningState: updateSessionRunningState(s.sessionRunningState, sessionKey, false),
           error: shouldAppendStreamingSnapshot || canPromoteStreamingAssistant
             ? s.error
             : (s.error || '最终回复还没有成功到达，但你可以继续当前对话。'),
@@ -514,6 +515,7 @@ function finalizeStreamingAssistantIfStale(set: ChatStoreSet, get: () => ChatSta
       pendingFinal: false,
       lastUserMessageAt: null,
       pendingToolImages: [],
+      sessionRunningState: updateSessionRunningState(s.sessionRunningState, state.currentSessionKey, false),
     };
   });
   return true;
@@ -1177,6 +1179,21 @@ function parseSessionPinOrder(value: unknown): number | undefined {
   return undefined;
 }
 
+function normalizeSessionModelRef(model: unknown, modelProvider: unknown): string | undefined {
+  const normalizedModel = typeof model === 'string' ? model.trim() : '';
+  if (!normalizedModel) {
+    return undefined;
+  }
+  if (normalizedModel.includes('/')) {
+    return normalizedModel;
+  }
+  const normalizedProvider = typeof modelProvider === 'string' ? modelProvider.trim() : '';
+  if (!normalizedProvider) {
+    return normalizedModel;
+  }
+  return `${normalizedProvider}/${normalizedModel}`;
+}
+
 async function loadCronFallbackMessages(sessionKey: string, limit = 200): Promise<RawMessage[]> {
   if (!isCronSessionKey(sessionKey)) return [];
   try {
@@ -1198,6 +1215,83 @@ function buildFallbackMainSessionKey(agentId: string): string {
   return `agent:${normalizeAgentId(agentId)}:main`;
 }
 
+function resolveSessionModelSnapshot(agentId: string): string {
+  const { agents, defaultModelRef } = useAgentsStore.getState();
+  const agent = agents.find((item) => item.id === agentId);
+  return (defaultModelRef || agent?.overrideModelRef || agent?.modelRef || '').trim();
+}
+
+function resolveSessionPreferredModel(sessionKey: string): string | null {
+  const chatState = useChatStore.getState();
+  const sessionModel = chatState.sessionModels[sessionKey]
+    || chatState.sessions.find((session) => session.key === sessionKey)?.model;
+  const agentId = getAgentIdFromSessionKey(sessionKey);
+  const { agents, defaultModelRef } = useAgentsStore.getState();
+  const agent = agents.find((item) => item.id === agentId);
+  const preferredModel = (sessionModel || defaultModelRef || agent?.overrideModelRef || agent?.modelRef || '').trim();
+  return preferredModel || null;
+}
+
+async function ensureSessionPreferredModelLoaded(
+  sessionKey: string,
+  set: ChatStoreSet,
+): Promise<void> {
+  const state = useChatStore.getState();
+  const storedSessionModel = state.sessionModels[sessionKey]
+    || state.sessions.find((session) => session.key === sessionKey)?.model;
+  if (storedSessionModel) {
+    return;
+  }
+
+  const existingDefaultModelRef = (useAgentsStore.getState().defaultModelRef || '').trim();
+  if (existingDefaultModelRef) {
+    set((currentState) => {
+      const latestSessionModel = currentState.sessionModels[sessionKey]
+        || currentState.sessions.find((session) => session.key === sessionKey)?.model;
+      if (latestSessionModel) {
+        return {};
+      }
+      return {
+        sessionModels: {
+          ...currentState.sessionModels,
+          [sessionKey]: existingDefaultModelRef,
+        },
+        sessions: currentState.sessions.map((session) => (
+          session.key === sessionKey
+            ? { ...session, model: existingDefaultModelRef }
+            : session
+        )),
+      };
+    });
+    return;
+  }
+
+  await useAgentsStore.getState().fetchAgents();
+  const refreshedDefaultModelRef = (useAgentsStore.getState().defaultModelRef || '').trim();
+  if (!refreshedDefaultModelRef) {
+    return;
+  }
+
+  set((currentState) => {
+    const latestSessionModel = currentState.sessionModels[sessionKey]
+      || currentState.sessions.find((session) => session.key === sessionKey)?.model;
+    if (latestSessionModel) {
+      return {};
+    }
+    return {
+      sessionModels: {
+        ...currentState.sessionModels,
+        [sessionKey]: refreshedDefaultModelRef,
+      },
+      sessions: currentState.sessions.map((session) => (
+        session.key === sessionKey
+          ? { ...session, model: refreshedDefaultModelRef }
+          : session
+      )),
+    };
+  });
+}
+
 function resolveMainSessionKeyForAgent(agentId: string | undefined | null): string | null {
   if (!agentId) return null;
   const normalizedAgentId = normalizeAgentId(agentId);
@@ -1212,22 +1306,93 @@ function ensureSessionEntry(sessions: ChatSession[], sessionKey: string): ChatSe
   return [...sessions, { key: sessionKey, displayName: sessionKey }];
 }
 
-function buildAgentExecutionMetadataForSession(sessionKey: string): string | null {
+function buildAgentExecutionMetadataForSession(sessionKey: string, mode: 'full' | 'model_only' = 'full'): string | null {
   const agentId = getAgentIdFromSessionKey(sessionKey);
   const agent = useAgentsStore.getState().agents.find((item) => item.id === agentId);
   if (!agent) return null;
-  return buildAgentExecutionMetadata(agent);
+  const preferredModel = resolveSessionPreferredModel(sessionKey);
+  const agentForMetadata = mode === 'model_only'
+    ? {
+        ...agent,
+        description: null,
+        objective: null,
+        boundaries: null,
+        outputContract: null,
+        skillIds: [],
+        workflowSteps: [],
+        workflowNodes: [],
+        triggerModes: [],
+        modelRef: preferredModel,
+      }
+    : {
+        ...agent,
+        modelRef: preferredModel || agent.modelRef || null,
+      };
+  return buildAgentExecutionMetadata(agentForMetadata);
 }
 
 function injectAgentExecutionMetadata(message: string, sessionKey: string, isFirstUserMessage: boolean): string {
-  if (!isFirstUserMessage) return message;
-  const metadata = buildAgentExecutionMetadataForSession(sessionKey);
+  const metadata = isFirstUserMessage
+    ? buildAgentExecutionMetadataForSession(sessionKey, 'full')
+    : buildAgentExecutionMetadataForSession(sessionKey, 'model_only');
   if (!metadata) return message;
   return message ? `${metadata}${message}` : metadata;
 }
 
 function clearSessionEntryFromMap<T extends Record<string, unknown>>(entries: T, sessionKey: string): T {
   return Object.fromEntries(Object.entries(entries).filter(([key]) => key !== sessionKey)) as T;
+}
+
+function updateSessionRunningState(
+  sessionRunningState: Record<string, boolean> | undefined,
+  sessionKey: string,
+  isRunning: boolean,
+): Record<string, boolean> {
+  const current = sessionRunningState ?? {};
+  if (!sessionKey) return current;
+  if (isRunning) {
+    if (current[sessionKey]) return current;
+    return {
+      ...current,
+      [sessionKey]: true,
+    };
+  }
+  if (!current[sessionKey]) return current;
+  return clearSessionEntryFromMap(current, sessionKey);
+}
+
+function getSessionIdentity(sessionKey: string | null | undefined): string {
+  if (!sessionKey) return '';
+  if (!sessionKey.startsWith('agent:')) return sessionKey;
+  const parts = sessionKey.split(':');
+  return parts.length >= 3 ? parts.slice(2).join(':') : sessionKey;
+}
+
+function sessionKeysMatch(left: string | null | undefined, right: string | null | undefined): boolean {
+  if (!left || !right) return false;
+  return left === right || getSessionIdentity(left) === getSessionIdentity(right);
+}
+
+function resolveSessionKeyAlias(sessionKey: string, availableSessionKeys: Iterable<string>): string {
+  for (const candidate of availableSessionKeys) {
+    if (sessionKeysMatch(candidate, sessionKey)) {
+      return candidate;
+    }
+  }
+  return sessionKey;
+}
+
+function remapSessionEntries<T>(
+  entries: Record<string, T> | undefined,
+  canonicalBySuffix: Map<string, string>,
+  merge?: (existing: T | undefined, next: T) => T,
+): Record<string, T> {
+  const current = entries ?? {};
+  return Object.entries(current).reduce<Record<string, T>>((nextEntries, [key, value]) => {
+    const normalizedKey = resolveSessionKeyAlias(key, canonicalBySuffix.values());
+    nextEntries[normalizedKey] = merge ? merge(nextEntries[normalizedKey], value) : value;
+    return nextEntries;
+  }, {});
 }
 
 function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boolean {
@@ -1276,6 +1441,7 @@ function buildSessionSwitchPatch(
     | 'sessions'
     | 'sessionLabels'
     | 'sessionLastActivity'
+    | 'sessionRunningState'
   >,
   nextSessionKey: string,
 ): Partial<ChatState> {
@@ -1297,6 +1463,15 @@ function buildSessionSwitchPatch(
     cacheSessionView({ ...state, sendStage: state.sendStage ?? null });
   }
 
+  const syncedLeavingSessionRunningState = updateSessionRunningState(
+    state.sessionRunningState,
+    state.currentSessionKey,
+    state.sending,
+  );
+  const syncedNextSessionRunningState = restoredView.sending
+    ? updateSessionRunningState(syncedLeavingSessionRunningState, nextSessionKey, true)
+    : syncedLeavingSessionRunningState;
+
   return {
     currentSessionKey: nextSessionKey,
     currentAgentId: getAgentIdFromSessionKey(nextSessionKey),
@@ -1307,6 +1482,9 @@ function buildSessionSwitchPatch(
     sessionLastActivity: leavingEmpty
       ? clearSessionEntryFromMap(state.sessionLastActivity, state.currentSessionKey)
       : state.sessionLastActivity,
+    sessionRunningState: leavingEmpty
+      ? clearSessionEntryFromMap(syncedNextSessionRunningState, state.currentSessionKey)
+      : syncedNextSessionRunningState,
     ...restoredView,
   };
 }
@@ -1893,8 +2071,10 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     sessions: [],
     currentSessionKey: DEFAULT_SESSION_KEY,
     currentAgentId: 'main',
+    sessionModels: {},
     sessionLabels: {},
     sessionLastActivity: {},
+    sessionRunningState: {},
 
     showThinking: true,
     thinkingLevel: null,
@@ -1948,7 +2128,8 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             label: s.label ? String(s.label) : undefined,
             displayName: s.displayName ? String(s.displayName) : undefined,
             thinkingLevel: s.thinkingLevel ? String(s.thinkingLevel) : undefined,
-            model: s.model ? String(s.model) : undefined,
+            modelProvider: s.modelProvider ? String(s.modelProvider) : undefined,
+            model: normalizeSessionModelRef(s.model, s.modelProvider),
             updatedAt: parseSessionUpdatedAtMs(s.updatedAt),
             pinned: parseSessionPinned(persistedMetadata[String(s.key || '')]?.pinned ?? s.pinned),
             pinOrder: parseSessionPinOrder(persistedMetadata[String(s.key || '')]?.pinOrder ?? s.pinOrder),
@@ -2006,15 +2187,32 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
               .filter((session) => typeof session.updatedAt === 'number' && Number.isFinite(session.updatedAt))
               .map((session) => [session.key, session.updatedAt!]),
           );
+          const discoveredModels = Object.fromEntries(
+            sessionsWithCurrent
+              .filter((session) => typeof session.model === 'string' && session.model.trim().length > 0)
+              .map((session) => [session.key, session.model!.trim()]),
+          );
 
           set((state) => ({
             sessions: sessionsWithCurrent,
             currentSessionKey: nextSessionKey,
             currentAgentId: getAgentIdFromSessionKey(nextSessionKey),
+            sessionModels: {
+              ...remapSessionEntries(state.sessionModels, canonicalBySuffix),
+              ...discoveredModels,
+            },
+            sessionLabels: remapSessionEntries(state.sessionLabels, canonicalBySuffix),
             sessionLastActivity: {
-              ...state.sessionLastActivity,
+              ...remapSessionEntries(state.sessionLastActivity, canonicalBySuffix, (existing, next) => (
+                typeof existing === 'number' ? Math.max(existing, next) : next
+              )),
               ...discoveredActivity,
             },
+            sessionRunningState: remapSessionEntries(
+              state.sessionRunningState,
+              canonicalBySuffix,
+              (existing, next) => Boolean(existing || next) as boolean,
+            ),
           }));
 
           if (currentSessionKey !== nextSessionKey) {
@@ -2127,8 +2325,10 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       const next = remaining[0];
       set((s) => ({
         sessions: remaining,
+        sessionModels: Object.fromEntries(Object.entries(s.sessionModels).filter(([k]) => k !== key)),
         sessionLabels: Object.fromEntries(Object.entries(s.sessionLabels).filter(([k]) => k !== key)),
         sessionLastActivity: Object.fromEntries(Object.entries(s.sessionLastActivity).filter(([k]) => k !== key)),
+        sessionRunningState: clearSessionEntryFromMap(s.sessionRunningState ?? {}, key),
         messages: [],
         streamingText: '',
         streamingMessage: null,
@@ -2147,8 +2347,10 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     } else {
       set((s) => ({
         sessions: remaining,
+        sessionModels: Object.fromEntries(Object.entries(s.sessionModels).filter(([k]) => k !== key)),
         sessionLabels: Object.fromEntries(Object.entries(s.sessionLabels).filter(([k]) => k !== key)),
         sessionLastActivity: Object.fromEntries(Object.entries(s.sessionLastActivity).filter(([k]) => k !== key)),
+        sessionRunningState: clearSessionEntryFromMap(s.sessionRunningState ?? {}, key),
       }));
     }
   },
@@ -2169,6 +2371,8 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       ?? getCanonicalPrefixFromSessions(sessions)
       ?? DEFAULT_CANONICAL_PREFIX;
     const newKey = `${prefix}:session-${Date.now()}`;
+    const newAgentId = getAgentIdFromSessionKey(newKey);
+    const defaultSessionModel = resolveSessionModelSnapshot(newAgentId);
     clearHistoryIncompleteRetry(currentSessionKey);
     if (leavingEmpty) {
       clearSessionView(currentSessionKey);
@@ -2176,9 +2380,21 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       cacheSessionView(get());
     }
     set((s) => ({
+      sessionRunningState: leavingEmpty
+        ? clearSessionEntryFromMap(
+            updateSessionRunningState(s.sessionRunningState, currentSessionKey, s.sending),
+            currentSessionKey,
+          )
+        : updateSessionRunningState(s.sessionRunningState, currentSessionKey, s.sending),
       currentSessionKey: newKey,
-      currentAgentId: getAgentIdFromSessionKey(newKey),
+      currentAgentId: newAgentId,
       sessions: leavingEmpty ? s.sessions.filter((sess) => sess.key !== currentSessionKey) : s.sessions,
+      sessionModels: {
+        ...(leavingEmpty
+          ? Object.fromEntries(Object.entries(s.sessionModels).filter(([k]) => k !== currentSessionKey))
+          : s.sessionModels),
+        ...(defaultSessionModel ? { [newKey]: defaultSessionModel } : {}),
+      },
       sessionLabels: leavingEmpty
         ? Object.fromEntries(Object.entries(s.sessionLabels).filter(([k]) => k !== currentSessionKey))
         : s.sessionLabels,
@@ -2280,6 +2496,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       sessionLastActivity: Object.fromEntries(
         Object.entries(s.sessionLastActivity).filter(([k]) => k !== currentSessionKey),
       ),
+      sessionRunningState: clearSessionEntryFromMap(s.sessionRunningState ?? {}, currentSessionKey),
     }));
   },
 
@@ -2557,37 +2774,50 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         clearHistoryIncompleteRetry(currentSessionKey);
       }
 
-      set({
-        messages: mergedMessagesForActiveSend,
-        thinkingLevel,
-        loading: false,
-        ...(historyRecentAssistant && !shouldDeferHistoryCurrentTurn
-          ? {
-              sending: false,
-              activeRunId: null,
-              sendStage: null,
-              pendingFinal: false,
-              streamingText: '',
-              streamingMessage: null,
-              streamingTools: [],
-              pendingToolImages: [],
-            }
-          : historyEmptyAssistant && !shouldDeferHistoryCurrentTurn
+      set((state) => {
+        const shouldFinalizeFromHistory = historyRecentAssistant && !shouldDeferHistoryCurrentTurn;
+        const shouldFinalizeEmptyAssistant = historyEmptyAssistant && !shouldDeferHistoryCurrentTurn;
+        const nextIsRunning = shouldFinalizeFromHistory || shouldFinalizeEmptyAssistant
+          ? false
+          : historyIsSendingNow;
+
+        return {
+          messages: mergedMessagesForActiveSend,
+          thinkingLevel,
+          loading: false,
+          sessionRunningState: updateSessionRunningState(
+            state.sessionRunningState,
+            currentSessionKey,
+            nextIsRunning,
+          ),
+          ...(shouldFinalizeFromHistory
             ? {
                 sending: false,
                 activeRunId: null,
                 sendStage: null,
                 pendingFinal: false,
-                lastUserMessageAt: null,
                 streamingText: '',
                 streamingMessage: null,
                 streamingTools: [],
                 pendingToolImages: [],
-                error: EMPTY_ASSISTANT_RESPONSE_ERROR,
               }
-          : shouldEnterHistoryPendingFinal || (shouldDeferHistoryCurrentTurn && deferredMergeResult.appendedProcessCount > 0)
-            ? { pendingFinal: true, sendStage: 'finalizing' }
-            : {}),
+            : shouldFinalizeEmptyAssistant
+              ? {
+                  sending: false,
+                  activeRunId: null,
+                  sendStage: null,
+                  pendingFinal: false,
+                  lastUserMessageAt: null,
+                  streamingText: '',
+                  streamingMessage: null,
+                  streamingTools: [],
+                  pendingToolImages: [],
+                  error: EMPTY_ASSISTANT_RESPONSE_ERROR,
+                }
+              : shouldEnterHistoryPendingFinal || (shouldDeferHistoryCurrentTurn && deferredMergeResult.appendedProcessCount > 0)
+                ? { pendingFinal: true, sendStage: 'finalizing' }
+                : {}),
+        };
       });
 
       // Extract first user message text as a session label for display in the toolbar.
@@ -2704,16 +2934,18 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
 
     const currentSessionKey = targetSessionKey;
     clearHistoryIncompleteRetry(currentSessionKey);
+    await ensureSessionPreferredModelLoaded(currentSessionKey, set);
     const existingMessages = get().messages;
     const isFirstUserMessage = !existingMessages.some((message) => message.role === 'user');
     const baseMessage = trimmed || (attachments?.length ? 'Process the attached file(s).' : '');
     const messageForGateway = injectAgentExecutionMetadata(baseMessage, currentSessionKey, isFirstUserMessage);
+    const visibleUserContent = trimmed || (attachments?.length ? '(file attached)' : '');
 
     // Add user message optimistically (with local file metadata for UI display)
     const nowMs = Date.now();
     const userMsg: RawMessage = {
       role: 'user',
-      content: messageForGateway || (attachments?.length ? '(file attached)' : ''),
+      content: visibleUserContent,
       timestamp: nowMs / 1000,
       id: crypto.randomUUID(),
       _attachedFiles: attachments?.map(a => ({
@@ -2726,16 +2958,17 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     };
       set((s) => ({
         sessions: ensureSessionEntry(s.sessions, currentSessionKey),
-      messages: [...s.messages, userMsg],
-      sending: true,
-      error: null,
-      streamingText: '',
-      streamingMessage: null,
-      streamingTools: [],
-      sendStage: 'sending_to_gateway',
-      pendingFinal: false,
-      lastUserMessageAt: nowMs,
-    }));
+        messages: [...s.messages, userMsg],
+        sending: true,
+        error: null,
+        streamingText: '',
+        streamingMessage: null,
+        streamingTools: [],
+        sendStage: 'sending_to_gateway',
+        pendingFinal: false,
+        lastUserMessageAt: nowMs,
+        sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, true),
+      }));
 
     // Update session label with first user message text as soon as it's sent
     const { sessionLabels, messages, sessions } = get();
@@ -2782,13 +3015,14 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         return;
       }
       clearHistoryPoll();
-      set({
+      set((s) => ({
         error: 'No response received from the model. The provider may be unavailable or the API key may have insufficient quota. Please check your provider settings.',
         sending: false,
         activeRunId: null,
         sendStage: null,
         lastUserMessageAt: null,
-      });
+        sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, false),
+      }));
     };
     setTimeout(checkStuck, 30_000);
 
@@ -2876,6 +3110,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             streamingTools: [],
             pendingFinal: false,
             pendingToolImages: [],
+            sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, false),
           }));
         }
       } else if (result.result?.runId) {
@@ -2906,6 +3141,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           streamingTools: [],
           pendingFinal: false,
           pendingToolImages: [],
+          sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, false),
         }));
       }
     }
@@ -2917,7 +3153,16 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     clearHistoryPoll();
     clearErrorRecoveryTimer();
     const { currentSessionKey } = get();
-    set({ sending: false, streamingText: '', streamingMessage: null, sendStage: null, pendingFinal: false, lastUserMessageAt: null, pendingToolImages: [] });
+    set((s) => ({
+      sending: false,
+      streamingText: '',
+      streamingMessage: null,
+      sendStage: null,
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, false),
+    }));
     set({ streamingTools: [] });
 
     try {
@@ -2936,10 +3181,13 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     const runId = String(event.runId || '');
     const eventState = String(event.state || '');
     const eventSessionKey = event.sessionKey != null ? String(event.sessionKey) : null;
-    const { activeRunId, currentSessionKey } = get();
+    const { activeRunId, currentSessionKey, sessions } = get();
+    const resolvedEventSessionKey = eventSessionKey != null
+      ? resolveSessionKeyAlias(eventSessionKey, [currentSessionKey, ...sessions.map((session) => session.key)])
+      : null;
 
     // Only process events for the current session (when sessionKey is present)
-    if (eventSessionKey != null && eventSessionKey !== currentSessionKey) return;
+    if (resolvedEventSessionKey != null && !sessionKeysMatch(resolvedEventSessionKey, currentSessionKey)) return;
 
     // Only process events for the active run (or if no active run set)
     if (activeRunId && runId && runId !== activeRunId) return;
@@ -2972,7 +3220,13 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       // show loading/streaming in the app when this session has an active run.
       const { sending } = get();
       if (!sending && runId) {
-        set({ sending: true, activeRunId: runId, error: null, sendStage: 'awaiting_runtime' });
+        set((s) => ({
+          sending: true,
+          activeRunId: runId,
+          error: null,
+          sendStage: 'awaiting_runtime',
+          sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, true),
+        }));
       }
     }
 
@@ -2984,7 +3238,13 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         clearHistoryIncompleteRetry(currentSessionKey);
         const { sending: currentSending } = get();
         if (!currentSending && runId) {
-          set({ sending: true, activeRunId: runId, error: null, sendStage: 'awaiting_runtime' });
+          set((s) => ({
+            sending: true,
+            activeRunId: runId,
+            error: null,
+            sendStage: 'awaiting_runtime',
+            sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, true),
+          }));
         }
         break;
       }
@@ -3122,6 +3382,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                 sendStage: 'finalizing',
                 pendingFinal: true,
                 streamingTools,
+                sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, s.sending),
                 ...clearPendingImages,
               } : {
                 streamingText: '',
@@ -3131,6 +3392,11 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                 sendStage: hasOutput ? null : 'finalizing',
                 pendingFinal: hasOutput ? false : true,
                 streamingTools,
+                sessionRunningState: updateSessionRunningState(
+                  s.sessionRunningState,
+                  currentSessionKey,
+                  !hasOutput && s.sending,
+                ),
                 ...clearPendingImages,
               };
             }
@@ -3149,6 +3415,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                 pendingFinal: false,
                 streamingTools,
                 error: null,
+                sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, false),
                 ...clearPendingImages,
               };
             }
@@ -3159,6 +3426,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
               sendStage: 'finalizing',
               pendingFinal: true,
               streamingTools,
+              sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, s.sending),
               ...clearPendingImages,
             } : {
               messages: [...s.messages, msgWithImages],
@@ -3169,6 +3437,11 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
               sendStage: hasOutput ? null : 'finalizing',
               pendingFinal: hasOutput ? false : true,
               streamingTools,
+              sessionRunningState: updateSessionRunningState(
+                s.sessionRunningState,
+                currentSessionKey,
+                !hasOutput && s.sending,
+              ),
               ...clearPendingImages,
             };
           });
@@ -3186,7 +3459,13 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           }
         } else {
           // No message in final event - reload history to get complete data
-          set({ streamingText: '', streamingMessage: null, sendStage: 'finalizing', pendingFinal: true });
+          set((s) => ({
+            streamingText: '',
+            streamingMessage: null,
+            sendStage: 'finalizing',
+            pendingFinal: true,
+            sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, s.sending),
+          }));
           schedulePendingFinalRecovery(set, get);
           get().loadHistory();
         }
@@ -3226,6 +3505,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           sendStage: null,
           pendingFinal: false,
           pendingToolImages: [],
+          sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, wasSending),
         }));
 
         // Don't immediately give up: the Gateway often retries internally
@@ -3241,12 +3521,13 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             if (state.sending && !state.streamingMessage) {
               clearHistoryPoll();
               // Grace period expired with no recovery — finalize the error
-              set({
+              set((s) => ({
                 sending: false,
                 activeRunId: null,
                 sendStage: null,
                 lastUserMessageAt: null,
-              });
+                sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, false),
+              }));
               // One final history reload in case the Gateway completed in the
               // background and we just missed the event.
               state.loadHistory(true);
@@ -3254,7 +3535,13 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           }, ERROR_RECOVERY_GRACE_MS);
         } else {
           clearHistoryPoll();
-          set({ sending: false, activeRunId: null, sendStage: null, lastUserMessageAt: null });
+          set((s) => ({
+            sending: false,
+            activeRunId: null,
+            sendStage: null,
+            lastUserMessageAt: null,
+            sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, false),
+          }));
         }
         break;
       }
@@ -3264,7 +3551,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         clearErrorRecoveryTimer();
         clearHistoryIncompleteRetry(currentSessionKey);
         clearPendingFinalRecoveryTimer();
-        set({
+        set((s) => ({
           sending: false,
           activeRunId: null,
           streamingText: '',
@@ -3274,7 +3561,8 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           pendingFinal: false,
           lastUserMessageAt: null,
           pendingToolImages: [],
-        });
+          sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, false),
+        }));
         break;
       }
       default: {

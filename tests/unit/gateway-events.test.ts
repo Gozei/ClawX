@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hostApiFetchMock = vi.fn();
 const subscribeHostEventMock = vi.fn();
-const handleChatEventMock = vi.fn();
 
 vi.mock('@/lib/host-api', () => ({
   hostApiFetch: (...args: unknown[]) => hostApiFetchMock(...args),
@@ -10,21 +9,6 @@ vi.mock('@/lib/host-api', () => ({
 
 vi.mock('@/lib/host-events', () => ({
   subscribeHostEvent: (...args: unknown[]) => subscribeHostEventMock(...args),
-}));
-
-vi.mock('@/stores/chat', () => ({
-  useChatStore: {
-    getState: () => ({
-      currentSessionKey: 'agent:main:main',
-      sessions: [{ key: 'agent:main:main', displayName: 'Main' }],
-      sending: false,
-      activeRunId: null,
-      loadSessions: vi.fn().mockResolvedValue(undefined),
-      loadHistory: vi.fn().mockResolvedValue(undefined),
-      handleChatEvent: handleChatEventMock,
-    }),
-    setState: vi.fn(),
-  },
 }));
 
 describe('gateway store event wiring', () => {
@@ -97,5 +81,66 @@ describe('gateway store event wiring', () => {
     expect(useChatStore.getState().sending).toBe(true);
     expect(useChatStore.getState().pendingFinal).toBe(true);
     expect(useChatStore.getState().error).toBeNull();
+  });
+
+  it('tracks running state for non-current sessions from gateway notifications', async () => {
+    hostApiFetchMock.mockResolvedValue({ state: 'running', port: 18789 });
+
+    const handlers = new Map<string, (payload: unknown) => void>();
+    subscribeHostEventMock.mockImplementation((eventName: string, handler: (payload: unknown) => void) => {
+      handlers.set(eventName, handler);
+      return () => {};
+    });
+
+    const { useChatStore } = await import('../../src/stores/chat');
+    const loadHistory = vi.fn();
+    const loadSessions = vi.fn();
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      sessions: [
+        { key: 'agent:main:main' },
+        { key: 'agent:worker:background' },
+      ],
+      sessionRunningState: {},
+      activeRunId: null,
+      sending: false,
+      pendingFinal: false,
+      error: null,
+      loadHistory,
+      loadSessions,
+    } as never);
+
+    const { useGatewayStore } = await import('@/stores/gateway');
+    await useGatewayStore.getState().init();
+
+    handlers.get('gateway:notification')?.({
+      method: 'agent',
+      params: {
+        phase: 'started',
+        runId: 'run-background',
+        sessionKey: 'agent:worker:background',
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(useChatStore.getState().sessionRunningState).toEqual({
+      'agent:worker:background': true,
+    });
+
+    handlers.get('gateway:notification')?.({
+      method: 'agent',
+      params: {
+        phase: 'completed',
+        runId: 'run-background',
+        sessionKey: 'agent:worker:background',
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(useChatStore.getState().sessionRunningState).toEqual({});
   });
 });

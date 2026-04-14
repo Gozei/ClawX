@@ -34,6 +34,21 @@ function parseSessionPinOrder(value: unknown): number | undefined {
   return undefined;
 }
 
+function normalizeSessionModelRef(model: unknown, modelProvider: unknown): string | undefined {
+  const normalizedModel = typeof model === 'string' ? model.trim() : '';
+  if (!normalizedModel) {
+    return undefined;
+  }
+  if (normalizedModel.includes('/')) {
+    return normalizedModel;
+  }
+  const normalizedProvider = typeof modelProvider === 'string' ? modelProvider.trim() : '';
+  if (!normalizedProvider) {
+    return normalizedModel;
+  }
+  return `${normalizedProvider}/${normalizedModel}`;
+}
+
 function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boolean {
   const session = sessions.find((entry) => entry.key === sessionKey);
   return typeof session?.label === 'string' && session.label.trim().length > 0;
@@ -95,7 +110,8 @@ export function createSessionActions(
             label: s.label ? String(s.label) : undefined,
             displayName: s.displayName ? String(s.displayName) : undefined,
             thinkingLevel: s.thinkingLevel ? String(s.thinkingLevel) : undefined,
-            model: s.model ? String(s.model) : undefined,
+            modelProvider: s.modelProvider ? String(s.modelProvider) : undefined,
+            model: normalizeSessionModelRef(s.model, s.modelProvider),
             updatedAt: parseSessionUpdatedAtMs(s.updatedAt),
             pinned: parseSessionPinned(persistedMetadata[String(s.key || '')]?.pinned ?? s.pinned),
             pinOrder: parseSessionPinOrder(persistedMetadata[String(s.key || '')]?.pinOrder ?? s.pinOrder),

@@ -276,4 +276,132 @@ describe('chat store session resume', () => {
       'assistant-1',
     ]);
   });
+
+  it('combines modelProvider and model into a full session model ref when sessions load', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'sessions.list') {
+        return Promise.resolve({
+          sessions: [
+            {
+              key: 'agent:main:main',
+              modelProvider: 'custom-custombc',
+              model: 'gpt-5.4',
+              updatedAt: userTimestampMs,
+            },
+          ],
+        });
+      }
+      if (method === 'chat.history') return Promise.resolve({ messages: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    await useChatStore.getState().loadSessions();
+
+    const next = useChatStore.getState();
+    expect(next.sessions[0]?.modelProvider).toBe('custom-custombc');
+    expect(next.sessions[0]?.model).toBe('custom-custombc/gpt-5.4');
+    expect(next.sessionModels['agent:main:main']).toBe('custom-custombc/gpt-5.4');
+  });
+
+  it('remaps legacy session running state when sessions load canonical keys', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'sessions.list') {
+        return Promise.resolve({
+          sessions: [
+            {
+              key: 'agent:main:legacy-session',
+              updatedAt: userTimestampMs,
+            },
+          ],
+        });
+      }
+      if (method === 'chat.history') return Promise.resolve({ messages: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'legacy-session',
+      currentAgentId: 'main',
+      sessions: [{ key: 'legacy-session' }],
+      sessionRunningState: { 'legacy-session': true },
+      sessionLabels: { 'legacy-session': 'Legacy Label' },
+      sessionLastActivity: { 'legacy-session': userTimestampMs - 1234 },
+      sessionModels: { 'legacy-session': 'custom/legacy-model' },
+      messages: [],
+      sending: true,
+      activeRunId: 'run-legacy',
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().loadSessions();
+
+    const next = useChatStore.getState();
+    expect(next.currentSessionKey).toBe('agent:main:legacy-session');
+    expect(next.sessionRunningState).toEqual({ 'agent:main:legacy-session': true });
+    expect(next.sessionLabels).toEqual({ 'agent:main:legacy-session': 'Legacy Label' });
+    expect(next.sessionLastActivity['agent:main:legacy-session']).toBe(userTimestampMs);
+    expect(next.sessionModels['agent:main:legacy-session']).toBe('custom/legacy-model');
+  });
+
+  it('accepts canonical runtime events for a legacy current session key and clears sending on final', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'legacy-session',
+      currentAgentId: 'main',
+      sessions: [{ key: 'legacy-session' }],
+      sessionRunningState: { 'legacy-session': true },
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionModels: {},
+      sending: true,
+      activeRunId: 'run-legacy',
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    useChatStore.getState().handleChatEvent({
+      state: 'final',
+      runId: 'run-legacy',
+      sessionKey: 'agent:main:legacy-session',
+      message: {
+        id: 'assistant-legacy',
+        role: 'assistant',
+        content: 'Done',
+        timestamp: assistantTimestampSeconds,
+      },
+    });
+
+    const next = useChatStore.getState();
+    expect(next.sending).toBe(false);
+    expect(next.activeRunId).toBeNull();
+    expect(next.sessionRunningState).toEqual({});
+    expect(next.messages.map((message) => message.id)).toEqual(['user-1', 'assistant-legacy']);
+  });
 });

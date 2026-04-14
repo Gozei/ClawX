@@ -4,7 +4,6 @@ import { closeElectronApp, expect, getStableWindow, test } from './fixtures/elec
 
 const SESSION_KEY = 'agent:main:session-rename-test';
 const SESSION_FILE = 'session-rename-test.jsonl';
-const ORIGINAL_LABEL = 'Original session name';
 const RENAMED_LABEL = '123456789012345678901234567890XYZ';
 const TRUNCATED_LABEL = '123456789012345678901234567890';
 
@@ -19,7 +18,7 @@ async function seedSession(homeDir: string): Promise<void> {
           key: SESSION_KEY,
           id: 'session-rename-test',
           file: SESSION_FILE,
-          label: ORIGINAL_LABEL,
+          label: 'Original session name',
           updatedAt: Date.now(),
         },
       ],
@@ -48,7 +47,10 @@ test.describe('Session rename', () => {
       await expect(page.getByTestId('main-layout')).toBeVisible();
 
       const sessionRow = page.getByTestId(`sidebar-session-${SESSION_KEY}`);
-      await expect(sessionRow.getByText(ORIGINAL_LABEL, { exact: true })).toBeVisible({ timeout: 60_000 });
+      await expect(sessionRow).toBeVisible({ timeout: 60_000 });
+      const sessionButton = sessionRow.locator('button').first();
+      await expect(sessionButton).toHaveCSS('padding-top', '6px');
+      await expect(sessionButton).toHaveCSS('padding-bottom', '6px');
       await sessionRow.hover();
       await page.getByTestId(`sidebar-session-menu-trigger-${SESSION_KEY}`).click();
       await expect(page.getByTestId(`sidebar-session-menu-rename-${SESSION_KEY}`)).toBeVisible();

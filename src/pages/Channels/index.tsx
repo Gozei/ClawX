@@ -245,7 +245,7 @@ export function Channels() {
               variant="outline"
               onClick={handleRefresh}
               disabled={gatewayStatus.state !== 'running'}
-              className="h-10 rounded-full px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6"
+              className="h-10 rounded-lg px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6"
             >
               <RefreshCw className={cn('h-3.5 w-3.5 mr-2', isUsingStableValue && 'animate-spin')} />
               {t('refresh')}
@@ -279,10 +279,10 @@ export function Channels() {
               </h2>
               <div className="space-y-4">
                 {configuredGroups.map((group) => (
-                  <div key={group.channelType} className="rounded-2xl border border-black/10 dark:border-white/10 p-4 bg-transparent">
+                  <div key={group.channelType} className="rounded-xl border border-black/10 dark:border-white/10 p-4 bg-transparent">
                     <div className="flex items-center justify-between gap-2 mb-3">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="h-[40px] w-[40px] shrink-0 flex items-center justify-center text-foreground bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 rounded-full shadow-sm">
+                        <div className="h-[40px] w-[40px] shrink-0 flex items-center justify-center text-foreground bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 rounded-xl shadow-sm">
                           <ChannelLogo type={group.channelType as ChannelType} />
                         </div>
                         <div className="min-w-0">
@@ -309,7 +309,7 @@ export function Channels() {
                         <Button
                           size="sm"
                           variant="outline"
-                          className="h-8 text-xs rounded-full"
+                          className="h-8 text-xs rounded-lg"
                           onClick={() => {
                             const shouldUseGeneratedAccountId = !usesPluginManagedQrAccounts(group.channelType);
                             const nextAccountId = shouldUseGeneratedAccountId
@@ -349,7 +349,7 @@ export function Channels() {
                             ? t('account.mainAccount')
                             : account.name;
                         return (
-                        <div key={`${group.channelType}-${account.accountId}`} className="rounded-xl bg-black/5 dark:bg-white/5 px-3 py-2">
+                        <div key={`${group.channelType}-${account.accountId}`} className="rounded-lg bg-black/5 dark:bg-white/5 px-3 py-2">
                           <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
                               <div className="flex items-center gap-2">

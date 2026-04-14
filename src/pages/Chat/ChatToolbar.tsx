@@ -30,8 +30,8 @@ export function ChatToolbar() {
 
   return (
     <div className="flex items-center gap-2 md:gap-2.5">
-      <div className="hidden min-w-0 items-center gap-2 rounded-[18px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.09),rgba(255,255,255,0.03))] px-3 py-2 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md sm:flex">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-primary/18 bg-primary/10 text-primary">
+      <div className="hidden min-w-0 items-center gap-2 rounded-[10px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.09),rgba(255,255,255,0.03))] px-3 py-2 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md sm:flex">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/18 bg-primary/10 text-primary">
           <Bot className="h-3.5 w-3.5" />
         </div>
         <div className="min-w-0">
@@ -44,7 +44,7 @@ export function ChatToolbar() {
         </div>
       </div>
 
-      <div className="hidden items-center gap-1 rounded-[18px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] px-1.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-md md:flex">
+      <div className="hidden items-center gap-1 rounded-[10px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] px-1.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-md md:flex">
         <div className="pl-1.5 pr-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground/34">
           {t('toolbar.readingLabel', '阅读')}
         </div>
@@ -53,7 +53,7 @@ export function ChatToolbar() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 rounded-full text-foreground/70 hover:bg-white/8 hover:text-foreground"
+              className="h-7 w-7 rounded-md text-foreground/70 hover:bg-white/8 hover:text-foreground"
               onClick={() => setChatFontScale(chatFontScale - 5)}
               disabled={chatFontScale <= 85}
             >
@@ -64,7 +64,7 @@ export function ChatToolbar() {
             <p>{t('toolbar.fontSmaller')}</p>
           </TooltipContent>
         </Tooltip>
-        <div className="flex min-w-[58px] items-center justify-center gap-1 rounded-full bg-black/[0.04] px-2.5 py-1 text-[12px] font-semibold text-foreground/76 dark:bg-white/[0.04]">
+        <div className="flex min-w-[58px] items-center justify-center gap-1 rounded-md bg-black/[0.04] px-2.5 py-1 text-[12px] font-semibold text-foreground/76 dark:bg-white/[0.04]">
           <Type className="h-3.5 w-3.5 text-muted-foreground/90" />
           <span>{chatFontScale}%</span>
         </div>
@@ -73,7 +73,7 @@ export function ChatToolbar() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 rounded-full text-foreground/70 hover:bg-white/8 hover:text-foreground"
+              className="h-7 w-7 rounded-md text-foreground/70 hover:bg-white/8 hover:text-foreground"
               onClick={() => setChatFontScale(chatFontScale + 5)}
               disabled={chatFontScale >= 120}
             >
@@ -86,13 +86,13 @@ export function ChatToolbar() {
         </Tooltip>
       </div>
 
-      <div className="flex items-center gap-1.5 rounded-[18px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] px-1.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-md">
+      <div className="flex items-center gap-1.5 rounded-[10px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] px-1.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-md">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 rounded-full text-foreground/70 hover:bg-white/8 hover:text-foreground"
+              className="h-8 w-8 rounded-md text-foreground/70 hover:bg-white/8 hover:text-foreground"
               onClick={() => refresh()}
               disabled={loading}
               data-testid="chat-refresh-button"
@@ -110,7 +110,7 @@ export function ChatToolbar() {
             <button
               type="button"
               className={cn(
-                'inline-flex items-center gap-2 rounded-full px-3 py-2 text-[12px] font-semibold transition',
+                'inline-flex items-center gap-2 rounded-md px-3 py-2 text-[12px] font-semibold transition',
                 showThinking
                   ? 'bg-primary/14 text-primary'
                   : 'text-foreground/64 hover:bg-white/8 hover:text-foreground',

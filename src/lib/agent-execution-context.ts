@@ -13,12 +13,13 @@ function normalizeText(value: unknown): string | undefined {
 
 export function buildAgentExecutionPayload(agent: AgentSummary) {
   const description = normalizeText(agent.description);
+  const preferredModel = normalizeText(agent.modelRef);
   const skillIds = Array.isArray(agent.skillIds) ? agent.skillIds.filter(Boolean) : [];
   const triggerModes = Array.isArray(agent.triggerModes) ? agent.triggerModes.filter(Boolean) : [];
   const workflow = normalizeSharedWorkflowNodes(agent.workflowNodes);
   const playbook = buildSharedExecutionPlaybook(agent);
 
-  if (!description && skillIds.length === 0 && triggerModes.length === 0 && workflow.length === 0) {
+  if (!description && !preferredModel && skillIds.length === 0 && triggerModes.length === 0 && workflow.length === 0) {
     return null;
   }
 
@@ -31,7 +32,7 @@ export function buildAgentExecutionPayload(agent: AgentSummary) {
       ...(normalizeText(agent.objective) ? { objective: normalizeText(agent.objective)! } : {}),
       ...(normalizeText(agent.boundaries) ? { boundaries: normalizeText(agent.boundaries)! } : {}),
       ...(normalizeText(agent.outputContract) ? { outputContract: normalizeText(agent.outputContract)! } : {}),
-      ...(normalizeText(agent.modelRef) ? { preferredModel: normalizeText(agent.modelRef)! } : {}),
+      ...(preferredModel ? { preferredModel } : {}),
       ...(skillIds.length > 0 ? { allowedSkills: skillIds } : {}),
       ...(triggerModes.length > 0 ? { triggerModes } : {}),
       ...(workflow.length > 0 ? { workflow } : {}),

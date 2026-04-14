@@ -5,6 +5,8 @@ const { gatewayRpcMock, hostApiFetchMock, agentsState } = vi.hoisted(() => ({
   hostApiFetchMock: vi.fn(),
   agentsState: {
     agents: [] as Array<Record<string, unknown>>,
+    defaultModelRef: 'custom-custombc/gpt-5.4' as string | null,
+    fetchAgents: vi.fn(),
   },
 }));
 
@@ -75,6 +77,8 @@ describe('chat target routing', () => {
         outputContract: '输出结论、证据、风险和后续建议',
       },
     ];
+    agentsState.defaultModelRef = 'custom-custombc/gpt-5.4';
+    agentsState.fetchAgents.mockReset();
 
     gatewayRpcMock.mockReset();
     gatewayRpcMock.mockImplementation(async (method: string) => {
@@ -131,9 +135,7 @@ describe('chat target routing', () => {
     expect(state.currentSessionKey).toBe('agent:research:desk');
     expect(state.currentAgentId).toBe('research');
     expect(state.sessions.some((session) => session.key === 'agent:research:desk')).toBe(true);
-    expect(String(state.messages.at(-1)?.content)).toContain('Conversation info (untrusted metadata):');
-    expect(String(state.messages.at(-1)?.content)).toContain('"allowedSkills": [');
-    expect(String(state.messages.at(-1)?.content)).toContain('Hello direct agent');
+    expect(String(state.messages.at(-1)?.content)).toBe('Hello direct agent');
 
     const historyCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.history');
     expect(historyCall?.[1]).toEqual({ sessionKey: 'agent:research:desk', limit: 200 });
@@ -219,5 +221,109 @@ describe('chat target routing', () => {
     expect(payload.message).toContain('Conversation info (untrusted metadata):');
     expect(payload.message).toContain('Process the attached file(s).');
     expect(payload.media[0]?.filePath).toBe('/tmp/design.png');
+  });
+
+  it('injects the current session model metadata for a default main-session send', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      sessionModels: { 'agent:main:main': 'custom-custombc/gpt-5.4' },
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().sendMessage('你现在是什么模型');
+
+    const sendCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.send');
+    const sendMessagePayload = String((sendCall?.[1] as { message?: unknown })?.message);
+    expect(sendMessagePayload).toContain('Conversation info (untrusted metadata):');
+    expect(sendMessagePayload).toContain('"preferredModel": "custom-custombc/gpt-5.4"');
+    expect(sendMessagePayload).toContain('你现在是什么模型');
+  });
+  it('refreshes agents and falls back to the default model before sending when no session model is stored', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+
+    agentsState.defaultModelRef = null;
+    agentsState.agents = [
+      {
+        id: 'main',
+        name: 'Main',
+        isDefault: true,
+        modelDisplay: 'GLM-5',
+        modelRef: 'custom-custombc/glm-5',
+        overrideModelRef: 'custom-custombc/glm-5',
+        inheritedModel: false,
+        workspace: '~/.openclaw/workspace',
+        agentDir: '~/.openclaw/agents/main/agent',
+        mainSessionKey: 'agent:main:main',
+        channelTypes: [],
+        skillIds: [],
+        workflowSteps: [],
+        triggerModes: [],
+        description: null,
+      },
+    ];
+    agentsState.fetchAgents.mockImplementation(async () => {
+      agentsState.defaultModelRef = 'custom-custombc/gpt-5.4';
+      agentsState.agents = agentsState.agents.map((agent) => (
+        agent.id === 'main'
+          ? {
+              ...agent,
+              modelDisplay: 'GPT-5.4',
+              modelRef: 'custom-custombc/gpt-5.4',
+              overrideModelRef: null,
+              inheritedModel: true,
+            }
+          : agent
+      ));
+    });
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:session-123',
+      currentAgentId: 'main',
+      sessions: [],
+      sessionModels: {},
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().sendMessage('你现在是什么模型');
+
+    expect(agentsState.fetchAgents).toHaveBeenCalledTimes(1);
+    expect(useChatStore.getState().sessionModels['agent:main:session-123']).toBe('custom-custombc/gpt-5.4');
+
+    const sendCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.send');
+    const sendMessagePayload = String((sendCall?.[1] as { message?: unknown })?.message);
+    expect(sendMessagePayload).toContain('"preferredModel": "custom-custombc/gpt-5.4"');
+    expect(sendMessagePayload).toContain('你现在是什么模型');
   });
 });

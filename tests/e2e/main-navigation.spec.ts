@@ -1,4 +1,18 @@
+import type { Page } from '@playwright/test';
 import { closeElectronApp, expect, getStableWindow, test } from './fixtures/electron';
+
+async function createRole(page: Page, name: string) {
+  await page.getByTestId('agents-add-button').click();
+  await expect(page.getByTestId('add-agent-dialog')).toBeVisible();
+  await page.locator('#agent-name').fill(name);
+  await page.getByTestId('add-agent-save-button').click();
+  await expect(page.getByTestId('add-agent-dialog')).toHaveCount(0);
+  await expect(page.getByText(name).first()).toBeVisible();
+}
+
+function getAgentCard(page: Page, name: string) {
+  return page.locator('[data-testid="agent-overview-card"]', { hasText: name }).first();
+}
 
 test.describe('Deep AI Worker main navigation without setup flow', () => {
   test('navigates between core pages with setup bypassed', async ({ launchElectronApp }) => {
@@ -15,8 +29,22 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
 
       await page.getByTestId('sidebar-nav-agents').click();
       await expect(page.getByTestId('agents-page')).toBeVisible();
+      await expect(page.getByTestId('agents-card-grid')).toBeVisible();
       await expect(page.getByText('Main Role').first()).toBeVisible();
-      await expect(page.getByTestId('agent-card-summary-grid').first().getByTestId('agent-card-summary-item')).toHaveCount(5);
+      await expect(page.getByText(/Specialist|专家型/).first()).toBeVisible();
+      await page.getByTestId('agent-overview-card').first().hover();
+      await expect(page.getByTestId('agent-open-settings-button').first()).toBeVisible();
+
+      const firstCard = page.getByTestId('agent-overview-card').first();
+      const cardBox = await firstCard.boundingBox();
+      const titleBox = await page.getByText('Main Role').first().boundingBox();
+      expect(cardBox).not.toBeNull();
+      expect(titleBox).not.toBeNull();
+      if (cardBox && titleBox) {
+        const cardCenterX = cardBox.x + (cardBox.width / 2);
+        const titleCenterX = titleBox.x + (titleBox.width / 2);
+        expect(Math.abs(cardCenterX - titleCenterX)).toBeLessThan(10);
+      }
 
       await page.getByTestId('sidebar-nav-channels').click();
       await expect(page.getByTestId('channels-page')).toBeVisible();
@@ -39,6 +67,84 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
       await expect(page.getByTestId('settings-page-subtitle')).toHaveCSS('font-size', '14px');
       await expect(page.getByRole('button', { name: 'English' }).first()).toBeVisible();
       await expect(page.getByRole('button', { name: '\u4e2d\u6587' }).first()).toBeVisible();
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
+  test('shows roles as a four-column card grid on wide screens and keeps details in the modal', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      const page = await getStableWindow(app);
+      await page.setViewportSize({ width: 1440, height: 900 });
+
+      await page.getByTestId('sidebar-nav-agents').click();
+      await expect(page.getByTestId('agents-page')).toBeVisible();
+      await expect(page.getByTestId('agents-card-grid')).toBeVisible();
+
+      const cards = page.getByTestId('agent-overview-card');
+      const grid = page.getByTestId('agents-card-grid');
+      let expectedCount = await cards.count();
+
+      for (const name of ['Ops Role', 'Finance Role', 'Support Role']) {
+        expectedCount += 1;
+        await createRole(page, name);
+        await expect(cards).toHaveCount(expectedCount);
+      }
+
+      const firstRow = await Promise.all(
+        Array.from({ length: 4 }, async (_, index) => await cards.nth(index).boundingBox()),
+      );
+      const gridBox = await grid.boundingBox();
+
+      expect(firstRow.every(Boolean)).toBe(true);
+      expect(gridBox).not.toBeNull();
+      const yPositions = firstRow.map((box) => box!.y);
+      const maxY = Math.max(...yPositions);
+      const minY = Math.min(...yPositions);
+      expect(maxY - minY).toBeLessThan(8);
+      if (gridBox) {
+        expect(minY - gridBox.y).toBeGreaterThan(4);
+      }
+
+      await page.getByTestId('agent-overview-card').first().hover();
+      await page.getByTestId('agent-open-settings-button').first().click();
+      await expect(page.getByTestId('agent-model-summary-card')).toBeVisible();
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
+  test('promotes a role to default from model settings and sorts it to the front', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      const page = await getStableWindow(app);
+      const roleName = `Priority Role ${Date.now()}`;
+
+      await page.getByTestId('sidebar-nav-agents').click();
+      await expect(page.getByTestId('agents-page')).toBeVisible();
+
+      await createRole(page, roleName);
+
+      const roleCard = getAgentCard(page, roleName);
+      await roleCard.hover();
+      const settingsButton = roleCard.getByTestId('agent-open-settings-button');
+      await expect(settingsButton).toBeVisible();
+      await settingsButton.click({ force: true });
+
+      await expect(page.getByTestId('agent-settings-dialog')).toBeVisible();
+      await page.getByTestId('agent-model-summary-card').click();
+      await expect(page.getByTestId('agent-model-dialog')).toBeVisible();
+
+      await page.getByTestId('agent-set-default-checkbox').check();
+      await page.getByTestId('agent-model-save-button').click();
+      await expect(page.getByTestId('agent-model-dialog')).toHaveCount(0);
+
+      const firstCard = page.getByTestId('agent-overview-card').first();
+      await expect(firstCard).toContainText(roleName);
+      await expect(firstCard.getByTestId('agent-default-badge')).toBeVisible();
     } finally {
       await closeElectronApp(app);
     }

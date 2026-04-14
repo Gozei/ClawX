@@ -45,6 +45,7 @@ export interface ChatSession {
   label?: string;
   displayName?: string;
   thinkingLevel?: string;
+  modelProvider?: string;
   model?: string;
   updatedAt?: number;
   pinned?: boolean;
@@ -105,10 +106,13 @@ export interface ChatState {
   sessions: ChatSession[];
   currentSessionKey: string;
   currentAgentId: string;
+  sessionModels: Record<string, string>;
   /** First user message text per session key, used as display label */
   sessionLabels: Record<string, string>;
   /** Last message timestamp (ms) per session key, used for sorting */
   sessionLastActivity: Record<string, number>;
+  /** Sidebar-only running state for sessions that still have work in flight */
+  sessionRunningState?: Record<string, boolean>;
 
   // Thinking
   showThinking: boolean;

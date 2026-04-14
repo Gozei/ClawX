@@ -20,6 +20,7 @@ export const initialChatState: Pick<
   | 'sessions'
   | 'currentSessionKey'
   | 'currentAgentId'
+  | 'sessionModels'
   | 'sessionLabels'
   | 'sessionLastActivity'
   | 'showThinking'
@@ -55,6 +56,7 @@ export const initialChatState: Pick<
   sessions: [],
   currentSessionKey: DEFAULT_SESSION_KEY,
   currentAgentId: 'main',
+  sessionModels: {},
   sessionLabels: {},
   sessionLastActivity: {},
 

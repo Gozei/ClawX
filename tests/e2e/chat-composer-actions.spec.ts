@@ -11,11 +11,15 @@ test.describe('Chat composer actions', () => {
       await page.getByTestId('sidebar-new-chat').click();
 
       const composer = page.getByTestId('chat-composer');
+      const modelSwitch = composer.getByTestId('chat-model-switch');
       await expect(composer).toBeVisible();
       await expect(composer.getByRole('textbox')).toBeVisible();
       await expect(composer.getByTestId('chat-attach-button')).toBeVisible();
-      await expect(composer.getByTestId('chat-model-switch')).toBeVisible();
+      await expect(modelSwitch).toBeVisible();
+      await expect(modelSwitch).toBeDisabled();
       await expect(composer.getByTestId('chat-send-button')).toBeVisible();
+
+      await expect(composer).toHaveClass(/rounded-\[20px\]/);
     } finally {
       await closeElectronApp(app);
     }

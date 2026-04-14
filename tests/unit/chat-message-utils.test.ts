@@ -58,4 +58,29 @@ describe('chat message utils', () => {
 
     expect(extractText(message)).toBe('请帮我解释一下 System (untrusted) 这个词是什么意思。');
   });
+  it('strips injected execution playbook metadata from user-visible text', () => {
+    const message: RawMessage = {
+      id: 'conversation-metadata-1',
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: [
+            'Conversation info (untrusted metadata): ```json',
+            '{"agent":{"id":"ops","name":"Operations","preferredModel":"custom/gpt-5.4"}}',
+            '```',
+            'Execution playbook:',
+            '- You are currently acting as the Operations agent.',
+            '- Preferred model: custom/gpt-5.4',
+            '- If tools are unavailable, explain the block instead of fabricating.',
+            '',
+            'What can you do?',
+          ].join('\n'),
+        },
+      ],
+      timestamp: 1713000002,
+    };
+
+    expect(extractText(message)).toBe('What can you do?');
+  });
 });
