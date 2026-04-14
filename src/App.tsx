@@ -3,8 +3,9 @@
  * Handles routing and global providers
  */
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { Component, lazy, Suspense, useEffect } from 'react';
+import { Component, lazy, Suspense, useEffect, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
+import { Loader2, Rocket } from 'lucide-react';
 import { Toaster } from 'sonner';
 import i18n from './i18n';
 import { MainLayout } from './components/layout/MainLayout';
@@ -13,7 +14,9 @@ import { PageLoader } from './components/common/LoadingSpinner';
 import { useSettingsStore } from './stores/settings';
 import { useGatewayStore } from './stores/gateway';
 import { useProviderStore } from './stores/providers';
+import { useUpdateStore } from './stores/update';
 import { applyGatewayTransportPreference } from './lib/api-client';
+import { cn } from '@/lib/utils';
 
 const Chat = lazy(() => import('./pages/Chat').then((module) => ({ default: module.Chat })));
 const Dashboard = lazy(() => import('./pages/Dashboard').then((module) => ({ default: module.Dashboard })));
@@ -29,6 +32,82 @@ function RouteLoader() {
   return (
     <div className="flex h-screen items-center justify-center">
       <PageLoader />
+    </div>
+  );
+}
+
+function UpdateInstallOverlay() {
+  const status = useUpdateStore((state) => state.status);
+  const installPhaseStartedAt = useUpdateStore((state) => state.installPhaseStartedAt);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (status !== 'installing' || !installPhaseStartedAt) {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const tick = () => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - installPhaseStartedAt) / 1000)));
+    };
+
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => { window.clearInterval(timer); };
+  }, [installPhaseStartedAt, status]);
+
+  if (status !== 'installing') {
+    return null;
+  }
+
+  const platform = window.electron.platform;
+  const detailKey = platform === 'linux'
+    ? 'updates.installOverlay.detailLinux'
+    : platform === 'darwin'
+      ? 'updates.installOverlay.detailMac'
+      : 'updates.installOverlay.detailWindows';
+
+  return (
+    <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-slate-950/56 px-6 backdrop-blur-sm">
+      <div className="w-full max-w-[520px] rounded-[28px] border border-white/15 bg-[#0f1726]/96 p-7 text-white shadow-[0_32px_120px_rgba(15,23,42,0.42)]">
+        <div className="flex items-start gap-4">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-500/18 text-blue-200 ring-1 ring-blue-300/20">
+            <Rocket className="h-6 w-6" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 text-blue-100/90">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-[13px] font-medium">
+                {i18n.t('settings:updates.installOverlay.badge')}
+              </span>
+            </div>
+            <h2 className="mt-3 text-[24px] font-semibold tracking-[-0.02em] text-white">
+              {i18n.t('settings:updates.installOverlay.title')}
+            </h2>
+            <p className="mt-3 text-[15px] leading-7 text-slate-200/88">
+              {i18n.t('settings:updates.installOverlay.description')}
+            </p>
+            <p className="mt-3 text-[14px] leading-6 text-amber-100/88">
+              {i18n.t(`settings:${detailKey}`)}
+            </p>
+            <div className="mt-5 flex flex-wrap items-center gap-3">
+              <div className="rounded-full bg-white/10 px-3 py-1.5 text-[12px] font-medium text-white/90 ring-1 ring-white/12">
+                {i18n.t('settings:updates.installOverlay.elapsed', { seconds: elapsedSeconds })}
+              </div>
+              <div className={cn(
+                'rounded-full px-3 py-1.5 text-[12px] font-medium ring-1',
+                elapsedSeconds >= 8
+                  ? 'bg-amber-400/12 text-amber-100 ring-amber-300/20'
+                  : 'bg-white/8 text-white/82 ring-white/10',
+              )}>
+                {elapsedSeconds >= 8
+                  ? i18n.t('settings:updates.installOverlay.slowHint')
+                  : i18n.t('settings:updates.installOverlay.waitHint')}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -125,6 +204,7 @@ function App() {
   const setupComplete = useSettingsStore((state) => state.setupComplete);
   const initGateway = useGatewayStore((state) => state.init);
   const initProviders = useProviderStore((state) => state.init);
+  const initUpdateStore = useUpdateStore((state) => state.init);
 
   useEffect(() => {
     initSettings();
@@ -146,6 +226,10 @@ function App() {
   useEffect(() => {
     initProviders();
   }, [initProviders]);
+
+  useEffect(() => {
+    void initUpdateStore();
+  }, [initUpdateStore]);
 
   // Redirect to setup wizard if not complete
   useEffect(() => {
@@ -220,6 +304,7 @@ function App() {
           closeButton
           style={{ zIndex: 99999 }}
         />
+        <UpdateInstallOverlay />
       </TooltipProvider>
     </ErrorBoundary>
   );

@@ -1,4 +1,4 @@
-import { closeElectronApp, expect, test } from './fixtures/electron';
+import { closeElectronApp, expect, openModelsFromSettings, test } from './fixtures/electron';
 
 test.describe('Deep AI Worker Electron smoke flows', () => {
   test('shows the setup wizard on a fresh profile', async ({ page }) => {
@@ -16,9 +16,7 @@ test.describe('Deep AI Worker Electron smoke flows', () => {
 
     await expect(page.getByTestId('main-layout')).toBeVisible();
     await expect(page.getByText('Deep AI Worker')).toBeVisible();
-    await page.getByTestId('sidebar-nav-models').click();
-
-    await expect(page.getByTestId('models-page')).toBeVisible();
+    await openModelsFromSettings(page);
     await expect(page.getByTestId('models-page-title')).toBeVisible();
     await expect(page.getByTestId('providers-settings')).toBeVisible();
   });

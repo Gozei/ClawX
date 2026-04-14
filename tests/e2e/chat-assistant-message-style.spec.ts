@@ -1,4 +1,4 @@
-import { closeElectronApp, expect, getStableWindow, test } from './fixtures/electron';
+import { closeElectronApp, expect, getStableWindow, openSettingsHub, test } from './fixtures/electron';
 
 test.describe('Chat assistant message style', () => {
   test('switches assistant replies to the stream style from settings', async ({ launchElectronApp }) => {
@@ -8,8 +8,7 @@ test.describe('Chat assistant message style', () => {
       const page = await getStableWindow(app);
       await expect(page.getByTestId('main-layout')).toBeVisible();
 
-      await page.getByTestId('sidebar-nav-settings').click();
-      await expect(page.getByTestId('settings-page')).toBeVisible();
+      await openSettingsHub(page);
       await expect(page.getByTestId('settings-assistant-message-style-bubble')).toBeVisible();
       await expect(page.getByTestId('settings-assistant-message-style-stream')).toBeVisible();
       await page.getByTestId('settings-assistant-message-style-stream').click();
@@ -18,8 +17,7 @@ test.describe('Chat assistant message style', () => {
 
       await page.getByTestId('sidebar-nav-dashboard').click();
       await expect(page.getByTestId('dashboard-page')).toBeVisible();
-      await page.getByTestId('sidebar-nav-settings').click();
-      await expect(page.getByTestId('settings-page')).toBeVisible();
+      await openSettingsHub(page);
       await expect(page.getByTestId('settings-assistant-message-style-stream')).toHaveClass(/bg-primary/);
     } finally {
       await closeElectronApp(app);

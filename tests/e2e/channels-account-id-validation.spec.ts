@@ -1,4 +1,4 @@
-import { completeSetup, expect, test } from './fixtures/electron';
+import { completeSetup, expect, openChannelsFromSettings, test } from './fixtures/electron';
 
 const testConfigResponses = {
   channelsAccounts: {
@@ -70,8 +70,7 @@ test.describe('Channels account ID validation', () => {
 
     await completeSetup(page);
 
-    await page.getByTestId('sidebar-nav-channels').click();
-    await expect(page.getByTestId('channels-page')).toBeVisible();
+    await openChannelsFromSettings(page);
     await expect(page.getByText('Feishu / Lark')).toBeVisible();
 
     await page.getByRole('button', { name: /Add Account|account\.add/i }).click();
