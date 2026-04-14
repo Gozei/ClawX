@@ -14,10 +14,8 @@ import {
   Key,
   Trash2,
   RefreshCw,
-  FolderOpen,
   FileCode,
   Globe,
-  Copy,
   ChevronDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -49,9 +47,7 @@ type SkillSection = {
   skills: Skill[];
 };
 
-const headerActionButtonClasses = 'h-10 rounded-full px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6';
 const actionButtonClasses = 'h-9 rounded-full border-black/10 bg-transparent px-4 text-[13px] font-medium text-muted-foreground shadow-none hover:bg-black/5 hover:text-foreground dark:border-white/10 dark:hover:bg-white/5';
-const iconOutlineButtonClasses = 'h-[36px] w-[36px] border-black/10 bg-transparent text-muted-foreground shadow-none hover:bg-black/5 hover:text-foreground dark:border-white/10 dark:hover:bg-white/5';
 const skillPanelClasses = 'rounded-[24px] border border-black/10 bg-transparent shadow-none dark:border-white/10';
 const skillSectionClasses = 'rounded-[28px] border border-black/10 bg-transparent shadow-none dark:border-white/10';
 const skillInsetCardClasses = 'rounded-2xl bg-black/5 shadow-none dark:bg-white/5';
@@ -65,7 +61,6 @@ interface SkillDetailDialogProps {
   onClose: () => void;
   onToggle: (enabled: boolean) => void;
   onUninstall?: (slug: string) => void;
-  onOpenFolder?: (skill: Skill) => Promise<void> | void;
 }
 
 function resolveSkillSourceLabel(skill: Skill, t: TFunction<'skills'>): string {
@@ -141,7 +136,7 @@ function getKeyFilterButtonClasses(selected: boolean): string {
   );
 }
 
-function SkillDetailDialog({ skill, isOpen, onClose, onToggle, onUninstall, onOpenFolder }: SkillDetailDialogProps) {
+function SkillDetailDialog({ skill, isOpen, onClose, onToggle, onUninstall }: SkillDetailDialogProps) {
   const { t } = useTranslation('skills');
   const { fetchSkills } = useSkillsStore();
   const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
@@ -190,15 +185,6 @@ function SkillDetailDialog({ skill, isOpen, onClose, onToggle, onUninstall, onOp
     }
   };
 
-  const handleCopyPath = async () => {
-    if (!skill?.baseDir) return;
-    try {
-      await navigator.clipboard.writeText(skill.baseDir);
-      toast.success(t('toast.copiedPath'));
-    } catch (err) {
-      toast.error(t('toast.failedCopyPath') + ': ' + String(err));
-    }
-  };
 
   const handleAddEnv = () => {
     setEnvVars([...envVars, { key: '', value: '' }]);
@@ -310,23 +296,7 @@ function SkillDetailDialog({ skill, isOpen, onClose, onToggle, onUninstall, onOp
               </div>
             </div>
           </div>
-
           <div className="mt-6 grid gap-4">
-            <div className={cn(skillPanelClasses, 'p-5')}>
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-[15px] font-semibold text-foreground">{t('detail.source')}</h3>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="icon" className={iconOutlineButtonClasses} disabled={!skill.baseDir} onClick={handleCopyPath} title={t('detail.copyPath')}>
-                    <Copy className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button variant="outline" size="icon" className={iconOutlineButtonClasses} disabled={!skill.baseDir} onClick={() => onOpenFolder?.(skill)} title={t('detail.openActualFolder')}>
-                    <FolderOpen className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
-              <Input value={skill.baseDir || t('detail.pathUnavailable')} readOnly className={cn(detailInputClasses, 'h-[42px] font-mono text-[12px] text-foreground/70')} />
-            </div>
-
             {!skill.isCore && (
               <div className={cn(skillPanelClasses, 'p-5')}>
                 <div className="mb-2 flex items-center gap-2">
@@ -450,7 +420,9 @@ export function Skills() {
   const [installSheetOpen, setInstallSheetOpen] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [selectedSource, setSelectedSource] = useState<SkillSourceCategory>('all');
+  const [selectedKeyCategory, setSelectedKeyCategory] = useState<SkillKeyCategory>('all');
   const [selectedMarketplaceSource, setSelectedMarketplaceSource] = useState('all');
+  const { sources, fetchSources } = useSkillsStore();
 
   const isGatewayRunning = gatewayStatus.state === 'running';
   const [showGatewayWarning, setShowGatewayWarning] = useState(false);
@@ -561,13 +533,8 @@ export function Skills() {
       noKeyCount: skillsInSection.filter((skill) => !skillRequiresKey(skill)).length,
       skills: skillsInSection,
     };
-  }, [filteredSkills, sourceStats.clawBuiltIn, sourceStats.custom, sourceStats.hubMarket, t]);
+  }), [filteredSkills, sourceStats.clawBuiltIn, sourceStats.custom, sourceStats.hubMarket, t]);
 
-  const sources = useMemo(() => [
-    { id: 'claw-built-in', label: t('marketplace.sources.clawBuiltIn', '官方内置') },
-    { id: 'hub-market', label: t('marketplace.sources.hubMarket', 'ClawHub 市场') },
-    { id: 'custom', label: t('marketplace.sources.custom', '自定义 / 第三方') },
-  ], [t]);
 
   const getMarketplaceSourceLabel = (skill: any, defaultVal: string) => {
     const source = sources.find(s => s.id === skill.sourceId);
@@ -617,52 +584,6 @@ export function Skills() {
     }
   }, [enableSkill, disableSkill, t]);
 
-  const hasInstalledSkills = safeSkills.some(s => !s.isBundled);
-
-  const handleOpenSkillsFolder = useCallback(async () => {
-    try {
-      const skillsDir = await invokeIpc<string>('openclaw:getSkillsDir');
-      if (!skillsDir) {
-        throw new Error('Skills directory not available');
-      }
-      const result = await invokeIpc<string>('shell:openPath', skillsDir);
-      if (result) {
-        if (result.toLowerCase().includes('no such file') || result.toLowerCase().includes('not found') || result.toLowerCase().includes('failed to open')) {
-          toast.error(t('toast.failedFolderNotFound'));
-        } else {
-          throw new Error(result);
-        }
-      }
-    } catch (err) {
-      toast.error(t('toast.failedOpenFolder') + ': ' + String(err));
-    }
-  }, [t]);
-
-  const handleOpenSkillFolder = useCallback(async (skill: Skill) => {
-    try {
-      const result = await hostApiFetch<{ success: boolean; error?: string }>('/api/clawhub/open-path', {
-        method: 'POST',
-        body: JSON.stringify({
-          skillKey: skill.id,
-          slug: skill.slug,
-          baseDir: skill.baseDir,
-        }),
-      });
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to open folder');
-      }
-    } catch (err) {
-      toast.error(t('toast.failedOpenActualFolder') + ': ' + String(err));
-    }
-  }, [t]);
-
-  const [skillsDirPath, setSkillsDirPath] = useState('~/.openclaw/skills');
-
-  useEffect(() => {
-    invokeIpc<string>('openclaw:getSkillsDir')
-      .then((dir) => setSkillsDirPath(dir as string))
-      .catch(console.error);
-  }, []);
 
   useEffect(() => {
     if (!installSheetOpen) {
@@ -676,10 +597,16 @@ export function Skills() {
     }
 
     const timer = setTimeout(() => {
-      searchSkills(query);
+      searchSkills(query, selectedMarketplaceSource === 'all' ? undefined : selectedMarketplaceSource);
     }, 300);
     return () => clearTimeout(timer);
-  }, [installQuery, installSheetOpen, searchSkills]);
+  }, [installQuery, installSheetOpen, searchSkills, selectedMarketplaceSource]);
+
+  useEffect(() => {
+    if (installSheetOpen) {
+      fetchSources();
+    }
+  }, [fetchSources, installSheetOpen]);
 
   const handleInstall = useCallback(async (slug: string, sourceId?: string) => {
     try {
@@ -689,12 +616,12 @@ export function Skills() {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       if (['installTimeoutError', 'installRateLimitError'].includes(errorMessage)) {
-        toast.error(t(`toast.${errorMessage}`, { path: skillsDirPath }), { duration: 10000 });
+        toast.error(t(`toast.${errorMessage}`), { duration: 10000 });
       } else {
         toast.error(t('toast.failedInstall') + ': ' + errorMessage);
       }
     }
-  }, [installSkill, enableSkill, t, skillsDirPath]);
+  }, [installSkill, enableSkill, t]);
 
   const handleUninstall = useCallback(async (slug: string, sourceId?: string) => {
     try {
@@ -724,15 +651,19 @@ export function Skills() {
           titleTestId="skills-page-title"
           title={t('title')}
           subtitle={t('subtitle')}
-          actions={hasInstalledSkills ? (
-            <button
-              onClick={handleOpenSkillsFolder}
-              className={cn(headerActionButtonClasses, 'shrink-0 transition-colors')}
+          actions={
+            <Button
+              size="icon"
+              className="h-10 w-10 rounded-full border border-black/10 bg-white text-foreground shadow-sm hover:bg-black/5 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/5"
+              onClick={() => {
+                setInstallQuery('');
+                setInstallSheetOpen(true);
+              }}
+              title={t('actions.installSkill')}
             >
-              <FolderOpen className="h-4 w-4 mr-2" />
-              {t('openFolder')}
-            </button>
-          ) : undefined}
+              <Plus className="h-5 w-5" />
+            </Button>
+          }
         />
 
         {/* Gateway Warning */}
@@ -817,17 +748,7 @@ export function Skills() {
               >
                 {t('actions.disableVisible')}
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setInstallQuery('');
-                  setInstallSheetOpen(true);
-                }}
-                className={actionButtonClasses}
-              >
-                {t('actions.installSkill')}
-              </Button>
+
               <Button
                 variant="outline"
                 size="icon"
@@ -871,7 +792,7 @@ export function Skills() {
               <AlertCircle className="h-5 w-5 shrink-0" />
               <span>
                 {['fetchTimeoutError', 'fetchRateLimitError', 'timeoutError', 'rateLimitError'].includes(error)
-                  ? t(`toast.${error}`, { path: skillsDirPath })
+                  ? t(`toast.${error}`)
                   : error}
               </span>
             </div>
@@ -988,7 +909,7 @@ export function Skills() {
                 <Package className="w-6 h-6 text-white dark:text-indigo-400" />
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-slate-900 dark:text-white">ClawHub Marketplace</h2>
+                <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{t('discoverSkills', '发现技能')}</h2>
                 <p className="text-slate-500 dark:text-white/50 text-xs mt-0.5">{t('marketplace.installDialogSubtitle', '发现并安装社区与官方构建的技能')}</p>
               </div>
             </div>
@@ -1016,7 +937,7 @@ export function Skills() {
                 className="appearance-none w-[180px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-xl h-[46px] text-[13px] font-medium text-slate-700 dark:text-white focus:ring-indigo-500 shadow-sm focus:ring-2 focus:outline-none pl-3.5 pr-9 cursor-pointer"
               >
                 <option value="all">{t('marketplace.sources.all', '全部来源')}</option>
-                {sources.map((source: any) => (
+                {sources.map((source) => (
                   <option key={source.id} value={source.id}>
                     {source.label}
                   </option>
@@ -1045,7 +966,13 @@ export function Skills() {
             {searching && (
               <div className="flex flex-col items-center justify-center py-20 text-slate-400">
                 <LoadingSpinner size="lg" />
-                <p className="mt-4 text-sm">{t('marketplace.searching', '正在搜索市场...')}</p>
+                <p className="mt-4 text-sm">
+                  {selectedMarketplaceSource === 'all'
+                    ? t('marketplace.searchingAll', '正在搜索所有来源...')
+                    : t('marketplace.searchingSource', '正在搜索 {{source}}...', { 
+                        source: sources.find(s => s.id === selectedMarketplaceSource)?.label || selectedMarketplaceSource 
+                      })}
+                </p>
               </div>
             )}
 
@@ -1118,7 +1045,6 @@ export function Skills() {
           setSelectedSkill({ ...selectedSkill, enabled });
         }}
         onUninstall={handleUninstall}
-        onOpenFolder={handleOpenSkillFolder}
       />
     </div>
   );

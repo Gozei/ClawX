@@ -31,6 +31,18 @@ export interface SkillSnapshot {
   sourceLabel?: string;
 }
 
+/**
+ * Combined Skill type used in the UI
+ */
+export type Skill = SkillSnapshot & {
+  config?: {
+    apiKey?: string;
+    env?: Record<string, string>;
+    [key: string]: unknown;
+  };
+};
+
+
 export interface SkillConfigDetail {
   id: string;
   config?: Record<string, unknown>;

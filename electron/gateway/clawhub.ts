@@ -264,7 +264,7 @@ export class ClawHubService {
             }
 
             const lines = output.split('\n').filter(l => l.trim());
-            return lines.map(line => {
+            const results = lines.map(line => {
                 const cleanLine = this.stripAnsi(line);
 
                 // Format could be: slug vversion description (score)
@@ -285,7 +285,7 @@ export class ClawHubService {
                         description,
                         sourceId: source.id,
                         sourceLabel: source.label,
-                    };
+                    } as ClawHubSkillResult;
                 }
 
                 // Fallback for new clawhub search format without version:
@@ -301,14 +301,16 @@ export class ClawHubService {
                     return {
                         slug,
                         name: slug,
-                        version: 'latest', // Fallback version since it's not provided
+                        version: 'latest', 
                         description,
                         sourceId: source.id,
                         sourceLabel: source.label,
-                    };
+                    } as ClawHubSkillResult;
                 }
                 return null;
-            }).filter((s): s is ClawHubSkillResult => s !== null);
+            });
+            
+            return results.filter((s): s is ClawHubSkillResult => s !== null);
         } catch (error) {
             console.error('ClawHub search error:', error);
             throw error;
@@ -321,7 +323,44 @@ export class ClawHubService {
     async explore(params: { limit?: number; sourceId?: string } = {}): Promise<ClawHubSkillResult[]> {
         try {
             const source = await this.resolveSource(params.sourceId);
-            const args = ['explore'];
+
+            // SPECIAL CASE: Use direct HTTP for official source if possible
+            if (source.id === 'clawhub') {
+                try {
+                    const response = await fetch('https://wry-manatee-359.convex.cloud/api/query', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            path: 'skills:listPublicPageV4',
+                            args: [{
+                                dir: 'desc',
+                                nonSuspiciousOnly: true,
+                                numItems: params.limit || 24,
+                                sort: 'downloads'
+                            }]
+                        }),
+                        headers: { 'Content-Type': 'application/json' }
+                    } as any);
+
+                    if (response.ok) {
+                        const data: any = await response.json();
+                        if (data && data.status === 'success' && data.value && Array.isArray(data.value.page)) {
+                            return data.value.page.map((item: any) => ({
+                                slug: item.skill?.slug || '',
+                                name: item.skill?.displayName || item.skill?.slug || '',
+                                version: item.latestVersion?.version || '1.0.0',
+                                description: item.skill?.description || '',
+                                author: item.owner?.handle || 'community',
+                                sourceId: source.id,
+                                sourceLabel: source.label,
+                            }));
+                        }
+                    }
+                } catch (httpError) {
+                    console.warn('Direct HTTP explore failed, falling back to CLI:', httpError);
+                }
+            }
+
+            const args = ['explore', '--json', '--sort', 'trending'];
             if (params.limit) {
                 args.push('--limit', String(params.limit));
             }
@@ -329,28 +368,22 @@ export class ClawHubService {
             const output = await this.runCommand(args, { sourceId: source.id });
             if (!output) return [];
 
-            const lines = output.split('\n').filter(l => l.trim());
-            return lines.map(line => {
-                const cleanLine = this.stripAnsi(line);
+            const jsonPart = output.substring(output.indexOf('{'));
+            const data = JSON.parse(jsonPart);
 
-                // Format: slug vversion time description
-                // Example: my-skill v1.0.0 2 hours ago A great skill
-                const match = cleanLine.match(/^(\S+)\s+v?(\d+\.\S+)\s+(.+? ago|just now|yesterday)\s+(.+)$/i);
-                if (match) {
-                    return {
-                        slug: match[1],
-                        name: match[1],
-                        version: match[2],
-                        description: match[4],
-                        sourceId: source.id,
-                        sourceLabel: source.label,
-                    };
-                }
-                return null;
-            }).filter((s): s is ClawHubSkillResult => s !== null);
+            const items = Array.isArray(data.items) ? data.items : [];
+            return items.map((item: any) => ({
+                slug: item.slug,
+                name: item.name || item.slug,
+                version: item.version,
+                description: item.description,
+                author: item.author,
+                sourceId: source.id,
+                sourceLabel: source.label,
+            }));
         } catch (error) {
             console.error('ClawHub explore error:', error);
-            throw error;
+            return [];
         }
     }
 
@@ -390,14 +423,12 @@ export class ClawHubService {
         const source = await this.resolveSource(params.sourceId);
         const fsPromises = fs.promises;
 
-        // 1. Delete the skill directory
         const skillDir = path.join(source.workdir, 'skills', params.slug);
         if (fs.existsSync(skillDir)) {
             console.log(`Deleting skill directory: ${skillDir}`);
             await fsPromises.rm(skillDir, { recursive: true, force: true });
         }
 
-        // 2. Remove from lock.json
         const lockFile = path.join(source.workdir, '.clawhub', 'lock.json');
         if (fs.existsSync(lockFile)) {
             try {
@@ -430,7 +461,7 @@ export class ClawHubService {
             }
 
             const lines = output.split('\n').filter(l => l.trim());
-            return lines.map(line => {
+            const results = lines.map(line => {
                 const cleanLine = this.stripAnsi(line);
                 const match = cleanLine.match(/^(\S+)\s+v?(\d+\.\S+)/);
                 if (match) {
@@ -442,10 +473,11 @@ export class ClawHubService {
                         baseDir: path.join(source.workdir, 'skills', slug),
                         sourceId: source.id,
                         sourceLabel: source.label,
-                    };
+                    } as ClawHubInstalledSkillResult;
                 }
                 return null;
-            }).filter((s): s is ClawHubInstalledSkillResult => s !== null);
+            });
+            return results.filter((s): s is ClawHubInstalledSkillResult => s !== null);
         } catch (error) {
             console.error('ClawHub list error:', error);
             return [];
