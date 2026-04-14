@@ -199,6 +199,75 @@ export function extractThinking(message: RawMessage | unknown): string | null {
   return combined.length > 0 ? combined : null;
 }
 
+function hasRenderableAssistantResult(message: RawMessage): boolean {
+  if (extractText(message).trim().length > 0) return true;
+  if (extractImages(message).length > 0) return true;
+  if ((message._attachedFiles?.length || 0) > 0) return true;
+  return false;
+}
+
+function buildMergedThinkingMessage(message: RawMessage, thinking: string): RawMessage {
+  const trimmedThinking = thinking.trim();
+  if (!trimmedThinking) return message;
+
+  const content = message.content;
+  const thinkingBlock: ContentBlock = {
+    type: 'thinking',
+    thinking: trimmedThinking,
+  };
+
+  if (Array.isArray(content)) {
+    const nonThinkingBlocks = content.filter(
+      (block) => block.type !== 'thinking',
+    );
+    return { ...message, content: [thinkingBlock, ...nonThinkingBlocks] };
+  }
+
+  const nextContent: ContentBlock[] = [thinkingBlock];
+  if (typeof content === 'string' && content.trim()) {
+    nextContent.push({ type: 'text', text: content });
+  }
+  return { ...message, content: nextContent };
+}
+
+export function mergeThinkingMessages(messages: RawMessage[]): RawMessage[] {
+  const merged: RawMessage[] = [];
+  let assistantGroup: RawMessage[] = [];
+
+  const flushAssistantGroup = () => {
+    if (assistantGroup.length === 0) return;
+
+    const finalAssistant = [...assistantGroup].reverse().find(hasRenderableAssistantResult)
+      || assistantGroup[assistantGroup.length - 1];
+    if (!finalAssistant) {
+      assistantGroup = [];
+      return;
+    }
+
+    const combinedThinking = assistantGroup
+      .map((message) => extractThinking(message))
+      .filter((thinking): thinking is string => Boolean(thinking && thinking.trim()))
+      .join('\n\n')
+      .trim();
+
+    merged.push(buildMergedThinkingMessage(finalAssistant, combinedThinking));
+    assistantGroup = [];
+  };
+
+  for (const message of messages) {
+    if (message.role === 'assistant') {
+      assistantGroup.push(message);
+      continue;
+    }
+
+    flushAssistantGroup();
+    merged.push(message);
+  }
+
+  flushAssistantGroup();
+  return merged;
+}
+
 /**
  * Extract media file references from Gateway-formatted user message text.
  * Returns array of { filePath, mimeType } from [media attached: path (mime) | path] patterns.
