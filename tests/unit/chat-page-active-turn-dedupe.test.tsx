@@ -112,6 +112,10 @@ vi.mock('@/pages/Chat/ChatToolbar', () => ({
   ChatToolbar: () => <div data-testid="chat-toolbar" />,
 }));
 
+vi.mock('@/pages/Chat/ChatToolbarV2', () => ({
+  ChatToolbarV2: () => <div data-testid="chat-toolbar" />,
+}));
+
 import { Chat } from '@/pages/Chat';
 
 describe('Chat active turn dedupe', () => {

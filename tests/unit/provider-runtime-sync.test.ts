@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getProvider: vi.fn(),
   getProviderConfig: vi.fn(),
   getProviderDefaultModel: vi.fn(),
+  getOpenClawProvidersConfig: vi.fn(),
   removeProviderFromOpenClaw: vi.fn(),
   removeProviderKeyFromOpenClaw: vi.fn(),
   saveOAuthTokenToOpenClaw: vi.fn(),
@@ -46,6 +47,7 @@ vi.mock('@electron/utils/provider-registry', () => ({
 }));
 
 vi.mock('@electron/utils/openclaw-auth', () => ({
+  getOpenClawProvidersConfig: mocks.getOpenClawProvidersConfig,
   removeProviderFromOpenClaw: mocks.removeProviderFromOpenClaw,
   removeProviderKeyFromOpenClaw: mocks.removeProviderKeyFromOpenClaw,
   saveOAuthTokenToOpenClaw: mocks.saveOAuthTokenToOpenClaw,
@@ -92,10 +94,11 @@ function createProvider(overrides: Partial<ProviderConfig> = {}): ProviderConfig
   };
 }
 
-function createGateway(state: 'running' | 'stopped' = 'running'): Pick<GatewayManager, 'debouncedReload' | 'debouncedRestart' | 'getStatus'> {
+function createGateway(state: 'running' | 'stopped' = 'running'): Pick<GatewayManager, 'debouncedReload' | 'debouncedRestart' | 'getStatus' | 'rpc'> {
   return {
     debouncedReload: vi.fn(),
     debouncedRestart: vi.fn(),
+    rpc: vi.fn(),
     getStatus: vi.fn(() => ({ state } as ReturnType<GatewayManager['getStatus']>)),
   };
 }
@@ -115,6 +118,16 @@ describe('provider-runtime-sync refresh strategy', () => {
     mocks.getDefaultProvider.mockResolvedValue('moonshot');
     mocks.getProvider.mockResolvedValue(createProvider());
     mocks.getProviderDefaultModel.mockReturnValue('kimi-k2.5');
+    mocks.getOpenClawProvidersConfig.mockResolvedValue({
+      providers: {
+        moonshot: {
+          baseUrl: 'https://api.moonshot.cn/v1',
+          api: 'openai-completions',
+          models: [{ id: 'kimi-k2.5', name: 'kimi-k2.5' }],
+        },
+      },
+      defaultModel: 'moonshot/kimi-k2.5',
+    });
     mocks.getProviderConfig.mockReturnValue({
       api: 'openai-completions',
       baseUrl: 'https://api.moonshot.cn/v1',
@@ -206,6 +219,65 @@ describe('provider-runtime-sync refresh strategy', () => {
 
     expect(gateway.debouncedReload).toHaveBeenCalledTimes(1);
     expect(gateway.debouncedRestart).not.toHaveBeenCalled();
+  });
+
+  it('hot patches the gateway when only the default model changes on the current default provider', async () => {
+    const previousProvider = createProvider({
+      model: 'kimi-k2.5',
+      metadata: {
+        customModels: ['kimi-k2-turbo-preview'],
+      },
+    });
+    const nextProvider = createProvider({
+      model: 'kimi-k2-turbo-preview',
+      metadata: {
+        customModels: ['kimi-k2.5'],
+      },
+    });
+    mocks.getOpenClawProvidersConfig.mockResolvedValue({
+      providers: {
+        moonshot: {
+          baseUrl: 'https://api.moonshot.cn/v1',
+          api: 'openai-completions',
+          models: [
+            { id: 'kimi-k2-turbo-preview', name: 'kimi-k2-turbo-preview' },
+            { id: 'kimi-k2.5', name: 'kimi-k2.5' },
+          ],
+        },
+      },
+      defaultModel: 'moonshot/kimi-k2-turbo-preview',
+    });
+
+    const gateway = createGateway('running');
+    vi.mocked(gateway.rpc)
+      .mockResolvedValueOnce({ hash: 'cfg-1', config: {} })
+      .mockResolvedValueOnce(undefined);
+
+    await syncUpdatedProviderToRuntime(nextProvider, undefined, gateway as GatewayManager, {
+      previousConfig: previousProvider,
+    });
+    await flushGatewayRefreshDebounce();
+
+    expect(gateway.debouncedReload).not.toHaveBeenCalled();
+    expect(gateway.debouncedRestart).not.toHaveBeenCalled();
+    expect(gateway.rpc).toHaveBeenNthCalledWith(1, 'config.get', {}, 15000);
+    expect(gateway.rpc).toHaveBeenNthCalledWith(
+      2,
+      'config.patch',
+      expect.objectContaining({
+        baseHash: 'cfg-1',
+      }),
+      15000,
+    );
+    const patchPayload = JSON.parse(String(vi.mocked(gateway.rpc).mock.calls[1]?.[1]?.raw || '{}')) as {
+      agents?: { defaults?: { model?: { primary?: string; fallbacks?: string[] } } };
+      models?: { providers?: Record<string, { api?: string }> };
+    };
+    expect(patchPayload.agents?.defaults?.model).toEqual({
+      primary: 'moonshot/kimi-k2-turbo-preview',
+      fallbacks: [],
+    });
+    expect(patchPayload.models?.providers?.moonshot?.api).toBe('openai-completions');
   });
 
   it('syncs the full configured model catalog when switching a custom default provider', async () => {

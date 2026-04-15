@@ -97,6 +97,20 @@ function getAgentIdFromSessionKey(sessionKey: string): string {
   return agentId || 'main';
 }
 
+function formatGatewayRestartElapsed(seconds: number, isChinese: boolean): string {
+  const totalSeconds = Math.max(0, seconds);
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = totalSeconds % 60;
+
+  if (minutes < 1) {
+    return isChinese ? `${totalSeconds}\u79d2` : `${totalSeconds}s`;
+  }
+
+  return isChinese
+    ? `${minutes}\u5206${remainingSeconds}\u79d2`
+    : `${minutes}m ${remainingSeconds}s`;
+}
+
 export function Sidebar() {
   const branding = useBranding();
   const location = useLocation();
@@ -157,11 +171,13 @@ export function Sidebar() {
   const [editingSessionName, setEditingSessionName] = useState('');
   const [openSessionMenuKey, setOpenSessionMenuKey] = useState<string | null>(null);
   const [settingsHubOpen, setSettingsHubOpen] = useState(false);
+  const [gatewayHintNow, setGatewayHintNow] = useState(() => Date.now());
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
   const isSubmittingRenameRef = useRef(false);
   const resizeStartXRef = useRef<number | null>(null);
   const resizeStartWidthRef = useRef(sidebarWidth);
+  const gatewayHintStartAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     void fetchAgents();
@@ -211,6 +227,27 @@ export function Sidebar() {
     };
   }, [settingsHubOpen]);
 
+  useEffect(() => {
+    if (!(gatewayStatus.state === 'starting' || gatewayStatus.state === 'reconnecting')) {
+      gatewayHintStartAtRef.current = null;
+      return;
+    }
+
+    const now = Date.now();
+    if (gatewayHintStartAtRef.current == null) {
+      gatewayHintStartAtRef.current = now;
+    }
+    setGatewayHintNow(now);
+
+    const timer = window.setInterval(() => {
+      setGatewayHintNow(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [gatewayStatus.state]);
+
   const agentNameById = useMemo(
     () => Object.fromEntries((agents ?? []).map((agent) => [agent.id, agent.name])),
     [agents],
@@ -232,7 +269,16 @@ export function Sidebar() {
     };
   }, [i18n.resolvedLanguage]);
 
-  const sessionSectionLabel = i18n.resolvedLanguage?.startsWith('zh') ? '会话记录' : 'Session History';
+  const isChinese = i18n.resolvedLanguage?.startsWith('zh') ?? false;
+  const sessionSectionLabel = isChinese ? '会话记录' : 'Session History';
+  const gatewayRestartHintLabel = isChinese ? '网关启动中' : 'Gateway starting';
+  const showGatewayRestartHint = gatewayStatus.state === 'starting' || gatewayStatus.state === 'reconnecting';
+  const gatewayRestartElapsedSeconds = gatewayHintStartAtRef.current == null
+    ? 0
+    : Math.floor((gatewayHintNow - gatewayHintStartAtRef.current) / 1000);
+  const gatewayRestartElapsedLabel = showGatewayRestartHint
+    ? formatGatewayRestartElapsed(gatewayRestartElapsedSeconds, isChinese)
+    : '';
 
   const startRenamingSession = (sessionKey: string, currentLabel: string) => {
     isSubmittingRenameRef.current = false;
@@ -513,7 +559,10 @@ export function Sidebar() {
       style={{ width: `${renderedSidebarWidth}px` }}
     >
       {/* Top Header Toggle */}
-      <div className={cn("flex items-center px-3 py-3 h-14 border-b border-black/5", sidebarCollapsed ? "justify-center" : "justify-between")}>
+      <div
+        data-testid="sidebar-top-header"
+        className={cn("flex h-14 items-center border-b border-black/5 px-3 py-3", sidebarCollapsed ? "justify-center" : "justify-between")}
+      >
         {!sidebarCollapsed && (
           <div className="flex items-center gap-2.5 overflow-hidden">
             <AppLogo testId="sidebar-brand-logo" className="h-[22.5px]" />
@@ -543,6 +592,40 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex flex-col gap-1 px-2.5 py-3">
+        {!sidebarCollapsed && showGatewayRestartHint && (
+          <div
+            data-testid="sidebar-gateway-restarting-hint"
+            className="mb-2 rounded-[14px] border border-amber-200/70 bg-amber-50/90 px-3.5 py-2 text-[12px] font-medium text-amber-700 shadow-[0_4px_14px_rgba(245,158,11,0.10)] dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200"
+          >
+            <div className="inline-flex items-center">
+              <span>{gatewayRestartHintLabel}</span>
+              <span
+                data-testid="sidebar-gateway-restarting-elapsed"
+                className="ml-1 text-amber-700/80 dark:text-amber-200/80"
+              >
+                {isChinese ? `（${gatewayRestartElapsedLabel}）` : `(${gatewayRestartElapsedLabel})`}
+              </span>
+              <span
+                aria-hidden="true"
+                data-testid="sidebar-gateway-restarting-ellipsis"
+                className="ml-1 inline-flex w-[18px] justify-start"
+              >
+                {[0, 1, 2].map((index) => (
+                  <span
+                    key={index}
+                    className="inline-block motion-safe:animate-pulse"
+                    style={{
+                      animationDelay: `${index * 160}ms`,
+                      animationDuration: '1.1s',
+                    }}
+                  >
+                    .
+                  </span>
+                ))}
+              </span>
+            </div>
+          </div>
+        )}
         <button
           data-testid="sidebar-new-chat"
           onClick={() => {

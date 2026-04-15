@@ -73,13 +73,16 @@ test.describe('Chat history refresh hydration', () => {
       await expect(sessionRow).toBeVisible({ timeout: 60_000 });
       await sessionRow.click();
 
+      const userMessages = page.getByTestId('chat-message-content-user').filter({ hasText: USER_TEXT });
       await expect(page.getByText(USER_TEXT, { exact: true })).toBeVisible({ timeout: 60_000 });
+      await expect(userMessages).toHaveCount(1);
       await expect(page.getByText(FINAL_TEXT, { exact: true })).toHaveCount(0);
 
       await writeSession(homeDir, true);
       await page.getByTestId('chat-refresh-button').click();
 
       await expect(page.getByText(FINAL_TEXT, { exact: true })).toBeVisible({ timeout: 60_000 });
+      await expect(userMessages).toHaveCount(1);
     } finally {
       await closeElectronApp(app);
     }

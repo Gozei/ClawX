@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const { defaultAgentStoreState } = vi.hoisted(() => ({
+  defaultAgentStoreState: {
+    defaultAgentId: 'main',
+  },
+}));
+
 const invokeIpcMock = vi.fn();
 const hostApiFetchMock = vi.fn();
 
@@ -11,8 +17,15 @@ vi.mock('@/lib/host-api', () => ({
   hostApiFetch: (...args: unknown[]) => hostApiFetchMock(...args),
 }));
 
+vi.mock('@/stores/agents', () => ({
+  useAgentsStore: {
+    getState: () => defaultAgentStoreState,
+  },
+}));
+
 type ChatLikeState = {
   currentSessionKey: string;
+  currentAgentId: string;
   sessions: Array<{ key: string; label?: string; displayName?: string; updatedAt?: number; pinned?: boolean; pinOrder?: number }>;
   messages: Array<{ role: string; timestamp?: number; content?: unknown }>;
   sessionLabels: Record<string, string>;
@@ -31,6 +44,7 @@ type ChatLikeState = {
 function makeHarness(initial?: Partial<ChatLikeState>) {
   let state: ChatLikeState = {
     currentSessionKey: 'agent:main:main',
+    currentAgentId: 'main',
     sessions: [{ key: 'agent:main:main' }],
     messages: [],
     sessionLabels: {},
@@ -57,6 +71,7 @@ function makeHarness(initial?: Partial<ChatLikeState>) {
 describe('chat session actions', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    defaultAgentStoreState.defaultAgentId = 'main';
     invokeIpcMock.mockResolvedValue({ success: true });
     hostApiFetchMock.mockResolvedValue({ success: true, label: 'Renamed session' });
   });
@@ -123,11 +138,13 @@ describe('chat session actions', () => {
     expect(h.read().loadHistory).toHaveBeenCalledTimes(1);
   });
 
-  it('newSession creates a draft session key without adding it to history yet', async () => {
+  it('newSession creates a draft session for the configured default role without adding it to history yet', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1711111111111);
+    defaultAgentStoreState.defaultAgentId = 'ops';
     const { createSessionActions } = await import('@/stores/chat/session-actions');
     const h = makeHarness({
       currentSessionKey: 'agent:foo:main',
+      currentAgentId: 'foo',
       sessions: [{ key: 'agent:foo:main' }],
       messages: [{ role: 'assistant' }],
       streamingText: 'streaming',
@@ -138,8 +155,9 @@ describe('chat session actions', () => {
 
     actions.newSession();
     const next = h.read();
-    expect(next.currentSessionKey).toBe('agent:foo:session-1711111111111');
-    expect(next.sessions.some((s) => s.key === 'agent:foo:session-1711111111111')).toBe(false);
+    expect(next.currentSessionKey).toBe('agent:ops:session-1711111111111');
+    expect(next.currentAgentId).toBe('ops');
+    expect(next.sessions.some((s) => s.key === 'agent:ops:session-1711111111111')).toBe(false);
     expect(next.messages).toEqual([]);
     expect(next.streamingText).toBe('');
     expect(next.activeRunId).toBeNull();

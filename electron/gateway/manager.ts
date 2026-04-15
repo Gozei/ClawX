@@ -10,6 +10,7 @@ import { PORTS } from '../utils/config';
 import { JsonRpcNotification, isNotification, isResponse } from './protocol';
 import { logger } from '../utils/logger';
 import { captureTelemetryEvent, trackMetric } from '../utils/telemetry';
+import { getSetting } from '../utils/store';
 import {
   loadOrCreateDeviceIdentity,
   type DeviceIdentity,
@@ -97,6 +98,7 @@ export class GatewayManager extends EventEmitter {
   private recentStartupStderrLines: string[] = [];
   private pendingRequests: Map<string, PendingGatewayRequest> = new Map();
   private deviceIdentity: DeviceIdentity | null = null;
+  private connectionToken: string | null = null;
   private restartInFlight: Promise<void> | null = null;
   private readonly connectionMonitor = new GatewayConnectionMonitor();
   private readonly lifecycleController = new GatewayLifecycleController();
@@ -119,6 +121,7 @@ export class GatewayManager extends EventEmitter {
   private static readonly HEARTBEAT_INTERVAL_MS_WIN = 60_000;
   private static readonly HEARTBEAT_TIMEOUT_MS_WIN = 25_000;
   private static readonly HEARTBEAT_MAX_MISSES_WIN = 5;
+  private static readonly HEALTHCHECK_PING_TIMEOUT_MS = 3_000;
   public static readonly RESTART_COOLDOWN_MS = 5_000;
   private lastRestartAt = 0;
   /** Set by scheduleReconnect() before calling start() to signal auto-reconnect. */
@@ -224,6 +227,12 @@ export class GatewayManager extends EventEmitter {
     if (this.startLock) {
       logger.debug('Gateway start ignored because a start flow is already in progress');
       return;
+    }
+
+    const configuredPort = await getSetting('gatewayPort').catch(() => this.status.port);
+    if (typeof configuredPort === 'number' && Number.isFinite(configuredPort) && configuredPort > 0 && configuredPort !== this.status.port) {
+      logger.info(`Gateway start syncing port from settings (${this.status.port} -> ${configuredPort})`);
+      this.setStatus({ port: configuredPort });
     }
 
     if (this.status.state === 'running') {
@@ -687,6 +696,71 @@ export class GatewayManager extends EventEmitter {
     }
   }
 
+  private async probeSocketResponsive(
+    ws: WebSocket,
+    timeoutMs = GatewayManager.HEALTHCHECK_PING_TIMEOUT_MS,
+  ): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      let settled = false;
+      let timeout: NodeJS.Timeout | null = null;
+
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = null;
+        }
+        ws.off('pong', handlePong);
+        ws.off('close', handleClose);
+        ws.off('error', handleError);
+      };
+
+      const resolveOnce = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+
+      const rejectOnce = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error instanceof Error ? error : new Error(String(error)));
+      };
+
+      const handlePong = () => {
+        resolveOnce();
+      };
+
+      const handleClose = (code: number) => {
+        rejectOnce(new Error(`Gateway socket closed (code=${code})`));
+      };
+
+      const handleError = (error: Error) => {
+        rejectOnce(error);
+      };
+
+      ws.on('pong', handlePong);
+      ws.on('close', handleClose);
+      ws.on('error', handleError);
+
+      timeout = setTimeout(() => {
+        rejectOnce(new Error(`Gateway ping timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      try {
+        ws.ping();
+      } catch (error) {
+        rejectOnce(error);
+      }
+    });
+  }
+
   /**
    * Make an RPC call to the Gateway
    * Uses OpenClaw protocol format: { type: "req", id: "...", method: "...", params: {...} }
@@ -748,15 +822,19 @@ export class GatewayManager extends EventEmitter {
    * Check Gateway health via WebSocket ping
    * OpenClaw Gateway doesn't have an HTTP /health endpoint
    */
-  async checkHealth(): Promise<{ ok: boolean; error?: string; uptime?: number }> {
+  async checkHealth(
+    timeoutMs = GatewayManager.HEALTHCHECK_PING_TIMEOUT_MS,
+  ): Promise<{ ok: boolean; error?: string; uptime?: number }> {
     try {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        const uptime = this.status.connectedAt
-          ? Math.floor((Date.now() - this.status.connectedAt) / 1000)
-          : undefined;
-        return { ok: true, uptime };
+      const ws = this.ws;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return { ok: false, error: 'WebSocket not connected' };
       }
-      return { ok: false, error: 'WebSocket not connected' };
+      await this.probeSocketResponsive(ws, timeoutMs);
+      const uptime = this.status.connectedAt
+        ? Math.floor((Date.now() - this.status.connectedAt) / 1000)
+        : undefined;
+      return { ok: true, uptime };
     } catch (error) {
       return { ok: false, error: String(error) };
     }
@@ -768,6 +846,7 @@ export class GatewayManager extends EventEmitter {
    */
   private async startProcess(): Promise<void> {
     const launchContext = await prepareGatewayLaunchContext(this.status.port);
+    this.connectionToken = launchContext.appSettings.gatewayToken;
     await unloadLaunchctlGatewayService();
     this.processExitCode = null;
 
@@ -847,7 +926,22 @@ export class GatewayManager extends EventEmitter {
   /**
    * Connect WebSocket to Gateway
    */
-  private async connect(port: number, _externalToken?: string): Promise<void> {
+  private async resolveConnectToken(externalToken?: string): Promise<string> {
+    const preferredToken = externalToken?.trim();
+    if (preferredToken) {
+      return preferredToken;
+    }
+
+    const managedToken = this.ownsProcess ? this.connectionToken?.trim() : undefined;
+    if (managedToken) {
+      return managedToken;
+    }
+
+    const storedToken = await import('../utils/store').then(({ getSetting }) => getSetting('gatewayToken'));
+    return typeof storedToken === 'string' ? storedToken : '';
+  }
+
+  private async connect(port: number, externalToken?: string): Promise<void> {
     const branding = await getResolvedBranding();
     if (this.ws) {
       this.disposeWebSocket(this.ws, { terminate: true });
@@ -858,7 +952,7 @@ export class GatewayManager extends EventEmitter {
       platform: process.platform,
       brandingDisplayName: branding.productName,
       pendingRequests: this.pendingRequests,
-      getToken: async () => await import('../utils/store').then(({ getSetting }) => getSetting('gatewayToken')),
+      getToken: async () => await this.resolveConnectToken(externalToken),
       onHandshakeComplete: (ws) => {
         this.ws = ws;
         ws.on('pong', () => {

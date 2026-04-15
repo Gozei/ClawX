@@ -752,9 +752,20 @@ function isToolResultRole(role: unknown): boolean {
   return normalized === 'toolresult' || normalized === 'tool_result';
 }
 
+function isPreCompactionMemoryFlushPrompt(text: string): boolean {
+  const normalized = text.trim();
+  return /^Pre-compaction memory flush\./i.test(normalized)
+    && /Store durable memories only in memory\//i.test(normalized)
+    && /reply with NO_REPLY\./i.test(normalized);
+}
+
 /** True for internal plumbing messages that should never be shown in the UI. */
 function isInternalMessage(msg: { role?: unknown; content?: unknown }): boolean {
   if (msg.role === 'system') return true;
+  if (msg.role === 'user') {
+    const text = getMessageText(msg.content);
+    if (isPreCompactionMemoryFlushPrompt(text)) return true;
+  }
   if (msg.role === 'assistant') {
     const text = getMessageText(msg.content);
     if (/^(HEARTBEAT_OK|NO_REPLY)\s*$/.test(text)) return true;

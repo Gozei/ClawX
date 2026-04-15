@@ -31,6 +31,9 @@
         "refresh": "Refresh chat",
         "showThinking": "Show thinking",
         "hideThinking": "Hide thinking",
+        "readingLabel": "Reading",
+        "thinkingOn": "Thinking shown",
+        "thinkingOff": "Show thinking",
         "currentAgent": "Talking to {{agent}}",
         "fontSmaller": "Smaller text",
         "fontLarger": "Larger text"

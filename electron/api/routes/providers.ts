@@ -145,8 +145,14 @@ export async function handleProviderRoutes(
         sendJson(res, 200, { success: true, noChange: true, account: existing });
         return true;
       }
+      const previousConfig = providerAccountToConfig(existing);
       const nextAccount = await providerService.updateAccount(accountId, body.updates, body.apiKey);
-      await syncUpdatedProviderToRuntime(providerAccountToConfig(nextAccount), body.apiKey, ctx.gatewayManager);
+      await syncUpdatedProviderToRuntime(
+        providerAccountToConfig(nextAccount),
+        body.apiKey,
+        ctx.gatewayManager,
+        { previousConfig },
+      );
       sendJson(res, 200, { success: true, account: nextAccount });
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });

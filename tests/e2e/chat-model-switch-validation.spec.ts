@@ -1,3 +1,3 @@
-// Model-switch validation is covered by unit tests in tests/unit/chat-input.test.tsx.
-// A deeper Electron E2E for provider-backed validation still needs a dedicated
-// gateway/provider harness so it can run reliably in CI without touching runtime config.
+// Provider-backed chat model switching is exercised in
+// tests/e2e/gateway-runtime-behavior.spec.ts.
+// This file remains as a breadcrumb for the original coverage split.

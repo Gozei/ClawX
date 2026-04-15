@@ -229,6 +229,10 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'clawx-settings',
+      merge: (persistedState, currentState) => ({
+        ...currentState,
+        ...(persistedState as Partial<SettingsState> | undefined),
+      }),
     }
   )
 );

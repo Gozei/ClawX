@@ -130,15 +130,25 @@ describe('chat target routing', () => {
     });
 
     await useChatStore.getState().sendMessage('Hello direct agent', undefined, 'research');
+    await Promise.resolve();
+    await Promise.resolve();
 
     const state = useChatStore.getState();
     expect(state.currentSessionKey).toBe('agent:research:desk');
     expect(state.currentAgentId).toBe('research');
     expect(state.sessions.some((session) => session.key === 'agent:research:desk')).toBe(true);
     expect(String(state.messages.at(-1)?.content)).toBe('Hello direct agent');
+    expect(state.sessionLabels['agent:research:desk']).toBe('Hello direct agent');
+    expect(state.sessions.find((session) => session.key === 'agent:research:desk')?.label).toBe('Hello direct agent');
 
     const historyCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.history');
     expect(historyCall?.[1]).toEqual({ sessionKey: 'agent:research:desk', limit: 200 });
+
+    const autoLabelCall = hostApiFetchMock.mock.calls.find(([path]) => path === '/api/sessions/auto-label');
+    expect(autoLabelCall?.[1]).toEqual({
+      method: 'POST',
+      body: JSON.stringify({ sessionKey: 'agent:research:desk', label: 'Hello direct agent' }),
+    });
 
     const sendCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.send');
     expect(sendCall?.[1]).toMatchObject({
@@ -209,8 +219,9 @@ describe('chat target routing', () => {
       }),
     );
 
+    const mediaCall = hostApiFetchMock.mock.calls.find(([path]) => path === '/api/chat/send-with-media');
     const payload = JSON.parse(
-      (hostApiFetchMock.mock.calls[0]?.[1] as { body: string }).body,
+      ((mediaCall?.[1] as { body: string } | undefined)?.body ?? '{}'),
     ) as {
       sessionKey: string;
       message: string;
@@ -256,6 +267,66 @@ describe('chat target routing', () => {
     expect(sendMessagePayload).toContain('"preferredModel": "custom-custombc/gpt-5.4"');
     expect(sendMessagePayload).toContain('你现在是什么模型');
   });
+  it('syncs the selected session model to runtime before sending', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+
+    agentsState.defaultModelRef = 'custom-custombc/glm-5';
+    agentsState.agents = [
+      {
+        id: 'main',
+        name: 'Main',
+        isDefault: true,
+        modelDisplay: 'GLM-5',
+        modelRef: 'custom-custombc/glm-5',
+        overrideModelRef: 'custom-custombc/glm-5',
+        inheritedModel: false,
+        workspace: '~/.openclaw/workspace',
+        agentDir: '~/.openclaw/agents/main/agent',
+        mainSessionKey: 'agent:main:main',
+        channelTypes: [],
+        skillIds: [],
+        workflowSteps: [],
+        triggerModes: [],
+        description: null,
+      },
+    ];
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main', model: 'custom-custombc/qwen3.5-plus' }],
+      sessionModels: { 'agent:main:main': 'custom-custombc/qwen3.5-plus' },
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().sendMessage('Current runtime model?');
+
+    const runtimeModelCall = hostApiFetchMock.mock.calls.find(([path]) => path === '/api/agents/main/model/runtime');
+    expect(runtimeModelCall?.[1]).toEqual({
+      method: 'PUT',
+      body: JSON.stringify({ modelRef: 'custom-custombc/qwen3.5-plus' }),
+    });
+
+    const sendCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.send');
+    const sendMessagePayload = String((sendCall?.[1] as { message?: unknown })?.message);
+    expect(sendMessagePayload).toContain('"preferredModel": "custom-custombc/qwen3.5-plus"');
+    expect(sendMessagePayload).toContain('Current runtime model?');
+  });
+
   it('refreshes agents and falls back to the default model before sending when no session model is stored', async () => {
     const { useChatStore } = await import('@/stores/chat');
 
@@ -326,4 +397,61 @@ describe('chat target routing', () => {
     expect(sendMessagePayload).toContain('"preferredModel": "custom-custombc/gpt-5.4"');
     expect(sendMessagePayload).toContain('你现在是什么模型');
   });
+  it('leaves preferredModel empty when neither the session nor the global default has a model', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+
+    agentsState.defaultModelRef = null;
+    agentsState.agents = [
+      {
+        id: 'main',
+        name: 'Main',
+        isDefault: true,
+        modelDisplay: 'GLM-5',
+        modelRef: 'custom-custombc/glm-5',
+        overrideModelRef: 'custom-custombc/glm-5',
+        inheritedModel: false,
+        workspace: '~/.openclaw/workspace',
+        agentDir: '~/.openclaw/agents/main/agent',
+        mainSessionKey: 'agent:main:main',
+        channelTypes: [],
+        skillIds: [],
+        workflowSteps: [],
+        triggerModes: [],
+        description: null,
+      },
+    ];
+    agentsState.fetchAgents.mockResolvedValue(undefined);
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:session-empty-model',
+      currentAgentId: 'main',
+      sessions: [],
+      sessionModels: {},
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().sendMessage('现在是什么模型');
+
+    expect(agentsState.fetchAgents).toHaveBeenCalledTimes(1);
+    expect(useChatStore.getState().sessionModels['agent:main:session-empty-model']).toBeUndefined();
+
+    const sendCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.send');
+    const sendMessagePayload = String((sendCall?.[1] as { message?: unknown })?.message);
+    expect(sendMessagePayload).not.toContain('"preferredModel":');
+    expect(sendMessagePayload).toContain('现在是什么模型');
+  }, 15000);
 });

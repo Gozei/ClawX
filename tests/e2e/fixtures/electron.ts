@@ -108,6 +108,15 @@ async function closeElectronApp(app: ElectronApplication, timeoutMs = 5_000): Pr
   }
 }
 
+async function removeTempDir(targetDir: string): Promise<void> {
+  await rm(targetDir, {
+    recursive: true,
+    force: true,
+    maxRetries: 8,
+    retryDelay: 250,
+  });
+}
+
 async function launchDeepAiWorkerElectron(
   homeDir: string,
   userDataDir: string,
@@ -146,7 +155,7 @@ export const test = base.extend<ElectronFixtures>({
     try {
       await provideHomeDir(homeDir);
     } finally {
-      await rm(homeDir, { recursive: true, force: true });
+      await removeTempDir(homeDir);
     }
   },
 
@@ -155,7 +164,7 @@ export const test = base.extend<ElectronFixtures>({
     try {
       await provideUserDataDir(userDataDir);
     } finally {
-      await rm(userDataDir, { recursive: true, force: true });
+      await removeTempDir(userDataDir);
     }
   },
 

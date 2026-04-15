@@ -28,6 +28,7 @@ import { logger } from '../utils/logger';
 import { prependPathEntry } from '../utils/env-path';
 import { copyPluginFromNodeModules, fixupPluginManifest, cpSyncSafe } from '../utils/plugin-install';
 import { stripSystemdSupervisorEnv } from './config-sync-env';
+import { shouldDisableManagedGatewayBonjour, summarizeManagedGatewayDiscovery } from './discovery-defaults';
 
 
 export interface GatewayLaunchContext {
@@ -41,6 +42,7 @@ export interface GatewayLaunchContext {
   loadedProviderKeyCount: number;
   proxySummary: string;
   channelStartupSummary: string;
+  discoverySummary: string;
 }
 
 // ── Auto-upgrade bundled plugins on startup ──────────────────────
@@ -465,6 +467,12 @@ export async function prepareGatewayLaunchContext(port: number): Promise<Gateway
 
   const { providerEnv, loadedProviderKeyCount } = await loadProviderEnv();
   const { skipChannels, channelStartupSummary } = await resolveChannelStartupPolicy();
+  const runtimeConfig = await readOpenClawConfig().catch((error) => {
+    logger.warn('Failed to read OpenClaw config while preparing Gateway discovery defaults:', error);
+    return {} as Record<string, unknown>;
+  });
+  const disableBonjour = shouldDisableManagedGatewayBonjour(runtimeConfig);
+  const discoverySummary = summarizeManagedGatewayDiscovery(runtimeConfig);
   const uvEnv = await getUvMirrorEnv();
   const proxyEnv = buildProxyEnv(appSettings);
   const resolvedProxy = resolveProxySettings(appSettings);
@@ -486,6 +494,7 @@ export async function prepareGatewayLaunchContext(port: number): Promise<Gateway
     OPENCLAW_SKIP_CHANNELS: skipChannels ? '1' : '',
     CLAWDBOT_SKIP_CHANNELS: skipChannels ? '1' : '',
     OPENCLAW_NO_RESPAWN: '1',
+    ...(disableBonjour ? { OPENCLAW_DISABLE_BONJOUR: '1' } : {}),
   };
 
   return {
@@ -499,5 +508,6 @@ export async function prepareGatewayLaunchContext(port: number): Promise<Gateway
     loadedProviderKeyCount,
     proxySummary,
     channelStartupSummary,
+    discoverySummary,
   };
 }

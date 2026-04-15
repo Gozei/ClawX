@@ -10,10 +10,11 @@ import { AlertCircle, ChevronDown, ChevronRight, ListTodo, Loader2, Network, Spa
 import { useChatStore, type RawMessage, type ToolStatus } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
+import { AppLogo } from '@/components/branding/AppLogo';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
-import { ChatToolbar } from './ChatToolbar';
+import { ChatToolbarV2 } from './ChatToolbarV2';
 import {
   assistantMessageShowsInChat,
   extractImages,
@@ -22,8 +23,8 @@ import {
   extractToolUse,
 } from './message-utils';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
 import { useBranding } from '@/lib/branding';
+import { cn } from '@/lib/utils';
 import { useStickToBottomInstant } from '@/hooks/use-stick-to-bottom-instant';
 import { useMinLoading } from '@/hooks/use-min-loading';
 import { useSettingsStore, type AssistantMessageStyle, type ChatProcessDisplayMode } from '@/stores/settings';
@@ -240,13 +241,16 @@ export function Chat() {
       }}
     >
       {/* Toolbar */}
-      <div className="flex shrink-0 items-center justify-end border-b border-black/5 bg-white/32 px-4 py-2 backdrop-blur-md dark:border-white/5 dark:bg-white/[0.02]">
-        <ChatToolbar />
+      <div
+        data-testid="chat-toolbar-header"
+        className="flex h-14 shrink-0 items-center justify-end border-b border-black/5 bg-white/32 px-4 backdrop-blur-md dark:border-white/5 dark:bg-white/[0.02]"
+      >
+        <ChatToolbarV2 />
       </div>
 
       {/* Messages Area */}
-      <div ref={scrollRef} data-testid="chat-scroll-container" data-chat-scroll-container="true" className="flex-1 overflow-y-auto px-4 py-5">
-        <div ref={contentRef} className="max-w-4xl mx-auto space-y-4">
+      <div ref={scrollRef} data-testid="chat-scroll-container" data-chat-scroll-container="true" className="flex-1 overflow-y-auto px-4 pt-5 pb-8">
+        <div ref={contentRef} data-testid="chat-content-column" className="max-w-4xl mx-auto space-y-4">
           {showSessionLoadingState ? (
             <div className="flex min-h-[40vh] items-center justify-center">
               <div className="bg-background shadow-lg rounded-full p-2.5 border border-border">
@@ -254,18 +258,22 @@ export function Chat() {
               </div>
             </div>
           ) : isEmpty ? (
-            <WelcomeScreen
-              gatewayHint={showGatewayStartupInline ? {
-                state: gatewayStatus.state,
-                error: gatewayStatus.error,
-                port: gatewayStatus.port,
-                pid: gatewayStatus.pid,
-                reconnectAttempts: gatewayStatus.reconnectAttempts,
-              } : null}
-              onOpenSettings={() => navigate('/settings')}
-              onRecoverGateway={handleGatewayRecovery}
-              onUseStarterPrompt={handleUseStarterPrompt}
-            />
+            showGatewayStartupInline ? (
+              <WelcomeScreen
+                gatewayHint={{
+                  state: gatewayStatus.state,
+                  error: gatewayStatus.error,
+                  port: gatewayStatus.port,
+                  pid: gatewayStatus.pid,
+                  reconnectAttempts: gatewayStatus.reconnectAttempts,
+                }}
+                onOpenSettings={() => navigate('/settings')}
+                onRecoverGateway={handleGatewayRecovery}
+                onUseStarterPrompt={handleUseStarterPrompt}
+              />
+            ) : (
+              <WelcomeScreenMinimal />
+            )
           ) : (
             <>
               <HistoryMessages
@@ -1051,6 +1059,29 @@ function ActiveTurn({
 
 // ── Welcome Screen ──────────────────────────────────────────────
 
+function WelcomeScreenMinimal() {
+  const { t } = useTranslation('chat');
+
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="w-full px-2">
+        <div className="mx-auto max-w-4xl text-center">
+          <AppLogo
+            testId="chat-welcome-logo"
+            className="mx-auto mb-8 h-10 md:mb-10 md:h-12"
+          />
+          <h1
+            data-testid="chat-welcome-title"
+            className="text-[34px] font-semibold tracking-[-0.05em] text-foreground md:text-[50px]"
+          >
+            {t('welcome.subtitle', '把工作交给我，我来持续推进')}
+          </h1>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WelcomeScreen({
   gatewayHint,
   onOpenSettings,
@@ -1244,6 +1275,7 @@ function WelcomeScreen({
           </h1>
 
           <p
+            data-testid="chat-welcome-description"
             className="mx-auto mt-5 max-w-[680px] text-[15px] leading-[1.9] text-foreground/62 md:text-[17px]"
             style={{ textWrap: 'pretty' }}
           >
