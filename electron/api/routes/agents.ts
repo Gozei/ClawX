@@ -1,10 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import {
+  applyPreparedAgentModelUpdate,
   assignChannelToAgent,
   clearChannelBinding,
   createAgent,
   deleteAgentConfig,
-  finalizePreparedAgentModelUpdate,
   type AgentWorkflowNode,
   listAgentsSnapshot,
   prepareAgentModelUpdate,
@@ -56,7 +56,7 @@ async function tryHotPatchAgentModel(
     },
     15000,
   );
-  await finalizePreparedAgentModelUpdate(prepared);
+  await applyPreparedAgentModelUpdate(prepared);
   return prepared;
 }
 

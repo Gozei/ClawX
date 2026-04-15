@@ -420,11 +420,10 @@ describe('sanitizeOpenClawConfig', () => {
     const tools = (result.tools as Record<string, unknown> | undefined) || {};
     const web = (tools.web as Record<string, unknown> | undefined) || {};
     const search = (web.search as Record<string, unknown> | undefined) || {};
-    const moonshot = ((((result.plugins as Record<string, unknown>).entries as Record<string, unknown>).moonshot as Record<string, unknown>).config as Record<string, unknown>).webSearch as Record<string, unknown>;
-
-    expect(search).not.toHaveProperty('kimi');
-    expect(moonshot).not.toHaveProperty('apiKey');
-    expect(moonshot.baseUrl).toBe('https://api.moonshot.cn/v1');
+    expect(search.kimi).toMatchObject({
+      baseUrl: 'https://api.moonshot.cn/v1',
+    });
+    expect((search.kimi as Record<string, unknown>)).not.toHaveProperty('apiKey');
   });
 
   it('mirrors telegram default account credentials to top level during sanitize', async () => {
@@ -516,10 +515,9 @@ describe('syncProviderConfigToOpenClaw', () => {
     const tools = (result.tools as Record<string, unknown> | undefined) || {};
     const web = (tools.web as Record<string, unknown> | undefined) || {};
     const search = (web.search as Record<string, unknown> | undefined) || {};
-    const moonshot = ((((result.plugins as Record<string, unknown>).entries as Record<string, unknown>).moonshot as Record<string, unknown>).config as Record<string, unknown>).webSearch as Record<string, unknown>;
-
-    expect(search).not.toHaveProperty('kimi');
-    expect(moonshot.baseUrl).toBe('https://api.moonshot.cn/v1');
+    expect(search.kimi).toMatchObject({
+      baseUrl: 'https://api.moonshot.cn/v1',
+    });
   });
 
   it('preserves legacy plugins array by converting it into plugins.load during moonshot sync', async () => {
@@ -540,10 +538,13 @@ describe('syncProviderConfigToOpenClaw', () => {
     const result = await readOpenClawJson();
     const plugins = result.plugins as Record<string, unknown>;
     const load = plugins.load as string[];
-    const moonshot = (((plugins.entries as Record<string, unknown>).moonshot as Record<string, unknown>).config as Record<string, unknown>).webSearch as Record<string, unknown>;
-
     expect(load).toEqual(['/tmp/custom-plugin.js']);
-    expect(moonshot.baseUrl).toBe('https://api.moonshot.cn/v1');
+    const tools = (result.tools as Record<string, unknown> | undefined) || {};
+    const web = (tools.web as Record<string, unknown> | undefined) || {};
+    const search = (web.search as Record<string, unknown> | undefined) || {};
+    expect(search.kimi).toMatchObject({
+      baseUrl: 'https://api.moonshot.cn/v1',
+    });
   });
 });
 

@@ -1266,7 +1266,12 @@ async function ensureSessionPreferredModelLoaded(
     return;
   }
 
-  await useAgentsStore.getState().fetchAgents();
+  const fetchAgents = useAgentsStore.getState().fetchAgents;
+  if (typeof fetchAgents !== 'function') {
+    return;
+  }
+
+  await fetchAgents();
   const refreshedDefaultModelRef = (useAgentsStore.getState().defaultModelRef || '').trim();
   if (!refreshedDefaultModelRef) {
     return;

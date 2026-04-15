@@ -627,6 +627,7 @@ export async function setOpenClawDefaultModel(
 ): Promise<void> {
   return withConfigLock(async () => {
     const config = await readOpenClawJson();
+    normalizePluginsConfig(config);
     ensureMoonshotKimiWebSearchCnBaseUrl(config, provider);
     const managedProviders = await readManagedProvidersState();
     let nextProviders = { ...managedProviders.providers };
@@ -813,6 +814,26 @@ function ensureMoonshotKimiWebSearchCnBaseUrl(config: Record<string, unknown>, p
   config.tools = tools;
 }
 
+function normalizePluginsConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const rawPlugins = config.plugins;
+  if (Array.isArray(rawPlugins)) {
+    const nextPlugins: Record<string, unknown> = {};
+    if (rawPlugins.length > 0) {
+      nextPlugins.load = [...rawPlugins];
+    }
+    config.plugins = nextPlugins;
+    return nextPlugins;
+  }
+
+  if (rawPlugins && typeof rawPlugins === 'object') {
+    return rawPlugins as Record<string, unknown>;
+  }
+
+  const nextPlugins: Record<string, unknown> = {};
+  config.plugins = nextPlugins;
+  return nextPlugins;
+}
+
 /**
  * Register or update a provider's configuration in openclaw.json
  * without changing the current default model.
@@ -824,6 +845,7 @@ export async function syncProviderConfigToOpenClaw(
 ): Promise<void> {
   return withConfigLock(async () => {
     const config = await readOpenClawJson();
+    normalizePluginsConfig(config);
     ensureMoonshotKimiWebSearchCnBaseUrl(config, provider);
     const managedProviders = await readManagedProvidersState();
     let nextProviders = { ...managedProviders.providers };
@@ -844,7 +866,7 @@ export async function syncProviderConfigToOpenClaw(
 
     // Ensure extension is enabled for oauth providers to prevent gateway wiping config
     if (isOpenClawOAuthPluginProviderKey(provider)) {
-      const plugins = (config.plugins || {}) as Record<string, unknown>;
+      const plugins = normalizePluginsConfig(config);
       const allow = Array.isArray(plugins.allow) ? [...plugins.allow as string[]] : [];
       const pEntries = (plugins.entries || {}) as Record<string, unknown>;
       const pluginId = getOAuthPluginId(provider);
@@ -912,7 +934,7 @@ export async function setOpenClawDefaultModelWithOverride(
 
     // Ensure the extension plugin is marked as enabled in openclaw.json
     if (isOpenClawOAuthPluginProviderKey(provider)) {
-      const plugins = (config.plugins || {}) as Record<string, unknown>;
+      const plugins = normalizePluginsConfig(config);
       const allow = Array.isArray(plugins.allow) ? [...plugins.allow as string[]] : [];
       const pEntries = (plugins.entries || {}) as Record<string, unknown>;
       const pluginId = getOAuthPluginId(provider);

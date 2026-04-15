@@ -197,7 +197,8 @@ export const ChatMessage = memo(function ChatMessage({
   const fallbackAgentModelRef = currentSession
     ? (currentAgent?.overrideModelRef || currentAgent?.modelRef || '')
     : '';
-  const effectiveModelRef = (sessionModels[currentSessionKey] || currentSession?.model || defaultModelRef || fallbackAgentModelRef || '').trim();
+  const safeSessionModels = sessionModels ?? {};
+  const effectiveModelRef = (safeSessionModels[currentSessionKey] || currentSession?.model || defaultModelRef || fallbackAgentModelRef || '').trim();
   const currentModelLabel = useMemo(
     () => modelOptions.find((option) => option.value === effectiveModelRef)?.label || effectiveModelRef,
     [effectiveModelRef, modelOptions],

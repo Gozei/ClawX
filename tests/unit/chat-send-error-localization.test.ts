@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { gatewayRpcMock, hostApiFetchMock } = vi.hoisted(() => ({
+const { gatewayRpcMock, hostApiFetchMock, agentsStoreState } = vi.hoisted(() => ({
   gatewayRpcMock: vi.fn(),
   hostApiFetchMock: vi.fn(),
+  agentsStoreState: {
+    agents: [] as Array<Record<string, unknown>>,
+    defaultModelRef: '',
+    fetchAgents: vi.fn(),
+  },
 }));
 
 vi.mock('@/stores/gateway', () => ({
@@ -15,9 +20,7 @@ vi.mock('@/stores/gateway', () => ({
 
 vi.mock('@/stores/agents', () => ({
   useAgentsStore: {
-    getState: () => ({
-      agents: [],
-    }),
+    getState: () => agentsStoreState,
   },
 }));
 
@@ -33,6 +36,9 @@ describe('chat send error localization', () => {
     window.localStorage.clear();
     gatewayRpcMock.mockReset();
     hostApiFetchMock.mockReset();
+    agentsStoreState.agents = [];
+    agentsStoreState.defaultModelRef = '';
+    agentsStoreState.fetchAgents = vi.fn();
     hostApiFetchMock.mockResolvedValue({ success: true, result: { runId: 'run-media' } });
 
     gatewayRpcMock.mockImplementation(async (method: string) => {
@@ -127,6 +133,42 @@ describe('chat send error localization', () => {
       role: 'assistant',
       isError: true,
       content: '消息发送失败：网关未连接。',
+    });
+  });
+
+  it('does not crash when fetchAgents is missing from the agents store', async () => {
+    const { default: i18n } = await import('@/i18n');
+    const { useChatStore } = await import('@/stores/chat');
+    await i18n.changeLanguage('en');
+    agentsStoreState.fetchAgents = undefined as unknown as typeof agentsStoreState.fetchAgents;
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      sendStage: null,
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await expect(useChatStore.getState().sendMessage('hello')).resolves.toBeUndefined();
+    expect(useChatStore.getState().messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      isError: true,
+      content: 'Failed to send message: Gateway not connected.',
     });
   });
 });
