@@ -122,7 +122,7 @@ export async function writeOpenClawRuntimeConfig(config: OpenClawConfigRecord): 
   await atomicWriteJson(OPENCLAW_CONFIG_PATH, applyOpenClawRuntimeDefaults(config), true);
 }
 
-function getManagedConfigPath(name: string): string {
+export function getManagedConfigPath(name: string): string {
   return join(MANAGED_CONFIG_DIR, name);
 }
 

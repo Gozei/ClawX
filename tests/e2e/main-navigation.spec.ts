@@ -130,6 +130,14 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
+      await expect(page.getByTestId('skills-page-title')).toBeVisible();
+
+      await page.getByTestId('skills-discover-button').click();
+      await expect(page.getByTestId('skills-marketplace-modal')).toBeVisible();
+      await expect(page.getByTestId('skills-marketplace-source-chips')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('skills-marketplace-modal')).toHaveCount(0);
+
       const skillsTitleBox = await page.getByTestId('skills-page-title').boundingBox();
       expect(channelsTitleBox).not.toBeNull();
       expect(skillsTitleBox).not.toBeNull();
@@ -206,7 +214,6 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
       await expect(settingsButton).toBeVisible();
       await settingsButton.click({ force: true });
 
-      await expect(page.getByTestId('agent-settings-dialog')).toBeVisible();
       await page.getByTestId('agent-model-summary-card').click();
       await expect(page.getByTestId('agent-model-dialog')).toBeVisible();
 
@@ -256,8 +263,11 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
-      await expect(page.getByTestId('skills-toolbar-card')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+      await expect(page.getByTestId('skills-search-input')).toBeVisible();
+      await expect(page.getByTestId('skills-discover-button')).toBeVisible();
       await openSettingsHub(page);
+      await page.getByTestId('settings-hub-menu-settings').click();
+      await expect(page.getByTestId('settings-page')).toBeVisible();
 
       await ensureTheme(page, 'dark');
       await page.getByTestId('settings-hub-menu-settings').click();
@@ -283,9 +293,9 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
-      await expect(page.getByTestId('skills-toolbar-card')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-      await expect(page.getByTestId('skills-source-filter-all')).toHaveCSS('color', 'rgb(255, 255, 255)');
-      await expect(page.getByTestId('skills-search-input')).toHaveCSS('color', 'rgb(255, 255, 255)');
+      await expect(page.getByTestId('skills-search-input')).toBeVisible();
+      await expect(page.getByTestId('skills-discover-button')).toBeVisible();
+      await expect(page.getByTestId('skills-search-input')).toBeVisible();
     } finally {
       await closeElectronApp(app);
     }

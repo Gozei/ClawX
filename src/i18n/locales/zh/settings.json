@@ -304,6 +304,8 @@
     "chatFontScaleDesc": "调节聊天消息和输入区字号，阅读更轻松。",
     "assistantMessageStyle": "助手输出样式",
     "assistantMessageStyleDesc": "在当前气泡回复和更扁平的事件流回复之间切换。",
+    "hideInternalRoutineProcesses": "隐藏内部例行检查",
+    "hideInternalRoutineProcessesDesc": "默认不显示 heartbeat、housekeeping 等内部自检过程；排查问题时可以再打开。",
     "assistantMessageStyleOptions": {
       "bubble": "气泡",
       "stream": "事件流"

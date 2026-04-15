@@ -23,6 +23,7 @@ interface SettingsState {
   telemetryEnabled: boolean;
   brandingOverrides: BrandingOverrides;
   chatProcessDisplayMode: ChatProcessDisplayMode;
+  hideInternalRoutineProcesses: boolean;
   assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
 
@@ -57,6 +58,7 @@ interface SettingsState {
   setLaunchAtStartup: (value: boolean) => void;
   setTelemetryEnabled: (value: boolean) => void;
   setChatProcessDisplayMode: (value: ChatProcessDisplayMode) => void;
+  setHideInternalRoutineProcesses: (value: boolean) => void;
   setAssistantMessageStyle: (value: AssistantMessageStyle) => void;
   setChatFontScale: (value: number) => void;
   setGatewayAutoStart: (value: boolean) => void;
@@ -85,7 +87,8 @@ const defaultSettings = {
   telemetryEnabled: true,
   brandingOverrides: {},
   chatProcessDisplayMode: 'files' as ChatProcessDisplayMode,
-  assistantMessageStyle: 'stream' as AssistantMessageStyle,
+  hideInternalRoutineProcesses: true,
+  assistantMessageStyle: 'bubble' as AssistantMessageStyle,
   chatFontScale: 100,
   gatewayAutoStart: true,
   gatewayPort: 18789,
@@ -119,7 +122,6 @@ export const useSettingsStore = create<SettingsState>()(
             ...state,
             ...settings,
             ...(resolvedLanguage ? { language: resolvedLanguage } : {}),
-            assistantMessageStyle: 'stream',
           }));
           if (resolvedLanguage) {
             i18n.changeLanguage(resolvedLanguage);
@@ -166,6 +168,13 @@ export const useSettingsStore = create<SettingsState>()(
         void hostApiFetch('/api/settings/chatProcessDisplayMode', {
           method: 'PUT',
           body: JSON.stringify({ value: chatProcessDisplayMode }),
+        }).catch(() => { });
+      },
+      setHideInternalRoutineProcesses: (hideInternalRoutineProcesses) => {
+        set({ hideInternalRoutineProcesses });
+        void hostApiFetch('/api/settings/hideInternalRoutineProcesses', {
+          method: 'PUT',
+          body: JSON.stringify({ value: hideInternalRoutineProcesses }),
         }).catch(() => { });
       },
       setAssistantMessageStyle: (assistantMessageStyle) => {
@@ -223,7 +232,6 @@ export const useSettingsStore = create<SettingsState>()(
       merge: (persistedState, currentState) => ({
         ...currentState,
         ...(persistedState as Partial<SettingsState> | undefined),
-        assistantMessageStyle: 'stream',
       }),
     }
   )

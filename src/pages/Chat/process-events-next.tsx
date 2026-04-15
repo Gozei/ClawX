@@ -39,10 +39,22 @@ function truncate(text: string, maxLength = 96): string {
   return `${normalized.slice(0, maxLength - 3)}...`;
 }
 
+const HEARTBEAT_TASK_CHECK_COPY_RE =
+  /用户又在发送心跳检查请求，我需要读取 HEARTBEAT\.md 文件确认是否有需要处理的任务。?/g;
+const HEARTBEAT_TASK_CHECK_COPY =
+  '发送心跳检查请求，系统读取 HEARTBEAT.md 文件跟进待办任务。';
+
+function normalizeRoutineProcessCopy(text: string): string {
+  return text.replace(HEARTBEAT_TASK_CHECK_COPY_RE, HEARTBEAT_TASK_CHECK_COPY);
+}
+
 const HEARTBEAT_FILE_RE = /(?:^|[\\/])HEARTBEAT\.md\b/i;
 const INTERNAL_HEARTBEAT_PATH_RE = /(?:^|[\\/])\.openclaw[\\/]+workspace[\\/]+HEARTBEAT\.md\b/i;
 const HEARTBEAT_INTERNAL_TEXT_RE =
   /(?:Read HEARTBEAT\.md if it exists|如果存在 HEARTBEAT\.md|读取 HEARTBEAT\.md 时|HEARTBEAT_OK|NO_REPLY|heartbeat check|heartbeat检查|当前时间：|Current time:|用户要求我读取 ?HEARTBEAT\.md|用户发来了heartbeat检查请求|用户又发了一次心跳检查)/i;
+
+const HEARTBEAT_INTERNAL_ENGLISH_RE =
+  /(?:the user is asking me to check heartbeat\.md again|routine heartbeat check|respond with heartbeat_ok|nothing that needs attention)/i;
 
 function isHeartbeatPath(value: string | undefined): boolean {
   if (!value) return false;
@@ -59,6 +71,7 @@ function isHeartbeatProcessText(value: string | undefined): boolean {
   const text = value.trim();
   if (!text) return false;
   return HEARTBEAT_INTERNAL_TEXT_RE.test(text)
+    || HEARTBEAT_INTERNAL_ENGLISH_RE.test(text)
     || (text.includes('HEARTBEAT.md') && /(?:heartbeat|心跳|工作区|workspace)/i.test(text));
 }
 
@@ -319,6 +332,7 @@ export function getProcessEventItems(
   message: RawMessage,
   showThinking: boolean,
   chatProcessDisplayMode: ChatProcessDisplayMode,
+  hideInternalRoutineProcesses = true,
   streamingTools: ToolStatus[] = [],
 ): ProcessEventItem[] {
   const items: ProcessEventItem[] = [];
@@ -330,13 +344,14 @@ export function getProcessEventItems(
     for (let blockIndex = 0; blockIndex < content.length; blockIndex += 1) {
       const block = content[blockIndex];
       if (block.type === 'thinking' && showThinking && typeof block.thinking === 'string' && block.thinking.trim()) {
+        const normalizedThinking = normalizeRoutineProcessCopy(block.thinking.trim());
         items.push({
           key: `${keyBase}-thinking-${blockIndex}`,
           kind: 'thinking',
           surface: 'thinking',
           title: 'Thinking',
-          preview: truncate(block.thinking, 88),
-          detail: block.thinking.trim(),
+          preview: truncate(normalizedThinking, 88),
+          detail: normalizedThinking,
         });
         continue;
       }
@@ -352,24 +367,26 @@ export function getProcessEventItems(
       }
 
       if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
+        const normalizedText = normalizeRoutineProcessCopy(block.text.trim());
         items.push({
           key: `${keyBase}-note-${blockIndex}`,
           kind: 'note',
           surface: 'note',
           title: 'Update',
-          preview: truncate(block.text, 96),
-          detail: block.text.trim(),
+          preview: truncate(normalizedText, 96),
+          detail: normalizedText,
         });
       }
     }
   } else if (typeof message.content === 'string' && message.content.trim()) {
+    const normalizedText = normalizeRoutineProcessCopy(message.content.trim());
     items.push({
       key: `${keyBase}-note-str`,
       kind: 'note',
       surface: 'note',
       title: 'Update',
-      preview: truncate(message.content, 96),
-      detail: message.content.trim(),
+      preview: truncate(normalizedText, 96),
+      detail: normalizedText,
     });
   }
 
@@ -377,13 +394,16 @@ export function getProcessEventItems(
     items.push(...createUnmatchedStatusItems(items, streamingTools));
   }
 
+  if (!hideInternalRoutineProcesses) {
+    return items;
+  }
+
   const hasInternalHeartbeatRead = items.some((item) => isInternalHeartbeatReadItem(item));
 
   return items.filter((item) => {
     if (shouldHideHeartbeatProcessItem(item)) return false;
     if (!hasInternalHeartbeatRead) return true;
-    if (item.kind !== 'thinking' && item.kind !== 'note') return true;
-    return ![item.detail?.trim(), item.preview?.trim()].some((value) => isHeartbeatProcessText(value));
+    return ![item.detail?.trim(), item.preview?.trim(), item.label?.trim()].some((value) => isHeartbeatProcessText(value));
   });
 }
 
@@ -492,10 +512,17 @@ export function getProcessActivityLabel(
   chatProcessDisplayMode: ChatProcessDisplayMode,
   streamingTools: ToolStatus[] = [],
   language?: string,
+  hideInternalRoutineProcesses = true,
 ): string | null {
   if (!message) return null;
 
-  const items = getProcessEventItems(message, showThinking, chatProcessDisplayMode, streamingTools);
+  const items = getProcessEventItems(
+    message,
+    showThinking,
+    chatProcessDisplayMode,
+    hideInternalRoutineProcesses,
+    streamingTools,
+  );
   const runningEvent = [...items].reverse().find((item) => !isDirectContent(item) && item.status === 'running');
   if (runningEvent) {
     return formatEventStatusLabel(runningEvent, language);
@@ -648,6 +675,7 @@ export const ProcessEventMessage = memo(function ProcessEventMessage({
   message,
   showThinking,
   chatProcessDisplayMode,
+  hideInternalRoutineProcesses = true,
   streamingTools = [],
   expandAll = false,
   /** 当前轮网关流式 delta：思考/笔记不走 Markdown，降低长回复时主线程阻塞 */
@@ -656,6 +684,7 @@ export const ProcessEventMessage = memo(function ProcessEventMessage({
   message: RawMessage;
   showThinking: boolean;
   chatProcessDisplayMode: ChatProcessDisplayMode;
+  hideInternalRoutineProcesses?: boolean;
   streamingTools?: ToolStatus[];
   expandAll?: boolean;
   preferPlainDirectContent?: boolean;
@@ -663,8 +692,14 @@ export const ProcessEventMessage = memo(function ProcessEventMessage({
   const { i18n } = useTranslation('chat');
   const language = i18n?.resolvedLanguage || i18n?.language;
   const items = useMemo(
-    () => getProcessEventItems(message, showThinking, chatProcessDisplayMode, streamingTools),
-    [chatProcessDisplayMode, message, showThinking, streamingTools],
+    () => getProcessEventItems(
+      message,
+      showThinking,
+      chatProcessDisplayMode,
+      hideInternalRoutineProcesses,
+      streamingTools,
+    ),
+    [chatProcessDisplayMode, hideInternalRoutineProcesses, message, showThinking, streamingTools],
   );
 
   if (items.length === 0) return null;

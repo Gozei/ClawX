@@ -48,8 +48,6 @@
         "targetChip": "@{{agent}}",
         "agentPickerTitle": "Route the next message to another role",
         "gatewayDisconnectedPlaceholder": "Gateway not connected...",
-        "modelSwitchSuccess": "Switched to {{model}}",
-        "modelSwitchFailed": "Failed to switch model. Still using {{model}}: {{error}}",
         "send": "Send",
         "stop": "Stop",
         "gatewayConnected": "connected",
