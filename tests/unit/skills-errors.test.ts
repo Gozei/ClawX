@@ -1,18 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hostApiFetchMock = vi.fn();
-const rpcMock = vi.fn();
-
 vi.mock('@/lib/host-api', () => ({
   hostApiFetch: (...args: unknown[]) => hostApiFetchMock(...args),
-}));
-
-vi.mock('@/stores/gateway', () => ({
-  useGatewayStore: {
-    getState: () => ({
-      rpc: (...args: unknown[]) => rpcMock(...args),
-    }),
-  },
 }));
 
 describe('skills store error mapping', () => {
@@ -22,7 +12,6 @@ describe('skills store error mapping', () => {
   });
 
   it('maps fetchSkills rate-limit error by AppError code', async () => {
-    rpcMock.mockResolvedValueOnce({ skills: [] });
     hostApiFetchMock.mockRejectedValueOnce(new Error('rate limit exceeded'));
 
     const { useSkillsStore } = await import('@/stores/skills');

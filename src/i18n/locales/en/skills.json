@@ -1,9 +1,51 @@
 {
     "title": "Skills",
-    "subtitle": "Browse and manage AI capabilities",
+    "subtitle": "Manage installed skills and inspect runtime state.",
     "refresh": "Refresh",
+    "search": "Search installed skills...",
+    "toolbar": {
+        "filters": "Filters",
+        "filtersWithCount": "Filters ({{count}})",
+        "filtersSubtitle": "Combine runtime filters for installed skills.",
+        "expand": "Expand",
+        "applyFilters": "Apply Filters",
+        "resetFilters": "Reset",
+        "sourceOption": "{{label}} {{count}}",
+        "sources": {
+            "title": "Source",
+            "all": "All",
+            "builtin": "Built-in",
+            "market": "Market",
+            "other": "Other"
+        },
+        "groups": {
+            "status": "Enablement",
+            "dependencies": "Dependencies"
+        },
+        "status": {
+            "all": "All",
+            "enabled": "Enabled",
+            "disabled": "Disabled"
+        },
+        "missing": {
+            "all": "All",
+            "missing": "Has Missing Items",
+            "clean": "No Missing Items"
+        }
+    },
+    "searchMarketplace": "Search marketplace...",
     "openFolder": "Open Skills Folder",
     "gatewayWarning": "Gateway is not running. Skills cannot be loaded without an active Gateway.",
+    "sections": {
+        "installed": "Installed Skills",
+        "installedCount_one": "{{count}} skill",
+        "installedCount_other": "{{count}} skills"
+    },
+    "list": {
+        "ready": "Ready",
+        "notReady": "Not Ready",
+        "missingHint": "Missing requirements"
+    },
     "tabs": {
         "installed": "Installed",
         "marketplace": "Marketplace"
@@ -18,8 +60,6 @@
         "requiresKey": "Requires Key ({{count}})",
         "noKey": "No Key ({{count}})"
     },
-    "search": "Search skills...",
-    "searchMarketplace": "Search marketplace...",
     "searchButton": "Search",
     "group": {
         "summary": "{{count}} skills in this section, with {{requiresKey}} requiring keys and {{noKey}} not requiring keys",
@@ -27,6 +67,7 @@
         "noKey": "No Key {{count}}"
     },
     "actions": {
+        "discover": "Discover Skills",
         "enableVisible": "Enable Visible",
         "disableVisible": "Disable Visible",
         "installSkill": "Install Skills"
@@ -35,6 +76,35 @@
     "noSkillsSearch": "Try a different search term",
     "noSkillsAvailable": "No skills available",
     "detail": {
+        "configuration": "Configuration",
+        "setupSubtitle": "Fill credentials and environment variables based on the skill's declared requirements.",
+        "runtimeStatus": "Runtime Status",
+        "skillSpec": "Skill Spec",
+        "docsTab": "Documentation",
+        "configTab": "Setup & Config",
+        "requirementsTab": "Environment & Dependencies",
+        "dangerZone": "Danger Zone",
+        "primaryCredential": "Primary credential · {{env}}",
+        "keyPlaceholder": "Key",
+        "valuePlaceholder": "Value",
+        "saving": "Saving...",
+        "saveConfig": "Save Config",
+        "addVariable": "Add Variable",
+        "readyValue": "Ready: {{value}}",
+        "missingRuntimeRequirements": "Missing runtime requirements",
+        "parseFailed": "SKILL.md parse failed. {{error}}",
+        "homepageLabel": "Homepage:",
+        "primaryEnvLabel": "Primary env:",
+        "requiresEnvLabel": "Requires env:",
+        "requiresConfigLabel": "Requires config:",
+        "requiresBinsLabel": "Requires bins:",
+        "requiresAnyBinsLabel": "Requires any bins:",
+        "rawSkillMd": "Raw SKILL.md",
+        "deleteHint": "Delete the local skill directory from disk.",
+        "deleting": "Deleting...",
+        "deleteSkill": "Delete Skill",
+        "deleteConfirmTitle": "Delete skill directory?",
+        "deleteConfirmMessage": "This removes the local skill directory from disk.",
         "info": "Information",
         "config": "Configuration",
         "description": "Description",
@@ -61,6 +131,15 @@
         "openManual": "Open Manual",
         "openActualFolder": "Open Actual Folder",
         "copyPath": "Copy path",
+        "skillId": "Skill ID",
+        "slug": "Slug",
+        "baseDir": "Skill directory",
+        "filePath": "SKILL.md path",
+        "backToList": "Back to skills",
+        "notFoundTitle": "Skill not found",
+        "notFoundSubtitle": "This skill may have been removed or is not currently loaded by the runtime.",
+        "additionalConfigTitle": "Additional config requirements",
+        "additionalConfigHint": "These config keys are declared in the skill documentation, but this version does not yet generate dedicated inputs for them in the detail page.",
         "pathUnavailable": "Path not available",
         "configurable": "Configurable",
         "uninstall": "Uninstall",
@@ -105,11 +184,27 @@
         "batchPartial": "Updated {{success}} / {{total}} skills. Some items failed."
     },
     "marketplace": {
-        "title": "Marketplace",
+        "title": "Discover Skills",
+        "subtitle": "Search and install skills from available sources.",
+        "close": "Close skill marketplace",
+        "allSources": "All sources",
+        "install": "Install",
+        "uninstall": "Uninstall",
+        "installAction": "Download skill",
+        "updateAction": "Update skill",
+        "occupiedAction": "Provided by another source",
+        "uninstallAction": "Uninstall skill",
+        "working": "Working...",
+        "installedState": "Installed",
+        "notInstalledState": "Not installed",
+        "updateAvailableState": "Update available",
+        "updateVersionLabel": "v{{current}} -> v{{latest}}",
+        "occupiedDetail": "Provided by {{source}}",
         "installDialogTitle": "Install Skills",
         "installDialogSubtitle": "Browse Explore by default, or enter keywords to search.",
         "sourceLabel": "Source",
         "sourceClawHub": "ClawHub",
+        "unknownSource": "Unknown source",
         "securityNote": "Click skill card to view its documentation and security information on ClawHub before installation.",
         "manualInstallHint": "Network issues? You can always download skill ZIP archives from ClawHub.ai and extract them manually into \"{{path}}\".",
         "searching": "Searching ClawHub...",
