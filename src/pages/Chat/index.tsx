@@ -198,7 +198,7 @@ export function Chat() {
         <div ref={contentRef} className="max-w-4xl mx-auto space-y-4">
           {showSessionLoadingState ? (
             <div className="flex min-h-[40vh] items-center justify-center">
-              <div className="bg-background shadow-lg rounded-lg p-2.5 border border-border">
+              <div className="bg-background shadow-lg rounded-full p-2.5 border border-border">
                 <LoadingSpinner size="md" />
               </div>
             </div>
@@ -299,8 +299,8 @@ export function Chat() {
 
       {/* Transparent loading overlay */}
       {minLoading && !sending && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/20 backdrop-blur-[1px] rounded-lg pointer-events-auto">
-          <div className="bg-background shadow-lg rounded-lg p-2.5 border border-border">
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/20 backdrop-blur-[1px] rounded-xl pointer-events-auto">
+          <div className="bg-background shadow-lg rounded-full p-2.5 border border-border">
             <LoadingSpinner size="md" />
           </div>
         </div>
@@ -967,10 +967,10 @@ function WelcomeScreen({
       <div className="w-full max-w-5xl px-2">
         <div className="mx-auto max-w-3xl text-center">
           {gatewayHint ? (
-            <div className="mx-auto mb-5 max-w-2xl rounded-[12px] border border-white/10 bg-white/[0.045] px-[clamp(14px,2.2vw,20px)] py-[clamp(12px,2vw,16px)] text-left shadow-[0_14px_36px_rgba(2,6,23,0.12)] backdrop-blur-sm">
+            <div className="mx-auto mb-5 max-w-2xl rounded-[22px] border border-white/10 bg-white/[0.045] px-[clamp(14px,2.2vw,20px)] py-[clamp(12px,2vw,16px)] text-left shadow-[0_14px_36px_rgba(2,6,23,0.12)] backdrop-blur-sm">
               <div className="flex items-start gap-3">
                 <div className={cn(
-                  "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border",
+                  "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border",
                   isError
                     ? 'border-amber-400/24 bg-amber-400/12 text-amber-300'
                     : 'border-primary/20 bg-primary/10 text-primary',
@@ -987,7 +987,7 @@ function WelcomeScreen({
                       {gatewayStatusTitle}
                     </div>
                     <div className={cn(
-                      'inline-flex rounded-md px-2 py-0.5 text-[10px] font-medium',
+                      'inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium',
                       isError
                         ? 'bg-amber-400/12 text-amber-200'
                         : 'bg-emerald-400/12 text-emerald-200',
@@ -998,9 +998,9 @@ function WelcomeScreen({
                   <div className="mt-1 text-[clamp(11px,1.8vw,13px)] leading-5 text-foreground/62">
                     {gatewayStatusDescription}
                   </div>
-                  <div className="mt-3 h-1.5 overflow-hidden rounded-md bg-white/8">
+                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/8">
                     <div
-                      className={cn('h-full rounded-md transition-[width] duration-500', isError ? 'bg-amber-400/80' : 'bg-primary/80')}
+                      className={cn('h-full rounded-full transition-[width] duration-500', isError ? 'bg-amber-400/80' : 'bg-primary/80')}
                       style={{ width: isError ? '82%' : isStarting ? (elapsedMs > 30000 ? '78%' : elapsedMs > 12000 ? '62%' : elapsedMs > 4000 ? '44%' : '26%') : '16%' }}
                     />
                   </div>
@@ -1009,7 +1009,7 @@ function WelcomeScreen({
                     <button
                       type="button"
                       onClick={onOpenSettings}
-                      className="rounded-md border border-white/10 px-2.5 py-1 text-foreground/62 transition hover:bg-white/[0.05] hover:text-foreground"
+                      className="rounded-full border border-white/10 px-2.5 py-1 text-foreground/62 transition hover:bg-white/[0.05] hover:text-foreground"
                     >
                       {isZh ? '打开设置' : 'Open settings'}
                     </button>
@@ -1024,7 +1024,7 @@ function WelcomeScreen({
             </div>
           ) : null}
 
-          <div className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-foreground/42">
+          <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-foreground/42">
             <Sparkles className="h-3.5 w-3.5 text-primary/80" />
             <span>{t('welcome.eyebrow', { appName: branding.productName })}</span>
           </div>
@@ -1042,9 +1042,9 @@ function WelcomeScreen({
           {quickActions.map(({ key, icon: Icon, label, description }) => (
             <button
               key={key}
-              className="group rounded-[14px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 text-left shadow-[0_18px_45px_rgba(2,6,23,0.18)] transition duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-[linear-gradient(180deg,rgba(59,130,246,0.10),rgba(255,255,255,0.04))]"
+              className="group rounded-[26px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 text-left shadow-[0_18px_45px_rgba(2,6,23,0.18)] transition duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-[linear-gradient(180deg,rgba(59,130,246,0.10),rgba(255,255,255,0.04))]"
             >
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.06] text-primary/90 transition group-hover:border-primary/30 group-hover:bg-primary/12">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-primary/90 transition group-hover:border-primary/30 group-hover:bg-primary/12">
                 <Icon className="h-5 w-5" />
               </div>
 
@@ -1076,7 +1076,7 @@ function TypingIndicator() {
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-1 bg-black/5 dark:bg-white/5 text-foreground">
         <Sparkles className="h-4 w-4" />
       </div>
-      <div className="bg-black/5 dark:bg-white/5 text-foreground rounded-xl px-4 py-3">
+      <div className="bg-black/5 dark:bg-white/5 text-foreground rounded-2xl px-4 py-3">
         <div className="flex gap-1">
           <span className="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
           <span className="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -1170,7 +1170,7 @@ function ProcessActivityIndicator({
   }
 
   return (
-      <div className="rounded-[12px] border border-black/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.34),rgba(255,255,255,0.18))] px-4 py-3 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm dark:border-white/8 dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.025))]">
+    <div className="rounded-[22px] border border-black/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.34),rgba(255,255,255,0.18))] px-4 py-3 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm dark:border-white/8 dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.025))]">
       <style>{'@keyframes chat-thinking-pulse { 0% { transform: scale(0.82); opacity: 0.0; } 35% { opacity: 0.38; } 100% { transform: scale(1.55); opacity: 0; } } @keyframes chat-thinking-dot { 0%, 100% { transform: translateY(0); opacity: 0.55; } 50% { transform: translateY(-2px); opacity: 1; } } @keyframes chat-thinking-slide { 0% { transform: translateX(-70%); opacity: 0.4; } 50% { opacity: 1; } 100% { transform: translateX(140%); opacity: 0.45; } }'}</style>
       <div className="space-y-2.5">
         {statusBody}
@@ -1186,7 +1186,7 @@ function ActivityIndicator({ phase }: { phase: 'tool_processing' }) {
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-1 bg-black/5 dark:bg-white/5 text-foreground">
         <Sparkles className="h-4 w-4" />
       </div>
-      <div className="bg-black/5 dark:bg-white/5 text-foreground rounded-xl px-4 py-3">
+      <div className="bg-black/5 dark:bg-white/5 text-foreground rounded-2xl px-4 py-3">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
           <span>Processing tool results…</span>

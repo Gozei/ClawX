@@ -687,11 +687,6 @@ export async function syncDefaultProviderToRuntime(
     if (providerKey) {
       await saveProviderKeyToOpenClaw(ock, providerKey);
     }
-
-    const context = await resolveRuntimeSyncContext(provider);
-    if (context) {
-      await syncRuntimeProviderConfig(provider, context);
-    }
   } else {
     if (browserOAuthRuntimeProvider) {
       const secret = await getProviderSecret(provider.id);
@@ -768,12 +763,12 @@ export async function syncDefaultProviderToRuntime(
     providerKey &&
     provider.baseUrl
   ) {
-    const configuredModelIds = getConfiguredProviderModelIds(provider);
-    const api = resolveProviderApiProtocol(provider, 'openai-completions', provider.model) || 'openai-completions';
+    const modelId = provider.model;
+    const api = resolveProviderApiProtocol(provider, 'openai-completions', modelId) || 'openai-completions';
     await updateAgentModelProvider(ock, {
       baseUrl: normalizeProviderBaseUrl(provider, provider.baseUrl, api),
       api,
-      models: configuredModelIds.map((id) => ({ id, name: id })),
+      models: modelId ? [{ id: modelId, name: modelId }] : [],
       apiKey: providerKey,
     });
   }

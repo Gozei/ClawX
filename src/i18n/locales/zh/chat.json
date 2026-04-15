@@ -45,8 +45,6 @@
         "targetChip": "@{{agent}}",
         "agentPickerTitle": "将下一条消息直接发送给其他 Role",
         "gatewayDisconnectedPlaceholder": "网关未连接...",
-        "modelSwitchSuccess": "已切换到 {{model}}",
-        "modelSwitchFailed": "模型切换失败，当前仍为 {{model}}：{{error}}",
         "send": "发送",
         "stop": "停止",
         "gatewayConnected": "已连接",
