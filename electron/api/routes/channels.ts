@@ -61,6 +61,7 @@ import {
   normalizeSlackMessagingTarget,
   normalizeWhatsAppMessagingTarget,
 } from '../../utils/openclaw-sdk';
+import { emitMutationAudit } from '../audit-utils';
 
 // listWhatsAppDirectory*FromConfig were removed from openclaw's public exports
 // in 2026.3.23-1.  No-op stubs; WhatsApp target picker uses session discovery.
@@ -1096,6 +1097,7 @@ export async function handleChannelRoutes(
   }
 
   if (url.pathname === '/api/channels/default-account' && req.method === 'PUT') {
+    const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ channelType: string; accountId: string }>(req);
       const validAccountId = await validateAccountIdOrReply(res, body.channelType, body.accountId);
@@ -1104,14 +1106,31 @@ export async function handleChannelRoutes(
       }
       await setChannelDefaultAccount(body.channelType, body.accountId);
       scheduleGatewayChannelSaveRefresh(ctx, body.channelType, `channel:setDefaultAccount:${body.channelType}`);
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'channel.set-default-account',
+        resourceType: 'channel',
+        resourceId: `${body.channelType}:${body.accountId}`,
+        result: 'success',
+        changedKeys: ['defaultAccount'],
+      });
       sendJson(res, 200, { success: true });
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'channel.set-default-account',
+        resourceType: 'channel',
+        result: 'failure',
+        changedKeys: ['defaultAccount'],
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
   }
 
   if (url.pathname === '/api/channels/binding' && req.method === 'PUT') {
+    const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ channelType: string; accountId: string; agentId: string }>(req);
       const validAccountId = await validateAccountIdOrReply(res, body.channelType, body.accountId);
@@ -1120,14 +1139,34 @@ export async function handleChannelRoutes(
       }
       await assignChannelAccountToAgent(body.agentId, resolveStoredChannelType(body.channelType), body.accountId);
       scheduleGatewayChannelSaveRefresh(ctx, body.channelType, `channel:setBinding:${body.channelType}`);
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'channel.binding.update',
+        resourceType: 'channel-binding',
+        resourceId: `${body.channelType}:${body.accountId}`,
+        result: 'success',
+        changedKeys: ['agentId'],
+        metadata: {
+          agentId: body.agentId,
+        },
+      });
       sendJson(res, 200, { success: true });
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'channel.binding.update',
+        resourceType: 'channel-binding',
+        result: 'failure',
+        changedKeys: ['agentId'],
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
   }
 
   if (url.pathname === '/api/channels/binding' && req.method === 'DELETE') {
+    const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ channelType: string; accountId: string }>(req);
       const validAccountId = await validateAccountIdOrReply(res, body.channelType, body.accountId);
@@ -1136,8 +1175,24 @@ export async function handleChannelRoutes(
       }
       await clearChannelBinding(resolveStoredChannelType(body.channelType), body.accountId);
       scheduleGatewayChannelSaveRefresh(ctx, body.channelType, `channel:clearBinding:${body.channelType}`);
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'channel.binding.delete',
+        resourceType: 'channel-binding',
+        resourceId: `${body.channelType}:${body.accountId}`,
+        result: 'success',
+        changedKeys: ['agentId'],
+      });
       sendJson(res, 200, { success: true });
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'channel.binding.delete',
+        resourceType: 'channel-binding',
+        result: 'failure',
+        changedKeys: ['agentId'],
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
@@ -1233,6 +1288,7 @@ export async function handleChannelRoutes(
   }
 
   if (url.pathname === '/api/channels/config' && req.method === 'POST') {
+    const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ channelType: string; config: Record<string, unknown>; accountId?: string }>(req);
       const validAccountId = await validateAccountIdOrReply(res, body.channelType, body.accountId);
@@ -1272,26 +1328,72 @@ export async function handleChannelRoutes(
       const existingValues = await getChannelFormValues(body.channelType, body.accountId);
       if (isSameConfigValues(existingValues, body.config)) {
         await ensureScopedChannelBinding(body.channelType, body.accountId);
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'channel.config.save',
+          resourceType: 'channel-config',
+          resourceId: `${body.channelType}:${body.accountId ?? 'default'}`,
+          result: 'noop',
+          changedKeys: Object.keys(body.config ?? {}),
+        });
         sendJson(res, 200, { success: true, noChange: true });
         return true;
       }
       await saveChannelConfig(body.channelType, body.config, body.accountId);
       await ensureScopedChannelBinding(body.channelType, body.accountId);
       scheduleGatewayChannelSaveRefresh(ctx, storedChannelType, `channel:saveConfig:${storedChannelType}`);
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'channel.config.save',
+        resourceType: 'channel-config',
+        resourceId: `${body.channelType}:${body.accountId ?? 'default'}`,
+        result: 'success',
+        changedKeys: Object.keys(body.config ?? {}),
+        metadata: {
+          storedChannelType,
+        },
+      });
       sendJson(res, 200, { success: true });
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'channel.config.save',
+        resourceType: 'channel-config',
+        result: 'failure',
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
   }
 
   if (url.pathname === '/api/channels/config/enabled' && req.method === 'PUT') {
+    const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ channelType: string; enabled: boolean }>(req);
       await setChannelEnabled(body.channelType, body.enabled);
       scheduleGatewayChannelRestart(ctx, `channel:setEnabled:${resolveStoredChannelType(body.channelType)}`);
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'channel.config.set-enabled',
+        resourceType: 'channel-config',
+        resourceId: body.channelType,
+        result: 'success',
+        changedKeys: ['enabled'],
+        metadata: {
+          enabled: body.enabled,
+        },
+      });
       sendJson(res, 200, { success: true });
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'channel.config.set-enabled',
+        resourceType: 'channel-config',
+        result: 'failure',
+        changedKeys: ['enabled'],
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
@@ -1312,6 +1414,7 @@ export async function handleChannelRoutes(
   }
 
   if (url.pathname.startsWith('/api/channels/config/') && req.method === 'DELETE') {
+    const startedAt = Date.now();
     try {
       const channelType = decodeURIComponent(url.pathname.slice('/api/channels/config/'.length));
       const accountId = url.searchParams.get('accountId') || undefined;
@@ -1325,8 +1428,24 @@ export async function handleChannelRoutes(
         await clearAllBindingsForChannel(storedChannelType);
         scheduleGatewayChannelRestart(ctx, `channel:deleteConfig:${storedChannelType}`);
       }
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: accountId ? 'channel.config.delete-account' : 'channel.config.delete',
+        resourceType: 'channel-config',
+        resourceId: accountId ? `${channelType}:${accountId}` : channelType,
+        result: 'success',
+        changedKeys: ['*'],
+      });
       sendJson(res, 200, { success: true });
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'channel.config.delete',
+        resourceType: 'channel-config',
+        result: 'failure',
+        changedKeys: ['*'],
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;

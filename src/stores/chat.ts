@@ -3180,7 +3180,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       try {
         const shouldTryLocalSessionHistory = !isCronSessionKey(currentSessionKey)
           && !get().sending
-          && !Boolean(get().sessionRunningState?.[currentSessionKey]);
+          && !get().sessionRunningState?.[currentSessionKey];
         if (shouldTryLocalSessionHistory) {
           const localHistory = await loadLocalSessionHistory(currentSessionKey, 200);
           if (localHistory.resolved) {

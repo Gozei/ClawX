@@ -136,12 +136,11 @@ export function Sidebar() {
   const isGatewayRunning = gatewayStatus.state === 'running';
 
   useEffect(() => {
-    if (!isGatewayRunning) return;
     let cancelled = false;
     const hasExistingMessages = useChatStore.getState().messages.length > 0;
     (async () => {
       await loadSessions();
-      if (cancelled) return;
+      if (cancelled || !isGatewayRunning) return;
       await loadHistory(hasExistingMessages);
     })();
     return () => {
@@ -629,9 +628,18 @@ export function Sidebar() {
         <button
           data-testid="sidebar-new-chat"
           onClick={() => {
-            const { messages } = useChatStore.getState();
-            if (messages.length > 0) {
+            const {
+              messages,
+              currentSessionKey: activeSessionKey,
+              sessions: persistedSessions,
+            } = useChatStore.getState();
+            const hasPersistedCurrentSession = persistedSessions.some((session) => session.key === activeSessionKey);
+
+            if (messages.length > 0 || hasPersistedCurrentSession) {
               newSession();
+            }
+            if (!sidebarCollapsed) {
+              setSidebarCollapsed(true);
             }
             navigate('/');
           }}

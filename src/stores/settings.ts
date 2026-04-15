@@ -8,6 +8,17 @@ import i18n from '@/i18n';
 import { hostApiFetch } from '@/lib/host-api';
 import type { BrandingOverrides } from '../../shared/branding';
 import { resolveSupportedLanguage } from '../../shared/language';
+import {
+  DEFAULT_APP_LOG_RETENTION_DAYS,
+  DEFAULT_AUDIT_LOG_RETENTION_DAYS,
+  DEFAULT_LOG_FILE_MAX_SIZE_MB,
+  normalizeAppLogLevel,
+  normalizeAuditMode,
+  normalizeLogFileMaxSizeMb,
+  normalizeLogRetentionDays,
+  type AppLogLevel,
+  type AuditMode,
+} from '../../shared/logging';
 
 type Theme = 'light' | 'dark' | 'system';
 type UpdateChannel = 'stable' | 'beta' | 'dev';
@@ -21,6 +32,12 @@ interface SettingsState {
   startMinimized: boolean;
   launchAtStartup: boolean;
   telemetryEnabled: boolean;
+  logLevel: AppLogLevel;
+  auditEnabled: boolean;
+  auditMode: AuditMode;
+  appLogRetentionDays: number;
+  auditLogRetentionDays: number;
+  logFileMaxSizeMb: number;
   brandingOverrides: BrandingOverrides;
   chatProcessDisplayMode: ChatProcessDisplayMode;
   hideInternalRoutineProcesses: boolean;
@@ -57,6 +74,14 @@ interface SettingsState {
   setStartMinimized: (value: boolean) => void;
   setLaunchAtStartup: (value: boolean) => void;
   setTelemetryEnabled: (value: boolean) => void;
+  setLogLevel: (value: AppLogLevel) => void;
+  setAuditEnabled: (value: boolean) => void;
+  setAuditMode: (value: AuditMode) => void;
+  saveLoggingPolicy: (patch: {
+    appLogRetentionDays: number;
+    auditLogRetentionDays: number;
+    logFileMaxSizeMb: number;
+  }) => Promise<void>;
   setChatProcessDisplayMode: (value: ChatProcessDisplayMode) => void;
   setHideInternalRoutineProcesses: (value: boolean) => void;
   setAssistantMessageStyle: (value: AssistantMessageStyle) => void;
@@ -85,6 +110,12 @@ const defaultSettings = {
   startMinimized: false,
   launchAtStartup: false,
   telemetryEnabled: true,
+  logLevel: normalizeAppLogLevel('debug'),
+  auditEnabled: true,
+  auditMode: normalizeAuditMode('minimal'),
+  appLogRetentionDays: normalizeLogRetentionDays(DEFAULT_APP_LOG_RETENTION_DAYS, DEFAULT_APP_LOG_RETENTION_DAYS),
+  auditLogRetentionDays: normalizeLogRetentionDays(DEFAULT_AUDIT_LOG_RETENTION_DAYS, DEFAULT_AUDIT_LOG_RETENTION_DAYS),
+  logFileMaxSizeMb: normalizeLogFileMaxSizeMb(DEFAULT_LOG_FILE_MAX_SIZE_MB, DEFAULT_LOG_FILE_MAX_SIZE_MB),
   brandingOverrides: {},
   chatProcessDisplayMode: 'files' as ChatProcessDisplayMode,
   hideInternalRoutineProcesses: true,
@@ -162,6 +193,50 @@ export const useSettingsStore = create<SettingsState>()(
           method: 'PUT',
           body: JSON.stringify({ value: telemetryEnabled }),
         }).catch(() => { });
+      },
+      setLogLevel: (logLevel) => {
+        const normalized = normalizeAppLogLevel(logLevel);
+        set({ logLevel: normalized });
+        void hostApiFetch('/api/settings/logLevel', {
+          method: 'PUT',
+          body: JSON.stringify({ value: normalized }),
+        }).catch(() => { });
+      },
+      setAuditEnabled: (auditEnabled) => {
+        set({ auditEnabled });
+        void hostApiFetch('/api/settings/auditEnabled', {
+          method: 'PUT',
+          body: JSON.stringify({ value: auditEnabled }),
+        }).catch(() => { });
+      },
+      setAuditMode: (auditMode) => {
+        const normalized = normalizeAuditMode(auditMode);
+        set({ auditMode: normalized });
+        void hostApiFetch('/api/settings/auditMode', {
+          method: 'PUT',
+          body: JSON.stringify({ value: normalized }),
+        }).catch(() => { });
+      },
+      saveLoggingPolicy: async (patch) => {
+        const normalizedPatch = {
+          appLogRetentionDays: normalizeLogRetentionDays(
+            patch.appLogRetentionDays,
+            defaultSettings.appLogRetentionDays,
+          ),
+          auditLogRetentionDays: normalizeLogRetentionDays(
+            patch.auditLogRetentionDays,
+            defaultSettings.auditLogRetentionDays,
+          ),
+          logFileMaxSizeMb: normalizeLogFileMaxSizeMb(
+            patch.logFileMaxSizeMb,
+            defaultSettings.logFileMaxSizeMb,
+          ),
+        };
+        await hostApiFetch('/api/settings', {
+          method: 'PUT',
+          body: JSON.stringify(normalizedPatch),
+        });
+        set(normalizedPatch);
       },
       setChatProcessDisplayMode: (chatProcessDisplayMode) => {
         set({ chatProcessDisplayMode });

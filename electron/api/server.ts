@@ -64,6 +64,11 @@ export function startHostApiServer(ctx: HostApiContext, port = getPort('CLAWX_HO
       // Set origin-aware CORS headers early so every response
       // (including error responses) carries them consistently.
       const origin = req.headers.origin;
+      const requestContext: HostApiContext = {
+        ...ctx,
+        requestId: randomBytes(12).toString('hex'),
+        requestOrigin: origin ?? null,
+      };
       setCorsHeaders(res, origin);
 
       // CORS preflight — respond before auth so browsers can negotiate.
@@ -95,7 +100,7 @@ export function startHostApiServer(ctx: HostApiContext, port = getPort('CLAWX_HO
       }
 
       for (const handler of routeHandlers) {
-        if (await handler(req, res, requestUrl, ctx)) {
+        if (await handler(req, res, requestUrl, requestContext)) {
           return;
         }
       }

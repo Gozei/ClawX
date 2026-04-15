@@ -187,7 +187,7 @@ describe('ChatInput agent targeting', () => {
   it('does not render a gateway status line below the composer', () => {
     gatewayState.status = { state: 'starting', port: 18789, pid: 24412 };
 
-    const { rerender } = render(<ChatInput onSend={vi.fn()} />);
+    render(<ChatInput onSend={vi.fn()} />);
 
     expect(screen.queryByText(/gateway starting \| port: 18789/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/pid: 24412/i)).not.toBeInTheDocument();

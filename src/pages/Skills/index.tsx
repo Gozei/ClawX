@@ -77,6 +77,7 @@ export function Skills() {
   const [installOpen, setInstallOpen] = useState(false);
   const [installQuery, setInstallQuery] = useState('');
   const [installSourceId, setInstallSourceId] = useState('');
+  const effectiveInstallSourceId = installSourceId || sources[0]?.id || '';
   const sourceCategory = readEnumParam(
     searchParams.get('source'),
     ['all', 'builtin', 'market', 'other'] as const,
@@ -140,24 +141,19 @@ export function Skills() {
   }, [fetchMarketInstalledSkills, installOpen]);
 
   useEffect(() => {
-    if (sources.length === 0) return;
-    setInstallSourceId((current) => current || sources[0]?.id || '');
-  }, [sources]);
-
-  useEffect(() => {
-    if (!installOpen || !installSourceId) return;
+    if (!installOpen || !effectiveInstallSourceId) return;
     const normalizedQuery = installQuery.trim();
 
     if (!normalizedQuery) {
-      void searchSkills('', installSourceId);
+      void searchSkills('', effectiveInstallSourceId);
       return;
     }
 
     const timer = setTimeout(() => {
-      void searchSkills(normalizedQuery, installSourceId);
+      void searchSkills(normalizedQuery, effectiveInstallSourceId);
     }, 300);
     return () => clearTimeout(timer);
-  }, [installOpen, installQuery, installSourceId, searchSkills]);
+  }, [effectiveInstallSourceId, installOpen, installQuery, searchSkills]);
 
   const { sourceCounts, filteredSkills, activeFilterCount } = useSkillFilters({
     skills,
@@ -230,7 +226,7 @@ export function Skills() {
                 size="icon"
                 aria-label={t('actions.discover')}
                 onClick={() => {
-                  if (!installSourceId && sources.length > 0) {
+                  if (!effectiveInstallSourceId && sources.length > 0) {
                     setInstallSourceId(sources[0]?.id || '');
                   }
                   setInstallOpen(true);
@@ -287,7 +283,7 @@ export function Skills() {
         onOpenChange={setInstallOpen}
         installQuery={installQuery}
         onInstallQueryChange={setInstallQuery}
-        installSourceId={installSourceId}
+        installSourceId={effectiveInstallSourceId}
         onInstallSourceIdChange={setInstallSourceId}
         sources={sources}
         searchError={searchError}
@@ -296,7 +292,7 @@ export function Skills() {
         searchResults={searchResults}
         installedSkills={marketInstalledSkills}
         installing={installing}
-        onLoadMore={() => void loadMoreSearchResults(installQuery.trim(), installSourceId)}
+        onLoadMore={() => void loadMoreSearchResults(installQuery.trim(), effectiveInstallSourceId)}
         onInstall={(slug, version, sourceId, force) => void onInstall(slug, version, sourceId, force)}
         onUninstall={(slug, sourceId) => void onMarketplaceUninstall(slug, sourceId)}
       />

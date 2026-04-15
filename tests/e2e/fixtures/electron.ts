@@ -17,6 +17,17 @@ type ElectronFixtures = {
   launchElectronApp: (options?: LaunchElectronOptions) => Promise<ElectronApplication>;
 };
 
+type HostApiMockResponse = {
+  ok: boolean;
+  data?: unknown;
+  error?: unknown;
+};
+
+type ElectronIpcMocks = {
+  gatewayStatus?: Record<string, unknown>;
+  hostApi?: Record<string, HostApiMockResponse>;
+};
+
 const repoRoot = resolve(process.cwd());
 const electronEntry = join(repoRoot, 'dist-electron/main/index.js');
 
@@ -221,6 +232,51 @@ export async function openChannelsFromSettings(page: Page): Promise<void> {
   await openSettingsHub(page);
   await page.getByTestId('settings-hub-menu-channels').click();
   await expect(page.getByTestId('channels-page')).toBeVisible();
+}
+
+export async function installIpcMocks(
+  app: ElectronApplication,
+  mocks: ElectronIpcMocks,
+): Promise<void> {
+  await app.evaluate(({ ipcMain }, mockConfig) => {
+    function stableStringify(value: unknown): string {
+      if (value == null || typeof value !== 'object') return JSON.stringify(value);
+      if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+      const entries = Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`);
+      return `{${entries.join(',')}}`;
+    }
+
+    if (mockConfig?.gatewayStatus) {
+      ipcMain.removeHandler('gateway:status');
+      ipcMain.handle('gateway:status', async () => mockConfig.gatewayStatus);
+    }
+
+    if (mockConfig?.hostApi) {
+      ipcMain.removeHandler('hostapi:fetch');
+      ipcMain.handle(
+        'hostapi:fetch',
+        async (_event, request: { path?: string; method?: string }) => {
+          const method = request?.method ?? 'GET';
+          const path = request?.path ?? '';
+          const requestKey = stableStringify([path, method]);
+          const mockedResponse = mockConfig.hostApi?.[requestKey];
+
+          if (mockedResponse) {
+            return mockedResponse;
+          }
+
+          return {
+            ok: false,
+            error: {
+              message: `Unexpected hostapi:fetch request: ${method} ${path}`,
+            },
+          };
+        },
+      );
+    }
+  }, mocks);
 }
 
 export { closeElectronApp };

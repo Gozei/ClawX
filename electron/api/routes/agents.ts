@@ -21,7 +21,9 @@ import {
   syncAllProviderAuthToRuntime,
 } from '../../services/providers/provider-runtime-sync';
 import type { HostApiContext } from '../context';
+import { emitMutationAudit } from '../audit-utils';
 import { parseJsonBody, sendJson } from '../route-utils';
+import { logger } from '../../utils/logger';
 
 function scheduleGatewayReload(ctx: HostApiContext, reason: string): void {
   if (ctx.gatewayManager.getStatus().state !== 'stopped') {
@@ -111,7 +113,7 @@ export async function restartGatewayForAgentDeletion(ctx: HostApiContext): Promi
     const status = ctx.gatewayManager.getStatus();
     const pid = status.pid;
     const port = status.port;
-    console.log('[agents] Triggering Gateway restart (kill+respawn) after agent deletion', { pid, port });
+    logger.info('[agents] Triggering Gateway restart (kill+respawn) after agent deletion', { pid, port });
 
     // Force-kill the Gateway process by PID.  The manager's stop() only
     // kills "owned" processes; if the manager connected to an already-
@@ -167,9 +169,9 @@ export async function restartGatewayForAgentDeletion(ctx: HostApiContext): Promi
     }
 
     await ctx.gatewayManager.restart();
-    console.log('[agents] Gateway restart completed after agent deletion');
+    logger.info('[agents] Gateway restart completed after agent deletion');
   } catch (err) {
-    console.warn('[agents] Gateway restart after agent deletion failed:', err);
+    logger.warn('[agents] Gateway restart after agent deletion failed:', err);
   }
 }
 
@@ -185,6 +187,7 @@ export async function handleAgentRoutes(
   }
 
   if (url.pathname === '/api/agents' && req.method === 'POST') {
+    const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{
         name: string;
@@ -207,11 +210,26 @@ export async function handleAgentRoutes(
       try {
         await syncAllProviderAuthToRuntime();
       } catch (err) {
-        console.warn('[agents] Failed to sync provider auth after agent creation:', err);
+        logger.warn('[agents] Failed to sync provider auth after agent creation:', err);
       }
       scheduleGatewayReload(ctx, 'create-agent');
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'agent.create',
+        resourceType: 'agent',
+        resourceId: created.createdAgentId,
+        result: 'success',
+        changedKeys: ['name', 'inheritWorkspace', ...(body.studio ? ['studio'] : [])],
+      });
       sendJson(res, 200, { success: true, createdAgentId: created.createdAgentId, ...snapshot });
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'agent.create',
+        resourceType: 'agent',
+        result: 'failure',
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
@@ -222,13 +240,30 @@ export async function handleAgentRoutes(
     const parts = suffix.split('/').filter(Boolean);
 
     if (parts.length === 1) {
+      const startedAt = Date.now();
       try {
         const body = await parseJsonBody<{ name: string }>(req);
         const agentId = decodeURIComponent(parts[0]);
         const snapshot = await updateAgentName(agentId, body.name);
         scheduleGatewayReload(ctx, 'update-agent');
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'agent.update-name',
+          resourceType: 'agent',
+          resourceId: agentId,
+          result: 'success',
+          changedKeys: ['name'],
+        });
         sendJson(res, 200, { success: true, ...snapshot });
       } catch (error) {
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'agent.update-name',
+          resourceType: 'agent',
+          result: 'failure',
+          changedKeys: ['name'],
+          error,
+        });
         sendJson(res, 500, { success: false, error: String(error) });
       }
       return true;
@@ -258,6 +293,7 @@ export async function handleAgentRoutes(
     }
 
     if (parts.length === 2 && parts[1] === 'model') {
+      const startedAt = Date.now();
       try {
         const body = await parseJsonBody<{ modelRef?: string | null; setAsDefault?: boolean }>(req);
         const agentId = decodeURIComponent(parts[0]);
@@ -273,7 +309,7 @@ export async function handleAgentRoutes(
             hotPatched = true;
           }
         } catch (hotPatchError) {
-          console.warn('[agents] Gateway config.patch for agent model failed, falling back to local update:', hotPatchError);
+          logger.warn('[agents] Gateway config.patch for agent model failed, falling back to local update:', hotPatchError);
         }
 
         if (!snapshot) {
@@ -284,19 +320,39 @@ export async function handleAgentRoutes(
           // Ensure this agent's runtime model registry reflects the new model override.
           await syncAgentModelOverrideToRuntime(agentId);
         } catch (syncError) {
-          console.warn('[agents] Failed to sync runtime after updating agent model:', syncError);
+          logger.warn('[agents] Failed to sync runtime after updating agent model:', syncError);
         }
         if (!hotPatched) {
           scheduleGatewayReload(ctx, 'update-agent-model');
         }
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'agent.update-model',
+          resourceType: 'agent',
+          resourceId: agentId,
+          result: 'success',
+          changedKeys: ['modelRef', ...(body.setAsDefault ? ['setAsDefault'] : [])],
+          metadata: {
+            hotPatched,
+          },
+        });
         sendJson(res, 200, { success: true, ...snapshot });
       } catch (error) {
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'agent.update-model',
+          resourceType: 'agent',
+          result: 'failure',
+          changedKeys: ['modelRef'],
+          error,
+        });
         sendJson(res, 500, { success: false, error: String(error) });
       }
       return true;
     }
 
     if (parts.length === 2 && parts[1] === 'studio') {
+      const startedAt = Date.now();
       try {
         const body = await parseJsonBody<{
           description?: string | null;
@@ -308,21 +364,56 @@ export async function handleAgentRoutes(
         const agentId = decodeURIComponent(parts[0]);
         const snapshot = await updateAgentStudio(agentId, body);
         scheduleGatewayReload(ctx, 'update-agent-studio');
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'agent.update-studio',
+          resourceType: 'agent',
+          resourceId: agentId,
+          result: 'success',
+          changedKeys: Object.keys(body),
+        });
         sendJson(res, 200, { success: true, ...snapshot });
       } catch (error) {
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'agent.update-studio',
+          resourceType: 'agent',
+          result: 'failure',
+          error,
+        });
         sendJson(res, 500, { success: false, error: String(error) });
       }
       return true;
     }
 
     if (parts.length === 3 && parts[1] === 'channels') {
+      const startedAt = Date.now();
       try {
         const agentId = decodeURIComponent(parts[0]);
         const channelType = decodeURIComponent(parts[2]);
         const snapshot = await assignChannelToAgent(agentId, channelType);
         scheduleGatewayReload(ctx, 'assign-channel');
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'agent.assign-channel',
+          resourceType: 'agent',
+          resourceId: agentId,
+          result: 'success',
+          changedKeys: ['channelType'],
+          metadata: {
+            channelType,
+          },
+        });
         sendJson(res, 200, { success: true, ...snapshot });
       } catch (error) {
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'agent.assign-channel',
+          resourceType: 'agent',
+          result: 'failure',
+          changedKeys: ['channelType'],
+          error,
+        });
         sendJson(res, 500, { success: false, error: String(error) });
       }
       return true;
@@ -334,6 +425,7 @@ export async function handleAgentRoutes(
     const parts = suffix.split('/').filter(Boolean);
 
     if (parts.length === 1) {
+      const startedAt = Date.now();
       try {
         const agentId = decodeURIComponent(parts[0]);
         const { snapshot, removedEntry } = await deleteAgentConfig(agentId);
@@ -343,16 +435,33 @@ export async function handleAgentRoutes(
         await restartGatewayForAgentDeletion(ctx);
         // Delete workspace after reload so the new config is already live.
         await removeAgentWorkspaceDirectory(removedEntry).catch((err) => {
-          console.warn('[agents] Failed to remove workspace after agent deletion:', err);
+          logger.warn('[agents] Failed to remove workspace after agent deletion:', err);
+        });
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'agent.delete',
+          resourceType: 'agent',
+          resourceId: agentId,
+          result: 'success',
+          changedKeys: ['*'],
         });
         sendJson(res, 200, { success: true, ...snapshot });
       } catch (error) {
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'agent.delete',
+          resourceType: 'agent',
+          result: 'failure',
+          changedKeys: ['*'],
+          error,
+        });
         sendJson(res, 500, { success: false, error: String(error) });
       }
       return true;
     }
 
     if (parts.length === 3 && parts[1] === 'channels') {
+      const startedAt = Date.now();
       try {
         const agentId = decodeURIComponent(parts[0]);
         const channelType = decodeURIComponent(parts[2]);
@@ -378,8 +487,28 @@ export async function handleAgentRoutes(
         }
         const snapshot = await listAgentsSnapshot();
         scheduleGatewayReload(ctx, 'remove-agent-channel');
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'agent.remove-channel',
+          resourceType: 'agent',
+          resourceId: agentId,
+          result: 'success',
+          changedKeys: ['channelType'],
+          metadata: {
+            channelType,
+            removedAccountCount: ownedAccountIds.length,
+          },
+        });
         sendJson(res, 200, { success: true, ...snapshot });
       } catch (error) {
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'agent.remove-channel',
+          resourceType: 'agent',
+          result: 'failure',
+          changedKeys: ['channelType'],
+          error,
+        });
         sendJson(res, 500, { success: false, error: String(error) });
       }
       return true;

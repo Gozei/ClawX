@@ -88,7 +88,7 @@ test.describe('Session pin', () => {
       await bravoRow.hover();
       await expect(page.getByTestId(`sidebar-session-menu-trigger-${SESSION_B_KEY}`)).toBeVisible();
 
-      const pinnedLabels = await pinnedSection.locator('[title]').evaluateAll((nodes) =>
+      const pinnedLabels = await pinnedSection.locator('[data-testid^="sidebar-session-title-"]').evaluateAll((nodes) =>
         nodes.map((node) => node.getAttribute('title')).filter(Boolean),
       );
       expect(pinnedLabels.slice(0, 2)).toEqual(['Bravo session', 'Charlie session']);

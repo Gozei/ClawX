@@ -1,4 +1,4 @@
-
+﻿
 <p align="center">
   <img src="src/assets/logo.svg" width="128" height="128" alt="Deep AI Worker Logo" />
 </p>
@@ -134,6 +134,10 @@ Light mode, dark mode, or system-synchronized themes. Deep AI Worker adapts to y
 In **Settings → General**, you can enable **Launch at system startup** so Deep AI Worker starts automatically after login.
 
 ---
+
+### Logs & Audit Viewer
+The same panel now also exposes visible log policy controls for application log retention, audit retention, single-file size limits, log level, and audit mode, so you can tune observability without opening Developer mode.
+In **Settings → Gateway**, Deep AI Worker includes a built-in **Logs & Audit** panel with local-time timestamps, keyword search, file/date filters, and export for both operational logs and audit trails.
 
 ## Getting Started
 
@@ -477,3 +481,4 @@ Deep AI Worker is released under the [MIT License](LICENSE). You're free to use,
 <p align="center">
   <sub>Built with ❤️ by the ValueCell Team</sub>
 </p>
+

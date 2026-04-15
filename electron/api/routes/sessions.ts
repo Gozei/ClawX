@@ -193,10 +193,14 @@ function extractSessionEntriesFromMalformedStore(raw: string): Record<string, Re
       break;
     }
 
-    let sessionKey = '';
-    try {
-      sessionKey = JSON.parse(raw.slice(keyStart, keyEnd)) as string;
-    } catch {
+    const sessionKey = (() => {
+      try {
+        return JSON.parse(raw.slice(keyStart, keyEnd)) as string;
+      } catch {
+        return null;
+      }
+    })();
+    if (sessionKey == null) {
       cursor = keyEnd;
       continue;
     }
@@ -303,7 +307,7 @@ async function loadSessionStoreIndex(
   },
 ): Promise<SessionStoreIndex> {
   const fsP = await import('node:fs/promises');
-  let raw = '';
+  let raw: string;
   try {
     raw = await fsP.readFile(sessionsJsonPath, 'utf8');
   } catch {
