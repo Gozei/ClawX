@@ -13,7 +13,6 @@ test.describe('Chat welcome starters', () => {
 
       const composerInput = page.getByTestId('chat-composer').getByRole('textbox');
       await expect(composerInput).not.toHaveValue('');
-      await expect(page.getByTestId('chat-composer-offline-hint')).toBeVisible();
 
       await page.getByTestId('chat-send-button').click();
       await expect(page.getByTestId('chat-queued-message-card')).toBeVisible();

@@ -616,9 +616,6 @@ export function ChatInput({
   const canQueueOffline = (input.trim() || attachments.length > 0) && allReady && disabled && !sending;
   const canStop = sending && !!onStop;
   const isZh = (i18n?.resolvedLanguage || i18n?.language || '').startsWith('zh');
-  const offlineDraftHint = isZh
-    ? '可以先把想法写成草稿，工作引擎恢复后再发送。'
-    : 'You can draft now and send as soon as the workspace engine reconnects.';
 
   useEffect(() => {
     if (!prefillText || prefillNonce === 0) {
@@ -1012,14 +1009,6 @@ export function ChatInput({
             </div>
           </div>
         </div>
-        {disabled && (
-          <div
-            className="mt-2 px-4 text-[12px] text-foreground/54"
-            data-testid="chat-composer-offline-hint"
-          >
-            {offlineDraftHint}
-          </div>
-        )}
         {hasFailedAttachments && (
           <Button
             variant="link"

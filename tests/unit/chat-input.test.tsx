@@ -193,7 +193,7 @@ describe('ChatInput agent targeting', () => {
     expect(screen.queryByText(/pid: 24412/i)).not.toBeInTheDocument();
   });
 
-  it('keeps the composer editable while the gateway is disconnected so drafts are not blocked', () => {
+  it('keeps the composer editable while the gateway is disconnected without showing an offline hint', () => {
     gatewayState.status = { state: 'stopped', port: 18789 };
 
     render(<ChatInput onSend={vi.fn()} disabled />);
@@ -201,9 +201,7 @@ describe('ChatInput agent targeting', () => {
     const textbox = screen.getByRole('textbox');
     expect(textbox).not.toBeDisabled();
     expect(textbox).toHaveAttribute('placeholder', 'Gateway not connected...');
-    expect(screen.getByTestId('chat-composer-offline-hint')).toHaveTextContent(
-      'You can draft now and send as soon as the workspace engine reconnects.',
-    );
+    expect(screen.queryByTestId('chat-composer-offline-hint')).not.toBeInTheDocument();
   });
 
   it('applies starter prompt prefills to the composer', async () => {
