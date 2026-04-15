@@ -829,14 +829,14 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
             <label
               data-testid="chat-model-switch"
               className={cn(
-                'relative inline-flex h-9 min-w-[220px] max-w-full items-center overflow-hidden rounded-full transition-colors',
-                modelOptions.length > 0 ? 'hover:bg-black/5 dark:hover:bg-white/8' : 'opacity-60'
+                'relative inline-flex h-9 min-w-[220px] max-w-full items-center overflow-hidden rounded-[10px] text-foreground/68 transition-colors',
+                modelOptions.length > 0 ? 'hover:bg-black/5 hover:text-foreground/82 dark:hover:bg-white/8' : 'opacity-60'
               )}
               title={t('composer.switchModel')}
             >
-              <Cpu className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground/72" />
+              <Cpu className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-current" />
               <select
-                className="h-full w-full appearance-none bg-transparent pl-9 pr-9 text-[13px] font-medium text-foreground/72 outline-none disabled:cursor-not-allowed"
+                className="h-full w-full appearance-none bg-transparent pl-9 pr-9 text-[13px] font-medium text-current outline-none disabled:cursor-not-allowed"
                 value={selectedModelValue}
                 onChange={(event) => {
                   void handleModelChange(event.target.value);
@@ -854,7 +854,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
                   </option>
                 ))}
               </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground/72" />
             </label>
           </div>
         </div>
