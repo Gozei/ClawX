@@ -2,6 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ChatInput } from '@/pages/Chat/ChatInput';
 
+function getModelSelect(): HTMLSelectElement {
+  const container = screen.getByTestId('chat-model-switch');
+  const select = container.querySelector('select');
+  if (!(select instanceof HTMLSelectElement)) {
+    throw new Error('Model select not found');
+  }
+  return select;
+}
+
 const { agentsState, chatState, gatewayState, providerState, hostApiFetchMock, invokeIpcMock, toastWarningMock, toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
   agentsState: {
     agents: [] as Array<Record<string, unknown>>,
@@ -270,11 +279,9 @@ describe('ChatInput agent targeting', () => {
 
     render(<ChatInput onSend={vi.fn()} />);
 
-    fireEvent.click(screen.getByTestId('chat-model-switch'));
-
-    const optionTexts = Array.from(new Set(screen.getAllByRole('button')
-      .map((button) => button.textContent)
-      .filter((text): text is string => Boolean(text) && text.includes(' / '))));
+    const optionTexts = Array.from(getModelSelect().options)
+      .map((option) => option.textContent)
+      .filter((text): text is string => Boolean(text) && text.includes(' / '));
     expect(optionTexts).toEqual([
       'OpenAI / gpt-5.4',
       'OpenAI / gpt-5.4-mini',
@@ -282,7 +289,7 @@ describe('ChatInput agent targeting', () => {
       'Moonshot / kimi-k2.5',
     ]);
 
-    fireEvent.click(screen.getByText('Moonshot / kimi-k2.5'));
+    fireEvent.change(getModelSelect(), { target: { value: 'moonshot/kimi-k2.5' } });
 
     await waitFor(() => {
       expect(hostApiFetchMock).toHaveBeenCalledWith(
@@ -370,8 +377,7 @@ describe('ChatInput agent targeting', () => {
 
     render(<ChatInput onSend={vi.fn()} />);
 
-    fireEvent.click(screen.getByTestId('chat-model-switch'));
-    fireEvent.click(screen.getByText('Moonshot / kimi-k2.5'));
+    fireEvent.change(getModelSelect(), { target: { value: 'moonshot/kimi-k2.5' } });
 
     await waitFor(() => {
       expect(toastErrorMock).toHaveBeenCalledWith(

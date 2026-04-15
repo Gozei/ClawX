@@ -6,7 +6,7 @@
  * Files are staged to disk via IPC — only lightweight path references
  * are sent with the message (no base64 over WebSocket).
  */
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import { SendHorizontal, Square, X, Paperclip, Music, FileArchive, File, Loader2, AtSign, FileCode, FileImage, ChevronDown, Cpu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -20,8 +20,9 @@ import { useProviderStore } from '@/stores/providers';
 import { useSettingsStore } from '@/stores/settings';
 import type { AgentSummary } from '@/types/agent';
 import type { ProviderAccount } from '@/lib/providers';
-import { buildProviderListItems } from '@/lib/provider-accounts';
+import { buildProviderListItems, type ProviderListItem } from '@/lib/provider-accounts';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -30,6 +31,7 @@ export interface FileAttachment {
   fileName: string;
   mimeType: string;
   fileSize: number;
+  dedupeKey?: string;
   stagedPath: string;        // disk path for gateway
   preview: string | null;    // data URL for images, null for others
   status: 'staging' | 'ready' | 'error';
@@ -47,6 +49,13 @@ interface ChatInputProps {
 type ModelOption = {
   value: string;
   label: string;
+  accountId: string;
+  vendorId: ProviderAccount['vendorId'];
+  modelId: string;
+  authMode: ProviderAccount['authMode'];
+  baseUrl?: string;
+  apiProtocol?: ProviderAccount['apiProtocol'];
+  validationKey: string;
 };
 
 const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
@@ -71,6 +80,38 @@ function getRuntimeProviderKey(account: ProviderAccount): string {
     return 'minimax-portal';
   }
   return account.vendorId;
+}
+
+function getConfiguredModelIds(account: ProviderAccount): string[] {
+  return Array.from(new Set([
+    account.model || '',
+    ...(account.metadata?.customModels ?? []),
+  ].map((model) => model.trim()).filter(Boolean)));
+}
+
+function resolveModelSourceAccount(item: ProviderListItem, modelId: string): ProviderAccount {
+  const normalizedModelId = modelId.trim();
+  return [item.account, ...item.aliases].find((account) => (
+    getConfiguredModelIds(account).includes(normalizedModelId)
+  )) ?? item.account;
+}
+
+function getModelApiProtocol(
+  account: ProviderAccount,
+  modelId: string,
+): ProviderAccount['apiProtocol'] | undefined {
+  return account.metadata?.modelProtocols?.[modelId] || account.apiProtocol;
+}
+
+function shouldValidateModelOption(option: ModelOption): boolean {
+  return option.authMode === 'api_key' || option.authMode === 'local';
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return String(error);
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -106,6 +147,18 @@ function FileIcon({ mimeType, fileName, className }: { mimeType: string; fileNam
   if (t.includes('zip') || t.includes('compressed') || t.includes('archive') || t.includes('tar') || t.includes('rar') || t.includes('7z') || n.match(/\.(zip|rar|7z|tar|gz)$/i)) return <FileArchive color="#ec4899" className={className} />;
 
   return <File color="#94a3b8" className={className} />;
+}
+
+function normalizePath(value: string): string {
+  return value.trim().replace(/\//g, '\\').toLowerCase();
+}
+
+function buildPathAttachmentKey(filePath: string): string {
+  return `path:${normalizePath(filePath)}`;
+}
+
+function buildBrowserFileAttachmentKey(file: Pick<File, 'name' | 'size' | 'type' | 'lastModified'>): string {
+  return `file:${file.name.trim().toLowerCase()}|${file.size}|${(file.type || '').trim().toLowerCase()}|${file.lastModified}`;
 }
 
 /**
@@ -146,18 +199,27 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
   const gatewayStatus = useGatewayStore((s) => s.status);
   const agents = useAgentsStore((s) => s.agents);
   const defaultModelRef = useAgentsStore((s) => s.defaultModelRef);
-  const updateAgentModel = useAgentsStore((s) => s.updateAgentModel);
   const providerAccounts = useProviderStore((s) => s.accounts);
   const providerStatuses = useProviderStore((s) => s.statuses);
   const providerVendors = useProviderStore((s) => s.vendors);
   const providerDefaultAccountId = useProviderStore((s) => s.defaultAccountId);
   const refreshProviderSnapshot = useProviderStore((s) => s.refreshProviderSnapshot);
+  const getAccountApiKey = useProviderStore((s) => s.getAccountApiKey);
   const chatFontScale = useSettingsStore((s) => s.chatFontScale);
   const currentAgentId = useChatStore((s) => s.currentAgentId);
+  const currentSessionKey = useChatStore((s) => s.currentSessionKey);
+  const sessions = useChatStore((s) => s.sessions);
+  const sessionModels = useChatStore((s) => s.sessionModels);
   const currentAgent = useMemo(
     () => (agents ?? []).find((agent) => agent.id === currentAgentId) ?? null,
     [agents, currentAgentId],
   );
+  const currentSession = useMemo(
+    () => (sessions ?? []).find((session) => session.key === currentSessionKey) ?? null,
+    [currentSessionKey, sessions],
+  );
+  const previousSessionKeyRef = useRef(currentSessionKey);
+  const activeSessionKeyRef = useRef(currentSessionKey);
   const currentAgentName = useMemo(
     () => currentAgent?.name ?? currentAgentId,
     [currentAgent, currentAgentId],
@@ -184,13 +246,32 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
         .filter((model) => model.source !== 'recommended')
         .slice()
         .sort((left, right) => left.id.localeCompare(right.id))
-        .map((model) => ({
-          value: `${runtimeProviderKey}/${model.id}`,
-          label: `${item.displayName} / ${model.id}`,
-        }));
+        .map((model) => {
+          const sourceAccount = resolveModelSourceAccount(item, model.id);
+          const apiProtocol = getModelApiProtocol(sourceAccount, model.id);
+          return {
+            value: `${runtimeProviderKey}/${model.id}`,
+            label: `${item.displayName} / ${model.id}`,
+            accountId: sourceAccount.id,
+            vendorId: sourceAccount.vendorId,
+            modelId: model.id,
+            authMode: sourceAccount.authMode,
+            baseUrl: sourceAccount.baseUrl,
+            apiProtocol,
+            validationKey: [
+              sourceAccount.id,
+              model.id,
+              sourceAccount.baseUrl || '',
+              apiProtocol || '',
+            ].join('|'),
+          };
+        });
     })
   ), [providerItems]);
-  const effectiveModelRef = (currentAgent?.overrideModelRef || currentAgent?.modelRef || defaultModelRef || '').trim();
+  const fallbackAgentModelRef = currentSession
+    ? (currentAgent?.overrideModelRef || currentAgent?.modelRef || '')
+    : '';
+  const effectiveModelRef = (sessionModels[currentSessionKey] || currentSession?.model || defaultModelRef || fallbackAgentModelRef || '').trim();
   const selectedModelValue = useMemo(() => {
     if (!effectiveModelRef) return '';
     return modelOptions.some((option) => option.value === effectiveModelRef) ? effectiveModelRef : '';
@@ -199,6 +280,25 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
     () => modelOptions.find((option) => option.value === selectedModelValue)?.label || t('composer.selectModel'),
     [modelOptions, selectedModelValue, t],
   );
+  const attachmentKeys = useMemo(
+    () => new Set(attachments.map((attachment) => attachment.dedupeKey).filter(Boolean)),
+    [attachments],
+  );
+
+  useLayoutEffect(() => {
+    activeSessionKeyRef.current = currentSessionKey;
+    if (previousSessionKeyRef.current === currentSessionKey) {
+      return;
+    }
+    previousSessionKeyRef.current = currentSessionKey;
+    setInput('');
+    setAttachments([]);
+    setTargetAgentId(null);
+    setPickerOpen(false);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+  }, [currentSessionKey]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -254,10 +354,28 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
         properties: ['openFile', 'multiSelections'],
       }) as { canceled: boolean; filePaths?: string[] };
       if (result.canceled || !result.filePaths?.length) return;
+      const draftSessionKey = currentSessionKey;
+      if (draftSessionKey !== activeSessionKeyRef.current) return;
+
+      const seenKeys = new Set(attachmentKeys);
+      let skippedDuplicates = false;
+      const nextFilePaths = result.filePaths.filter((filePath) => {
+        const key = buildPathAttachmentKey(filePath);
+        if (seenKeys.has(key)) {
+          skippedDuplicates = true;
+          return false;
+        }
+        seenKeys.add(key);
+        return true;
+      });
+      if (skippedDuplicates) {
+        toast.warning('不要重复添加文件');
+      }
+      if (nextFilePaths.length === 0) return;
 
       // Add placeholder entries immediately
       const tempIds: string[] = [];
-      for (const filePath of result.filePaths) {
+      for (const filePath of nextFilePaths) {
         const tempId = crypto.randomUUID();
         tempIds.push(tempId);
         // Handle both Unix (/) and Windows (\) path separators
@@ -267,6 +385,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
           fileName,
           mimeType: '',
           fileSize: 0,
+          dedupeKey: buildPathAttachmentKey(filePath),
           stagedPath: '',
           preview: null,
           status: 'staging' as const,
@@ -274,7 +393,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
       }
 
       // Stage all files via IPC
-      console.log('[pickFiles] Staging files:', result.filePaths);
+      console.log('[pickFiles] Staging files:', nextFilePaths);
       const staged = await hostApiFetch<Array<{
         id: string;
         fileName: string;
@@ -284,20 +403,22 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
         preview: string | null;
       }>>('/api/files/stage-paths', {
         method: 'POST',
-        body: JSON.stringify({ filePaths: result.filePaths }),
+        body: JSON.stringify({ filePaths: nextFilePaths }),
       });
       console.log('[pickFiles] Stage result:', staged?.map(s => ({ id: s?.id, fileName: s?.fileName, mimeType: s?.mimeType, fileSize: s?.fileSize, stagedPath: s?.stagedPath, hasPreview: !!s?.preview })));
+      if (draftSessionKey !== activeSessionKeyRef.current) return;
+      const stagedItems = Array.isArray(staged) ? staged : [];
 
       // Update each placeholder with real data
       setAttachments(prev => {
         let updated = [...prev];
         for (let i = 0; i < tempIds.length; i++) {
           const tempId = tempIds[i];
-          const data = staged[i];
+          const data = stagedItems[i];
           if (data) {
             updated = updated.map(a =>
               a.id === tempId
-                ? { ...data, status: 'ready' as const }
+                ? { ...data, dedupeKey: buildPathAttachmentKey(nextFilePaths[i] || data.stagedPath), status: 'ready' as const }
                 : a,
             );
           } else {
@@ -312,6 +433,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
         return updated;
       });
     } catch (err) {
+      if (currentSessionKey !== activeSessionKeyRef.current) return;
       console.error('[pickFiles] Failed to stage files:', err);
       // Mark any stuck 'staging' attachments as 'error' so the user can remove them
       // and the send button isn't permanently blocked
@@ -321,18 +443,36 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
           : a,
       ));
     }
-  }, []);
+  }, [attachmentKeys, currentSessionKey]);
 
   // ── Stage browser File objects (paste / drag-drop) ─────────────
 
   const stageBufferFiles = useCallback(async (files: globalThis.File[]) => {
-    for (const file of files) {
+    const draftSessionKey = currentSessionKey;
+    const seenKeys = new Set(attachmentKeys);
+    let skippedDuplicates = false;
+    const nextFiles = files.filter((file) => {
+      const key = buildBrowserFileAttachmentKey(file);
+      if (seenKeys.has(key)) {
+        skippedDuplicates = true;
+        return false;
+      }
+      seenKeys.add(key);
+      return true;
+    });
+    if (skippedDuplicates) {
+      toast.warning('不要重复添加文件');
+    }
+
+    for (const file of nextFiles) {
+      if (draftSessionKey !== activeSessionKeyRef.current) return;
       const tempId = crypto.randomUUID();
       setAttachments(prev => [...prev, {
         id: tempId,
         fileName: file.name,
         mimeType: file.type || 'application/octet-stream',
         fileSize: file.size,
+        dedupeKey: buildBrowserFileAttachmentKey(file),
         stagedPath: '',
         preview: null,
         status: 'staging' as const,
@@ -341,6 +481,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
       try {
         console.log(`[stageBuffer] Reading file: ${file.name} (${file.type}, ${file.size} bytes)`);
         const base64 = await readFileAsBase64(file);
+        if (draftSessionKey !== activeSessionKeyRef.current) return;
         console.log(`[stageBuffer] Base64 length: ${base64?.length ?? 'null'}`);
         const staged = await hostApiFetch<{
           id: string;
@@ -359,9 +500,10 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
         });
         console.log(`[stageBuffer] Staged: id=${staged?.id}, path=${staged?.stagedPath}, size=${staged?.fileSize}`);
         setAttachments(prev => prev.map(a =>
-          a.id === tempId ? { ...staged, status: 'ready' as const } : a,
+          a.id === tempId ? { ...staged, dedupeKey: buildBrowserFileAttachmentKey(file), status: 'ready' as const } : a,
         ));
       } catch (err) {
+        if (draftSessionKey !== activeSessionKeyRef.current) return;
         console.error(`[stageBuffer] Error staging ${file.name}:`, err);
         setAttachments(prev => prev.map(a =>
           a.id === tempId
@@ -370,7 +512,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
         ));
       }
     }
-  }, []);
+  }, [attachmentKeys, currentSessionKey]);
 
   // ── Attachment management ──────────────────────────────────────
 
@@ -480,8 +622,53 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
 
   const handleModelChange = useCallback(async (nextModelRef: string) => {
     if (!currentAgentId) return;
-    await updateAgentModel(currentAgentId, nextModelRef || null);
-  }, [currentAgentId, updateAgentModel]);
+    const normalizedNextModelRef = (nextModelRef || '').trim();
+    if (!normalizedNextModelRef || normalizedNextModelRef === selectedModelValue) return;
+
+    const nextOption = modelOptions.find((option) => option.value === normalizedNextModelRef);
+    const previousLabel = modelOptions.find((option) => option.value === selectedModelValue)?.label
+      || selectedModelValue
+      || t('composer.selectModel');
+    const nextLabel = nextOption?.label || normalizedNextModelRef;
+
+    try {
+      if (nextOption && shouldValidateModelOption(nextOption)) {
+        const apiKey = nextOption.authMode === 'api_key'
+          ? await getAccountApiKey(nextOption.accountId)
+          : null;
+        await hostApiFetch('/api/provider-drafts/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            accountId: nextOption.accountId,
+            vendorId: nextOption.vendorId,
+            ...(apiKey ? { apiKey } : {}),
+            model: nextOption.modelId,
+            ...(nextOption.baseUrl ? { baseUrl: nextOption.baseUrl } : {}),
+            ...(nextOption.apiProtocol ? { apiProtocol: nextOption.apiProtocol } : {}),
+          }),
+        });
+      }
+
+      useChatStore.setState((state) => ({
+        sessionModels: {
+          ...state.sessionModels,
+          [currentSessionKey]: normalizedNextModelRef,
+        },
+        sessions: state.sessions.map((session) => (
+          session.key === currentSessionKey
+            ? { ...session, model: normalizedNextModelRef }
+            : session
+        )),
+      }));
+      toast.success(t('composer.modelSwitchSuccess', { model: nextLabel }));
+    } catch (error) {
+      toast.error(t('composer.modelSwitchFailed', {
+        model: previousLabel,
+        error: getErrorMessage(error),
+      }));
+    }
+  }, [currentAgentId, currentSessionKey, getAccountApiKey, modelOptions, selectedModelValue, t]);
 
   return (
     <div

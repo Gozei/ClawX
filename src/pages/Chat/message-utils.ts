@@ -96,13 +96,21 @@ function summarizeSystemHeartbeatNoise(text: string): string {
   return summaryLines.join('\n');
 }
 
+function stripInjectedConversationInfo(text: string): string {
+  const withoutConversationInfo = text
+    .replace(/^Conversation info\s*\([^)]*\):\s*```[a-z]*\n[\s\S]*?```\s*/i, '')
+    .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '');
+
+  return withoutConversationInfo.replace(/^Execution playbook:\s*(?:\r?\n- .*)+\s*/i, '');
+}
+
 /**
  * Clean Gateway metadata from user message text for display.
  * Strips: [media attached: ... | ...], [message_id: ...],
  * and the timestamp prefix [Day Date Time Timezone].
  */
 function cleanUserText(text: string): string {
-  const cleaned = text
+  const cleaned = stripInjectedConversationInfo(text
     // Remove [media attached: path (mime) | path] references
     .replace(/\s*\[media attached:[^\]]*\]/g, '')
     // Remove [message_id: uuid]
@@ -113,7 +121,7 @@ function cleanUserText(text: string): string {
     .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '')
     // Remove Gateway timestamp prefix like [Fri 2026-02-13 22:39 GMT+8]
     .replace(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i, '')
-    .trim();
+    .trim());
 
   return summarizeSystemHeartbeatNoise(cleaned);
 }

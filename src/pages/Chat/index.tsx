@@ -45,6 +45,7 @@ export function Chat() {
   const error = useChatStore((s) => s.error);
   const showThinking = useChatStore((s) => s.showThinking);
   const chatProcessDisplayMode = useSettingsStore((s) => s.chatProcessDisplayMode);
+  const hideInternalRoutineProcesses = useSettingsStore((s) => s.hideInternalRoutineProcesses);
   const assistantMessageStyle = useSettingsStore((s) => s.assistantMessageStyle);
   const activeTurnBuffer = useChatStore((s) => s.activeTurnBuffer);
   const rawStreamingMessage = useChatStore((s) => s.streamingMessage);
@@ -141,10 +142,10 @@ export function Chat() {
   const hasStreamToolStatus = chatProcessDisplayMode === 'all' && streamingTools.length > 0;
   const streamingDisplayMessage = activeTurnBuffer?.streamingDisplayMessage ?? fallbackStreamingDisplayMessage;
   const hasPersistedProcessMessages = activeTurnProcessMessages.some((message) => (
-    hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle)
+    hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle, hideInternalRoutineProcesses)
   ));
   const hasStreamingProcessMessage = streamingProcessMessage != null
-    && hasVisibleProcessContent(streamingProcessMessage, showThinking, chatProcessDisplayMode, assistantMessageStyle);
+    && hasVisibleProcessContent(streamingProcessMessage, showThinking, chatProcessDisplayMode, assistantMessageStyle, hideInternalRoutineProcesses);
   const hasStreamingFinalMessage = splitStreamingFinalMessage != null
     && hasVisibleFinalContent(splitStreamingFinalMessage);
   const shouldUseProcessLayout = hasPersistedProcessMessages
@@ -220,6 +221,7 @@ export function Chat() {
                 showThinking={showThinking}
                 chatProcessDisplayMode={chatProcessDisplayMode}
                 assistantMessageStyle={assistantMessageStyle}
+                hideInternalRoutineProcesses={hideInternalRoutineProcesses}
               />
 
               {activeTurnUserMessage ? (
@@ -233,6 +235,7 @@ export function Chat() {
                   showThinking={showThinking}
                   chatProcessDisplayMode={chatProcessDisplayMode}
                   assistantMessageStyle={assistantMessageStyle}
+                  hideInternalRoutineProcesses={hideInternalRoutineProcesses}
                   startedAtMs={activeTurnStartedAtMs}
                   showActivity={showProcessActivity}
                   showTyping={!shouldUseProcessLayout && !persistedActiveFinalMessage && !activeTurnFinalStreamingMessage && !pendingFinal && !hasAnyStreamContent}
@@ -436,6 +439,7 @@ function hasVisibleProcessContent(
   showThinking: boolean,
   chatProcessDisplayMode: ChatProcessDisplayMode,
   assistantMessageStyle: AssistantMessageStyle,
+  hideInternalRoutineProcesses: boolean,
 ): boolean {
   if (!message || message.role !== 'assistant') return false;
 
@@ -453,7 +457,12 @@ function hasVisibleProcessContent(
       || files.length > 0;
   }
 
-  const items = getProcessEventItems(message, showThinking, chatProcessDisplayMode);
+  const items = getProcessEventItems(
+    message,
+    showThinking,
+    chatProcessDisplayMode,
+    hideInternalRoutineProcesses,
+  );
 
   return items.length > 0
     || images.length > 0
@@ -472,11 +481,13 @@ const HistoryMessages = memo(function HistoryMessages({
   showThinking,
   chatProcessDisplayMode,
   assistantMessageStyle,
+  hideInternalRoutineProcesses,
 }: {
   messages: RawMessage[];
   showThinking: boolean;
   chatProcessDisplayMode: ChatProcessDisplayMode;
   assistantMessageStyle: AssistantMessageStyle;
+  hideInternalRoutineProcesses: boolean;
 }) {
   const displayItems = useMemo(() => groupMessagesForDisplay(messages), [messages]);
 
@@ -493,6 +504,7 @@ const HistoryMessages = memo(function HistoryMessages({
               showThinking={showThinking}
               chatProcessDisplayMode={chatProcessDisplayMode}
               assistantMessageStyle={assistantMessageStyle}
+              hideInternalRoutineProcesses={hideInternalRoutineProcesses}
             />
           );
         }
@@ -516,6 +528,7 @@ function ProcessSection({
   showThinking,
   chatProcessDisplayMode,
   assistantMessageStyle,
+  hideInternalRoutineProcesses,
   startedAtMs,
   completedAtMs,
   showActivity,
@@ -528,6 +541,7 @@ function ProcessSection({
   showThinking: boolean;
   chatProcessDisplayMode: ChatProcessDisplayMode;
   assistantMessageStyle: AssistantMessageStyle;
+  hideInternalRoutineProcesses: boolean;
   startedAtMs: number;
   completedAtMs?: number;
   showActivity?: boolean;
@@ -537,11 +551,11 @@ function ProcessSection({
   const { i18n } = useTranslation('chat');
   const language = i18n?.resolvedLanguage || i18n?.language;
   const visibleMessages = processMessages.filter((message) => (
-    hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle)
+    hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle, hideInternalRoutineProcesses)
   ));
   const hasStreamingProcessContent = !!processStreamingMessage
     && (
-      hasVisibleProcessContent(processStreamingMessage, showThinking, chatProcessDisplayMode, assistantMessageStyle)
+      hasVisibleProcessContent(processStreamingMessage, showThinking, chatProcessDisplayMode, assistantMessageStyle, hideInternalRoutineProcesses)
       || (chatProcessDisplayMode === 'all' && (streamingTools?.length ?? 0) > 0)
     );
   const hasSection = visibleMessages.length > 0 || hasStreamingProcessContent || !!showActivity;
@@ -601,6 +615,7 @@ function ProcessSection({
     chatProcessDisplayMode,
     streamingTools,
     language,
+    hideInternalRoutineProcesses,
   );
 
   const handleToggle = () => {
@@ -660,6 +675,7 @@ function ProcessSection({
                     message={message}
                     showThinking={showThinking}
                     chatProcessDisplayMode={chatProcessDisplayMode}
+                    hideInternalRoutineProcesses={hideInternalRoutineProcesses}
                     expandAll={expandAllEvents}
                   />
                 ))}
@@ -669,6 +685,7 @@ function ProcessSection({
                     message={processStreamingMessage}
                     showThinking={showThinking}
                     chatProcessDisplayMode={chatProcessDisplayMode}
+                    hideInternalRoutineProcesses={hideInternalRoutineProcesses}
                     streamingTools={streamingTools}
                     expandAll={expandAllEvents}
                     preferPlainDirectContent={phase === 'working'}
@@ -724,6 +741,7 @@ function CollapsedProcessTurn({
   showThinking,
   chatProcessDisplayMode,
   assistantMessageStyle,
+  hideInternalRoutineProcesses,
 }: {
   userMessage: RawMessage;
   intermediateMessages: RawMessage[];
@@ -731,6 +749,7 @@ function CollapsedProcessTurn({
   showThinking: boolean;
   chatProcessDisplayMode: ChatProcessDisplayMode;
   assistantMessageStyle: AssistantMessageStyle;
+  hideInternalRoutineProcesses: boolean;
 }) {
   const { t } = useTranslation('chat');
   const { collapsedProcessMessage, finalDisplayMessage } = splitFinalMessageForTurnDisplay(finalMessage);
@@ -738,7 +757,7 @@ function CollapsedProcessTurn({
     ? [...intermediateMessages, collapsedProcessMessage]
     : intermediateMessages;
   const hasProcessSection = processMessages.some((message) => (
-    hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle)
+    hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle, hideInternalRoutineProcesses)
   ));
   const finalHasVisibleContent = hasVisibleFinalContent(finalDisplayMessage);
   const showTools = chatProcessDisplayMode === 'all';
@@ -757,6 +776,7 @@ function CollapsedProcessTurn({
           showThinking={showThinking}
           chatProcessDisplayMode={chatProcessDisplayMode}
           assistantMessageStyle={assistantMessageStyle}
+          hideInternalRoutineProcesses={hideInternalRoutineProcesses}
           startedAtMs={resolveMessageTimestampMs(userMessage)}
           completedAtMs={resolveMessageTimestampMs(finalMessage, resolveMessageTimestampMs(userMessage))}
           showFinalDivider={finalHasVisibleContent}
@@ -799,6 +819,7 @@ function ActiveTurn({
   showThinking,
   chatProcessDisplayMode,
   assistantMessageStyle,
+  hideInternalRoutineProcesses,
   startedAtMs,
   showActivity,
   showTyping,
@@ -813,6 +834,7 @@ function ActiveTurn({
   showThinking: boolean;
   chatProcessDisplayMode: ChatProcessDisplayMode;
   assistantMessageStyle: AssistantMessageStyle;
+  hideInternalRoutineProcesses: boolean;
   startedAtMs: number;
   showActivity: boolean;
   showTyping: boolean;
@@ -832,12 +854,12 @@ function ActiveTurn({
 
   // 过程区只用真正的过程流消息(processStreamingMessage)判断，正文流消息作为独立气泡渲染
   const hasProcessSection = liveProcessMessages.some((message) => (
-    hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle)
+    hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle, hideInternalRoutineProcesses)
   ))
     || (
       !!processStreamingMessage
       && (
-        hasVisibleProcessContent(processStreamingMessage, showThinking, chatProcessDisplayMode, assistantMessageStyle)
+        hasVisibleProcessContent(processStreamingMessage, showThinking, chatProcessDisplayMode, assistantMessageStyle, hideInternalRoutineProcesses)
         || (chatProcessDisplayMode === 'all' && streamingTools.length > 0)
       )
     )
@@ -856,6 +878,7 @@ function ActiveTurn({
           showThinking={showThinking}
           chatProcessDisplayMode={chatProcessDisplayMode}
           assistantMessageStyle={assistantMessageStyle}
+          hideInternalRoutineProcesses={hideInternalRoutineProcesses}
           startedAtMs={startedAtMs}
           showActivity={showActivity}
           showFinalDivider={!sending && (finalHasVisibleContent || finalStreamingHasVisibleContent)}

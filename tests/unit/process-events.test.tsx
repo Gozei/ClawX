@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { getProcessActivityLabel, ProcessEventMessage } from '@/pages/Chat/process-events-next';
+import { getProcessActivityLabel, getProcessEventItems, ProcessEventMessage } from '@/pages/Chat/process-events-next';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -281,6 +281,41 @@ describe('ProcessEventMessage', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('hides english routine heartbeat reasoning from the process stream', () => {
+    const { container } = render(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-heartbeat-english',
+          role: 'assistant',
+          content: [
+            {
+              type: 'thinking',
+              thinking: 'The user is asking me to check HEARTBEAT.md again. This is a routine heartbeat check. I need to read the file and respond with HEARTBEAT_OK if there\'s nothing that needs attention.',
+            },
+            {
+              type: 'tool_use',
+              id: 'read-heartbeat-english',
+              name: 'read_file',
+              input: { path: 'C:/Users/Administrator/.openclaw/workspace/HEARTBEAT.md' },
+            },
+            {
+              type: 'tool_result',
+              id: 'read-heartbeat-english',
+              name: 'read_file',
+              content: 'HEARTBEAT_OK',
+            },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="all"
+      />,
+    );
+
+    expect(screen.queryByTestId('chat-process-thinking-content')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-process-event-row')).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('keeps normal HEARTBEAT.md troubleshooting reads visible outside internal heartbeat flow', () => {
     render(
       <ProcessEventMessage
@@ -305,5 +340,63 @@ describe('ProcessEventMessage', () => {
     expect(screen.getByTestId('chat-process-note-content')).toBeInTheDocument();
     expect(screen.getByTestId('chat-process-event-row')).toBeInTheDocument();
     expect(screen.getByText(/template with the runtime workspace copy/i)).toBeInTheDocument();
+  });
+
+  it('shows internal heartbeat events when filtering is disabled', () => {
+    const items = getProcessEventItems(
+      {
+        id: 'assistant-heartbeat-visible',
+        role: 'assistant',
+        content: [
+          {
+            type: 'thinking',
+            thinking: 'The user is asking me to check HEARTBEAT.md again. This is a routine heartbeat check.',
+          },
+          {
+            type: 'tool_use',
+            id: 'read-heartbeat-visible',
+            name: 'read_file',
+            input: { path: 'C:/Users/Administrator/.openclaw/workspace/HEARTBEAT.md' },
+          },
+          {
+            type: 'tool_result',
+            id: 'read-heartbeat-visible',
+            name: 'read_file',
+            content: 'HEARTBEAT_OK',
+          },
+        ],
+      },
+      true,
+      'all',
+      false,
+    );
+
+    expect(items).toHaveLength(3);
+    expect(items.some((item) => item.kind === 'thinking')).toBe(true);
+    expect(items.some((item) => item.kind === 'tool_call')).toBe(true);
+    expect(items.some((item) => item.kind === 'tool_result')).toBe(true);
+  });
+
+  it('rewrites the heartbeat task-check note to a calmer system phrasing', () => {
+    render(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-heartbeat-copy',
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: '用户又在发送心跳检查请求，我需要读取 HEARTBEAT.md 文件确认是否有需要处理的任务。',
+            },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="files"
+        hideInternalRoutineProcesses={false}
+      />,
+    );
+
+    expect(screen.getByText('发送心跳检查请求，系统读取 HEARTBEAT.md 文件跟进待办任务。')).toBeInTheDocument();
+    expect(screen.queryByText('用户又在发送心跳检查请求，我需要读取 HEARTBEAT.md 文件确认是否有需要处理的任务。')).not.toBeInTheDocument();
   });
 });

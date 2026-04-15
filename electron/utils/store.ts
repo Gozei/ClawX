@@ -34,6 +34,7 @@ export interface AppSettings {
   telemetryEnabled: boolean;
   brandingOverrides: BrandingOverrides;
   chatProcessDisplayMode: ChatProcessDisplayMode;
+  hideInternalRoutineProcesses: boolean;
   assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
   machineId: string;
@@ -89,6 +90,7 @@ function createDefaultSettings(): AppSettings {
     telemetryEnabled: true,
     brandingOverrides: {},
     chatProcessDisplayMode: 'files',
+    hideInternalRoutineProcesses: true,
     assistantMessageStyle: 'bubble',
     chatFontScale: 100,
     machineId: '',

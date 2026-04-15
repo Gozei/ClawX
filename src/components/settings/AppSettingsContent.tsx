@@ -76,6 +76,8 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
     setTelemetryEnabled,
     chatProcessDisplayMode,
     setChatProcessDisplayMode,
+    hideInternalRoutineProcesses,
+    setHideInternalRoutineProcesses,
     assistantMessageStyle,
     setAssistantMessageStyle,
     chatFontScale,
@@ -675,6 +677,20 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
                     </Button>
                   ))}
                 </div>
+              </div>
+
+              <div className="flex items-center justify-between rounded-2xl border border-black/6 bg-black/[0.02] px-4 py-3 dark:border-white/8 dark:bg-white/[0.02]">
+                <div className="pr-4">
+                  <Label className="text-[15px] font-medium text-foreground">{t('advanced.hideInternalRoutineProcesses')}</Label>
+                  <p className="text-[13px] text-muted-foreground mt-1">
+                    {t('advanced.hideInternalRoutineProcessesDesc')}
+                  </p>
+                </div>
+                <Switch
+                  checked={hideInternalRoutineProcesses}
+                  onCheckedChange={setHideInternalRoutineProcesses}
+                  data-testid="settings-hide-internal-routine-processes"
+                />
               </div>
 
               <div className="space-y-3">

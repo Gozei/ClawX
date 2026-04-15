@@ -302,6 +302,8 @@
     "chatProcessDisplayDesc": "Control whether tool execution and read-process cards appear in the conversation.",
     "assistantMessageStyle": "Assistant output style",
     "assistantMessageStyleDesc": "Switch between the current bubble reply and a flatter event-stream reply.",
+    "hideInternalRoutineProcesses": "Hide internal routine checks",
+    "hideInternalRoutineProcessesDesc": "Keep heartbeat, housekeeping, and other internal self-check process entries out of the chat unless you are debugging.",
     "assistantMessageStyleOptions": {
       "bubble": "Bubble",
       "stream": "Event stream"
