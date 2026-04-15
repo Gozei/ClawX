@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { getAllSkillConfigs, updateSkillConfig } from '../../utils/skill-config';
+import { deleteSkillDirectory, getSkillDetail, listSkills, saveSkillConfig } from '../../utils/skill-details';
 import type { HostApiContext } from '../context';
 import { parseJsonBody, sendJson } from '../route-utils';
 
@@ -9,6 +10,15 @@ export async function handleSkillRoutes(
   url: URL,
   ctx: HostApiContext,
 ): Promise<boolean> {
+  if (url.pathname === '/api/skills' && req.method === 'GET') {
+    try {
+      sendJson(res, 200, await listSkills(ctx.gatewayManager));
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
   if (url.pathname === '/api/skills/configs' && req.method === 'GET') {
     sendJson(res, 200, await getAllSkillConfigs());
     return true;
@@ -25,6 +35,45 @@ export async function handleSkillRoutes(
         apiKey: body.apiKey,
         env: body.env,
       }));
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname.startsWith('/api/skills/') && req.method === 'GET') {
+    try {
+      const skillId = decodeURIComponent(url.pathname.slice('/api/skills/'.length));
+      const detail = await getSkillDetail(ctx.gatewayManager, skillId);
+      if (!detail) {
+        sendJson(res, 404, { success: false, error: 'Skill not found' });
+      } else {
+        sendJson(res, 200, detail);
+      }
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname.startsWith('/api/skills/') && url.pathname.endsWith('/config') && req.method === 'PUT') {
+    try {
+      const skillId = decodeURIComponent(url.pathname.slice('/api/skills/'.length, -'/config'.length));
+      const body = await parseJsonBody<{
+        apiKey?: string;
+        env?: Record<string, string>;
+      }>(req);
+      sendJson(res, 200, await saveSkillConfig(ctx.gatewayManager, skillId, body));
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname.startsWith('/api/skills/') && req.method === 'DELETE') {
+    try {
+      const skillId = decodeURIComponent(url.pathname.slice('/api/skills/'.length));
+      sendJson(res, 200, await deleteSkillDirectory(ctx.gatewayManager, skillId));
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
     }

@@ -2,61 +2,7 @@ import { create } from 'zustand';
 import { hostApiFetch } from '@/lib/host-api';
 import { AppError, normalizeAppError } from '@/lib/error-model';
 import { useGatewayStore } from './gateway';
-import type { SkillSnapshot, SkillConfigDetail, MarketplaceSkill, SkillSource } from '../types/skill';
-
-type GatewaySkillStatus = {
-  skillKey: string;
-  slug?: string;
-  name?: string;
-  description?: string;
-  disabled?: boolean;
-  emoji?: string;
-  version?: string;
-  author?: string;
-  bundled?: boolean;
-  always?: boolean;
-  source?: string;
-  baseDir?: string;
-  filePath?: string;
-  ready?: boolean;
-  missing?: string[];
-  homepage?: string;
-};
-
-type GatewaySkillsStatusResult = {
-  skills?: GatewaySkillStatus[];
-};
-
-type ClawHubListResult = {
-  slug: string;
-  version?: string;
-  source?: string;
-  baseDir?: string;
-  sourceId?: string;
-  sourceLabel?: string;
-};
-
-function normalizePathForCompare(input: string | undefined): string | null {
-  if (!input) return null;
-  return input.replace(/\//g, '\\').toLowerCase();
-}
-
-function inferSource(baseDir: string | undefined, sources: SkillSource[]): SkillSource | undefined {
-  const normalizedBaseDir = normalizePathForCompare(baseDir);
-  if (!normalizedBaseDir) return undefined;
-  return sources.find((source) => {
-    const root = normalizePathForCompare(`${source.workdir}\\skills`);
-    return Boolean(root) && (normalizedBaseDir === root || normalizedBaseDir.startsWith(`${root}\\`));
-  });
-}
-
-function inferSourceId(baseDir: string | undefined, sources: SkillSource[]): string | undefined {
-  return inferSource(baseDir, sources)?.id;
-}
-
-function inferSourceLabel(baseDir: string | undefined, sources: SkillSource[]): string | undefined {
-  return inferSource(baseDir, sources)?.label;
-}
+import type { MarketplaceSkill, SkillDetail, SkillSnapshot, SkillSource } from '../types/skill';
 
 function mapErrorCodeToSkillErrorKey(
   code: AppError['code'],
@@ -81,40 +27,44 @@ function mapErrorCodeToSkillErrorKey(
 
 interface SkillsState {
   skills: SkillSnapshot[];
-  skillConfigById: Record<string, SkillConfigDetail>;
+  skillDetailsById: Record<string, SkillDetail>;
   searchResults: MarketplaceSkill[];
   sources: SkillSource[];
   loading: boolean;
   refreshing: boolean;
   searching: boolean;
+  detailLoadingId: string | null;
   searchError: string | null;
-  installing: Record<string, boolean>; // slug -> boolean
+  installing: Record<string, boolean>;
+  deleting: Record<string, boolean>;
   error: string | null;
   lastFetchedAt: number | null;
 
-  // Actions
-  fetchSkills: () => Promise<void>;
+  fetchSkills: (force?: boolean) => Promise<void>;
   fetchSources: () => Promise<SkillSource[]>;
-  fetchSkillConfig: (skillId: string) => Promise<SkillConfigDetail>;
+  fetchSkillDetail: (skillId: string, force?: boolean) => Promise<SkillDetail>;
+  saveSkillConfig: (skillId: string, input: { apiKey?: string; env?: Record<string, string> }) => Promise<void>;
+  deleteSkill: (skillId: string) => Promise<void>;
   searchSkills: (query: string, sourceId?: string) => Promise<void>;
   installSkill: (slug: string, version?: string, sourceId?: string) => Promise<void>;
   uninstallSkill: (slug: string, sourceId?: string) => Promise<void>;
   enableSkill: (skillId: string) => Promise<void>;
   disableSkill: (skillId: string) => Promise<void>;
-  setSkills: (skills: SkillSnapshot[]) => void;
   updateSkill: (skillId: string, updates: Partial<SkillSnapshot>) => void;
 }
 
 export const useSkillsStore = create<SkillsState>((set, get) => ({
   skills: [],
-  skillConfigById: {},
+  skillDetailsById: {},
   searchResults: [],
   sources: [],
   loading: false,
   refreshing: false,
   searching: false,
+  detailLoadingId: null,
   searchError: null,
   installing: {},
+  deleting: {},
   error: null,
   lastFetchedAt: null,
 
@@ -129,10 +79,10 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     return sources;
   },
 
-  fetchSkills: async () => {
+  fetchSkills: async (force = false) => {
     const existingSkills = get().skills;
     const lastFetchedAt = get().lastFetchedAt;
-    if (existingSkills.length > 0 && lastFetchedAt && Date.now() - lastFetchedAt < 15_000) {
+    if (!force && existingSkills.length > 0 && lastFetchedAt && Date.now() - lastFetchedAt < 15_000) {
       return;
     }
 
@@ -141,129 +91,90 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     } else {
       set({ refreshing: true, error: null });
     }
+
     try {
-      const sources = await get().fetchSources();
-      const gatewayData = await useGatewayStore.getState().rpc<GatewaySkillsStatusResult>('skills.status');
-      
-      let snapshots: SkillSnapshot[] = [];
-      const currentSkills = get().skills;
-
-      if (gatewayData.skills) {
-        snapshots = gatewayData.skills.map((s: GatewaySkillStatus) => ({
-          id: s.skillKey,
-          slug: s.slug || s.skillKey,
-          name: s.name || s.skillKey,
-          description: s.description || '',
-          enabled: !s.disabled,
-          icon: s.emoji || '📦',
-          version: s.version || '1.0.0',
-          author: s.author,
-          isCore: s.bundled && s.always,
-          isBundled: s.bundled,
-          source: s.source,
-          baseDir: s.baseDir,
-          filePath: s.filePath,
-          ready: s.ready,
-          missing: s.missing,
-          homepage: s.homepage,
-          installed: true,
-          sourceId: inferSourceId(s.baseDir, sources),
-          sourceLabel: inferSourceLabel(s.baseDir, sources),
-        }));
-      } else if (currentSkills.length > 0) {
-        snapshots = [...currentSkills];
-      }
-
+      const skills = await hostApiFetch<SkillSnapshot[]>('/api/skills');
       set({
-        skills: snapshots,
+        skills,
         loading: false,
         refreshing: false,
         lastFetchedAt: Date.now(),
       });
-
-      // Optionally fetch clawhub:list to supplement "just installed" skills that aren't picked up by runtime yet.
-      const clawhubResult = await hostApiFetch<{ success: boolean; results?: ClawHubListResult[]; error?: string }>('/api/clawhub/list');
-      
-      if (clawhubResult.success && clawhubResult.results) {
-        const enrichedSkills = [...snapshots];
-        let hasChanges = false;
-
-        clawhubResult.results.forEach((cs: ClawHubListResult) => {
-          const existing = enrichedSkills.find(s => s.id === cs.slug);
-          if (existing) {
-            if (!existing.baseDir && cs.baseDir) {
-              existing.baseDir = cs.baseDir;
-              hasChanges = true;
-            }
-            if (!existing.source && cs.source) {
-              existing.source = cs.source;
-              hasChanges = true;
-            }
-            if (!existing.sourceId && cs.sourceId) {
-              existing.sourceId = cs.sourceId;
-              existing.sourceLabel = cs.sourceLabel;
-              hasChanges = true;
-            }
-            return;
-          }
-          
-          hasChanges = true;
-          enrichedSkills.push({
-            id: cs.slug,
-            slug: cs.slug,
-            name: cs.slug,
-            description: 'Recently installed, initializing...',
-            enabled: false,
-            icon: '⌛',
-            version: cs.version || 'unknown',
-            author: undefined,
-            isCore: false,
-            isBundled: false,
-            source: cs.source || 'openclaw-managed',
-            baseDir: cs.baseDir,
-            installed: true,
-            ready: false,
-            sourceId: cs.sourceId,
-            sourceLabel: cs.sourceLabel,
-          });
-        });
-
-        if (hasChanges) {
-          set({ skills: enrichedSkills, lastFetchedAt: Date.now() });
-        }
-      }
     } catch (error) {
-      console.error('Failed to fetch skills:', error);
       const appError = normalizeAppError(error, { module: 'skills', operation: 'fetch' });
       set({ loading: false, refreshing: false, error: mapErrorCodeToSkillErrorKey(appError.code, 'fetch') });
     }
   },
 
-  fetchSkillConfig: async (skillId: string): Promise<SkillConfigDetail> => {
+  fetchSkillDetail: async (skillId: string, force = false): Promise<SkillDetail> => {
+    const cached = get().skillDetailsById[skillId];
+    if (cached && !force) {
+      return cached;
+    }
+
+    set({ detailLoadingId: skillId });
     try {
-      const configMap = await hostApiFetch<Record<string, { apiKey?: string; env?: Record<string, string>; config?: Record<string, unknown> }>>('/api/skills/configs');
-      const skill = get().skills.find(s => s.id === skillId);
-      const slug = skill?.slug;
-      
-      const configData = configMap[skillId] || (slug ? configMap[slug] : undefined) || {};
-      
-      const detail: SkillConfigDetail = {
-        id: skillId,
-        apiKey: configData.apiKey,
-        env: configData.env,
-        config: configData.config,
-      };
-
+      const detail = await hostApiFetch<SkillDetail>(`/api/skills/${encodeURIComponent(skillId)}`);
       set((state) => ({
-        skillConfigById: {
-          ...state.skillConfigById,
+        detailLoadingId: state.detailLoadingId === skillId ? null : state.detailLoadingId,
+        skillDetailsById: {
+          ...state.skillDetailsById,
           [skillId]: detail,
-        }
+        },
       }));
-
       return detail;
     } catch (error) {
-      console.error(`Failed to fetch config for skill ${skillId}:`, error);
+      set((state) => ({
+        detailLoadingId: state.detailLoadingId === skillId ? null : state.detailLoadingId,
+      }));
+      throw error;
+    }
+  },
+
+  saveSkillConfig: async (skillId: string, input) => {
+    const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/skills/${encodeURIComponent(skillId)}/config`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to save skill config');
+    }
+    await get().fetchSkills(true);
+    const detail = await get().fetchSkillDetail(skillId, true);
+    set((state) => ({
+      skillDetailsById: {
+        ...state.skillDetailsById,
+        [skillId]: detail,
+      },
+    }));
+  },
+
+  deleteSkill: async (skillId: string) => {
+    set((state) => ({ deleting: { ...state.deleting, [skillId]: true } }));
+    try {
+      const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/skills/${encodeURIComponent(skillId)}`, {
+        method: 'DELETE',
+      });
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to delete skill');
+      }
+      await get().fetchSkills(true);
+      set((state) => {
+        const nextDeleting = { ...state.deleting };
+        delete nextDeleting[skillId];
+        const nextDetails = { ...state.skillDetailsById };
+        delete nextDetails[skillId];
+        return {
+          deleting: nextDeleting,
+          skillDetailsById: nextDetails,
+        };
+      });
+    } catch (error) {
+      set((state) => {
+        const nextDeleting = { ...state.deleting };
+        delete nextDeleting[skillId];
+        return { deleting: nextDeleting };
+      });
       throw error;
     }
   },
@@ -306,16 +217,12 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
         });
         throw new Error(mapErrorCodeToSkillErrorKey(appError.code, 'install'));
       }
-      // Refresh skills after install
-      await get().fetchSkills();
-    } catch (error) {
-      console.error('Install error:', error);
-      throw error;
+      await get().fetchSkills(true);
     } finally {
       set((state) => {
-        const newInstalling = { ...state.installing };
-        delete newInstalling[installKey];
-        return { installing: newInstalling };
+        const nextInstalling = { ...state.installing };
+        delete nextInstalling[installKey];
+        return { installing: nextInstalling };
       });
     }
   },
@@ -331,56 +238,49 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       if (!result.success) {
         throw new Error(result.error || 'Uninstall failed');
       }
-      // Refresh skills after uninstall
-      await get().fetchSkills();
-    } catch (error) {
-      console.error('Uninstall error:', error);
-      throw error;
+      await get().fetchSkills(true);
     } finally {
       set((state) => {
-        const newInstalling = { ...state.installing };
-        delete newInstalling[installKey];
-        return { installing: newInstalling };
+        const nextInstalling = { ...state.installing };
+        delete nextInstalling[installKey];
+        return { installing: nextInstalling };
       });
     }
   },
 
-  enableSkill: async (skillId) => {
-    const { updateSkill } = get();
-
-    try {
-      await useGatewayStore.getState().rpc('skills.update', { skillKey: skillId, enabled: true });
-      updateSkill(skillId, { enabled: true });
-    } catch (error) {
-      console.error('Failed to enable skill:', error);
-      throw error;
+  enableSkill: async (skillId: string) => {
+    await useGatewayStore.getState().rpc('skills.update', { skillKey: skillId, enabled: true });
+    await get().fetchSkills(true);
+    if (get().skillDetailsById[skillId]) {
+      const detail = await get().fetchSkillDetail(skillId, true);
+      set((state) => ({
+        skillDetailsById: {
+          ...state.skillDetailsById,
+          [skillId]: detail,
+        },
+      }));
     }
   },
 
-  disableSkill: async (skillId) => {
-    const { updateSkill, skills } = get();
-
-    const skill = skills.find((s) => s.id === skillId);
-    if (skill?.isCore) {
-      throw new Error('Cannot disable core skill');
-    }
-
-    try {
-      await useGatewayStore.getState().rpc('skills.update', { skillKey: skillId, enabled: false });
-      updateSkill(skillId, { enabled: false });
-    } catch (error) {
-      console.error('Failed to disable skill:', error);
-      throw error;
+  disableSkill: async (skillId: string) => {
+    await useGatewayStore.getState().rpc('skills.update', { skillKey: skillId, enabled: false });
+    await get().fetchSkills(true);
+    if (get().skillDetailsById[skillId]) {
+      const detail = await get().fetchSkillDetail(skillId, true);
+      set((state) => ({
+        skillDetailsById: {
+          ...state.skillDetailsById,
+          [skillId]: detail,
+        },
+      }));
     }
   },
-
-  setSkills: (skills) => set({ skills }),
 
   updateSkill: (skillId, updates) => {
     set((state) => ({
-      skills: state.skills.map((skill) =>
+      skills: state.skills.map((skill) => (
         skill.id === skillId ? { ...skill, ...updates } : skill
-      ),
+      )),
     }));
   },
 }));

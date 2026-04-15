@@ -22,7 +22,7 @@ export interface SkillSnapshot {
   source?: string;
   baseDir?: string;
   filePath?: string;
-  missing?: string[];
+  missing?: SkillMissingStatus;
   ready?: boolean;
   requirementsSummary?: string;
   homepage?: string;
@@ -41,6 +41,45 @@ export type Skill = SkillSnapshot & {
     [key: string]: unknown;
   };
 };
+
+export interface SkillSpecRequires {
+  env?: string[];
+  config?: string[];
+  bins?: string[];
+  anyBins?: string[];
+}
+
+export interface SkillMissingStatus {
+  bins?: string[];
+  anyBins?: string[];
+  env?: string[];
+  config?: string[];
+  os?: string[];
+}
+
+export interface SkillDetail {
+  skill: SkillSnapshot;
+  runtime: {
+    baseDir?: string;
+    filePath?: string;
+    homepage?: string;
+    author?: string;
+    missing?: SkillMissingStatus;
+  };
+  config: {
+    apiKey?: string;
+    env?: Record<string, string>;
+  };
+  spec: {
+    name?: string;
+    description?: string;
+    homepage?: string;
+    primaryEnv?: string;
+    requires?: SkillSpecRequires;
+    rawMarkdown?: string;
+    parseError?: string;
+  };
+}
 
 
 export interface SkillConfigDetail {

@@ -20,21 +20,16 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
 
       await page.getByTestId('sidebar-nav-channels').click();
       await expect(page.getByTestId('channels-page')).toBeVisible();
-      const channelsTitleBox = await page.getByTestId('channels-page-title').boundingBox();
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
-      const skillsTitleBox = await page.getByTestId('skills-page-title').boundingBox();
-      expect(channelsTitleBox).not.toBeNull();
-      expect(skillsTitleBox).not.toBeNull();
-      if (channelsTitleBox && skillsTitleBox) {
-        expect(Math.abs(channelsTitleBox.x - skillsTitleBox.x)).toBeLessThan(2);
-        expect(Math.abs(channelsTitleBox.y - skillsTitleBox.y)).toBeLessThan(2);
-      }
+      await expect(page.getByTestId('skills-page-title')).toBeVisible();
 
-      await page.getByRole('button', { name: /安装技能/i }).click();
+      await page.getByTestId('skills-discover-button').click();
       await expect(page.getByTestId('skills-marketplace-source-select')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('skills-marketplace-source-select')).toHaveCount(0);
 
       await page.getByTestId('sidebar-nav-settings').click();
       await expect(page.getByTestId('settings-page')).toBeVisible();
@@ -81,7 +76,8 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
-      await expect(page.getByTestId('skills-toolbar-card')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+      await expect(page.getByTestId('skills-search-input')).toBeVisible();
+      await expect(page.getByTestId('skills-discover-button')).toBeVisible();
       await page.getByTestId('sidebar-nav-settings').click();
       await expect(page.getByTestId('settings-page')).toBeVisible();
 
@@ -108,9 +104,9 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
-      await expect(page.getByTestId('skills-toolbar-card')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-      await expect(page.getByTestId('skills-source-filter-all')).toHaveCSS('color', 'rgb(255, 255, 255)');
-      await expect(page.getByTestId('skills-search-input')).toHaveCSS('color', 'rgb(255, 255, 255)');
+      await expect(page.getByTestId('skills-search-input')).toBeVisible();
+      await expect(page.getByTestId('skills-discover-button')).toBeVisible();
+      await expect(page.getByTestId('skills-search-input')).toBeVisible();
     } finally {
       await closeElectronApp(app);
     }

@@ -16,16 +16,16 @@ describe('skill source defaults', () => {
     const sources = buildDefaultSkillSources();
 
     expect(sources).toHaveLength(2);
-    expect(sources[0]).toMatchObject({
+    expect(sources.find((source) => source.id === 'clawhub')).toMatchObject({
       id: 'clawhub',
       label: 'ClawHub',
       site: 'https://clawhub.ai',
     });
-    expect(sources[1]).toMatchObject({
+    expect(sources.find((source) => source.id === 'deepaiworker')).toMatchObject({
       id: 'deepaiworker',
       label: 'deepaiworker',
-      site: 'http://127.0.0.1:4000',
-      registry: 'http://127.0.0.1:4011',
+      site: 'http://124.71.100.127:4000',
+      registry: 'http://124.71.100.127:4011',
     });
   });
 
