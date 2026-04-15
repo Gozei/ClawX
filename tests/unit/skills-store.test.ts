@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hostApiFetchMock = vi.fn();
 const gatewayRpcMock = vi.fn();
@@ -17,6 +17,7 @@ vi.mock('@/stores/gateway', () => ({
 
 describe('skills store refresh behavior', () => {
   beforeEach(async () => {
+    vi.useRealTimers();
     vi.resetModules();
     hostApiFetchMock.mockReset();
     gatewayRpcMock.mockReset();
@@ -37,6 +38,10 @@ describe('skills store refresh behavior', () => {
       error: null,
       lastFetchedAt: null,
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('refreshes list and detail after saving config', async () => {
@@ -155,6 +160,7 @@ describe('skills store refresh behavior', () => {
   });
 
   it('updates skill enabled state immediately before the gateway call settles', async () => {
+    vi.useFakeTimers();
     const { useSkillsStore } = await import('@/stores/skills');
 
     let resolveRpc: (() => void) | undefined;
@@ -173,6 +179,9 @@ describe('skills store refresh behavior', () => {
     expect(useSkillsStore.getState().skills[0]?.enabled).toBe(true);
     expect(useSkillsStore.getState().skills[0]?.ready).toBe(true);
 
+    await vi.advanceTimersByTimeAsync(500);
+    expect(resolveRpc).toBeTypeOf('function');
+
     resolveRpc?.();
     hostApiFetchMock.mockImplementation(async (path: string) => {
       if (path === '/api/skills') {
@@ -186,6 +195,7 @@ describe('skills store refresh behavior', () => {
   });
 
   it('rolls back optimistic updates when the gateway call fails', async () => {
+    vi.useFakeTimers();
     const { useSkillsStore } = await import('@/stores/skills');
 
     useSkillsStore.setState({
@@ -196,7 +206,11 @@ describe('skills store refresh behavior', () => {
 
     gatewayRpcMock.mockRejectedValueOnce(new Error('gateway unavailable'));
 
-    await expect(useSkillsStore.getState().enableSkill('gh-issues')).rejects.toThrow('gateway unavailable');
+    const request = useSkillsStore.getState().enableSkill('gh-issues');
+    const rejection = expect(request).rejects.toThrow('gateway unavailable');
+    await vi.advanceTimersByTimeAsync(500);
+
+    await rejection;
 
     expect(useSkillsStore.getState().skills[0]?.enabled).toBe(false);
     expect(useSkillsStore.getState().skills[0]?.ready).toBe(false);

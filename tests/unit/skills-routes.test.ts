@@ -9,6 +9,9 @@ const saveSkillConfigMock = vi.fn();
 const deleteSkillDirectoryMock = vi.fn();
 const getAllSkillConfigsMock = vi.fn();
 const updateSkillConfigMock = vi.fn();
+const listSourcesMock = vi.fn();
+const inferSourceFromBaseDirMock = vi.fn();
+const uninstallMock = vi.fn();
 
 vi.mock('@electron/api/route-utils', () => ({
   parseJsonBody: (...args: unknown[]) => parseJsonBodyMock(...args),
@@ -30,6 +33,8 @@ vi.mock('@electron/utils/skill-config', () => ({
 describe('skill routes', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    listSourcesMock.mockResolvedValue([]);
+    inferSourceFromBaseDirMock.mockReturnValue(null);
   });
 
   it('serves aggregated skill list', async () => {
@@ -83,13 +88,26 @@ describe('skill routes', () => {
 
   it('deletes the skill directory through the detail endpoint', async () => {
     const { handleSkillRoutes } = await import('@electron/api/routes/skills');
+    getSkillDetailMock.mockResolvedValue({
+      identity: {
+        slug: 'weather',
+        baseDir: 'C:/skills/weather',
+      },
+    });
     deleteSkillDirectoryMock.mockResolvedValue({ success: true });
 
     await handleSkillRoutes(
       { method: 'DELETE' } as IncomingMessage,
       {} as ServerResponse,
       new URL('http://localhost/api/skills/weather'),
-      { gatewayManager: {} } as never,
+      {
+        gatewayManager: {},
+        clawHubService: {
+          listSources: (...args: unknown[]) => listSourcesMock(...args),
+          inferSourceFromBaseDir: (...args: unknown[]) => inferSourceFromBaseDirMock(...args),
+          uninstall: (...args: unknown[]) => uninstallMock(...args),
+        },
+      } as never,
     );
 
     expect(deleteSkillDirectoryMock).toHaveBeenCalledWith({}, 'weather');
