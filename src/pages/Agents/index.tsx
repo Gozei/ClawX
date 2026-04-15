@@ -23,7 +23,7 @@ import { subscribeHostEvent } from '@/lib/host-events';
 import { CHANNEL_ICONS, CHANNEL_NAMES, type ChannelType } from '@/types/channel';
 import type { AgentProfileType, AgentSummary, AgentWorkflowNode } from '@/types/agent';
 import type { ProviderAccount, ProviderVendorInfo, ProviderWithKeyInfo } from '@/lib/providers';
-import type { Skill } from '@/types/skill';
+import type { SkillSnapshot } from '@/types/skill';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -1068,7 +1068,7 @@ function AgentSettingsModal({
   );
   const assignedSkillDetails = selectedSkillIds
     .map((skillId) => skills.find((skill) => skill.id === skillId))
-    .filter(Boolean) as Skill[];
+    .filter(Boolean) as SkillSnapshot[];
   const enabledSkills = skills.filter((skill) => !skill.isCore);
   const recommendedSkills = enabledSkills.filter((skill) => skill.enabled);
   const runtimeProviderOptions = useMemo(
