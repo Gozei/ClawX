@@ -73,6 +73,23 @@ export async function handleSkillRoutes(
   if (url.pathname.startsWith('/api/skills/') && req.method === 'DELETE') {
     try {
       const skillId = decodeURIComponent(url.pathname.slice('/api/skills/'.length));
+      const detail = await getSkillDetail(ctx.gatewayManager, skillId);
+      if (!detail) {
+        sendJson(res, 404, { success: false, error: 'Skill not found' });
+        return true;
+      }
+
+      const sources = await ctx.clawHubService.listSources();
+      const inferredSource = ctx.clawHubService.inferSourceFromBaseDir(detail.identity.baseDir, sources);
+      if (inferredSource && detail.identity.slug) {
+        await ctx.clawHubService.uninstall({
+          slug: detail.identity.slug,
+          sourceId: inferredSource.id,
+        });
+        sendJson(res, 200, { success: true });
+        return true;
+      }
+
       sendJson(res, 200, await deleteSkillDirectory(ctx.gatewayManager, skillId));
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
@@ -83,9 +100,11 @@ export async function handleSkillRoutes(
   if (url.pathname === '/api/clawhub/search' && req.method === 'POST') {
     try {
       const body = await parseJsonBody<Record<string, unknown>>(req);
+      const page = await ctx.clawHubService.search(body);
       sendJson(res, 200, {
         success: true,
-        results: await ctx.clawHubService.search(body),
+        results: page.results,
+        nextCursor: page.nextCursor,
       });
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });

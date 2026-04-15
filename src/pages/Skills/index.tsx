@@ -1,106 +1,111 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Plus, Search, SlidersHorizontal } from 'lucide-react';
+import { ArrowLeft, X } from 'lucide-react';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { AlertCircle, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useSkillsStore } from '@/stores/skills';
 import { useGatewayStore } from '@/stores/gateway';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import type { SkillSnapshot, SkillSource } from '@/types/skill';
-import { skillCompactControlClasses, skillIconControlClasses, skillPrimaryControlClasses, skillPrimaryInputClasses } from './components/constants';
+import type { SkillSnapshot } from '@/types/skill';
+import { skillIconControlClasses } from './components/constants';
 import { SkillList } from './components/SkillList';
-import { SkillDetailPanel } from './components/SkillDetailPanel';
+import { SkillDetailContent } from './components/SkillDetailContent';
 import { SkillMarketplaceSheet } from './components/SkillMarketplaceSheet';
+import { SkillsToolbar } from './components/SkillsToolbar';
+import { useSkillFilters } from './hooks/useSkillFilters';
+import { type MissingFilter, type SkillSourceCategory, type StatusFilter } from './filters';
 
-type SkillSourceCategory = 'all' | 'builtin' | 'market' | 'other';
-type StatusFilter = 'all' | 'enabled' | 'disabled';
-type MissingFilter = 'all' | 'missing' | 'clean';
+const DEFAULT_QUERY = '';
+const DEFAULT_SOURCE_CATEGORY: SkillSourceCategory = 'all';
+const DEFAULT_STATUS_FILTER: StatusFilter = 'all';
+const DEFAULT_MISSING_FILTER: MissingFilter = 'all';
 
-function normalizePath(value?: string): string {
-  return (value || '').replace(/\\/g, '/').toLowerCase();
-}
-
-function includesAny(haystack: string, needles: string[]): boolean {
-  return needles.some((needle) => haystack.includes(needle));
-}
-
-function hasMissingRequirements(skill: SkillSnapshot): boolean {
-  const missing = skill.missing;
-  if (!missing) return false;
-  return (missing.bins?.length || 0) > 0
-    || (missing.anyBins?.length || 0) > 0
-    || (missing.env?.length || 0) > 0
-    || (missing.config?.length || 0) > 0
-    || (missing.os?.length || 0) > 0;
-}
-
-function classifySkillSource(skill: SkillSnapshot, sources: SkillSource[]): SkillSourceCategory {
-  const normalizedBaseDir = normalizePath(skill.baseDir);
-  const normalizedSource = normalizePath(skill.source);
-  const normalizedSourceId = normalizePath(skill.sourceId);
-  const normalizedSourceLabel = normalizePath(skill.sourceLabel);
-  const combined = [normalizedBaseDir, normalizedSource, normalizedSourceId, normalizedSourceLabel].filter(Boolean).join(' ');
-
-  if (skill.isBundled || includesAny(combined, ['node_modules/openclaw/skills', '/skills/builtin', '/skills/core'])) {
-    return 'builtin';
+function readEnumParam<T extends string>(value: string | null, allowed: readonly T[], fallback: T): T {
+  if (value && allowed.includes(value as T)) {
+    return value as T;
   }
-
-  const sourceByDir = sources.find((source) => {
-    const workdir = normalizePath(source.workdir);
-    return workdir.length > 0 && normalizedBaseDir.startsWith(workdir);
-  });
-  const matchedSourceId = sourceByDir?.id || skill.sourceId || (
-    includesAny(combined, ['deepaiworker', 'deepskillhub']) ? 'deepaiworker' : (
-      includesAny(combined, ['clawhub', 'openclaw-managed']) ? 'clawhub' : undefined
-    )
-  );
-
-  if (matchedSourceId === 'deepaiworker' || matchedSourceId === 'clawhub') return 'market';
-  return 'other';
+  return fallback;
 }
 
-function buildFilterButtonClass(active: boolean): string {
-  return active
-    ? 'border-[#111827] bg-[#111827] text-white hover:bg-[#1f2937] dark:border-white dark:bg-white dark:text-black dark:hover:bg-white/90'
-    : 'border-black/10 bg-transparent text-foreground/75 hover:bg-black/5 dark:border-white/10 dark:text-white/72 dark:hover:bg-white/5';
+function buildSkillsSearchParams(options: {
+  query: string;
+  sourceCategory: SkillSourceCategory;
+  statusFilter: StatusFilter;
+  missingFilter: MissingFilter;
+}) {
+  const params = new URLSearchParams();
+  const normalizedQuery = options.query.trim();
+  if (normalizedQuery) params.set('q', normalizedQuery);
+  if (options.sourceCategory !== DEFAULT_SOURCE_CATEGORY) params.set('source', options.sourceCategory);
+  if (options.statusFilter !== DEFAULT_STATUS_FILTER) params.set('status', options.statusFilter);
+  if (options.missingFilter !== DEFAULT_MISSING_FILTER) params.set('missing', options.missingFilter);
+  return params;
 }
 
 export function Skills() {
   const { t } = useTranslation('skills');
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     skills,
     loading,
     error,
     fetchSkills,
-    fetchSkillDetail,
-    skillDetailsById,
-    detailLoadingId,
     enableSkill,
     disableSkill,
     searchResults,
     searching,
+    searchingMore,
     searchError,
     searchSkills,
+    loadMoreSearchResults,
     installSkill,
     uninstallSkill,
     installing,
     sources,
     fetchSources,
+    marketInstalledSkills,
+    fetchMarketInstalledSkills,
   } = useSkillsStore();
   const gatewayStatus = useGatewayStore((state) => state.status);
-  const [query, setQuery] = useState('');
-  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
+  const query = searchParams.get('q') ?? DEFAULT_QUERY;
   const [installOpen, setInstallOpen] = useState(false);
   const [installQuery, setInstallQuery] = useState('');
-  const [installSourceId, setInstallSourceId] = useState('all');
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [sourceCategory, setSourceCategory] = useState<SkillSourceCategory>('all');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [missingFilter, setMissingFilter] = useState<MissingFilter>('all');
+  const [installSourceId, setInstallSourceId] = useState('');
+  const sourceCategory = readEnumParam(
+    searchParams.get('source'),
+    ['all', 'builtin', 'market', 'other'] as const,
+    DEFAULT_SOURCE_CATEGORY,
+  );
+  const statusFilter = readEnumParam(
+    searchParams.get('status'),
+    ['all', 'enabled', 'disabled'] as const,
+    DEFAULT_STATUS_FILTER,
+  );
+  const missingFilter = readEnumParam(
+    searchParams.get('missing'),
+    ['all', 'missing', 'clean'] as const,
+    DEFAULT_MISSING_FILTER,
+  );
+
+  const updateListState = useCallback((updates: Partial<{
+    query: string;
+    sourceCategory: SkillSourceCategory;
+    statusFilter: StatusFilter;
+    missingFilter: MissingFilter;
+  }>) => {
+    const nextParams = buildSkillsSearchParams({
+      query: updates.query ?? query,
+      sourceCategory: updates.sourceCategory ?? sourceCategory,
+      statusFilter: updates.statusFilter ?? statusFilter,
+      missingFilter: updates.missingFilter ?? missingFilter,
+    });
+    setSearchParams(nextParams, { replace: true });
+  }, [missingFilter, query, setSearchParams, sourceCategory, statusFilter]);
 
   useEffect(() => {
     if (gatewayStatus.state === 'running') void fetchSkills(true);
@@ -111,60 +116,53 @@ export function Skills() {
   }, [fetchSources]);
 
   useEffect(() => {
-    if (!selectedSkillId) return;
-    void fetchSkillDetail(selectedSkillId).catch((error) => toast.error(String(error)));
-  }, [fetchSkillDetail, selectedSkillId]);
+    if (!installOpen) return;
+    void fetchMarketInstalledSkills();
+  }, [fetchMarketInstalledSkills, installOpen]);
 
   useEffect(() => {
-    if (!installOpen) return;
+    if (sources.length === 0) return;
+    setInstallSourceId((current) => current || sources[0]?.id || '');
+  }, [sources]);
+
+  useEffect(() => {
+    if (!installOpen || !installSourceId) return;
+    const normalizedQuery = installQuery.trim();
+
+    if (!normalizedQuery) {
+      void searchSkills('', installSourceId);
+      return;
+    }
+
     const timer = setTimeout(() => {
-      void searchSkills(installQuery.trim(), installSourceId === 'all' ? undefined : installSourceId);
+      void searchSkills(normalizedQuery, installSourceId);
     }, 300);
     return () => clearTimeout(timer);
   }, [installOpen, installQuery, installSourceId, searchSkills]);
 
-  const sourceCounts = useMemo(() => {
-    return skills.reduce<Record<SkillSourceCategory, number>>((acc, skill) => {
-      const category = classifySkillSource(skill, sources);
-      acc.all += 1;
-      acc[category] += 1;
-      return acc;
-    }, {
-      all: 0,
-      builtin: 0,
-      market: 0,
-      other: 0,
-    });
-  }, [skills, sources]);
-
-  const filteredSkills = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    return skills
-      .filter((skill) => {
-        if (normalized.length > 0 && !`${skill.name} ${skill.description} ${skill.id}`.toLowerCase().includes(normalized)) {
-          return false;
-        }
-        if (sourceCategory !== 'all' && classifySkillSource(skill, sources) !== sourceCategory) {
-          return false;
-        }
-        if (statusFilter === 'enabled' && !skill.enabled) return false;
-        if (statusFilter === 'disabled' && skill.enabled) return false;
-        const hasMissing = hasMissingRequirements(skill);
-        if (missingFilter === 'missing' && !hasMissing) return false;
-        if (missingFilter === 'clean' && hasMissing) return false;
-        return true;
-      })
-      .sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.name.localeCompare(b.name));
-  }, [missingFilter, query, skills, sourceCategory, sources, statusFilter]);
-  const selectedDetail = selectedSkillId ? skillDetailsById[selectedSkillId] : undefined;
-  const detailLoading = Boolean(selectedSkillId) && detailLoadingId === selectedSkillId && !selectedDetail;
-  const activeFilterCount = Number(statusFilter !== 'all') + Number(missingFilter !== 'all');
+  const { sourceCounts, filteredSkills, activeFilterCount } = useSkillFilters({
+    skills,
+    sources,
+    query,
+    sourceCategory,
+    statusFilter,
+    missingFilter,
+  });
   const sourceOptions: Array<{ id: SkillSourceCategory; label: string; count: number }> = [
     { id: 'all', label: t('toolbar.sources.all'), count: sourceCounts.all },
     { id: 'builtin', label: t('toolbar.sources.builtin'), count: sourceCounts.builtin },
     { id: 'market', label: t('toolbar.sources.market'), count: sourceCounts.market },
     { id: 'other', label: t('toolbar.sources.other'), count: sourceCounts.other },
   ];
+  const listSearch = useMemo(() => {
+    const value = buildSkillsSearchParams({
+      query,
+      sourceCategory,
+      statusFilter,
+      missingFilter,
+    }).toString();
+    return value ? `?${value}` : '';
+  }, [missingFilter, query, sourceCategory, statusFilter]);
   const onToggle = useCallback(async (skill: SkillSnapshot, enabled: boolean) => {
     try {
       if (enabled) await enableSkill(skill.id);
@@ -174,13 +172,13 @@ export function Skills() {
     }
   }, [disableSkill, enableSkill]);
 
-  const onInstall = useCallback(async (slug: string, sourceId?: string) => {
+  const onInstall = useCallback(async (slug: string, version?: string, sourceId?: string, force = false) => {
     try {
-      await installSkill(slug, undefined, sourceId);
+      await installSkill(slug, version, sourceId, force);
       await enableSkill(slug);
       toast.success(t('toast.installed'));
     } catch (error) {
-      toast.error(String(error));
+      toast.error(error instanceof Error ? error.message : String(error));
     }
   }, [enableSkill, installSkill, t]);
 
@@ -189,7 +187,7 @@ export function Skills() {
       await uninstallSkill(slug, sourceId);
       toast.success(t('toast.uninstalled'));
     } catch (error) {
-      toast.error(String(error));
+      toast.error(error instanceof Error ? error.message : String(error));
     }
   }, [t, uninstallSkill]);
 
@@ -212,7 +210,12 @@ export function Skills() {
                 variant="ghost"
                 size="icon"
                 aria-label={t('actions.discover')}
-                onClick={() => setInstallOpen(true)}
+                onClick={() => {
+                  if (!installSourceId && sources.length > 0) {
+                    setInstallSourceId(sources[0]?.id || '');
+                  }
+                  setInstallOpen(true);
+                }}
                 className={cn(skillIconControlClasses, 'h-14 w-14 border-0 bg-transparent text-[#223047] hover:bg-transparent dark:text-white dark:hover:bg-transparent')}
               >
                 <Plus className="h-10 w-10" />
@@ -222,66 +225,23 @@ export function Skills() {
         />
 
         <section className="shrink-0 pb-6">
-          <div data-testid="skills-toolbar" className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px_auto] lg:items-center">
-            <div className="relative min-w-0">
-              <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                data-testid="skills-search-input"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className={cn(skillPrimaryInputClasses, 'border-[#d6deea] bg-white pl-10 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:border-white/12 dark:bg-transparent')}
-                placeholder={t('search')}
-              />
-            </div>
-
-            <div className="min-w-0">
-              <div className="grid min-w-0 grid-cols-4 items-center gap-x-0.5" data-testid="skills-source-tabs">
-                {sourceOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => setSourceCategory(option.id)}
-                    className={cn(
-                      'relative min-w-0 border-0 bg-transparent px-2 pb-3 pt-1 text-[14px] font-semibold leading-none shadow-none outline-none transition-colors',
-                      sourceCategory === option.id
-                        ? 'text-[#0f172a] dark:text-white'
-                        : 'text-[#415168] hover:text-[#243247] dark:text-white/58 dark:hover:text-white/82'
-                    )}
-                    data-testid={`skills-source-tab-${option.id}`}
-                  >
-                    <span className="flex items-center justify-center gap-1 whitespace-nowrap">
-                      <span className="truncate">{option.label}</span>
-                      <span
-                        className={cn(
-                          'text-[11px] font-semibold leading-none',
-                          sourceCategory === option.id ? 'text-[#0f172a]/56 dark:text-white/60' : 'text-[#607089] dark:text-white/44'
-                        )}
-                      >
-                        {option.count}
-                      </span>
-                    </span>
-                    <span
-                      className={cn(
-                        'absolute bottom-0 left-1/2 h-[2px] -translate-x-1/2 rounded-full transition-all',
-                        sourceCategory === option.id ? 'w-[64px] bg-[#0f172a] dark:bg-white' : 'w-0 bg-transparent'
-                      )}
-                    />
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setFilterOpen(true)}
-              className={cn(skillPrimaryControlClasses, 'justify-self-end shrink-0 border-black/10 bg-transparent text-foreground/80 hover:bg-black/5 dark:border-white/10 dark:text-white/80 dark:hover:bg-white/5')}
-              data-testid="skills-filter-button"
-            >
-              <SlidersHorizontal className="mr-2 h-4 w-4" />
-              {activeFilterCount > 0 ? t('toolbar.filtersWithCount', { count: activeFilterCount }) : t('toolbar.filters')}
-            </Button>
-          </div>
+          <SkillsToolbar
+            query={query}
+            onQueryChange={(value) => updateListState({ query: value })}
+            sourceOptions={sourceOptions}
+            sourceCategory={sourceCategory}
+            onSourceCategoryChange={(value) => updateListState({ sourceCategory: value })}
+            statusFilter={statusFilter}
+            onStatusFilterChange={(value) => updateListState({ statusFilter: value })}
+            missingFilter={missingFilter}
+            onMissingFilterChange={(value) => updateListState({ missingFilter: value })}
+            activeFilterCount={activeFilterCount}
+            onResetFilters={() => updateListState({
+              sourceCategory: DEFAULT_SOURCE_CATEGORY,
+              statusFilter: DEFAULT_STATUS_FILTER,
+              missingFilter: DEFAULT_MISSING_FILTER,
+            })}
+          />
         </section>
 
         <div className="flex-1 overflow-y-auto pr-2 pb-10 min-h-0 -mr-2">
@@ -294,70 +254,14 @@ export function Skills() {
           )}
 
           <section>
-            <SkillList skills={filteredSkills} onSelect={setSelectedSkillId} onToggle={(skill, enabled) => void onToggle(skill, enabled)} />
+            <SkillList
+              skills={filteredSkills}
+              onSelect={(skillId) => navigate(`/skills/${encodeURIComponent(skillId)}${listSearch}`)}
+              onToggle={(skill, enabled) => void onToggle(skill, enabled)}
+            />
           </section>
         </div>
       </div>
-
-      <SkillDetailPanel detail={selectedDetail} loading={detailLoading} onClose={() => setSelectedSkillId(null)} />
-
-      <Sheet open={filterOpen} onOpenChange={setFilterOpen}>
-        <SheetContent side="right" className="w-full border-l border-black/10 bg-background p-6 dark:border-white/10 dark:bg-card sm:max-w-[420px]" data-testid="skills-filter-sheet">
-          <SheetHeader>
-            <SheetTitle>{t('toolbar.filters')}</SheetTitle>
-            <SheetDescription>{t('toolbar.filtersSubtitle')}</SheetDescription>
-          </SheetHeader>
-
-          <div className="mt-6 space-y-6">
-            <div>
-              <h3 className="mb-3 text-[13px] font-semibold text-foreground/80">{t('toolbar.groups.status')}</h3>
-              <div className="flex flex-wrap gap-2">
-                {([
-                  ['all', t('toolbar.status.all')],
-                  ['enabled', t('toolbar.status.enabled')],
-                  ['disabled', t('toolbar.status.disabled')],
-                ] as Array<[StatusFilter, string]>).map(([value, label]) => (
-                  <Button key={value} type="button" variant="outline" onClick={() => setStatusFilter(value)} className={cn(skillCompactControlClasses, buildFilterButtonClass(statusFilter === value))}>
-                    {label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <h3 className="mb-3 text-[13px] font-semibold text-foreground/80">{t('toolbar.groups.dependencies')}</h3>
-              <div className="flex flex-wrap gap-2">
-                {([
-                  ['all', t('toolbar.missing.all')],
-                  ['missing', t('toolbar.missing.missing')],
-                  ['clean', t('toolbar.missing.clean')],
-                ] as Array<[MissingFilter, string]>).map(([value, label]) => (
-                  <Button key={value} type="button" variant="outline" onClick={() => setMissingFilter(value)} className={cn(skillCompactControlClasses, buildFilterButtonClass(missingFilter === value))}>
-                    {label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setStatusFilter('all');
-                  setMissingFilter('all');
-                }}
-                className={cn(skillPrimaryControlClasses, 'border-black/10 dark:border-white/10')}
-              >
-                {t('toolbar.resetFilters')}
-              </Button>
-              <Button type="button" onClick={() => setFilterOpen(false)} className={skillPrimaryControlClasses}>
-                {t('toolbar.applyFilters')}
-              </Button>
-            </div>
-          </div>
-        </SheetContent>
-      </Sheet>
 
       <SkillMarketplaceSheet
         open={installOpen}
@@ -369,12 +273,80 @@ export function Skills() {
         sources={sources}
         searchError={searchError}
         searching={searching}
+        searchingMore={searchingMore}
         searchResults={searchResults}
-        installedSkills={skills}
+        installedSkills={marketInstalledSkills}
         installing={installing}
-        onInstall={(slug, sourceId) => void onInstall(slug, sourceId)}
+        onLoadMore={() => void loadMoreSearchResults(installQuery.trim(), installSourceId)}
+        onInstall={(slug, version, sourceId, force) => void onInstall(slug, version, sourceId, force)}
         onUninstall={(slug, sourceId) => void onMarketplaceUninstall(slug, sourceId)}
       />
+    </div>
+  );
+}
+
+export function SkillDetailPage() {
+  const { t } = useTranslation('skills');
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { skillId } = useParams<{ skillId: string }>();
+  const { fetchSkills, fetchSkillDetail, skillDetailsById, detailLoadingId, loading, skills } = useSkillsStore();
+  const decodedSkillId = skillId ? decodeURIComponent(skillId) : '';
+  const detail = decodedSkillId ? skillDetailsById[decodedSkillId] : undefined;
+  const detailLoading = Boolean(decodedSkillId) && detailLoadingId === decodedSkillId && !detail;
+  const summary = skills.find((skill) => skill.id === decodedSkillId);
+  const backToListHref = `/skills${location.search}`;
+
+  useEffect(() => {
+    void fetchSkills();
+  }, [fetchSkills]);
+
+  useEffect(() => {
+    if (!decodedSkillId) return;
+    void fetchSkillDetail(decodedSkillId, true).catch((error) => toast.error(String(error)));
+  }, [decodedSkillId, fetchSkillDetail]);
+
+  if (loading || detailLoading) {
+    return <div data-testid="skills-detail-page" className="flex flex-col -m-6 dark:bg-background min-h-[calc(100vh-2.5rem)] items-center justify-center"><LoadingSpinner size="lg" /></div>;
+  }
+
+  if (!decodedSkillId || !detail) {
+    return (
+      <div data-testid="skills-detail-page" className="flex flex-col -m-6 dark:bg-background min-h-[calc(100vh-2.5rem)]">
+        <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col p-10 pt-16">
+          <PageHeader
+            title={summary?.name || t('detail.notFoundTitle')}
+            subtitle={t('detail.notFoundSubtitle')}
+            titleTestId="skills-detail-page-title"
+            actions={(
+              <Button variant="outline" onClick={() => navigate(backToListHref)} className="rounded-full">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                {t('detail.backToList')}
+              </Button>
+            )}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="skills-detail-page" className="flex flex-col -m-6 min-h-[calc(100vh-2.5rem)] bg-[#f6f7fb] dark:bg-background">
+      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col p-6 pt-4 pb-10">
+        <div className="mb-4 flex justify-end">
+          <Button
+            variant="ghost"
+            size="icon"
+            asChild
+            className="h-10 w-10 rounded-full text-slate-500 hover:bg-white hover:text-slate-700 dark:text-white/60 dark:hover:bg-white/[0.05] dark:hover:text-white"
+          >
+            <Link to={backToListHref} aria-label={t('detail.backToList')}>
+              <X className="h-5 w-5" />
+            </Link>
+          </Button>
+        </div>
+        <SkillDetailContent detail={detail} onDeleted={() => navigate(backToListHref)} />
+      </div>
     </div>
   );
 }

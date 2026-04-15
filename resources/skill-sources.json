@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "updatedAt": "1970-01-01T00:00:00.000Z",
+  "sources": [
+    {
+      "id": "deepaiworker",
+      "label": "DeepSkillHub",
+      "enabled": true,
+      "site": "http://124.71.100.127:4000",
+      "apiQueryEndpoint": "http://124.71.100.127:4010/api/query",
+      "registry": "http://124.71.100.127:4011",
+      "workdir": "~/.openclaw/skill-sources/deepaiworker"
+    },
+    {
+      "id": "clawhub",
+      "label": "ClawHub",
+      "enabled": true,
+      "site": "https://clawhub.ai",
+      "apiQueryEndpoint": "https://wry-manatee-359.convex.cloud/api/query",
+      "workdir": "~/.openclaw/skill-sources/clawhub"
+    }
+  ]
+}

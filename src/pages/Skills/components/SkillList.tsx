@@ -55,28 +55,28 @@ export function SkillList({ skills, onSelect, onToggle }: SkillListProps) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3">
       {skills.map((skill) => (
         <div
           key={skill.id}
           data-testid={`skills-list-item-${skill.id}`}
-          className="flex cursor-pointer items-center justify-between rounded-2xl bg-black/5 px-4 py-4 transition-colors hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10"
+          className="group flex cursor-pointer items-center justify-between rounded-2xl bg-white px-4 py-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[transform,box-shadow,background-color] hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)] dark:bg-white/[0.04] dark:shadow-none dark:hover:bg-white/[0.06]"
           onClick={() => onSelect(skill.id)}
         >
           <div className="flex min-w-0 flex-1 items-start gap-4 pr-4">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-black/5 bg-black/5 text-2xl dark:border-white/10 dark:bg-white/5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-50 text-2xl shadow-inner shadow-white/40 dark:bg-white/[0.05] dark:shadow-none">
               {skill.icon || '📦'}
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="truncate text-[16px] font-semibold">{skill.name}</h3>
+                <h3 className="truncate text-[16px] font-semibold text-foreground">{skill.name}</h3>
                 <StatusBadge skill={skill} />
               </div>
-              <p className="mt-1 line-clamp-2 text-[14px] text-muted-foreground">{skill.description}</p>
+              <p className="mt-1 line-clamp-2 text-[14px] text-foreground/68">{skill.description}</p>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-6" onClick={(event) => event.stopPropagation()}>
-            <span className="text-[13px] font-mono text-muted-foreground">v{skill.version || '1.0.0'}</span>
+            <span className="text-[13px] font-mono text-foreground/60">v{skill.version || '1.0.0'}</span>
             <Switch checked={skill.enabled} onCheckedChange={(checked) => onToggle(skill, checked)} />
           </div>
         </div>

@@ -57,28 +57,43 @@ export interface SkillMissingStatus {
   os?: string[];
 }
 
+export interface SkillIdentity {
+  id: string;
+  slug?: string;
+  name: string;
+  description: string;
+  icon?: string;
+  version?: string;
+  author?: string;
+  homepage?: string;
+  source?: string;
+  isCore?: boolean;
+  isBundled?: boolean;
+  baseDir?: string;
+  filePath?: string;
+}
+
+export interface SkillStatus {
+  enabled: boolean;
+  ready?: boolean;
+  missing?: SkillMissingStatus;
+}
+
+export interface SkillDefinition {
+  primaryEnv?: string;
+  requires?: SkillSpecRequires;
+  rawMarkdown?: string;
+  parseError?: string;
+}
+
 export interface SkillDetail {
-  skill: SkillSnapshot;
-  runtime: {
-    baseDir?: string;
-    filePath?: string;
-    homepage?: string;
-    author?: string;
-    missing?: SkillMissingStatus;
-  };
+  identity: SkillIdentity;
+  status: SkillStatus;
   config: {
     apiKey?: string;
     env?: Record<string, string>;
   };
-  spec: {
-    name?: string;
-    description?: string;
-    homepage?: string;
-    primaryEnv?: string;
-    requires?: SkillSpecRequires;
-    rawMarkdown?: string;
-    parseError?: string;
-  };
+  requirements: SkillDefinition;
 }
 
 
@@ -119,11 +134,25 @@ export interface MarketplaceSkill {
   sourceLabel?: string;
 }
 
+export interface MarketplaceSearchResponse {
+  results: MarketplaceSkill[];
+  nextCursor?: string;
+}
+
+export interface MarketplaceInstalledSkill {
+  slug: string;
+  version?: string;
+  baseDir?: string;
+  sourceId?: string;
+  sourceLabel?: string;
+}
+
 export interface SkillSource {
   id: string;
   label: string;
   enabled: boolean;
   site: string;
+  apiQueryEndpoint?: string;
   registry?: string;
   workdir: string;
 }

@@ -1,4 +1,4 @@
-export const skillCardClasses = 'rounded-2xl border border-black/10 bg-transparent shadow-none dark:border-white/10';
+export const skillCardClasses = 'rounded-2xl border border-black/8 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-white/10 dark:bg-white/[0.04] dark:shadow-none';
 export const skillInputClasses = 'rounded-xl border-black/10 bg-white text-foreground shadow-none dark:border-white/10 dark:bg-card';
 export const skillPrimaryControlClasses = 'h-10 rounded-full px-4 text-[13px] font-medium shadow-none';
 export const skillCompactControlClasses = 'h-9 rounded-full px-4 text-[13px] font-medium shadow-none';

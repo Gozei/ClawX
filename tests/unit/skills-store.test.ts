@@ -153,4 +153,52 @@ describe('skills store refresh behavior', () => {
     expect(useSkillsStore.getState().skills[0]?.enabled).toBe(false);
     expect(useSkillsStore.getState().skillDetailsById['gh-issues']?.skill.ready).toBe(false);
   });
+
+  it('updates skill enabled state immediately before the gateway call settles', async () => {
+    const { useSkillsStore } = await import('@/stores/skills');
+
+    let resolveRpc: (() => void) | undefined;
+    useSkillsStore.setState({
+      skills: [
+        { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues', enabled: false, ready: false },
+      ],
+    });
+
+    gatewayRpcMock.mockImplementation(() => new Promise<void>((resolve) => {
+      resolveRpc = resolve;
+    }));
+
+    const request = useSkillsStore.getState().enableSkill('gh-issues');
+
+    expect(useSkillsStore.getState().skills[0]?.enabled).toBe(true);
+    expect(useSkillsStore.getState().skills[0]?.ready).toBe(true);
+
+    resolveRpc?.();
+    hostApiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/skills') {
+        return [{ id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues', enabled: true, ready: true }];
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+
+    await request;
+    expect(gatewayRpcMock).toHaveBeenCalledWith('skills.update', { skillKey: 'gh-issues', enabled: true });
+  });
+
+  it('rolls back optimistic updates when the gateway call fails', async () => {
+    const { useSkillsStore } = await import('@/stores/skills');
+
+    useSkillsStore.setState({
+      skills: [
+        { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues', enabled: false, ready: false },
+      ],
+    });
+
+    gatewayRpcMock.mockRejectedValueOnce(new Error('gateway unavailable'));
+
+    await expect(useSkillsStore.getState().enableSkill('gh-issues')).rejects.toThrow('gateway unavailable');
+
+    expect(useSkillsStore.getState().skills[0]?.enabled).toBe(false);
+    expect(useSkillsStore.getState().skills[0]?.ready).toBe(false);
+  });
 });

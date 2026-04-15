@@ -14,6 +14,7 @@ export interface ClawHubSearchParams {
     limit?: number;
     sourceId?: string;
     allSources?: boolean;
+    cursor?: string;
 }
 
 export interface ClawHubInstallParams {
@@ -38,6 +39,30 @@ export interface ClawHubSkillResult {
     stars?: number;
     sourceId?: string;
     sourceLabel?: string;
+}
+
+export interface ClawHubSearchResponse {
+    results: ClawHubSkillResult[];
+    nextCursor?: string;
+}
+
+interface PublicSkillsApiItem {
+    skill?: {
+        slug?: string;
+        displayName?: string;
+        description?: string;
+        summary?: string;
+        stats?: {
+            downloads?: number;
+            stars?: number;
+        };
+    };
+    latestVersion?: {
+        version?: string;
+    };
+    owner?: {
+        handle?: string;
+    };
 }
 
 export interface ClawHubInstalledSkillResult {
@@ -159,6 +184,51 @@ export class ClawHubService {
         return env;
     }
 
+    private async fetchPublicSkills(source: SkillSourceConfig, limit: number, cursor?: string): Promise<ClawHubSearchResponse> {
+        if (!source.apiQueryEndpoint) {
+            return { results: [] };
+        }
+
+        const response = await fetch(source.apiQueryEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                path: 'skills:listPublicPageV4',
+                format: 'convex_encoded_json',
+                args: [{
+                    dir: 'desc',
+                    highlightedOnly: false,
+                    nonSuspiciousOnly: false,
+                    numItems: limit,
+                    sort: 'downloads',
+                    ...(cursor ? { cursor } : {}),
+                }],
+            }),
+        } as RequestInit);
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch public skills from ${source.id}: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json() as { status?: string; value?: { page?: PublicSkillsApiItem[]; nextCursor?: string } };
+        const items = Array.isArray(data?.value?.page) ? data.value.page : [];
+
+        return {
+            results: items.map((item) => ({
+                slug: item.skill?.slug || '',
+                name: item.skill?.displayName || item.skill?.slug || '',
+                version: item.latestVersion?.version || '1.0.0',
+                description: item.skill?.summary || item.skill?.description || '',
+                author: item.owner?.handle || 'community',
+                downloads: item.skill?.stats?.downloads,
+                stars: item.skill?.stats?.stars,
+                sourceId: source.id,
+                sourceLabel: source.label,
+            })).filter((item) => item.slug),
+            nextCursor: data?.value?.nextCursor,
+        };
+    }
+
     /**
      * Run a ClawHub CLI command
      */
@@ -237,20 +307,22 @@ export class ClawHubService {
     /**
      * Search for skills
      */
-    async search(params: ClawHubSearchParams): Promise<ClawHubSkillResult[]> {
+    async search(params: ClawHubSearchParams): Promise<ClawHubSearchResponse> {
         try {
             if (params.allSources || !params.sourceId) {
                 const sources = (await listSkillSources()).filter((source) => source.enabled);
                 const results = await Promise.allSettled(sources.map(async (source) => {
                     return await this.search({ ...params, sourceId: source.id, allSources: false });
                 }));
-                return results.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
+                return {
+                    results: results.flatMap((result) => result.status === 'fulfilled' ? result.value.results : []),
+                };
             }
 
             const source = await this.resolveSource(params.sourceId);
             // If query is empty, use 'explore' to show trending skills
             if (!params.query || params.query.trim() === '') {
-                return this.explore({ limit: params.limit, sourceId: source.id });
+                return this.explore({ limit: params.limit, sourceId: source.id, cursor: params.cursor });
             }
 
             const args = ['search', params.query];
@@ -260,7 +332,7 @@ export class ClawHubService {
 
             const output = await this.runCommand(args, { sourceId: source.id });
             if (!output || output.includes('No skills found')) {
-                return [];
+                return { results: [] };
             }
 
             const lines = output.split('\n').filter(l => l.trim());
@@ -310,7 +382,7 @@ export class ClawHubService {
                 return null;
             });
             
-            return results.filter((s): s is ClawHubSkillResult => s !== null);
+            return { results: results.filter((s): s is ClawHubSkillResult => s !== null) };
         } catch (error) {
             console.error('ClawHub search error:', error);
             throw error;
@@ -320,43 +392,16 @@ export class ClawHubService {
     /**
      * Explore trending skills
      */
-    async explore(params: { limit?: number; sourceId?: string } = {}): Promise<ClawHubSkillResult[]> {
+    async explore(params: { limit?: number; sourceId?: string; cursor?: string } = {}): Promise<ClawHubSearchResponse> {
         try {
             const source = await this.resolveSource(params.sourceId);
+            const limit = params.limit || 25;
 
-            // SPECIAL CASE: Use direct HTTP for official source if possible
-            if (source.id === 'clawhub') {
+            if (source.apiQueryEndpoint) {
                 try {
-                    const response = await fetch('https://wry-manatee-359.convex.cloud/api/query', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            path: 'skills:listPublicPageV4',
-                            args: [{
-                                dir: 'desc',
-                                nonSuspiciousOnly: true,
-                                numItems: params.limit || 24,
-                                sort: 'downloads'
-                            }]
-                        }),
-                        headers: { 'Content-Type': 'application/json' }
-                    } as any);
-
-                    if (response.ok) {
-                        const data: any = await response.json();
-                        if (data && data.status === 'success' && data.value && Array.isArray(data.value.page)) {
-                            return data.value.page.map((item: any) => ({
-                                slug: item.skill?.slug || '',
-                                name: item.skill?.displayName || item.skill?.slug || '',
-                                version: item.latestVersion?.version || '1.0.0',
-                                description: item.skill?.description || '',
-                                author: item.owner?.handle || 'community',
-                                sourceId: source.id,
-                                sourceLabel: source.label,
-                            }));
-                        }
-                    }
+                    return await this.fetchPublicSkills(source, limit, params.cursor);
                 } catch (httpError) {
-                    console.warn('Direct HTTP explore failed, falling back to CLI:', httpError);
+                    console.warn(`Direct HTTP explore failed for ${source.id}, falling back to CLI:`, httpError);
                 }
             }
 
@@ -366,24 +411,26 @@ export class ClawHubService {
             }
 
             const output = await this.runCommand(args, { sourceId: source.id });
-            if (!output) return [];
+            if (!output) return { results: [] };
 
             const jsonPart = output.substring(output.indexOf('{'));
             const data = JSON.parse(jsonPart);
 
             const items = Array.isArray(data.items) ? data.items : [];
-            return items.map((item: any) => ({
-                slug: item.slug,
-                name: item.name || item.slug,
-                version: item.version,
-                description: item.description,
-                author: item.author,
-                sourceId: source.id,
-                sourceLabel: source.label,
-            }));
+            return {
+                results: items.map((item: any) => ({
+                    slug: item.slug,
+                    name: item.name || item.slug,
+                    version: item.version,
+                    description: item.description,
+                    author: item.author,
+                    sourceId: source.id,
+                    sourceLabel: source.label,
+                })),
+            };
         } catch (error) {
             console.error('ClawHub explore error:', error);
-            return [];
+            return { results: [] };
         }
     }
 

@@ -2,7 +2,9 @@ import { create } from 'zustand';
 import { hostApiFetch } from '@/lib/host-api';
 import { AppError, normalizeAppError } from '@/lib/error-model';
 import { useGatewayStore } from './gateway';
-import type { MarketplaceSkill, SkillDetail, SkillSnapshot, SkillSource } from '../types/skill';
+import type { MarketplaceInstalledSkill, MarketplaceSearchResponse, MarketplaceSkill, SkillDetail, SkillSnapshot, SkillSource } from '../types/skill';
+
+const SKILL_TOGGLE_DEBOUNCE_MS = 500;
 
 function mapErrorCodeToSkillErrorKey(
   code: AppError['code'],
@@ -29,7 +31,10 @@ interface SkillsState {
   skills: SkillSnapshot[];
   skillDetailsById: Record<string, SkillDetail>;
   searchResults: MarketplaceSkill[];
+  marketInstalledSkills: MarketplaceInstalledSkill[];
   sources: SkillSource[];
+  searchNextCursor: string | null;
+  searchingMore: boolean;
   loading: boolean;
   refreshing: boolean;
   searching: boolean;
@@ -37,16 +42,20 @@ interface SkillsState {
   searchError: string | null;
   installing: Record<string, boolean>;
   deleting: Record<string, boolean>;
+  toggling: Record<string, boolean>;
+  toggleTargets: Record<string, boolean | undefined>;
   error: string | null;
   lastFetchedAt: number | null;
 
   fetchSkills: (force?: boolean) => Promise<void>;
   fetchSources: () => Promise<SkillSource[]>;
+  fetchMarketInstalledSkills: () => Promise<MarketplaceInstalledSkill[]>;
   fetchSkillDetail: (skillId: string, force?: boolean) => Promise<SkillDetail>;
   saveSkillConfig: (skillId: string, input: { apiKey?: string; env?: Record<string, string> }) => Promise<void>;
   deleteSkill: (skillId: string) => Promise<void>;
-  searchSkills: (query: string, sourceId?: string) => Promise<void>;
-  installSkill: (slug: string, version?: string, sourceId?: string) => Promise<void>;
+  searchSkills: (query: string, sourceId?: string, options?: { append?: boolean; cursor?: string }) => Promise<void>;
+  loadMoreSearchResults: (query: string, sourceId?: string) => Promise<void>;
+  installSkill: (slug: string, version?: string, sourceId?: string, force?: boolean) => Promise<void>;
   uninstallSkill: (slug: string, sourceId?: string) => Promise<void>;
   enableSkill: (skillId: string) => Promise<void>;
   disableSkill: (skillId: string) => Promise<void>;
@@ -57,7 +66,10 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   skills: [],
   skillDetailsById: {},
   searchResults: [],
+  marketInstalledSkills: [],
   sources: [],
+  searchNextCursor: null,
+  searchingMore: false,
   loading: false,
   refreshing: false,
   searching: false,
@@ -65,6 +77,8 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   searchError: null,
   installing: {},
   deleting: {},
+  toggling: {},
+  toggleTargets: {},
   error: null,
   lastFetchedAt: null,
 
@@ -77,6 +91,13 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     const sources = result.success ? (result.results || []) : [];
     set({ sources });
     return sources;
+  },
+
+  fetchMarketInstalledSkills: async (): Promise<MarketplaceInstalledSkill[]> => {
+    const result = await hostApiFetch<{ success: boolean; results?: MarketplaceInstalledSkill[]; error?: string }>('/api/clawhub/list');
+    const installed = result.success ? (result.results || []) : [];
+    set({ marketInstalledSkills: installed });
+    return installed;
   },
 
   fetchSkills: async (force = false) => {
@@ -179,15 +200,19 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     }
   },
 
-  searchSkills: async (query: string, sourceId?: string) => {
-    set({ searching: true, searchError: null });
+  searchSkills: async (query: string, sourceId?: string, options?: { append?: boolean; cursor?: string }) => {
+    const append = options?.append === true;
+    set(append ? { searchingMore: true, searchError: null } : { searching: true, searchError: null });
     try {
-      const result = await hostApiFetch<{ success: boolean; results?: MarketplaceSkill[]; error?: string }>('/api/clawhub/search', {
+      const result = await hostApiFetch<{ success: boolean; results?: MarketplaceSearchResponse['results']; nextCursor?: string; error?: string }>('/api/clawhub/search', {
         method: 'POST',
-        body: JSON.stringify({ query, ...(sourceId ? { sourceId } : { allSources: true }) }),
+        body: JSON.stringify({ query, ...(sourceId ? { sourceId } : { allSources: true }), ...(options?.cursor ? { cursor: options.cursor } : {}) }),
       });
       if (result.success) {
-        set({ searchResults: result.results || [] });
+        set((state) => ({
+          searchResults: append ? [...state.searchResults, ...(result.results || [])] : (result.results || []),
+          searchNextCursor: result.nextCursor || null,
+        }));
       } else {
         throw normalizeAppError(new Error(result.error || 'Search failed'), {
           module: 'skills',
@@ -198,26 +223,31 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       const appError = normalizeAppError(error, { module: 'skills', operation: 'search' });
       set({ searchError: mapErrorCodeToSkillErrorKey(appError.code, 'search') });
     } finally {
-      set({ searching: false });
+      set(append ? { searchingMore: false } : { searching: false });
     }
   },
 
-  installSkill: async (slug: string, version?: string, sourceId?: string) => {
+  loadMoreSearchResults: async (query: string, sourceId?: string) => {
+    const { searchNextCursor, searching, searchingMore } = get();
+    if (!searchNextCursor || searching || searchingMore) {
+      return;
+    }
+    await get().searchSkills(query, sourceId, { append: true, cursor: searchNextCursor });
+  },
+
+  installSkill: async (slug: string, version?: string, sourceId?: string, force = false) => {
     const installKey = sourceId ? `${sourceId}:${slug}` : slug;
     set((state) => ({ installing: { ...state.installing, [installKey]: true } }));
     try {
       const result = await hostApiFetch<{ success: boolean; error?: string }>('/api/clawhub/install', {
         method: 'POST',
-        body: JSON.stringify({ slug, version, sourceId }),
+        body: JSON.stringify({ slug, version, sourceId, force }),
       });
       if (!result.success) {
-        const appError = normalizeAppError(new Error(result.error || 'Install failed'), {
-          module: 'skills',
-          operation: 'install',
-        });
-        throw new Error(mapErrorCodeToSkillErrorKey(appError.code, 'install'));
+        throw new Error(result.error || 'Install failed');
       }
       await get().fetchSkills(true);
+      await get().fetchMarketInstalledSkills();
     } finally {
       set((state) => {
         const nextInstalling = { ...state.installing };
@@ -239,6 +269,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
         throw new Error(result.error || 'Uninstall failed');
       }
       await get().fetchSkills(true);
+      await get().fetchMarketInstalledSkills();
     } finally {
       set((state) => {
         const nextInstalling = { ...state.installing };
@@ -249,30 +280,192 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   },
 
   enableSkill: async (skillId: string) => {
-    await useGatewayStore.getState().rpc('skills.update', { skillKey: skillId, enabled: true });
-    await get().fetchSkills(true);
-    if (get().skillDetailsById[skillId]) {
-      const detail = await get().fetchSkillDetail(skillId, true);
+    const previousSkill = get().skills.find((skill) => skill.id === skillId);
+    const previousDetail = get().skillDetailsById[skillId];
+
+    const applyOptimistic = (enabled: boolean) => {
       set((state) => ({
-        skillDetailsById: {
-          ...state.skillDetailsById,
-          [skillId]: detail,
-        },
+        skills: state.skills.map((skill) => (
+          skill.id === skillId
+            ? {
+                ...skill,
+                enabled,
+                ready: enabled ? (skill.missing ? false : true) : false,
+              }
+            : skill
+        )),
+        skillDetailsById: state.skillDetailsById[skillId]
+          ? {
+              ...state.skillDetailsById,
+              [skillId]: {
+                ...state.skillDetailsById[skillId],
+                status: {
+                  ...state.skillDetailsById[skillId].status,
+                  enabled,
+                },
+              },
+            }
+          : state.skillDetailsById,
       }));
+    };
+
+    applyOptimistic(true);
+    set((state) => ({
+      toggleTargets: { ...state.toggleTargets, [skillId]: true },
+    }));
+
+    if (get().toggling[skillId]) return;
+
+    set((state) => ({ toggling: { ...state.toggling, [skillId]: true } }));
+    await new Promise((resolve) => setTimeout(resolve, SKILL_TOGGLE_DEBOUNCE_MS));
+
+    try {
+      while (true) {
+        const targetEnabled = get().toggleTargets[skillId];
+        if (targetEnabled === undefined) break;
+
+        await useGatewayStore.getState().rpc('skills.update', { skillKey: skillId, enabled: targetEnabled });
+        await get().fetchSkills(true);
+        if (previousDetail) {
+          const detail = await get().fetchSkillDetail(skillId, true);
+          set((state) => ({
+            skillDetailsById: {
+              ...state.skillDetailsById,
+              [skillId]: detail,
+            },
+          }));
+        }
+
+        if (get().toggleTargets[skillId] === targetEnabled) {
+          set((state) => {
+            const nextTargets = { ...state.toggleTargets };
+            delete nextTargets[skillId];
+            return { toggleTargets: nextTargets };
+          });
+          break;
+        }
+      }
+    } catch (error) {
+      if (previousSkill || previousDetail) {
+        set((state) => ({
+          skills: previousSkill
+            ? state.skills.map((skill) => (skill.id === skillId ? previousSkill : skill))
+            : state.skills,
+          skillDetailsById: previousDetail
+            ? {
+                ...state.skillDetailsById,
+                [skillId]: previousDetail,
+              }
+            : state.skillDetailsById,
+        }));
+      }
+      set((state) => {
+        const nextTargets = { ...state.toggleTargets };
+        delete nextTargets[skillId];
+        return { toggleTargets: nextTargets };
+      });
+      throw error;
+    } finally {
+      set((state) => {
+        const nextToggling = { ...state.toggling };
+        delete nextToggling[skillId];
+        return { toggling: nextToggling };
+      });
     }
   },
 
   disableSkill: async (skillId: string) => {
-    await useGatewayStore.getState().rpc('skills.update', { skillKey: skillId, enabled: false });
-    await get().fetchSkills(true);
-    if (get().skillDetailsById[skillId]) {
-      const detail = await get().fetchSkillDetail(skillId, true);
+    const previousSkill = get().skills.find((skill) => skill.id === skillId);
+    const previousDetail = get().skillDetailsById[skillId];
+
+    const applyOptimistic = (enabled: boolean) => {
       set((state) => ({
-        skillDetailsById: {
-          ...state.skillDetailsById,
-          [skillId]: detail,
-        },
+        skills: state.skills.map((skill) => (
+          skill.id === skillId
+            ? {
+                ...skill,
+                enabled,
+                ready: enabled ? (skill.missing ? false : true) : false,
+              }
+            : skill
+        )),
+        skillDetailsById: state.skillDetailsById[skillId]
+          ? {
+              ...state.skillDetailsById,
+              [skillId]: {
+                ...state.skillDetailsById[skillId],
+                status: {
+                  ...state.skillDetailsById[skillId].status,
+                  enabled,
+                },
+              },
+            }
+          : state.skillDetailsById,
       }));
+    };
+
+    applyOptimistic(false);
+    set((state) => ({
+      toggleTargets: { ...state.toggleTargets, [skillId]: false },
+    }));
+
+    if (get().toggling[skillId]) return;
+
+    set((state) => ({ toggling: { ...state.toggling, [skillId]: true } }));
+    await new Promise((resolve) => setTimeout(resolve, SKILL_TOGGLE_DEBOUNCE_MS));
+
+    try {
+      while (true) {
+        const targetEnabled = get().toggleTargets[skillId];
+        if (targetEnabled === undefined) break;
+
+        await useGatewayStore.getState().rpc('skills.update', { skillKey: skillId, enabled: targetEnabled });
+        await get().fetchSkills(true);
+        if (previousDetail) {
+          const detail = await get().fetchSkillDetail(skillId, true);
+          set((state) => ({
+            skillDetailsById: {
+              ...state.skillDetailsById,
+              [skillId]: detail,
+            },
+          }));
+        }
+
+        if (get().toggleTargets[skillId] === targetEnabled) {
+          set((state) => {
+            const nextTargets = { ...state.toggleTargets };
+            delete nextTargets[skillId];
+            return { toggleTargets: nextTargets };
+          });
+          break;
+        }
+      }
+    } catch (error) {
+      if (previousSkill || previousDetail) {
+        set((state) => ({
+          skills: previousSkill
+            ? state.skills.map((skill) => (skill.id === skillId ? previousSkill : skill))
+            : state.skills,
+          skillDetailsById: previousDetail
+            ? {
+                ...state.skillDetailsById,
+                [skillId]: previousDetail,
+              }
+            : state.skillDetailsById,
+        }));
+      }
+      set((state) => {
+        const nextTargets = { ...state.toggleTargets };
+        delete nextTargets[skillId];
+        return { toggleTargets: nextTargets };
+      });
+      throw error;
+    } finally {
+      set((state) => {
+        const nextToggling = { ...state.toggling };
+        delete nextToggling[skillId];
+        return { toggling: nextToggling };
+      });
     }
   },
 

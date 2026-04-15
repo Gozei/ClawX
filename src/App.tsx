@@ -21,6 +21,7 @@ const Models = lazy(() => import('./pages/Models').then((module) => ({ default: 
 const Agents = lazy(() => import('./pages/Agents').then((module) => ({ default: module.Agents })));
 const Channels = lazy(() => import('./pages/Channels').then((module) => ({ default: module.Channels })));
 const Skills = lazy(() => import('./pages/Skills').then((module) => ({ default: module.Skills })));
+const SkillDetailPage = lazy(() => import('./pages/Skills').then((module) => ({ default: module.SkillDetailPage })));
 const Cron = lazy(() => import('./pages/Cron').then((module) => ({ default: module.Cron })));
 const Settings = lazy(() => import('./pages/Settings').then((module) => ({ default: module.Settings })));
 const Setup = lazy(() => import('./pages/Setup').then((module) => ({ default: module.Setup })));
@@ -207,6 +208,7 @@ function App() {
               <Route path="/agents" element={<Agents />} />
               <Route path="/channels" element={<Channels />} />
               <Route path="/skills" element={<Skills />} />
+              <Route path="/skills/:skillId" element={<SkillDetailPage />} />
               <Route path="/cron" element={<Cron />} />
               <Route path="/settings/*" element={<Settings />} />
             </Route>

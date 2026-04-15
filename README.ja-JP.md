@@ -116,7 +116,7 @@ AIタスクを自動的に実行するようスケジュール設定できます
 事前構築されたスキルでAIエージェントを拡張できます。統合スキルパネルからスキルの閲覧、インストール、管理が可能です。パッケージマネージャーは不要です。
 Deep AI Worker はドキュメント処理スキル（`pdf`、`xlsx`、`docx`、`pptx`）もフル内容で同梱し、起動時に管理スキルディレクトリ（既定 `~/.openclaw/skills`）へ自動配備し、初回インストール時に既定で有効化します。追加の同梱スキル（`find-skills`、`self-improving-agent`、`tavily-search`、`brave-web-search`）も既定で有効化されますが、必要な API キーが未設定の場合は OpenClaw が実行時に設定エラーを表示します。  
 Skills ページでは OpenClaw の複数ソース（管理ディレクトリ、workspace、追加スキルディレクトリ）から検出されたスキルを表示でき、各スキルの実際のパスを確認して実フォルダを直接開けます。
-Marketplace のソースは内部の `skill-sources.json` で管理されます。ClawX は既定で 2 つのソース（`ClawHub` と現在の環境変数から取り込む `deepaiworker` ソース）を初期化し、各ソースに `~/.openclaw/skill-sources/<source-id>` 配下の独立した ClawHub workdir を割り当てます。Skills パネルでは全ソース検索と単一ソース検索の両方を利用できます。
+Marketplace のソースは内部の `skill-sources.json` で管理されます。ClawX は既定で 2 つのソース（`ClawHub` と現在の環境変数から取り込む `DeepSkillHub` ソース、id は `deepaiworker`）を初期化し、各ソースに `~/.openclaw/skill-sources/<source-id>` 配下の独立した ClawHub workdir を割り当てます。Skills パネルでは全ソース検索と単一ソース検索の両方を利用できます。
 
 主な検索スキルで必要な環境変数:
 - `BRAVE_SEARCH_API_KEY`: `brave-web-search` 用

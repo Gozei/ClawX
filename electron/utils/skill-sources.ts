@@ -3,12 +3,14 @@ import { homedir } from 'os';
 import path from 'path';
 import { withConfigLock } from './config-mutex';
 import { getManagedConfigPath, readOpenClawRuntimeConfig, writeOpenClawRuntimeConfig } from './openclaw-config-assembler';
+import { getResourcesDir } from './paths';
 
 export interface SkillSourceConfig {
   id: string;
   label: string;
   enabled: boolean;
   site: string;
+  apiQueryEndpoint?: string;
   registry?: string;
   workdir: string;
 }
@@ -32,6 +34,10 @@ function getSourceConfigPath(): string {
   return getManagedConfigPath(SKILL_SOURCE_CONFIG_NAME);
 }
 
+function getBundledSourceConfigPath(): string {
+  return path.join(getResourcesDir(), SKILL_SOURCE_CONFIG_NAME);
+}
+
 function getSourceWorkdir(id: string): string {
   return path.join(homedir(), '.openclaw', 'skill-sources', id);
 }
@@ -42,30 +48,29 @@ function normalizeUrl(url: string | undefined): string | undefined {
 }
 
 
-export function buildDefaultSkillSources(): SkillSourceConfig[] {
-  return [
-    {
-      id: 'deepaiworker',
-      label: 'deepaiworker',
-      enabled: true,
-      site: 'http://124.71.100.127:4000',
-      registry: 'http://124.71.100.127:4011',
-      workdir: getSourceWorkdir('deepaiworker'),
-    },
-    {
-      id: 'clawhub',
-      label: 'ClawHub',
-      enabled: true,
-      site: 'https://clawhub.ai',
-      workdir: getSourceWorkdir('clawhub'),
-    },
-  ];
+export async function buildDefaultSkillSources(): Promise<SkillSourceConfig[]> {
+  try {
+    const raw = await readFile(getBundledSourceConfigPath(), 'utf8');
+    const parsed = JSON.parse(raw) as Partial<SkillSourcesState>;
+    if (Array.isArray(parsed.sources)) {
+      const normalized = parsed.sources
+        .map((source) => normalizeSource(source as SkillSourceConfig))
+        .filter((source): source is SkillSourceConfig => Boolean(source));
+      if (normalized.length > 0) {
+        return normalized;
+      }
+    }
+  } catch {
+    // Fall through and use an empty default set.
+  }
+  return [];
 }
 
 function normalizeSource(input: SkillSourceConfig): SkillSourceConfig | null {
   const id = input.id.trim();
   const label = input.label.trim();
   const site = normalizeUrl(input.site);
+  const apiQueryEndpoint = normalizeUrl(input.apiQueryEndpoint);
   const registry = normalizeUrl(input.registry);
   if (!id || !label || !site) return null;
   return {
@@ -73,6 +78,7 @@ function normalizeSource(input: SkillSourceConfig): SkillSourceConfig | null {
     label,
     enabled: input.enabled !== false,
     site,
+    ...(apiQueryEndpoint ? { apiQueryEndpoint } : {}),
     ...(registry ? { registry } : {}),
     workdir: expandHome(input.workdir.trim() || getSourceWorkdir(id)),
   };
@@ -80,7 +86,7 @@ function normalizeSource(input: SkillSourceConfig): SkillSourceConfig | null {
 
 export async function readSkillSourcesState(): Promise<SkillSourcesState> {
   const filePath = getSourceConfigPath();
-  const defaults = buildDefaultSkillSources();
+  const defaults = await buildDefaultSkillSources();
   let sources: SkillSourceConfig[] = [];
   let updatedAt = new Date(0).toISOString();
 
@@ -106,7 +112,9 @@ export async function readSkillSourcesState(): Promise<SkillSourcesState> {
       // If exists on disk, keep user's 'enabled' and 'workdir', but force code-defined site/registry
       return {
         ...existing,
+        label: def.label,
         site: def.site,
+        apiQueryEndpoint: def.apiQueryEndpoint,
         registry: def.registry,
       };
     }

@@ -3,6 +3,7 @@ import { access, readFile, rm } from 'fs/promises';
 import { constants } from 'fs';
 import type { GatewayManager } from '../gateway/manager';
 import { getAllSkillConfigs, updateSkillConfig } from './skill-config';
+import { inferSkillSourceFromBaseDir, listSkillSources } from './skill-sources';
 
 type GatewaySkillStatus = {
   skillKey: string;
@@ -61,15 +62,29 @@ export type SkillListItem = {
   };
   ready?: boolean;
   homepage?: string;
+  sourceId?: string;
+  sourceLabel?: string;
 };
 
 export type SkillDetail = {
-  skill: SkillListItem;
-  runtime: {
+  identity: {
+    id: string;
+    slug?: string;
+    name: string;
+    description: string;
+    icon?: string;
+    version?: string;
+    author?: string;
+    homepage?: string;
+    source?: string;
+    isCore?: boolean;
+    isBundled?: boolean;
     baseDir?: string;
     filePath?: string;
-    homepage?: string;
-    author?: string;
+  };
+  status: {
+    enabled: boolean;
+    ready?: boolean;
     missing?: {
       bins?: string[];
       anyBins?: string[];
@@ -79,10 +94,7 @@ export type SkillDetail = {
     };
   };
   config: SkillConfigEntry;
-  spec: {
-    name?: string;
-    description?: string;
-    homepage?: string;
+  requirements: {
     primaryEnv?: string;
     requires?: {
       env?: string[];
@@ -95,7 +107,15 @@ export type SkillDetail = {
   };
 };
 
-type ParsedSkillSpec = SkillDetail['spec'];
+type ParsedSkillSpec = {
+  name?: string;
+  description?: string;
+  homepage?: string;
+  primaryEnv?: string;
+  requires?: SkillDetail['requirements']['requires'];
+  rawMarkdown?: string;
+  parseError?: string;
+};
 
 function mapSkillStatus(skill: GatewaySkillStatus): SkillListItem {
   return {
@@ -235,7 +255,16 @@ async function findSkillById(gatewayManager: GatewayManager, skillId: string): P
 
 export async function listSkills(gatewayManager: GatewayManager): Promise<SkillListItem[]> {
   const skills = await getRuntimeSkills(gatewayManager);
-  return skills.map(mapSkillStatus);
+  const sources = await listSkillSources();
+  return skills.map((skill) => {
+    const mapped = mapSkillStatus(skill);
+    const inferredSource = inferSkillSourceFromBaseDir(skill.baseDir, sources);
+    return {
+      ...mapped,
+      sourceId: inferredSource?.id,
+      sourceLabel: inferredSource?.label,
+    };
+  });
 }
 
 export async function getSkillDetail(gatewayManager: GatewayManager, skillId: string): Promise<SkillDetail | null> {
@@ -247,16 +276,33 @@ export async function getSkillDetail(gatewayManager: GatewayManager, skillId: st
   const spec = await readSkillSpec(skill.filePath, skill.baseDir);
 
   return {
-    skill: mapSkillStatus(skill),
-    runtime: {
+    identity: {
+      id: skill.skillKey,
+      slug: skill.slug || skill.skillKey,
+      name: skill.name || spec.name || skill.skillKey,
+      description: skill.description || spec.description || '',
+      icon: skill.emoji || '📦',
+      version: skill.version || '1.0.0',
+      author: skill.author,
+      homepage: skill.homepage || spec.homepage,
+      source: skill.source,
+      isCore: skill.bundled && skill.always,
+      isBundled: skill.bundled,
       baseDir: skill.baseDir,
       filePath: skill.filePath,
-      homepage: skill.homepage,
-      author: skill.author,
+    },
+    status: {
+      enabled: !skill.disabled,
+      ready: skill.eligible,
       missing: skill.missing,
     },
     config,
-    spec,
+    requirements: {
+      primaryEnv: spec.primaryEnv,
+      requires: spec.requires,
+      rawMarkdown: spec.rawMarkdown,
+      parseError: spec.parseError,
+    },
   };
 }
 
