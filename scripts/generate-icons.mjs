@@ -1,5 +1,6 @@
 #!/usr/bin/env zx
 
+import './setup-zx-shell.mjs';
 import 'zx/globals';
 import sharp from 'sharp';
 import png2icons from 'png2icons';

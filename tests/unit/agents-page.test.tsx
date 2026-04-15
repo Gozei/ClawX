@@ -95,6 +95,7 @@ vi.mock('react-i18next', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-i18next')>();
   return {
     ...actual,
+    initReactI18next: actual.initReactI18next ?? { type: '3rdParty', init: () => {} },
     useTranslation: () => ({
       t: (key: string) => key,
       i18n: { language: 'zh-CN' },

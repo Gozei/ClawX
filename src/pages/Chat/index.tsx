@@ -934,10 +934,8 @@ function WelcomeScreen({
 
   useEffect(() => {
     if (!gatewayHint || !isStarting) {
-      setElapsedMs(0);
       return undefined;
     }
-    setElapsedMs(0);
     const timer = setInterval(() => {
       setElapsedMs((current) => current + 1000);
     }, 1000);

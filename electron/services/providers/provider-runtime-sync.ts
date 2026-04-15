@@ -15,6 +15,7 @@ import {
   updateAgentModelProvider,
   updateSingleAgentModelProvider,
 } from '../../utils/openclaw-auth';
+import { getOpenClawProviderKeyForType } from '../../utils/provider-keys';
 import { logger } from '../../utils/logger';
 import { listAgentsSnapshot } from '../../utils/agent-config';
 
@@ -111,25 +112,7 @@ function shouldUseExplicitDefaultOverride(config: ProviderConfig, runtimeProvide
   return Boolean(config.baseUrl || config.apiProtocol || runtimeProviderKey !== config.type);
 }
 
-export function getOpenClawProviderKey(type: string, providerId: string): string {
-  if (isUnregisteredProviderType(type)) {
-    // If the providerId is already a runtime key (e.g. re-seeded from openclaw.json
-    // as "custom-XXXXXXXX"), return it directly to avoid double-hashing.
-    const prefix = `${type}-`;
-    if (providerId.startsWith(prefix)) {
-      const tail = providerId.slice(prefix.length);
-      if (tail.length === 8 && !tail.includes('-')) {
-        return providerId;
-      }
-    }
-    const suffix = providerId.replace(/-/g, '').slice(0, 8);
-    return `${type}-${suffix}`;
-  }
-  if (type === 'minimax-portal-cn') {
-    return 'minimax-portal';
-  }
-  return type;
-}
+export const getOpenClawProviderKey = getOpenClawProviderKeyForType;
 
 async function resolveRuntimeProviderKey(config: ProviderConfig): Promise<string> {
   const account = await getProviderAccount(config.id);
@@ -221,6 +204,17 @@ export async function getProviderFallbackModelRefs(config: ProviderConfig): Prom
 
 type GatewayRefreshMode = 'reload' | 'restart';
 
+const PROVIDER_REFRESH_DEBOUNCE_MS = 2500;
+let pendingGatewayRefreshTimer: NodeJS.Timeout | null = null;
+let pendingGatewayRefreshRequest:
+  | {
+    message: string;
+    mode: GatewayRefreshMode;
+    onlyIfRunning: boolean;
+    gatewayManager?: GatewayManager;
+  }
+  | null = null;
+
 function scheduleGatewayRefresh(
   gatewayManager: GatewayManager | undefined,
   message: string,
@@ -234,12 +228,52 @@ function scheduleGatewayRefresh(
     return;
   }
 
-  logger.info(message);
-  if (options?.mode === 'restart') {
-    gatewayManager.debouncedRestart(options?.delayMs);
-    return;
+  const requestedMode = options?.mode === 'restart' ? 'restart' : 'reload';
+  const requestedOnlyIfRunning = options?.onlyIfRunning === true;
+
+  if (!pendingGatewayRefreshRequest) {
+    pendingGatewayRefreshRequest = {
+      message,
+      mode: requestedMode,
+      onlyIfRunning: requestedOnlyIfRunning,
+      gatewayManager,
+    };
+  } else {
+    pendingGatewayRefreshRequest = {
+      message,
+      mode: pendingGatewayRefreshRequest.mode === 'restart' || requestedMode === 'restart' ? 'restart' : 'reload',
+      onlyIfRunning: pendingGatewayRefreshRequest.onlyIfRunning && requestedOnlyIfRunning,
+      gatewayManager: pendingGatewayRefreshRequest.gatewayManager || gatewayManager,
+    };
   }
-  gatewayManager.debouncedReload(options?.delayMs);
+
+  if (pendingGatewayRefreshTimer) {
+    clearTimeout(pendingGatewayRefreshTimer);
+  }
+
+  const effectiveDelayMs = Math.max(options?.delayMs ?? 0, PROVIDER_REFRESH_DEBOUNCE_MS);
+  pendingGatewayRefreshTimer = setTimeout(() => {
+    const request = pendingGatewayRefreshRequest;
+    pendingGatewayRefreshRequest = null;
+    pendingGatewayRefreshTimer = null;
+
+    if (!request?.gatewayManager) {
+      return;
+    }
+
+    if (request.onlyIfRunning && request.gatewayManager.getStatus().state === 'stopped') {
+      return;
+    }
+
+    logger.info(
+      `[provider-runtime] Applying batched gateway ${request.mode}: ${request.message}`,
+    );
+    if (request.mode === 'restart') {
+      request.gatewayManager.debouncedRestart();
+      return;
+    }
+    request.gatewayManager.debouncedReload();
+  }, effectiveDelayMs);
 }
 
 export async function syncProviderApiKeyToRuntime(
@@ -360,13 +394,7 @@ async function syncRuntimeProviderConfig(
     apiKeyEnv: context.meta?.apiKeyEnv,
     headers: config.headers ?? context.meta?.headers,
   };
-  if (configuredModelIds.length === 0) {
-    await syncProviderConfigToOpenClaw(context.runtimeProviderKey, undefined, override);
-    return;
-  }
-  for (const modelId of configuredModelIds) {
-    await syncProviderConfigToOpenClaw(context.runtimeProviderKey, modelId, override);
-  }
+  await syncProviderConfigToOpenClaw(context.runtimeProviderKey, configuredModelIds, override);
 }
 
 async function syncCustomProviderAgentModel(

@@ -228,15 +228,13 @@ function applyModelChangeToAccount(account: ProviderAccount, draft: DraftState):
   const nextModelId = draft.modelId.trim();
   const remaining = currentModelIds.filter((modelId) => modelId !== originalModelId);
 
-  let nextModelIds: string[] = [];
-  if (draft.wasDefault) {
-    nextModelIds = [nextModelId, ...remaining];
-  } else {
-    const head = currentModelIds[0] && currentModelIds[0] !== originalModelId ? [currentModelIds[0]] : [];
-    const tail = remaining.filter((modelId) => modelId !== currentModelIds[0]);
-    nextModelIds = [...head, nextModelId, ...tail];
-  }
-  nextModelIds = Array.from(new Set(nextModelIds.filter(Boolean)));
+  const nextModelIds = Array.from(new Set((draft.wasDefault
+    ? [nextModelId, ...remaining]
+    : [
+        ...(currentModelIds[0] && currentModelIds[0] !== originalModelId ? [currentModelIds[0]] : []),
+        nextModelId,
+        ...remaining.filter((modelId) => modelId !== currentModelIds[0]),
+      ]).filter(Boolean)));
 
   const nextMetadata = { ...(account.metadata ?? {}) };
   const nextCustomModels = nextModelIds.slice(1);
@@ -303,14 +301,16 @@ export function ProviderConfigPanel() {
   const [saving, setSaving] = useState(false);
   const [testingRowKey, setTestingRowKey] = useState<string | null>(null);
   const [resultsByRow, setResultsByRow] = useState<Record<string, TestStatus>>({});
+  const [deletingRowKeys, setDeletingRowKeys] = useState<string[]>([]);
 
   useEffect(() => {
     void refreshProviderSnapshot();
   }, [refreshProviderSnapshot]);
 
   const rows = useMemo(
-    () => buildModelRows(accounts, statuses, vendors, defaultAccountId),
-    [accounts, statuses, vendors, defaultAccountId],
+    () => buildModelRows(accounts, statuses, vendors, defaultAccountId)
+      .filter((row) => !deletingRowKeys.includes(row.key)),
+    [accounts, statuses, vendors, defaultAccountId, deletingRowKeys],
   );
 
   const vendorOptions = useMemo(
@@ -381,6 +381,7 @@ export function ProviderConfigPanel() {
   };
 
   const handleDeleteRow = async (row: ModelRow) => {
+    setDeletingRowKeys((current) => current.includes(row.key) ? current : [...current, row.key]);
     try {
       const accountUpdate = removeModelFromAccount(row.account, row.modelId);
       if (accountUpdate) {
@@ -388,8 +389,10 @@ export function ProviderConfigPanel() {
       } else {
         await removeAccount(row.account.id);
       }
+      await refreshProviderSnapshot();
       toast.success('已删除配置');
     } catch (error) {
+      setDeletingRowKeys((current) => current.filter((key) => key !== row.key));
       toast.error(`删除失败: ${error}`);
     }
   };
