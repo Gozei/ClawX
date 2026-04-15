@@ -1,11 +1,13 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import {
+  applyPreparedAgentModelUpdate,
   assignChannelToAgent,
   clearChannelBinding,
   createAgent,
   deleteAgentConfig,
   type AgentWorkflowNode,
   listAgentsSnapshot,
+  prepareAgentModelUpdate,
   removeAgentWorkspaceDirectory,
   resolveAccountIdForAgent,
   updateAgentModel,
@@ -23,6 +25,39 @@ function scheduleGatewayReload(ctx: HostApiContext, reason: string): void {
     return;
   }
   void reason;
+}
+
+type GatewayConfigSnapshot = {
+  hash?: string;
+  config?: Record<string, unknown>;
+};
+
+async function tryHotPatchAgentModel(
+  ctx: HostApiContext,
+  agentId: string,
+  modelRef: string | null,
+  options: { setAsDefault?: boolean } = {},
+): Promise<Awaited<ReturnType<typeof prepareAgentModelUpdate>> | null> {
+  if (ctx.gatewayManager.getStatus().state !== 'running') {
+    return null;
+  }
+
+  const snapshot = await ctx.gatewayManager.rpc<GatewayConfigSnapshot>('config.get', {}, 15000);
+  if (!snapshot?.hash || !snapshot.config || typeof snapshot.config !== 'object' || Array.isArray(snapshot.config)) {
+    return null;
+  }
+
+  const prepared = await prepareAgentModelUpdate(snapshot.config, agentId, modelRef, options);
+  await ctx.gatewayManager.rpc(
+    'config.patch',
+    {
+      baseHash: snapshot.hash,
+      raw: JSON.stringify({ agents: prepared.config.agents ?? {} }),
+    },
+    15000,
+  );
+  await applyPreparedAgentModelUpdate(prepared);
+  return prepared;
 }
 
 import { exec } from 'child_process';
@@ -170,9 +205,26 @@ export async function handleAgentRoutes(
 
     if (parts.length === 2 && parts[1] === 'model') {
       try {
-        const body = await parseJsonBody<{ modelRef?: string | null }>(req);
+        const body = await parseJsonBody<{ modelRef?: string | null; setAsDefault?: boolean }>(req);
         const agentId = decodeURIComponent(parts[0]);
-        const snapshot = await updateAgentModel(agentId, body.modelRef ?? null);
+        const updateOptions = {
+          setAsDefault: body.setAsDefault === true,
+        };
+        let snapshot;
+        let hotPatched = false;
+        try {
+          const prepared = await tryHotPatchAgentModel(ctx, agentId, body.modelRef ?? null, updateOptions);
+          if (prepared) {
+            snapshot = prepared.snapshot;
+            hotPatched = true;
+          }
+        } catch (hotPatchError) {
+          console.warn('[agents] Gateway config.patch for agent model failed, falling back to local update:', hotPatchError);
+        }
+
+        if (!snapshot) {
+          snapshot = await updateAgentModel(agentId, body.modelRef ?? null, updateOptions);
+        }
         try {
           await syncAllProviderAuthToRuntime();
           // Ensure this agent's runtime model registry reflects the new model override.
@@ -180,7 +232,9 @@ export async function handleAgentRoutes(
         } catch (syncError) {
           console.warn('[agents] Failed to sync runtime after updating agent model:', syncError);
         }
-        scheduleGatewayReload(ctx, 'update-agent-model');
+        if (!hotPatched) {
+          scheduleGatewayReload(ctx, 'update-agent-model');
+        }
         sendJson(res, 200, { success: true, ...snapshot });
       } catch (error) {
         sendJson(res, 500, { success: false, error: String(error) });

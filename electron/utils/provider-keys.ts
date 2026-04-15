@@ -16,6 +16,12 @@ const PROVIDER_KEY_ALIASES: Record<string, string> = {
 
 export function getOpenClawProviderKeyForType(type: string, providerId: string): string {
   if (MULTI_INSTANCE_PROVIDER_TYPES.has(type)) {
+    // Re-seeded OpenClaw runtime providers may already use a stable runtime key
+    // like "zai" or "modelstudio" instead of a generated "custom-xxxxxxxx".
+    // Preserve those ids so UI edits/deletes round-trip to the same runtime entry.
+    if (providerId && !providerId.startsWith(`${type}-`) && !providerId.includes('-')) {
+      return providerId;
+    }
     // If the providerId is already a runtime key (e.g. re-seeded from openclaw.json
     // as "custom-XXXXXXXX"), return it directly to avoid double-hashing.
     const prefix = `${type}-`;

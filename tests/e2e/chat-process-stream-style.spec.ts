@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { closeElectronApp, expect, getStableWindow, test } from './fixtures/electron';
+import { closeElectronApp, expect, getStableWindow, openSettingsHub, test } from './fixtures/electron';
 
 const SESSION_KEY = 'agent:main:process-stream-style-test';
 const SESSION_FILE = 'process-stream-style-test.jsonl';
@@ -17,7 +17,7 @@ const seededMessages = [
     id: 'assistant-1',
     role: 'assistant',
     content: [
-      { type: 'thinking', thinking: 'Check the browser before replying.' },
+      { type: 'thinking', thinking: '### Browser checklist\n\n1. **Check the browser** before replying.' },
       { type: 'tool_use', id: 'browser-1', name: 'browser', input: { action: 'start', enabled: true } },
     ],
     timestamp: Math.floor(Date.now() / 1000) - 4,
@@ -81,10 +81,8 @@ test.describe.skip('Chat process stream style', () => {
 
       await expect(page.getByText('The browser is ready now.')).toBeVisible({ timeout: 60_000 });
 
-      await page.getByTestId('sidebar-nav-settings').click();
-      await expect(page.getByTestId('settings-page')).toBeVisible();
+      await openSettingsHub(page);
       await page.getByTestId('settings-assistant-message-style-stream').click();
-      await page.goBack();
 
       await expect(page.getByTestId('chat-process-toggle')).toBeVisible({ timeout: 60_000 });
       await page.getByTestId('chat-process-toggle').click();
@@ -92,7 +90,10 @@ test.describe.skip('Chat process stream style', () => {
       const processContent = page.getByTestId('chat-process-content');
       await expect(processContent).toBeVisible();
       await expect(processContent.getByTestId('chat-process-event-row')).toHaveCount(1);
+      await expect(processContent.getByText('Browser checklist')).toBeVisible();
       await expect(processContent.getByText('Check the browser before replying.')).toBeVisible();
+      await expect(processContent.getByText('### Browser checklist')).toHaveCount(0);
+      await expect(processContent.getByText('**Check the browser** before replying.')).toHaveCount(0);
       await expect(processContent.getByText('Browser opened')).toBeVisible();
       await expect(processContent.getByText(/"action": "start"/)).toBeVisible();
       await expect(processContent.getByText('Thinking')).toHaveCount(0);

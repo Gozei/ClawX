@@ -4,14 +4,22 @@
  * with markdown, thinking sections, images, and tool cards.
  */
 import { useState, useCallback, useEffect, useMemo, memo, lazy, Suspense } from 'react';
-import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, FileText, Film, Music, FileArchive, File, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { FileTypeIcon } from './file-icon';
+import { getFileVisual } from './file-visual';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { invokeIpc } from '@/lib/api-client';
 import type { RawMessage, AttachedFileMeta } from '@/stores/chat';
+import { useAgentsStore } from '@/stores/agents';
+import { useChatStore } from '@/stores/chat';
+import { useProviderStore } from '@/stores/providers';
 import { useSettingsStore, type AssistantMessageStyle } from '@/stores/settings';
+import type { ProviderAccount } from '@/lib/providers';
+import { buildProviderListItems } from '@/lib/provider-accounts';
 import { extractText, extractThinking, extractImages, extractToolUse, formatTimestamp } from './message-utils';
+import { StreamingMarkdownPreview } from './StreamingMarkdownPreview';
 
 interface ChatMessageProps {
   message: RawMessage;
@@ -31,6 +39,30 @@ interface ChatMessageProps {
 }
 
 interface ExtractedImage { url?: string; data?: string; mimeType: string; }
+
+const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
+const GOOGLE_OAUTH_RUNTIME_PROVIDER = 'google-gemini-cli';
+
+function getRuntimeProviderKey(account: ProviderAccount): string {
+  if (account.authMode === 'oauth_browser') {
+    if (account.vendorId === 'openai') return OPENAI_OAUTH_RUNTIME_PROVIDER;
+    if (account.vendorId === 'google') return GOOGLE_OAUTH_RUNTIME_PROVIDER;
+  }
+  if (account.vendorId === 'custom' || account.vendorId === 'ollama') {
+    const prefix = `${account.vendorId}-`;
+    if (account.id.startsWith(prefix)) {
+      const suffix = account.id.slice(prefix.length);
+      if (suffix.length === 8 && !suffix.includes('-')) {
+        return account.id;
+      }
+    }
+    return `${account.vendorId}-${account.id.replace(/-/g, '').slice(0, 8)}`;
+  }
+  if (account.vendorId === 'minimax-portal-cn') {
+    return 'minimax-portal';
+  }
+  return account.vendorId;
+}
 
 const messageSignatureCache = new WeakMap<RawMessage, string>();
 const MarkdownRenderer = lazy(() => import('./MarkdownRenderer').then((module) => ({ default: module.MarkdownRenderer })));
@@ -120,6 +152,16 @@ export const ChatMessage = memo(function ChatMessage({
   const chatProcessDisplayMode = useSettingsStore((state) => state.chatProcessDisplayMode);
   const assistantMessageStyle = useSettingsStore((state) => state.assistantMessageStyle);
   const chatFontScale = useSettingsStore((state) => state.chatFontScale);
+  const agents = useAgentsStore((state) => state.agents);
+  const defaultModelRef = useAgentsStore((state) => state.defaultModelRef);
+  const currentAgentId = useChatStore((state) => state.currentAgentId);
+  const currentSessionKey = useChatStore((state) => state.currentSessionKey);
+  const sessions = useChatStore((state) => state.sessions);
+  const sessionModels = useChatStore((state) => state.sessionModels);
+  const providerAccounts = useProviderStore((state) => state.accounts);
+  const providerStatuses = useProviderStore((state) => state.statuses);
+  const providerVendors = useProviderStore((state) => state.vendors);
+  const providerDefaultAccountId = useProviderStore((state) => state.defaultAccountId);
   const usesAssistantStreamStyle = !isUser && assistantMessageStyle === 'stream';
   const visibleThinking = showThinking ? thinking : null;
   const visibleTools = useMemo(() => (
@@ -127,6 +169,41 @@ export const ChatMessage = memo(function ChatMessage({
   ), [chatProcessDisplayMode, tools]);
   const bodyFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
   const metaFontSize = `${Math.round(12 * (chatFontScale / 100) * 10) / 10}px`;
+  const attachmentGridClassName = 'grid w-full max-w-[720px] grid-cols-3 gap-2';
+  const currentAgent = useMemo(
+    () => (agents ?? []).find((agent) => agent.id === currentAgentId) ?? null,
+    [agents, currentAgentId],
+  );
+  const currentSession = useMemo(
+    () => (sessions ?? []).find((session) => session.key === currentSessionKey) ?? null,
+    [currentSessionKey, sessions],
+  );
+  const providerItems = useMemo(
+    () => buildProviderListItems(providerAccounts, providerStatuses, providerVendors, providerDefaultAccountId),
+    [providerAccounts, providerDefaultAccountId, providerStatuses, providerVendors],
+  );
+  const modelOptions = useMemo(() => (
+    providerItems.flatMap((item) => {
+      const runtimeProviderKey = getRuntimeProviderKey(item.account);
+      return item.models
+        .filter((model) => model.source !== 'recommended')
+        .slice()
+        .sort((left, right) => left.id.localeCompare(right.id))
+        .map((model) => ({
+          value: `${runtimeProviderKey}/${model.id}`,
+          label: `${item.displayName} / ${model.id}`,
+        }));
+    })
+  ), [providerItems]);
+  const fallbackAgentModelRef = currentSession
+    ? (currentAgent?.overrideModelRef || currentAgent?.modelRef || '')
+    : '';
+  const effectiveSessionModels = sessionModels ?? {};
+  const effectiveModelRef = (effectiveSessionModels[currentSessionKey] || currentSession?.model || defaultModelRef || fallbackAgentModelRef || '').trim();
+  const currentModelLabel = useMemo(
+    () => modelOptions.find((option) => option.value === effectiveModelRef)?.label || effectiveModelRef,
+    [effectiveModelRef, modelOptions],
+  );
 
   const attachedFiles = useMemo(() => message._attachedFiles || [], [message._attachedFiles]);
   const [lightboxImg, setLightboxImg] = useState<{ src: string; fileName: string; filePath?: string; base64?: string; mimeType?: string } | null>(null);
@@ -213,7 +290,7 @@ export const ChatMessage = memo(function ChatMessage({
 
         {/* File attachments */}
         {isUser && attachedFiles.length > 0 && (
-          <div className="flex flex-wrap gap-2">
+          <div className={attachmentGridClassName}>
             {attachedFiles.map((file, i) => (
               <FileCard
                 key={`local-${i}`}
@@ -260,7 +337,7 @@ export const ChatMessage = memo(function ChatMessage({
 
         {/* File attachments — assistant messages (below text) */}
         {!isUser && attachedFiles.length > 0 && (
-          <div className="flex flex-wrap gap-2">
+          <div className={attachmentGridClassName}>
             {attachedFiles.map((file, i) => (
               <FileCard
                 key={`local-${i}`}
@@ -280,6 +357,7 @@ export const ChatMessage = memo(function ChatMessage({
             timestamp={message.timestamp}
             metaFontSize={metaFontSize}
             messageType={isUser ? 'user' : 'assistant'}
+            modelLabel={!isUser ? currentModelLabel : undefined}
           />
         )}
       </div>
@@ -356,13 +434,16 @@ const MessageHoverBar = memo(function MessageHoverBar({
   timestamp,
   metaFontSize,
   messageType,
+  modelLabel,
 }: {
   text: string;
   timestamp?: number;
   metaFontSize: string;
   messageType: 'user' | 'assistant';
+  modelLabel?: string;
 }) {
   const [copied, setCopied] = useState(false);
+  const isAssistant = messageType === 'assistant';
 
   const copyContent = useCallback(() => {
     navigator.clipboard.writeText(text);
@@ -371,21 +452,57 @@ const MessageHoverBar = memo(function MessageHoverBar({
   }, [text]);
 
   return (
-    <div className="flex items-center gap-1.5 self-end opacity-0 group-hover:opacity-100 transition-opacity duration-200 select-none px-1">
-      {timestamp ? (
-        <span className="text-muted-foreground" style={{ fontSize: metaFontSize }}>
-          {formatTimestamp(timestamp)}
-        </span>
-      ) : null}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-6 w-6"
-        onClick={copyContent}
-        data-testid={`chat-message-copy-${messageType}`}
-      >
-        {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-      </Button>
+    <div
+      className={cn(
+        'flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 select-none text-muted-foreground',
+        isAssistant ? 'self-start' : 'self-end',
+      )}
+    >
+      {isAssistant ? (
+        <>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 bg-transparent shadow-none hover:bg-transparent hover:shadow-none"
+            onClick={copyContent}
+            data-testid={`chat-message-copy-${messageType}`}
+          >
+            {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+          </Button>
+          {timestamp ? (
+            <span className="text-muted-foreground whitespace-nowrap" style={{ fontSize: metaFontSize }}>
+              {formatTimestamp(timestamp)}
+            </span>
+          ) : null}
+          {modelLabel ? (
+            <span
+              data-testid="chat-message-model-label"
+              className="max-w-[260px] truncate text-muted-foreground/85"
+              style={{ fontSize: metaFontSize }}
+              title={modelLabel}
+            >
+              {modelLabel}
+            </span>
+          ) : null}
+        </>
+      ) : (
+        <>
+          {timestamp ? (
+            <span className="text-muted-foreground whitespace-nowrap" style={{ fontSize: metaFontSize }}>
+              {formatTimestamp(timestamp)}
+            </span>
+          ) : null}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 bg-transparent shadow-none hover:bg-transparent hover:shadow-none"
+            onClick={copyContent}
+            data-testid={`chat-message-copy-${messageType}`}
+          >
+            {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+          </Button>
+        </>
+      )}
     </div>
   );
 });
@@ -419,7 +536,7 @@ const MessageBubble = memo(function MessageBubble({
       data-testid={!isUser ? (isError ? 'chat-assistant-error-message' : `chat-assistant-message-${assistantMessageStyle}`) : undefined}
       className={cn(
         'relative',
-        usesAssistantStreamStyle ? 'w-full px-1 py-0.5' : 'rounded-[24px] px-4 py-3.5',
+        usesAssistantStreamStyle ? 'w-full px-1 py-0.5' : 'rounded-[16px] px-4 py-3.5',
         !isUser && !usesAssistantStreamStyle && 'w-full',
         isUser
           ? 'bg-[linear-gradient(135deg,#4f8df7_0%,#2f6fe4_100%)] text-white shadow-[0_12px_28px_rgba(47,111,228,0.24)]'
@@ -433,9 +550,16 @@ const MessageBubble = memo(function MessageBubble({
       {isUser ? (
         <p className="whitespace-pre-wrap break-words break-all leading-[1.82]" style={{ fontSize }}>{text}</p>
       ) : isStreaming ? (
-        <div className={cn('whitespace-pre-wrap break-words break-all leading-[1.82]', usesAssistantStreamStyle && 'prose prose-sm dark:prose-invert max-w-none')} style={{ fontSize }}>
-          {text}
-          <span className="inline-block w-2 h-4 bg-foreground/50 animate-pulse ml-0.5 align-[-2px]" />
+        <div className={cn(usesAssistantStreamStyle && 'max-w-none')} style={{ fontSize }}>
+          <StreamingMarkdownPreview
+            content={text}
+            trailingCursor
+            className={cn(
+              usesAssistantStreamStyle
+                ? 'space-y-2.5 text-[0.985em] text-foreground/94'
+                : 'space-y-2 text-[0.97em] text-foreground/92',
+            )}
+          />
         </div>
       ) : (
         <div className={cn('prose prose-sm dark:prose-invert max-w-none break-words break-all leading-[1.82]', usesAssistantStreamStyle && '[&>*]:my-3 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0')} style={{ fontSize }}>
@@ -486,7 +610,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ content }: { content: string
   const summary = preview.length > 84 ? `${preview.slice(0, 81)}...` : preview;
 
   return (
-    <div className="w-full rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-[14px]">
+    <div className="w-full rounded-lg border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-[14px]">
       <button
         className="flex items-center gap-2 w-full px-3 py-2 text-muted-foreground hover:text-foreground transition-colors"
         onClick={() => setExpanded(!expanded)}
@@ -519,33 +643,8 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-function FileExtIcon({ ext, color, className }: { ext: string; color: string; className?: string }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" fill={`${color}20`} />
-      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
-      <text x="12" y="18" fontSize="6.5" fontFamily="sans-serif" fontWeight="bold" textAnchor="middle" stroke="none" fill={color}>{ext.toUpperCase()}</text>
-    </svg>
-  );
-}
-
-function FileIcon({ mimeType, fileName, className }: { mimeType: string; fileName?: string; className?: string }) {
-  const t = mimeType.toLowerCase();
-  const n = (fileName || '').toLowerCase();
-
-  if (t.startsWith('image/') || t.startsWith('video/') || n.match(/\.(jpg|jpeg|png|gif|webp|mp4|mov|avi|webm)$/i)) return <FileImage color="#8b5cf6" className={className} />;
-  if (t.startsWith('audio/') || n.match(/\.(mp3|wav|ogg|m4a)$/i)) return <Music color="#eab308" className={className} />;
-  if (t.includes('pdf') || n.endsWith('.pdf')) return <FileExtIcon ext="PDF" color="#ef4444" className={className} />;
-  if (t.includes('spreadsheet') || t.includes('excel') || t.includes('csv') || n.match(/\.(xls|xlsx|csv)$/i)) return <FileExtIcon ext="XLS" color="#22c55e" className={className} />;
-  if (t.includes('wordprocessing') || t.includes('msword') || t.includes('document') || n.match(/\.(doc|docx)$/i)) return <FileExtIcon ext="DOC" color="#3b82f6" className={className} />;
-  if (t.includes('presentation') || t.includes('powerpoint') || n.match(/\.(ppt|pptx)$/i)) return <FileExtIcon ext="PPT" color="#f97316" className={className} />;
-  if (t.startsWith('text/') || t === 'application/json' || t === 'application/xml' || n.match(/\.(txt|json|xml|md|csv|log)$/i)) return <FileCode color="#64748b" className={className} />;
-  if (t.includes('zip') || t.includes('compressed') || t.includes('archive') || t.includes('tar') || t.includes('rar') || t.includes('7z') || n.match(/\.(zip|rar|7z|tar|gz)$/i)) return <FileArchive color="#ec4899" className={className} />;
-
-  return <File color="#94a3b8" className={className} />;
-}
-
 function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () => void }) {
+  const visual = getFileVisual(file.mimeType, file.fileName);
   const handleOpen = useCallback(() => {
     if (onPreview) {
       onPreview();
@@ -557,20 +656,24 @@ function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () 
   }, [file.filePath, onPreview]);
 
   return (
-    <div 
+    <div
+      data-testid="chat-file-card"
       className={cn(
-        "flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 h-14 bg-black/5 dark:bg-white/5 max-w-[220px]",
-        (file.filePath || onPreview) && "cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+        "relative min-w-0 overflow-hidden rounded-xl border border-black/10 bg-white/80 shadow-[0_14px_34px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.06]",
+        (file.filePath || onPreview) && "cursor-pointer hover:border-black/15 hover:bg-white dark:hover:border-white/15 dark:hover:bg-white/[0.08] transition-colors"
       )}
       onClick={handleOpen}
       title={file.filePath ? '打开文件' : undefined}
     >
-      <FileIcon mimeType={file.mimeType} fileName={file.fileName} className="h-8 w-8 shrink-0 drop-shadow-sm" />
-      <div className="min-w-0 overflow-hidden leading-tight flex flex-col justify-center">
-        <p className="text-[13px] font-medium truncate">{file.fileName}</p>
-        <p className="text-[10px] text-muted-foreground">
-          {file.fileSize > 0 ? formatFileSize(file.fileSize) : 'File'}
-        </p>
+      <div className="flex h-14 min-w-0 items-center gap-3 px-3">
+        <FileTypeIcon mimeType={file.mimeType} fileName={file.fileName} />
+        <div className="min-w-0 overflow-hidden leading-tight flex flex-col justify-center gap-1">
+          <p className="text-[13px] font-semibold tracking-[-0.01em] truncate">{file.fileName}</p>
+          <p className="text-[11px] text-muted-foreground">
+            {visual.label}
+            {file.fileSize > 0 ? ` · ${formatFileSize(file.fileSize)}` : ''}
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -596,7 +699,7 @@ const ImageThumbnail = memo(function ImageThumbnail({
   void filePath; void base64; void mimeType;
   return (
     <div
-      className="relative w-36 h-36 rounded-xl border overflow-hidden border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 group/img cursor-zoom-in"
+      className="relative w-36 h-36 rounded-lg border overflow-hidden border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 group/img cursor-zoom-in"
       onClick={onPreview}
     >
       <img src={src} alt={fileName} className="w-full h-full object-cover" />
@@ -627,7 +730,7 @@ const ImagePreviewCard = memo(function ImagePreviewCard({
   void filePath; void base64; void mimeType;
   return (
     <div
-      className="relative max-w-xs rounded-xl border overflow-hidden border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 group/img cursor-zoom-in"
+      className="relative max-w-xs rounded-lg border overflow-hidden border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 group/img cursor-zoom-in"
       onClick={onPreview}
     >
       <img src={src} alt={fileName} className="block w-full" />
@@ -655,7 +758,8 @@ const ImageLightbox = memo(function ImageLightbox({
   mimeType?: string;
   onClose: () => void;
 }) {
-  void src; void base64; void mimeType; void fileName;
+  void mimeType;
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -671,6 +775,17 @@ const ImageLightbox = memo(function ImageLightbox({
     }
   }, [filePath]);
 
+  const handleCopyImage = useCallback(async () => {
+    const result = await invokeIpc('media:copyImage', {
+      filePath,
+      base64,
+    }) as { success?: boolean };
+    if (result?.success) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    }
+  }, [base64, filePath]);
+
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
@@ -684,11 +799,21 @@ const ImageLightbox = memo(function ImageLightbox({
         <img
           src={src}
           alt={fileName}
-          className="max-w-[90vw] max-h-[85vh] rounded-lg shadow-2xl object-contain"
+          className="max-w-[90vw] max-h-[85vh] rounded-md shadow-2xl object-contain"
         />
 
         {/* Action buttons below image */}
         <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            data-testid="chat-image-lightbox-copy"
+            className="h-8 w-8 bg-white/10 hover:bg-white/20 text-white"
+            onClick={handleCopyImage}
+            title="复制图片"
+          >
+            {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+          </Button>
           {filePath && (
             <Button
               variant="ghost"
@@ -724,7 +849,7 @@ const ToolCard = memo(function ToolCard({ name, input }: { name: string; input: 
   return (
     <div
       data-testid="chat-tool-card"
-      className="w-full rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-[14px]"
+      className="w-full rounded-lg border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-[14px]"
     >
       <button
         className="flex items-center gap-2 w-full px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"

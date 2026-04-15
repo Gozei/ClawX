@@ -85,6 +85,9 @@ export async function waitForGatewayReady(options: {
 }): Promise<void> {
   const maxWaitMs = options.maxWaitMs ?? 480_000;
   const startTime = Date.now();
+  const logPrefix = process.platform === 'win32'
+    ? '[Windows Gateway Monitor]'
+    : '[Gateway Monitor]';
 
   let attempts = 0;
   while (Date.now() - startTime < maxWaitMs) {
@@ -98,16 +101,22 @@ export async function waitForGatewayReady(options: {
     try {
       const ready = await probeGatewayReady(options.port, 1500);
       if (ready) {
-        logger.debug(`Gateway ready after ${attempts} attempt(s)`);
+        const elapsedMs = Date.now() - startTime;
+        logger.info(
+          `${logPrefix} wait-ready outcome=success port=${options.port} attempts=${attempts} elapsed=${elapsedMs}ms`,
+        );
         return;
       }
     } catch {
       // Gateway not ready yet.
     }
 
-    if (attempts > 1 && attempts % 10 === 0) {
+    const monitorInterval = process.platform === 'win32' ? 5 : 10;
+    if (attempts > 1 && attempts % monitorInterval === 0) {
       const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(0);
-      logger.debug(`Still waiting for Gateway... (attempt ${attempts}, ${elapsedSec}s elapsed)`);
+      logger.info(
+        `${logPrefix} wait-ready outcome=pending port=${options.port} attempts=${attempts} elapsed=${elapsedSec}s`,
+      );
     }
 
     const interval = getDynamicProbeInterval(Date.now() - startTime);
@@ -124,6 +133,7 @@ export function buildGatewayConnectFrame(options: {
   token: string;
   deviceIdentity: DeviceIdentity | null;
   platform: string;
+  brandingDisplayName?: string;
 }): { connectId: string; frame: Record<string, unknown> } {
   const connectId = `connect-${Date.now()}`;
   const role = 'operator';
@@ -383,7 +393,7 @@ export async function connectGatewaySocket(options: {
       const msg = error instanceof Error ? error.message : String(error);
       // 仅在 Gateway 主动关闭 WS（handshake 阶段）或 RPC 超时时重试，
       // 其他错误（如 ECONNREFUSED）直接抛出。
-      const isRetryable = /closed before handshake|handshake timeout/i.test(msg);
+      const isRetryable = /closed before handshake/i.test(msg);
       if (!isRetryable || attempt >= CONNECT_MAX_RETRIES) {
         throw error;
       }

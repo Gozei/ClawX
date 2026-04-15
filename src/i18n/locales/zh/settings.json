@@ -1,6 +1,44 @@
 {
   "title": "设置",
   "subtitle": "配置您的 {{appName}} 体验",
+  "settingsHub": {
+    "title": "设置菜单",
+    "subtitle": "从这里统一管理模型、通道、外观与系统设置。",
+    "menu": {
+      "models": "模型",
+      "channels": "通道",
+      "theme": "主题",
+      "language": "语言",
+      "checkUpdates": "检查更新",
+      "settings": "设置",
+      "console": ">_ OpenClaw 控制台"
+    },
+    "theme": {
+      "light": "浅色",
+      "dark": "深色",
+      "changed": "已切换为{{theme}}主题"
+    },
+    "language": {
+      "changed": "语言已切换为 {{language}}"
+    },
+    "update": {
+      "checking": "检查中",
+      "downloading": "下载中",
+      "available": "有新版本",
+      "latest": "当前已经是最新版本",
+      "failed": "检查更新失败",
+      "dialogTitle": "发现新版本",
+      "dialogMessage": "检测到新版本 v{{version}}，是否现在开始下载更新？",
+      "downloadedMessage": "版本 v{{version}} 已下载完成，点击后将安装并重启应用。",
+      "downloadedReady": "更新已下载完成，点击后将安装并重启应用。",
+      "confirm": "立即更新",
+      "installing": "正在安装并重启...",
+      "started": "已开始下载更新"
+    },
+    "console": {
+      "failed": "打开 OpenClaw 控制台失败"
+    }
+  },
   "appearance": {
     "title": "通用",
     "description": "自定义外观和风格",
@@ -204,6 +242,7 @@
       "downloading": "正在下载更新...",
       "available": "可用更新：v{{version}}",
       "downloaded": "准备安装：v{{version}}",
+      "installing": "正在安装更新并准备重启...",
       "autoInstalling": "将在 {{seconds}} 秒后重启并安装更新...",
       "failed": "检查更新失败",
       "latest": "您已拥有最新版本",
@@ -214,9 +253,21 @@
       "downloading": "下载中...",
       "download": "下载更新",
       "install": "安装并重启",
+      "installing": "正在安装...",
       "cancelAutoInstall": "取消",
       "retry": "重试",
       "check": "检查更新"
+    },
+    "installOverlay": {
+      "badge": "更新安装进行中",
+      "title": "正在安装更新，请耐心等待",
+      "description": "应用正在退出并交给系统安装程序处理。现在不要关闭应用、不要重复点击，也不要做其他操作。",
+      "detailWindows": "Windows 通常会继续显示系统安装向导，请按向导完成安装并等待应用自动重启。",
+      "detailMac": "macOS 可能会短暂没有明显响应，这是正常的。请等待系统完成替换并自动重启应用。",
+      "detailLinux": "Linux 上安装阶段可能会短暂看起来像未响应。如果系统弹出“等待”或类似选项，请选择等待，不要强制关闭，否则更新可能失败。",
+      "elapsed": "已等待 {{seconds}} 秒",
+      "waitHint": "安装过程中请勿操作应用",
+      "slowHint": "仍在处理中，请继续等待系统完成安装"
     },
     "currentVersion": "当前版本",
     "whatsNew": "更新内容：",

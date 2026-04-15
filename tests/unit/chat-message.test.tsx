@@ -3,16 +3,80 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { ChatMessage } from '@/pages/Chat/ChatMessage';
 import type { RawMessage } from '@/stores/chat';
 
-const { settingsState } = vi.hoisted(() => ({
+const { settingsState, invokeIpcMock } = vi.hoisted(() => ({
   settingsState: {
     chatProcessDisplayMode: 'all',
     chatFontScale: 100,
     assistantMessageStyle: 'bubble',
   },
+  invokeIpcMock: vi.fn(),
 }));
+
+const agentsState = {
+  agents: [
+    {
+      id: 'main',
+      name: 'Main',
+      modelRef: 'custom-custombc/gpt-5.4',
+    },
+  ],
+  defaultModelRef: 'openai/gpt-4.1',
+};
+
+const chatState = {
+  currentAgentId: 'main',
+  currentSessionKey: 'agent:main:main',
+  sessions: [{ key: 'agent:main:main', model: 'custom-custombc/gpt-5.4' }],
+  sessionModels: {} as Record<string, string>,
+};
+
+const providersState = {
+  accounts: [
+    {
+      id: 'custom-bc',
+      vendorId: 'custom',
+      label: '京东供应商',
+      model: 'gpt-5.4',
+      metadata: { customModels: ['gpt-5.4'] },
+      updatedAt: '2026-04-14T10:00:00.000Z',
+      createdAt: '2026-04-14T10:00:00.000Z',
+      authMode: 'api_key',
+      apiProtocol: 'openai',
+      baseUrl: 'https://example.com/v1',
+    },
+  ],
+  statuses: [],
+  vendors: [
+    {
+      id: 'custom',
+      name: '自定义',
+    },
+  ],
+  defaultAccountId: 'custom-bc',
+};
 
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (selector: (state: typeof settingsState) => unknown) => selector(settingsState),
+}));
+
+vi.mock('@/stores/agents', () => ({
+  useAgentsStore: (selector: (state: typeof agentsState) => unknown) => selector(agentsState),
+}));
+
+vi.mock('@/stores/chat', async () => {
+  const actual = await vi.importActual<typeof import('@/stores/chat')>('@/stores/chat');
+  return {
+    ...actual,
+    useChatStore: (selector: (state: typeof chatState) => unknown) => selector(chatState),
+  };
+});
+
+vi.mock('@/stores/providers', () => ({
+  useProviderStore: (selector: (state: typeof providersState) => unknown) => selector(providersState),
+}));
+
+vi.mock('@/lib/api-client', () => ({
+  invokeIpc: (...args: unknown[]) => invokeIpcMock(...args),
 }));
 
 describe('ChatMessage', () => {
@@ -21,6 +85,13 @@ describe('ChatMessage', () => {
     settingsState.chatProcessDisplayMode = 'all';
     settingsState.chatFontScale = 100;
     settingsState.assistantMessageStyle = 'bubble';
+    agentsState.defaultModelRef = 'openai/gpt-4.1';
+    agentsState.agents[0].modelRef = 'custom-custombc/gpt-5.4';
+    chatState.currentSessionKey = 'agent:main:main';
+    chatState.sessions = [{ key: 'agent:main:main', model: 'custom-custombc/gpt-5.4' }];
+    chatState.sessionModels = {};
+    invokeIpcMock.mockReset();
+    invokeIpcMock.mockResolvedValue({ success: true });
     Object.defineProperty(navigator, 'clipboard', {
       value: {
         writeText: vi.fn(),
@@ -42,6 +113,37 @@ describe('ChatMessage', () => {
     fireEvent.click(screen.getByTestId('chat-message-copy-user'));
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('Copy this user message');
+  });
+
+  it('shows the current session model label next to assistant message metadata', () => {
+    const message: RawMessage = {
+      id: 'assistant-model-1',
+      role: 'assistant',
+      content: 'Model metadata row',
+      timestamp: 1712123456,
+    };
+
+    render(<ChatMessage message={message} showThinking={false} />);
+
+    expect(screen.getByTestId('chat-message-model-label')).toHaveTextContent('京东供应商 / gpt-5.4');
+  });
+
+  it('prefers the stored session model label over the global default model', () => {
+    chatState.sessionModels = { 'agent:main:main': 'custom-custombc/gpt-5.4' };
+    chatState.sessions = [{ key: 'agent:main:main' }];
+    agentsState.defaultModelRef = 'openai/gpt-4.1';
+    agentsState.agents[0].modelRef = undefined;
+
+    const message: RawMessage = {
+      id: 'assistant-model-2',
+      role: 'assistant',
+      content: 'Model metadata row',
+      timestamp: 1712123456,
+    };
+
+    render(<ChatMessage message={message} showThinking={false} />);
+
+    expect(screen.getByTestId('chat-message-model-label')).toHaveTextContent('gpt-5.4');
   });
 
   it('renders tool cards at full width so process blocks stay aligned', () => {
@@ -90,6 +192,24 @@ describe('ChatMessage', () => {
     expect(screen.getByTestId('chat-message-content-assistant')).not.toHaveClass('max-w-[80%]');
   });
 
+  it('lightly formats markdown markers while the assistant reply is still streaming', () => {
+    settingsState.assistantMessageStyle = 'stream';
+
+    const message: RawMessage = {
+      id: 'assistant-streaming-markdown',
+      role: 'assistant',
+      content: '### 内容分类\n\n1. **人工智能与大模型技术**\n- LM 技术报告',
+    };
+
+    render(<ChatMessage message={message} showThinking={false} isStreaming />);
+
+    expect(screen.getByText('内容分类')).toBeInTheDocument();
+    expect(screen.getByText('1.')).toBeInTheDocument();
+    expect(screen.getByText('人工智能与大模型技术')).toBeInTheDocument();
+    expect(screen.queryByText('### 内容分类')).not.toBeInTheDocument();
+    expect(screen.queryByText('**人工智能与大模型技术**')).not.toBeInTheDocument();
+  });
+
   it('renders assistant error replies with the dedicated error styling hook', () => {
     const message: RawMessage = {
       id: 'assistant-error-1',
@@ -101,5 +221,54 @@ describe('ChatMessage', () => {
     render(<ChatMessage message={message} showThinking={false} />);
 
     expect(screen.getByTestId('chat-assistant-error-message')).toBeInTheDocument();
+  });
+
+  it('renders assistant file attachments with the richer file card treatment', () => {
+    const message: RawMessage = {
+      id: 'assistant-file-1',
+      role: 'assistant',
+      content: 'Generated file ready.',
+      _attachedFiles: [
+        {
+          fileName: 'HEARTBEAT.md',
+          fileSize: 193,
+          mimeType: 'text/markdown',
+          filePath: '/tmp/HEARTBEAT.md',
+        },
+      ],
+    };
+
+    render(<ChatMessage message={message} showThinking={false} />);
+
+    expect(screen.getByTestId('chat-file-card')).toBeInTheDocument();
+    expect(screen.getByText('HEARTBEAT.md')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-file-ext-badge')).toHaveTextContent('MD');
+    expect(screen.getByText(/Markdown 文件/)).toBeInTheDocument();
+  });
+  it('adds a copy button to the image lightbox', () => {
+    const message: RawMessage = {
+      id: 'assistant-image-1',
+      role: 'assistant',
+      content: 'Preview image.',
+      _attachedFiles: [
+        {
+          fileName: 'preview.png',
+          fileSize: 1024,
+          mimeType: 'image/png',
+          filePath: '/tmp/preview.png',
+          preview: 'data:image/png;base64,abc123',
+        },
+      ],
+    };
+
+    render(<ChatMessage message={message} showThinking={false} />);
+
+    fireEvent.click(screen.getByTestId('chat-file-card'));
+    fireEvent.click(screen.getByTestId('chat-image-lightbox-copy'));
+
+    expect(invokeIpcMock).toHaveBeenCalledWith('media:copyImage', {
+      filePath: '/tmp/preview.png',
+      base64: undefined,
+    });
   });
 });

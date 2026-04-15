@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { closeElectronApp, expect, getStableWindow, test } from './fixtures/electron';
+import { closeElectronApp, expect, getStableWindow, openChannelsFromSettings, openModelsFromSettings, openSettingsHub, test } from './fixtures/electron';
 
 type ProcessSample = {
   cpuPercent: number;
@@ -28,10 +28,10 @@ const SAMPLE_INTERVAL_MS = 250;
 const SAMPLE_COUNT = 3;
 
 const routes = [
-  { route: '/models', navTestId: 'sidebar-nav-models', pageTestId: 'models-page' },
-  { route: '/agents', navTestId: 'sidebar-nav-agents', pageTestId: 'agents-page' },
-  { route: '/channels', navTestId: 'sidebar-nav-channels', pageTestId: 'channels-page' },
-  { route: '/settings', navTestId: 'sidebar-nav-settings', pageTestId: 'settings-page' },
+  { route: '/models', pageTestId: 'models-page', navigate: openModelsFromSettings },
+  { route: '/agents', pageTestId: 'agents-page', navigate: async (page: Awaited<ReturnType<typeof getStableWindow>>) => { await page.getByTestId('sidebar-nav-agents').click(); } },
+  { route: '/channels', pageTestId: 'channels-page', navigate: openChannelsFromSettings },
+  { route: '/settings', pageTestId: 'settings-page', navigate: openSettingsHub },
 ] as const;
 
 function sleep(ms: number): Promise<void> {
@@ -124,12 +124,12 @@ async function averageProcessSample(rootPid: number): Promise<ProcessSample> {
 async function navigateAndMeasure(
   page: Awaited<ReturnType<typeof getStableWindow>>,
   rootPid: number,
-  navTestId: string,
+  navigate: (page: Awaited<ReturnType<typeof getStableWindow>>) => Promise<void>,
   pageTestId: string,
   route: string,
 ): Promise<NavigationMetric> {
   const start = performance.now();
-  await page.getByTestId(navTestId).click();
+  await navigate(page);
   await expect(page.getByTestId(pageTestId)).toBeVisible();
   const durationMs = Number((performance.now() - start).toFixed(2));
   await page.waitForTimeout(200);
@@ -163,7 +163,7 @@ test.describe('Deep AI Worker navigation performance', () => {
           await navigateAndMeasure(
             page,
             rootPid,
-            routeConfig.navTestId,
+            routeConfig.navigate,
             routeConfig.pageTestId,
             routeConfig.route,
           ),
@@ -175,7 +175,7 @@ test.describe('Deep AI Worker navigation performance', () => {
           await navigateAndMeasure(
             page,
             rootPid,
-            routeConfig.navTestId,
+            routeConfig.navigate,
             routeConfig.pageTestId,
             routeConfig.route,
           ),

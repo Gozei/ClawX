@@ -159,9 +159,10 @@ export async function launchGatewayProcess(options: {
     };
 
     child.on('error', (error) => {
-      logger.error('Gateway process spawn error:', error);
-      options.onError(error);
-      rejectOnce(error);
+      const normalizedError = new Error(String(error));
+      logger.error('Gateway process spawn error:', normalizedError);
+      options.onError(normalizedError);
+      rejectOnce(normalizedError);
     });
 
     child.on('exit', (code: number) => {
@@ -171,8 +172,11 @@ export async function launchGatewayProcess(options: {
       // shutdown in logs.  shouldReconnect is the reliable indicator: stop()
       // sets it to false (expected), crashes leave it true (unexpected).
       const expectedExit = !options.getShouldReconnect();
-      const level = expectedExit ? logger.info : logger.warn;
-      level(`Gateway process exited (code=${code}, expected=${expectedExit ? 'yes' : 'no'})`);
+      if (expectedExit) {
+        logger.info(`Gateway process exited (code=${code}, expected=yes)`);
+      } else {
+        logger.warn(`Gateway process exited (code=${code}, expected=no)`);
+      }
       options.onExit(child, code);
     });
 

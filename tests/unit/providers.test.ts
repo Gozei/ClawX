@@ -253,14 +253,16 @@ describe('provider metadata', () => {
     ];
 
     const items = buildProviderListItems(accounts, statuses, vendors, 'zai');
+    const zaiItem = items.find((item) => item.displayName === '智谱 Z.ai');
+    const qwenItem = items.find((item) => item.displayName === '阿里百炼 / Qwen');
 
     expect(items).toHaveLength(2);
-    expect(items[0]).toMatchObject({
+    expect(zaiItem).toMatchObject({
       displayName: '智谱 Z.ai',
       resolvedModel: 'zai/glm-5',
     });
-    expect(items[0].aliases).toHaveLength(2);
-    expect(items[1]).toMatchObject({
+    expect(zaiItem?.aliases).toHaveLength(2);
+    expect(qwenItem).toMatchObject({
       displayName: '阿里百炼 / Qwen',
       resolvedModel: 'qwen3.5-plus',
     });

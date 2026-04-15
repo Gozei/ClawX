@@ -20,7 +20,7 @@ import { ClawHubService } from '../gateway/clawhub';
 import { ensureClawXContext, repairClawXOnlyBootstrapFiles } from '../utils/openclaw-workspace';
 import { syncAllAgentWorkspaceStudioContexts } from '../utils/agent-config';
 import { autoInstallCliIfNeeded, generateCompletionCache, installCompletionToProfile } from '../utils/openclaw-cli';
-import { isQuitting, setQuitting } from './app-state';
+import { isQuitting, isUpdateInstallQuit, setQuitting } from './app-state';
 import { applyProxySettings } from './proxy';
 import { syncLaunchAtStartupSettingFromStore } from './launch-at-startup';
 import {
@@ -38,7 +38,6 @@ import { createSignalQuitHandler } from './signal-quit';
 import { acquireProcessInstanceFileLock } from './process-instance-lock';
 import { getSetting } from '../utils/store';
 import { ensureBuiltinSkillsInstalled, ensurePreinstalledSkillsInstalled } from '../utils/skill-config';
-import { ensureAllBundledPluginsInstalled } from '../utils/plugin-install';
 import { startHostApiServer } from '../api/server';
 import { HostEventBus } from '../api/event-bus';
 import { deviceOAuthManager } from '../utils/device-oauth';
@@ -79,7 +78,11 @@ app.disableHardwareAcceleration();
 // on X11 it supplements the StartupWMClass matching.
 // Must be called before app.whenReady() / before any window is created.
 if (process.platform === 'linux') {
-  app.setDesktopName('clawx.desktop');
+  (app as Electron.App & { setDesktopName?: (name: string) => void }).setDesktopName?.('clawx.desktop');
+  // Linux desktop environments are more likely to surface Chromium's hang
+  // monitor during update handoff. Disable it so brief installer waits do not
+  // trigger a misleading "not responding" prompt.
+  app.commandLine.appendSwitch('disable-hang-monitor');
 }
 
 // Prevent multiple instances of the app from running simultaneously.
@@ -281,6 +284,34 @@ function createMainWindow(): BrowserWindow {
  * Initialize the application
  */
 async function initialize(): Promise<void> {
+  const startupTimelineStart = Date.now();
+  let startupDidFinishLoadLogged = false;
+  let startupWindowVisibleLogged = false;
+  let workspaceSyncInFlight: Promise<void> | null = null;
+  const logStartupStage = (stage: string): void => {
+    const prefix = process.platform === 'win32'
+      ? '[Windows Startup Monitor]'
+      : '[Startup Monitor]';
+    logger.info(`${prefix} stage=${stage} elapsed=${Date.now() - startupTimelineStart}ms`);
+  };
+  const scheduleWorkspaceBootstrapSync = (reason: string): void => {
+    if (isE2EMode) return;
+    if (workspaceSyncInFlight) {
+      logger.debug(`Workspace bootstrap sync already in flight, skipping duplicate request (${reason})`);
+      return;
+    }
+
+    workspaceSyncInFlight = Promise.all([
+      ensureClawXContext().catch((error) => {
+        logger.warn(`Failed to merge Deep AI Worker context into workspace (${reason}):`, error);
+      }),
+      syncAllAgentWorkspaceStudioContexts().catch((error) => {
+        logger.warn(`Failed to sync agent studio context into workspace (${reason}):`, error);
+      }),
+    ]).then(() => undefined).finally(() => {
+      workspaceSyncInFlight = null;
+    });
+  };
   const userDataMigrationReport = await migrateLegacyUserDataIfNeeded();
 
   // Initialize logger first
@@ -296,32 +327,63 @@ async function initialize(): Promise<void> {
       + ` copied: ${userDataMigrationReport.migratedFiles.join(', ') || 'none'})`,
     );
   }
+  logStartupStage('logger-ready');
 
   if (!isE2EMode) {
     // Warm up network optimization (non-blocking)
     void warmupNetworkOptimization();
 
-    // Initialize Telemetry early
-    await initTelemetry();
-
     // Apply persisted proxy settings before creating windows or network requests.
     await applyProxySettings();
-    await syncLaunchAtStartupSettingFromStore();
+    logStartupStage('proxy-ready');
   } else {
     logger.info('Running in E2E mode: startup side effects minimized');
+    logStartupStage('e2e-mode');
   }
 
   // Set application menu
   await createMenu();
+  logStartupStage('menu-ready');
 
   // Create the main window
   const window = createMainWindow();
   attachContextMenu(window.webContents);
+  logStartupStage('main-window-created');
+  window.webContents.once('did-finish-load', () => {
+    if (startupDidFinishLoadLogged) {
+      return;
+    }
+    startupDidFinishLoadLogged = true;
+    logStartupStage('renderer-ready');
+  });
+  window.once('ready-to-show', () => {
+    if (startupWindowVisibleLogged) {
+      return;
+    }
+    startupWindowVisibleLogged = true;
+    const elapsedMs = Date.now() - startupTimelineStart;
+    const prefix = process.platform === 'win32'
+      ? '[Windows Startup Monitor]'
+      : '[Startup Monitor]';
+    logger.info(`${prefix} stage=window-visible elapsed=${elapsedMs}ms`);
+    logger.info(`${prefix} startup-complete elapsed=${elapsedMs}ms`);
+  });
+
+  if (!isE2EMode) {
+    // These tasks are helpful but not worth blocking first paint, especially on Windows.
+    void initTelemetry().catch((error) => {
+      logger.warn('Failed to initialize telemetry during startup:', error);
+    });
+    void syncLaunchAtStartupSettingFromStore().catch((error) => {
+      logger.warn('Failed to sync launch-at-startup setting during startup:', error);
+    });
+  }
 
   // Create system tray
   if (!isE2EMode) {
     void createTray(window);
   }
+  logStartupStage('post-first-paint-tasks-scheduled');
 
   // Override security headers ONLY for the OpenClaw Gateway Control UI.
   // The URL filter ensures this callback only fires for gateway requests,
@@ -388,15 +450,6 @@ async function initialize(): Promise<void> {
     });
   }
 
-  // Pre-deploy/upgrade bundled OpenClaw plugins (dingtalk, wecom, feishu, wechat)
-  // to ~/.openclaw/extensions/ so they are always up-to-date after an app update.
-  // Note: qqbot was moved to a built-in channel in OpenClaw 3.31.
-  if (!isE2EMode) {
-    void ensureAllBundledPluginsInstalled().catch((error) => {
-      logger.warn('Failed to install/upgrade bundled plugins:', error);
-    });
-  }
-
   // Bridge gateway and host-side events before any auto-start logic runs, so
   // renderer subscribers observe the full startup lifecycle.
   gatewayManager.on('status', (status: GatewayStatus) => {
@@ -405,12 +458,7 @@ async function initialize(): Promise<void> {
       void updateTrayStatus(status.state);
     }
     if (status.state === 'running' && !isE2EMode) {
-    void ensureClawXContext().catch((error) => {
-      logger.warn('Failed to re-merge Deep AI Worker context after gateway reconnect:', error);
-    });
-    void syncAllAgentWorkspaceStudioContexts().catch((error) => {
-      logger.warn('Failed to sync agent studio context after gateway reconnect:', error);
-    });
+      scheduleWorkspaceBootstrapSync('gateway-running');
     }
   });
 
@@ -505,16 +553,11 @@ async function initialize(): Promise<void> {
     logger.info('Gateway auto-start disabled in settings');
   }
 
-  // Merge ClawX context snippets into the workspace bootstrap files.
-  // The gateway seeds workspace files asynchronously after its HTTP server
-  // is ready, so ensureClawXContext will retry until the target files appear.
   if (!isE2EMode) {
-    void ensureClawXContext().catch((error) => {
-      logger.warn('Failed to merge Deep AI Worker context into workspace:', error);
-    });
-    void syncAllAgentWorkspaceStudioContexts().catch((error) => {
-      logger.warn('Failed to sync agent studio context into workspace:', error);
-    });
+    // Seed existing workspace files early when possible; if the gateway later
+    // creates missing bootstrap files, the running-state hook above will pick
+    // them up without duplicating this work.
+    scheduleWorkspaceBootstrapSync('startup');
   }
 
   // Auto-install openclaw CLI and shell completions (non-blocking).
@@ -596,7 +639,10 @@ if (gotTheLock) {
   });
 
   app.on('before-quit', (event) => {
-    setQuitting();
+    const updateInstallQuit = isUpdateInstallQuit();
+    if (!updateInstallQuit) {
+      setQuitting();
+    }
     const action = requestQuitLifecycleAction(quitLifecycleState);
 
     if (action === 'allow-quit') {
@@ -617,18 +663,31 @@ if (gotTheLock) {
       logger.warn('gatewayManager.stop() error during quit:', err);
     });
     const timeoutPromise = new Promise<'timeout'>((resolve) => {
-      setTimeout(() => resolve('timeout'), 5000);
+      setTimeout(() => resolve('timeout'), updateInstallQuit ? 1200 : 5000);
     });
 
     void Promise.race([stopPromise.then(() => 'stopped' as const), timeoutPromise]).then((result) => {
       if (result === 'timeout') {
-        logger.warn('Gateway shutdown timed out during app quit; proceeding with forced quit');
+        logger.warn(
+          updateInstallQuit
+            ? 'Gateway shutdown timed out during update install; forcing quit quickly so the installer can continue'
+            : 'Gateway shutdown timed out during app quit; proceeding with forced quit',
+        );
         void gatewayManager.forceTerminateOwnedProcessForQuit().then((terminated) => {
           if (terminated) {
-            logger.warn('Forced gateway process termination completed after quit timeout');
+            logger.warn(
+              updateInstallQuit
+                ? 'Forced gateway process termination completed for update install'
+                : 'Forced gateway process termination completed after quit timeout',
+            );
           }
         }).catch((err) => {
-          logger.warn('Forced gateway termination failed after quit timeout:', err);
+          logger.warn(
+            updateInstallQuit
+              ? 'Forced gateway termination failed during update install:'
+              : 'Forced gateway termination failed after quit timeout:',
+            err,
+          );
         });
       }
       markQuitCleanupCompleted(quitLifecycleState);

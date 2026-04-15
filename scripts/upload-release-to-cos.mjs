@@ -1,5 +1,6 @@
 #!/usr/bin/env zx
 
+import './setup-zx-shell.mjs';
 import 'zx/globals';
 import COS from 'cos-nodejs-sdk-v5';
 import { existsSync, readdirSync, statSync } from 'node:fs';

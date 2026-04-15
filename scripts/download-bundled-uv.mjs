@@ -1,5 +1,6 @@
 #!/usr/bin/env zx
 
+import './setup-zx-shell.mjs';
 import 'zx/globals';
 
 const ROOT_DIR = path.resolve(__dirname, '..');

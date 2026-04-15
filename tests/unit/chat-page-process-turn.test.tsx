@@ -42,31 +42,35 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => navigateMock,
 }));
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    i18n: {
-      resolvedLanguage: 'en',
-      language: 'en',
-    },
-    t: (key: string, params?: Record<string, string | number>) => {
-      switch (key) {
-        case 'process.durationHourMinute':
-          return `${params?.hours}h ${params?.minutes}m`;
-        case 'process.durationMinuteSecond':
-          return `${params?.minutes}m ${params?.seconds}s`;
-        case 'process.durationSecond':
-          return `${params?.seconds}s`;
-        case 'process.workingFor':
-          return `Working for ${params?.duration}`;
-        case 'process.processedFor':
-          return `Processed ${params?.duration}`;
-        default:
-          if (!params) return key;
-          return `${key}:${Object.values(params).join(' ')}`;
-      }
-    },
-  }),
-}));
+vi.mock('react-i18next', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-i18next')>();
+  return {
+    ...actual,
+    useTranslation: () => ({
+      i18n: {
+        resolvedLanguage: 'en',
+        language: 'en',
+      },
+      t: (key: string, params?: Record<string, string | number>) => {
+        switch (key) {
+          case 'process.durationHourMinute':
+            return `${params?.hours}h ${params?.minutes}m`;
+          case 'process.durationMinuteSecond':
+            return `${params?.minutes}m ${params?.seconds}s`;
+          case 'process.durationSecond':
+            return `${params?.seconds}s`;
+          case 'process.workingFor':
+            return `Working for ${params?.duration}`;
+          case 'process.processedFor':
+            return `Processed ${params?.duration}`;
+          default:
+            if (!params) return key;
+            return `${key}:${Object.values(params).join(' ')}`;
+        }
+      },
+    }),
+  };
+});
 
 vi.mock('@/stores/chat', () => ({
   useChatStore: (selector: (state: typeof chatState) => unknown) => selector(chatState),
@@ -196,6 +200,30 @@ describe('Chat process turn rendering', () => {
     expect(screen.getByTestId('chat-process-activity-label')).toHaveTextContent('Thinking');
     expect(screen.getAllByTestId('chat-process-avatar')).toHaveLength(1);
     expect(screen.queryByTestId('chat-assistant-avatar')).not.toBeInTheDocument();
+  });
+
+  it('lightly formats markdown-looking thinking content in the live process stream', () => {
+    settingsState.assistantMessageStyle = 'stream';
+    chatState.pendingFinal = false;
+    chatState.streamingMessage = {
+      role: 'assistant',
+      content: [
+        {
+          type: 'thinking',
+          thinking: '### 内容分类\n\n1. **人工智能与大模型技术**\n- LM 技术报告',
+        },
+      ],
+      timestamp: fixedNow / 1000,
+    };
+
+    render(<Chat />);
+
+    const processContent = screen.getByTestId('chat-process-content');
+    expect(processContent).toBeInTheDocument();
+    expect(within(processContent).getByText('内容分类')).toBeInTheDocument();
+    expect(within(processContent).getByText('人工智能与大模型技术')).toBeInTheDocument();
+    expect(within(processContent).queryByText('### 内容分类')).not.toBeInTheDocument();
+    expect(within(processContent).queryByText('**人工智能与大模型技术**')).not.toBeInTheDocument();
   });
 
   it('keeps all unfinished output inside the process section while the reply is still streaming', () => {

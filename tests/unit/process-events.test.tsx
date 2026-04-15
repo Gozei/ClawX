@@ -241,7 +241,69 @@ describe('ProcessEventMessage', () => {
       />,
     );
 
-    const row = screen.getByTestId('chat-process-event-row');
-    expect(within(row).getByTestId('chat-process-event-summary')).toHaveTextContent('Working on 2 files, 1 search');
+    expect(screen.getAllByTestId('chat-process-event-row')).toHaveLength(3);
+    expect(screen.getAllByTestId('chat-process-event-summary').map((node) => node.textContent)).toEqual([
+      'Reading content',
+      'Reading content',
+      'Reading content',
+    ]);
+  });
+
+  it('hides internal heartbeat process reads and notes from the process stream', () => {
+    const { container } = render(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-heartbeat-1',
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '用户发来了heartbeat检查请求，我需要读取HEARTBEAT.md文件。' },
+            {
+              type: 'tool_use',
+              id: 'read-heartbeat-1',
+              name: 'read_file',
+              input: { path: 'C:/Users/Administrator/.openclaw/workspace/HEARTBEAT.md' },
+            },
+            {
+              type: 'tool_result',
+              id: 'read-heartbeat-1',
+              name: 'read_file',
+              content: '已读取内容 C:/Users/Administrator/.openclaw/workspace/HEARTBEAT.md',
+            },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="all"
+      />,
+    );
+
+    expect(screen.queryByTestId('chat-process-note-content')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-process-event-row')).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('keeps normal HEARTBEAT.md troubleshooting reads visible outside internal heartbeat flow', () => {
+    render(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-heartbeat-2',
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'I am comparing the committed HEARTBEAT.md template with the runtime workspace copy.' },
+            {
+              type: 'tool_use',
+              id: 'read-repo-heartbeat-1',
+              name: 'read_file',
+              input: { path: 'D:/AI/Deep AI Worker/ClawX/HEARTBEAT.md' },
+            },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="all"
+      />,
+    );
+
+    expect(screen.getByTestId('chat-process-note-content')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-process-event-row')).toBeInTheDocument();
+    expect(screen.getByText(/template with the runtime workspace copy/i)).toBeInTheDocument();
   });
 });

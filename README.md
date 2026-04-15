@@ -234,7 +234,7 @@ Deep AI Worker employs a **dual-process architecture** with a unified host API l
 └──────────────────────────────┬──────────────────────────────────┘
                                │
                                │ Main-owned transport strategy
-                               │ (WS first, HTTP then IPC fallback)
+                               │ (IPC default, optional WS/HTTP diagnostics)
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                Host API & Main Process Proxies                  │
@@ -244,7 +244,7 @@ Deep AI Worker employs a **dual-process architecture** with a unified host API l
 │  • Unified error mapping & retry/backoff                         │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
-                               │ WS / HTTP / IPC fallback
+                               │ IPC / optional WS / optional HTTP
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                     OpenClaw Gateway                             │
@@ -259,7 +259,7 @@ Deep AI Worker employs a **dual-process architecture** with a unified host API l
 
 - **Process Isolation**: The AI runtime operates in a separate process, ensuring UI responsiveness even during heavy computation
 - **Single Entry for Frontend Calls**: Renderer requests go through host-api/api-client; protocol details are hidden behind a stable interface
-- **Main-Process Transport Ownership**: Electron Main controls WS/HTTP usage and fallback to IPC for reliability
+- **Main-Process Transport Ownership**: Electron Main owns transport selection; runtime RPC defaults to IPC, while WS/HTTP remain available for diagnostics and compatibility work
 - **Graceful Recovery**: Built-in reconnect, timeout, and backoff logic handles transient failures automatically
 - **Secure Storage**: API keys and sensitive data leverage the operating system's native secure storage mechanisms
 - **CORS-Safe by Design**: Local HTTP access is proxied by Main, preventing renderer-side CORS issues

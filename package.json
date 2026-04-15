@@ -1,6 +1,6 @@
 {
     "name": "deep-ai-worker",
-    "version": "0.4.6",
+    "version": "0.5.1",
     "pnpm": {
         "onlyBuiltDependencies": [
             "@discordjs/opus",
@@ -13,6 +13,7 @@
             "sharp"
         ],
         "overrides": {
+            "libsignal": "file:vendor/libsignal-node-direct.tar.gz",
             "isbinaryfile": "^5.0.0",
             "https-proxy-agent": "7.0.6"
         },
@@ -40,7 +41,7 @@
         "bundle:openclaw-plugins": "zx scripts/bundle-openclaw-plugins.mjs",
         "bundle:preinstalled-skills": "zx scripts/bundle-preinstalled-skills.mjs",
         "lint": "eslint . --fix",
-        "typecheck": "tsc --noEmit",
+        "typecheck": "tsc -p tsconfig.typecheck.json && tsc -p tsconfig.node.typecheck.json",
         "test": "vitest run",
         "test:e2e": "pnpm run build:vite && playwright test",
         "test:e2e:headed": "pnpm run build:vite && playwright test --headed",
@@ -67,8 +68,9 @@
         "package:mac:zip:arm64:local": "SKIP_PREINSTALLED_SKILLS=1 pnpm run package && electron-builder --mac zip --arm64 --publish never",
         "package:win": "pnpm run prep:win-binaries && pnpm run package && electron-builder --win --publish never",
         "package:win:x64": "pnpm run prep:win-binaries:x64 && pnpm run package && electron-builder --win --x64 --publish never",
+        "package:win:x64:local": "SKIP_PREINSTALLED_SKILLS=1 pnpm run package && electron-builder --win --x64 --publish never",
         "package:linux": "pnpm run package && electron-builder --linux --publish never",
-        "package:linux:deb:x64": "pnpm run package && electron-builder --linux deb --x64 --publish never",
+        "package:linux:deb:x64:local": "SKIP_PREINSTALLED_SKILLS_DOWNLOAD=1 pnpm run package && electron-builder --linux deb --x64 --publish never",
         "package:linux:rpm:arm64": "pnpm run package && electron-builder --linux rpm --arm64 --publish never",
         "upload:cos": "zx scripts/upload-release-to-cos.mjs",
         "release": "pnpm run uv:download && pnpm run package && electron-builder --publish always",

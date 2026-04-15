@@ -425,9 +425,14 @@ export class WhatsAppLoginManager extends EventEmitter {
                 }
             });
 
-            this.socket.ev.on('connection.update', async (update: ConnectionState) => {
+            this.socket.ev.on('connection.update', (...args: unknown[]) => {
+                const [update] = args;
+                if (!update || typeof update !== 'object') {
+                    return;
+                }
+                void (async () => {
                 try {
-                    const { connection, lastDisconnect, qr } = update;
+                    const { connection, lastDisconnect, qr } = update as ConnectionState;
 
                     if (qr) {
                         this.qr = qr;
@@ -491,6 +496,7 @@ export class WhatsAppLoginManager extends EventEmitter {
                 } catch (innerErr) {
                     console.error('[WhatsAppLogin] Error in connection update:', innerErr);
                 }
+                })();
             });
 
         } catch (error) {
@@ -527,7 +533,7 @@ export class WhatsAppLoginManager extends EventEmitter {
                 // This ensures WhatsApp server receives a clean close frame
                 // and releases the session, preventing 401 on next connect
                 try {
-                    this.socket.ws?.close();
+                    this.socket.ws?.close?.();
                 } catch {
                     // ws may already be closed
                 }

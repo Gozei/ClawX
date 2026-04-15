@@ -23,6 +23,8 @@ export type {
 } from '@/lib/providers';
 export type { ProviderSnapshot } from '@/lib/provider-accounts';
 
+let refreshProviderSnapshotInFlight: Promise<void> | null = null;
+
 interface ProviderState {
   statuses: ProviderWithKeyInfo[];
   accounts: ProviderAccount[];
@@ -81,21 +83,31 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   refreshProviderSnapshot: async () => {
-    set({ loading: true, error: null });
-    
-    try {
-      const snapshot = await fetchProviderSnapshot();
-      
-      set({ 
-        statuses: snapshot.statuses ?? [],
-        accounts: snapshot.accounts ?? [],
-        vendors: snapshot.vendors ?? [],
-        defaultAccountId: snapshot.defaultAccountId ?? null,
-        loading: false 
-      });
-    } catch (error) {
-      set({ error: String(error), loading: false });
+    if (refreshProviderSnapshotInFlight) {
+      return refreshProviderSnapshotInFlight;
     }
+
+    set({ loading: true, error: null });
+
+    refreshProviderSnapshotInFlight = (async () => {
+      try {
+        const snapshot = await fetchProviderSnapshot();
+
+        set({
+          statuses: snapshot.statuses ?? [],
+          accounts: snapshot.accounts ?? [],
+          vendors: snapshot.vendors ?? [],
+          defaultAccountId: snapshot.defaultAccountId ?? null,
+          loading: false,
+        });
+      } catch (error) {
+        set({ error: String(error), loading: false });
+      } finally {
+        refreshProviderSnapshotInFlight = null;
+      }
+    })();
+
+    return refreshProviderSnapshotInFlight;
   },
 
   fetchProviders: async () => get().refreshProviderSnapshot(),

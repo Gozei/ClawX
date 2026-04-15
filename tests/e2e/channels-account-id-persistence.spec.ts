@@ -1,4 +1,4 @@
-import { completeSetup, expect, installIpcMocks, test } from './fixtures/electron';
+import { completeSetup, expect, installIpcMocks, openChannelsFromSettings, test } from './fixtures/electron';
 
 function stableStringify(value: unknown): string {
   if (value == null || typeof value !== 'object') return JSON.stringify(value);
@@ -55,8 +55,7 @@ test.describe('Channels account editor behavior', () => {
     });
 
     await completeSetup(page);
-    await page.getByTestId('sidebar-nav-channels').click();
-    await expect(page.getByTestId('channels-page')).toBeVisible();
+    await openChannelsFromSettings(page);
 
     const addAccountButton = page.locator('button').filter({
       hasText: /Add Account|添加账号|アカウントを追加/,

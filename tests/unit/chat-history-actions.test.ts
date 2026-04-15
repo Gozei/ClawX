@@ -62,6 +62,7 @@ vi.mock('@/lib/host-api', () => ({
 }));
 
 vi.mock('@/stores/chat/helpers', () => ({
+  CHAT_HISTORY_RPC_TIMEOUT_MS: 60_000,
   appendAssistantMessage: (...args: unknown[]) => appendAssistantMessage(...args),
   clearHistoryPoll: (...args: unknown[]) => clearHistoryPoll(...args),
   createLocalAssistantMessage: (...args: unknown[]) => createLocalAssistantMessage(...args),

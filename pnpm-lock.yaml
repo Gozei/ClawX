@@ -5,6 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  libsignal: file:vendor/libsignal-node-direct.tar.gz
   isbinaryfile: ^5.0.0
   https-proxy-agent: 7.0.6
 
@@ -2979,8 +2980,8 @@ packages:
       link-preview-js:
         optional: true
 
-  '@whiskeysockets/libsignal-node@git+https://git@github.com:whiskeysockets/libsignal-node.git#1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67':
-    resolution: {commit: 1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67, repo: git@github.com:whiskeysockets/libsignal-node.git, type: git}
+  '@whiskeysockets/libsignal-node@file:vendor/libsignal-node-direct.tar.gz':
+    resolution: {integrity: sha512-/bVVmcH9cQi0WljVkF/jfSMXDhq5P3HkkJw6633ZsYe7DXKP72BOPM+Oi09ZkR6SoCcXePk6i5xgYY/FiRH4xA==}
     version: 2.0.1
 
   '@xmldom/xmldom@0.8.11':
@@ -10682,7 +10683,7 @@ snapshots:
       '@cacheable/node-cache': 1.7.6
       '@hapi/boom': 9.1.4
       async-mutex: 0.5.0
-      libsignal: '@whiskeysockets/libsignal-node@git+https://git@github.com:whiskeysockets/libsignal-node.git#1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67'
+      libsignal: '@whiskeysockets/libsignal-node@file:vendor/libsignal-node-direct.tar.gz'
       lru-cache: 11.2.7
       music-metadata: 11.12.3
       p-queue: 9.1.0
@@ -10697,7 +10698,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@whiskeysockets/libsignal-node@git+https://git@github.com:whiskeysockets/libsignal-node.git#1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67':
+  '@whiskeysockets/libsignal-node@file:vendor/libsignal-node-direct.tar.gz':
     dependencies:
       curve25519-js: 0.0.4
       protobufjs: 6.8.8

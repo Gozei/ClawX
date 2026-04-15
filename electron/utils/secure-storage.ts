@@ -36,6 +36,14 @@ export interface ProviderConfig {
   apiProtocol?: 'openai-completions' | 'openai-responses' | 'anthropic-messages';
   headers?: Record<string, string>;
   model?: string;
+  metadata?: {
+    region?: string;
+    email?: string;
+    resourceUrl?: string;
+    customModels?: string[];
+    modelProtocols?: Record<string, 'openai-completions' | 'openai-responses' | 'anthropic-messages'>;
+    modelUsageTags?: Record<string, string[]>;
+  };
   fallbackModels?: string[];
   fallbackProviderIds?: string[];
   enabled: boolean;

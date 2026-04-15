@@ -38,10 +38,15 @@
     "composer": {
         "attachFiles": "Attach files",
         "pickAgent": "Choose role",
+        "selectModel": "Switch model",
+        "switchModel": "Switch model",
+        "messagePlaceholder": "Send a message...",
         "clearTarget": "Clear target role",
         "targetChip": "@{{agent}}",
         "agentPickerTitle": "Route the next message to another role",
         "gatewayDisconnectedPlaceholder": "Gateway not connected...",
+        "modelSwitchSuccess": "Switched to {{model}}",
+        "modelSwitchFailed": "Failed to switch model. Still using {{model}}: {{error}}",
         "send": "Send",
         "stop": "Stop",
         "gatewayConnected": "connected",
@@ -57,6 +62,17 @@
         "sendFailed": "Failed to send message. Please check the provider or gateway status and try again.",
         "sendFailedWithDetail": "Failed to send message: {{error}}",
         "emptyAssistantResponse": "The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key."
+    },
+    "sessionErrorDetails": {
+        "authInvalid": "Authentication failed. Check API key or login status and try again.",
+        "timeout": "Request timed out. Please try again.",
+        "rateLimit": "Too many requests. Please wait and try again.",
+        "permission": "Permission denied. Check your configuration and try again.",
+        "channelUnavailable": "Service channel unavailable. Restart the app or gateway and try again.",
+        "network": "Network error. Please verify connectivity and try again.",
+        "config": "Configuration is invalid. Please review your settings and try again.",
+        "gatewayNotConnected": "Gateway not connected.",
+        "gatewayUnavailable": "Gateway is unavailable. Start or restart the gateway and try again."
     },
     "sessionWarnings": {
         "finalReplyMissing": "The final reply did not arrive, but you can continue the conversation.",

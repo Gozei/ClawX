@@ -1,4 +1,5 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+/* eslint-disable react-refresh/only-export-components */
+import { memo, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -6,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import type { ContentBlock, RawMessage, ToolStatus } from '@/stores/chat';
 import type { ChatProcessDisplayMode } from '@/stores/settings';
 import { cn } from '@/lib/utils';
+import { StreamingMarkdownPreview } from './StreamingMarkdownPreview';
 
 type ProcessSurface = 'thinking' | 'terminal' | 'code' | 'read' | 'tool' | 'note';
 type ProcessAction = 'generic' | 'browser_start' | 'browser_page' | 'browser' | 'shell' | 'code' | 'read';
@@ -35,6 +37,52 @@ function truncate(text: string, maxLength = 96): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength - 3)}...`;
+}
+
+const HEARTBEAT_FILE_RE = /(?:^|[\\/])HEARTBEAT\.md\b/i;
+const INTERNAL_HEARTBEAT_PATH_RE = /(?:^|[\\/])\.openclaw[\\/]+workspace[\\/]+HEARTBEAT\.md\b/i;
+const HEARTBEAT_INTERNAL_TEXT_RE =
+  /(?:Read HEARTBEAT\.md if it exists|如果存在 HEARTBEAT\.md|读取 HEARTBEAT\.md 时|HEARTBEAT_OK|NO_REPLY|heartbeat check|heartbeat检查|当前时间：|Current time:|用户要求我读取 ?HEARTBEAT\.md|用户发来了heartbeat检查请求|用户又发了一次心跳检查)/i;
+
+function isHeartbeatPath(value: string | undefined): boolean {
+  if (!value) return false;
+  return HEARTBEAT_FILE_RE.test(value.trim());
+}
+
+function isInternalHeartbeatPath(value: string | undefined): boolean {
+  if (!value) return false;
+  return INTERNAL_HEARTBEAT_PATH_RE.test(value.trim());
+}
+
+function isHeartbeatProcessText(value: string | undefined): boolean {
+  if (!value) return false;
+  const text = value.trim();
+  if (!text) return false;
+  return HEARTBEAT_INTERNAL_TEXT_RE.test(text)
+    || (text.includes('HEARTBEAT.md') && /(?:heartbeat|心跳|工作区|workspace)/i.test(text));
+}
+
+function shouldHideHeartbeatProcessItem(item: ProcessEventItem): boolean {
+  const detail = item.detail?.trim();
+  const preview = item.preview?.trim();
+  const label = item.label?.trim();
+
+  if (item.surface === 'read' && [detail, preview, label].some((value) => isInternalHeartbeatPath(value))) {
+    return true;
+  }
+
+  if (item.kind === 'thinking' || item.kind === 'note') {
+    return [detail, preview].some((value) => isHeartbeatProcessText(value))
+      && [detail, preview].some((value) => isHeartbeatPath(value) || isInternalHeartbeatPath(value));
+  }
+
+  return [detail, preview].some((value) => isHeartbeatProcessText(value))
+    && [detail, preview].some((value) => isInternalHeartbeatPath(value));
+}
+
+function isInternalHeartbeatReadItem(item: ProcessEventItem): boolean {
+  if (item.surface !== 'read') return false;
+  return [item.detail?.trim(), item.preview?.trim(), item.label?.trim()].some((value) => isInternalHeartbeatPath(value));
 }
 
 function formatUnknownContent(value: unknown): string {
@@ -329,7 +377,14 @@ export function getProcessEventItems(
     items.push(...createUnmatchedStatusItems(items, streamingTools));
   }
 
-  return items;
+  const hasInternalHeartbeatRead = items.some((item) => isInternalHeartbeatReadItem(item));
+
+  return items.filter((item) => {
+    if (shouldHideHeartbeatProcessItem(item)) return false;
+    if (!hasInternalHeartbeatRead) return true;
+    if (item.kind !== 'thinking' && item.kind !== 'note') return true;
+    return ![item.detail?.trim(), item.preview?.trim()].some((value) => isHeartbeatProcessText(value));
+  });
 }
 
 function normalizeLocale(language: string | undefined): 'zh' | 'en' {
@@ -475,9 +530,7 @@ function ProcessEventDetail({
   if (isDirectContent(item)) {
     if (preferPlainText) {
       return (
-        <div className="whitespace-pre-wrap break-words text-[14px] leading-7 text-foreground">
-          {item.detail}
-        </div>
+        <StreamingMarkdownPreview content={item.detail} className="space-y-2 text-foreground" />
       );
     }
     return (
@@ -526,13 +579,9 @@ const ProcessEventRow = memo(function ProcessEventRow({
   expandedByDefault?: boolean;
 }) {
   const canExpand = !!item.detail;
-  const [expanded, setExpanded] = useState(expandedByDefault && canExpand);
+  const [expanded, setExpanded] = useState(() => expandedByDefault && canExpand);
   const durationLabel = formatDuration(item.durationMs);
   const summaryLabel = formatEventStatusLabel(item, language);
-
-  useEffect(() => {
-    setExpanded(expandedByDefault && canExpand);
-  }, [canExpand, expandedByDefault, item.key]);
 
   return (
     <div data-testid="chat-process-event-row" className="group py-0.5">

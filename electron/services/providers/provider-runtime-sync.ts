@@ -15,6 +15,7 @@ import {
   updateAgentModelProvider,
   updateSingleAgentModelProvider,
 } from '../../utils/openclaw-auth';
+import { getOpenClawProviderKeyForType } from '../../utils/provider-keys';
 import { logger } from '../../utils/logger';
 import { listAgentsSnapshot } from '../../utils/agent-config';
 
@@ -46,6 +47,35 @@ type RuntimeProviderSyncContext = {
   meta: ReturnType<typeof getProviderConfig>;
   api: string;
 };
+type ProviderProtocol = 'openai-completions' | 'openai-responses' | 'anthropic-messages';
+const SUPPORTED_PROVIDER_PROTOCOLS: ProviderProtocol[] = ['openai-completions', 'openai-responses', 'anthropic-messages'];
+
+function getConfiguredModelProtocol(config: ProviderConfig, modelId?: string): ProviderProtocol | undefined {
+  const normalizedModelId = (modelId || '').trim();
+  const mapping = config.metadata?.modelProtocols;
+  if (normalizedModelId && mapping && typeof mapping[normalizedModelId] === 'string') {
+    const protocol = mapping[normalizedModelId];
+    if (SUPPORTED_PROVIDER_PROTOCOLS.includes(protocol)) {
+      return protocol;
+    }
+  }
+  return undefined;
+}
+
+function resolveProviderApiProtocol(
+  config: ProviderConfig,
+  fallbackApi: string | undefined,
+  modelId?: string,
+): string | undefined {
+  return getConfiguredModelProtocol(config, modelId) || fallbackApi;
+}
+
+function getConfiguredProviderModelIds(config: ProviderConfig): string[] {
+  return Array.from(new Set([
+    (config.model || '').trim(),
+    ...((config.metadata?.customModels ?? []).map((modelId) => modelId.trim())),
+  ].filter(Boolean)));
+}
 
 function normalizeProviderBaseUrl(
   config: ProviderConfig,
@@ -82,25 +112,7 @@ function shouldUseExplicitDefaultOverride(config: ProviderConfig, runtimeProvide
   return Boolean(config.baseUrl || config.apiProtocol || runtimeProviderKey !== config.type);
 }
 
-export function getOpenClawProviderKey(type: string, providerId: string): string {
-  if (isUnregisteredProviderType(type)) {
-    // If the providerId is already a runtime key (e.g. re-seeded from openclaw.json
-    // as "custom-XXXXXXXX"), return it directly to avoid double-hashing.
-    const prefix = `${type}-`;
-    if (providerId.startsWith(prefix)) {
-      const tail = providerId.slice(prefix.length);
-      if (tail.length === 8 && !tail.includes('-')) {
-        return providerId;
-      }
-    }
-    const suffix = providerId.replace(/-/g, '').slice(0, 8);
-    return `${type}-${suffix}`;
-  }
-  if (type === 'minimax-portal-cn') {
-    return 'minimax-portal';
-  }
-  return type;
-}
+export const getOpenClawProviderKey = getOpenClawProviderKeyForType;
 
 async function resolveRuntimeProviderKey(config: ProviderConfig): Promise<string> {
   const account = await getProviderAccount(config.id);
@@ -192,6 +204,17 @@ export async function getProviderFallbackModelRefs(config: ProviderConfig): Prom
 
 type GatewayRefreshMode = 'reload' | 'restart';
 
+const PROVIDER_REFRESH_DEBOUNCE_MS = 2500;
+let pendingGatewayRefreshTimer: NodeJS.Timeout | null = null;
+let pendingGatewayRefreshRequest:
+  | {
+    message: string;
+    mode: GatewayRefreshMode;
+    onlyIfRunning: boolean;
+    gatewayManager?: GatewayManager;
+  }
+  | null = null;
+
 function scheduleGatewayRefresh(
   gatewayManager: GatewayManager | undefined,
   message: string,
@@ -205,12 +228,52 @@ function scheduleGatewayRefresh(
     return;
   }
 
-  logger.info(message);
-  if (options?.mode === 'restart') {
-    gatewayManager.debouncedRestart(options?.delayMs);
-    return;
+  const requestedMode = options?.mode === 'restart' ? 'restart' : 'reload';
+  const requestedOnlyIfRunning = options?.onlyIfRunning === true;
+
+  if (!pendingGatewayRefreshRequest) {
+    pendingGatewayRefreshRequest = {
+      message,
+      mode: requestedMode,
+      onlyIfRunning: requestedOnlyIfRunning,
+      gatewayManager,
+    };
+  } else {
+    pendingGatewayRefreshRequest = {
+      message,
+      mode: pendingGatewayRefreshRequest.mode === 'restart' || requestedMode === 'restart' ? 'restart' : 'reload',
+      onlyIfRunning: pendingGatewayRefreshRequest.onlyIfRunning && requestedOnlyIfRunning,
+      gatewayManager: pendingGatewayRefreshRequest.gatewayManager || gatewayManager,
+    };
   }
-  gatewayManager.debouncedReload(options?.delayMs);
+
+  if (pendingGatewayRefreshTimer) {
+    clearTimeout(pendingGatewayRefreshTimer);
+  }
+
+  const effectiveDelayMs = Math.max(options?.delayMs ?? 0, PROVIDER_REFRESH_DEBOUNCE_MS);
+  pendingGatewayRefreshTimer = setTimeout(() => {
+    const request = pendingGatewayRefreshRequest;
+    pendingGatewayRefreshRequest = null;
+    pendingGatewayRefreshTimer = null;
+
+    if (!request?.gatewayManager) {
+      return;
+    }
+
+    if (request.onlyIfRunning && request.gatewayManager.getStatus().state === 'stopped') {
+      return;
+    }
+
+    logger.info(
+      `[provider-runtime] Applying batched gateway ${request.mode}: ${request.message}`,
+    );
+    if (request.mode === 'restart') {
+      request.gatewayManager.debouncedRestart();
+      return;
+    }
+    request.gatewayManager.debouncedReload();
+  }, effectiveDelayMs);
 }
 
 export async function syncProviderApiKeyToRuntime(
@@ -304,7 +367,11 @@ async function syncProviderSecretToRuntime(
 async function resolveRuntimeSyncContext(config: ProviderConfig): Promise<RuntimeProviderSyncContext | null> {
   const runtimeProviderKey = await resolveRuntimeProviderKey(config);
   const meta = getProviderConfig(config.type);
-  const api = config.apiProtocol || (isUnregisteredProviderType(config.type) ? 'openai-completions' : meta?.api);
+  const api = resolveProviderApiProtocol(
+    config,
+    isUnregisteredProviderType(config.type) ? 'openai-completions' : meta?.api,
+    config.model,
+  );
   if (!api) {
     return null;
   }
@@ -320,12 +387,14 @@ async function syncRuntimeProviderConfig(
   config: ProviderConfig,
   context: RuntimeProviderSyncContext,
 ): Promise<void> {
-  await syncProviderConfigToOpenClaw(context.runtimeProviderKey, config.model, {
+  const configuredModelIds = getConfiguredProviderModelIds(config);
+  const override = {
     baseUrl: normalizeProviderBaseUrl(config, config.baseUrl || context.meta?.baseUrl, context.api),
     api: context.api,
     apiKeyEnv: context.meta?.apiKeyEnv,
     headers: config.headers ?? context.meta?.headers,
-  });
+  };
+  await syncProviderConfigToOpenClaw(context.runtimeProviderKey, configuredModelIds, override);
 }
 
 async function syncCustomProviderAgentModel(
@@ -343,10 +412,12 @@ async function syncCustomProviderAgentModel(
   }
 
   const modelId = config.model;
+  const configuredModelIds = getConfiguredProviderModelIds(config);
+  const api = resolveProviderApiProtocol(config, 'openai-completions', modelId) || 'openai-completions';
   await updateAgentModelProvider(runtimeProviderKey, {
-    baseUrl: normalizeProviderBaseUrl(config, config.baseUrl, config.apiProtocol || 'openai-completions'),
-    api: config.apiProtocol || 'openai-completions',
-    models: modelId ? [{ id: modelId, name: modelId }] : [],
+    baseUrl: normalizeProviderBaseUrl(config, config.baseUrl, api),
+    api,
+    models: configuredModelIds.map((id) => ({ id, name: id })),
     apiKey: resolvedKey,
   });
 }
@@ -423,7 +494,11 @@ async function buildAgentModelProviderEntry(
   authHeader?: boolean;
 } | null> {
   const meta = getProviderConfig(config.type);
-  const api = config.apiProtocol || (isUnregisteredProviderType(config.type) ? 'openai-completions' : meta?.api);
+  const api = resolveProviderApiProtocol(
+    config,
+    isUnregisteredProviderType(config.type) ? 'openai-completions' : meta?.api,
+    modelId,
+  );
   const baseUrl = normalizeProviderBaseUrl(config, config.baseUrl || meta?.baseUrl, api);
   if (!api || !baseUrl) {
     return null;
@@ -540,9 +615,10 @@ export async function syncUpdatedProviderToRuntime(
         await setOpenClawDefaultModel(ock, modelOverride, fallbackModels);
       }
     } else {
+      const api = resolveProviderApiProtocol(config, 'openai-completions', config.model) || 'openai-completions';
       await setOpenClawDefaultModelWithOverride(ock, modelOverride, {
-        baseUrl: normalizeProviderBaseUrl(config, config.baseUrl, config.apiProtocol || 'openai-completions'),
-        api: config.apiProtocol || 'openai-completions',
+        baseUrl: normalizeProviderBaseUrl(config, config.baseUrl, api),
+        api,
         headers: config.headers,
       }, fallbackModels);
     }
@@ -615,9 +691,10 @@ export async function syncDefaultProviderToRuntime(
       : undefined;
 
     if (isUnregisteredProviderType(provider.type)) {
+      const api = resolveProviderApiProtocol(provider, 'openai-completions', provider.model) || 'openai-completions';
       await setOpenClawDefaultModelWithOverride(ock, modelOverride, {
-        baseUrl: normalizeProviderBaseUrl(provider, provider.baseUrl, provider.apiProtocol || 'openai-completions'),
-        api: provider.apiProtocol || 'openai-completions',
+        baseUrl: normalizeProviderBaseUrl(provider, provider.baseUrl, api),
+        api,
         headers: provider.headers,
       }, fallbackModels);
     } else if (shouldUseExplicitDefaultOverride(provider, ock)) {
@@ -625,9 +702,9 @@ export async function syncDefaultProviderToRuntime(
         baseUrl: normalizeProviderBaseUrl(
           provider,
           provider.baseUrl || getProviderConfig(provider.type)?.baseUrl,
-          provider.apiProtocol || getProviderConfig(provider.type)?.api,
+          resolveProviderApiProtocol(provider, getProviderConfig(provider.type)?.api, provider.model),
         ),
-        api: provider.apiProtocol || getProviderConfig(provider.type)?.api,
+        api: resolveProviderApiProtocol(provider, getProviderConfig(provider.type)?.api, provider.model),
         apiKeyEnv: getProviderConfig(provider.type)?.apiKeyEnv,
         headers: provider.headers ?? getProviderConfig(provider.type)?.headers,
       }, fallbackModels);
@@ -637,6 +714,11 @@ export async function syncDefaultProviderToRuntime(
 
     if (providerKey) {
       await saveProviderKeyToOpenClaw(ock, providerKey);
+    }
+
+    const context = await resolveRuntimeSyncContext(provider);
+    if (context) {
+      await syncRuntimeProviderConfig(provider, context);
     }
   } else {
     if (browserOAuthRuntimeProvider) {
@@ -714,11 +796,12 @@ export async function syncDefaultProviderToRuntime(
     providerKey &&
     provider.baseUrl
   ) {
-    const modelId = provider.model;
+    const configuredModelIds = getConfiguredProviderModelIds(provider);
+    const api = resolveProviderApiProtocol(provider, 'openai-completions', provider.model) || 'openai-completions';
     await updateAgentModelProvider(ock, {
-      baseUrl: normalizeProviderBaseUrl(provider, provider.baseUrl, provider.apiProtocol || 'openai-completions'),
-      api: provider.apiProtocol || 'openai-completions',
-      models: modelId ? [{ id: modelId, name: modelId }] : [],
+      baseUrl: normalizeProviderBaseUrl(provider, provider.baseUrl, api),
+      api,
+      models: configuredModelIds.map((id) => ({ id, name: id })),
       apiKey: providerKey,
     });
   }

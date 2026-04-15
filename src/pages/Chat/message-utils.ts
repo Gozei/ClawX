@@ -17,24 +17,114 @@ function isNonBodyAssistantBlockType(type: string | undefined): boolean {
     || t === 'image';
 }
 
+const SYSTEM_LINE_RE = /^System(?: \(untrusted\))?:\s*(?:\[[^\]]+\]\s*)?(.*)$/i;
+const EXEC_SYSTEM_RE = /^Exec (?:completed|finished)\s*\(([^)]*)\)(?:\s*::\s*([\s\S]*))?$/i;
+const CONVERSATION_INFO_PREFIX_RE = /^Conversation info\s*\([^)]*\):/i;
+const HEARTBEAT_PROMPT_LINE_RE =
+  /^(如果存在 HEARTBEAT\.md|Read HEARTBEAT\.md if it exists|读取 HEARTBEAT\.md 时|Current time:|当前时间：)/i;
+
+function summarizeSystemHeartbeatNoise(text: string): string {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) return '';
+
+  let execCount = 0;
+  let abnormalExecCount = 0;
+  let heartbeatLineCount = 0;
+  let otherSystemLineCount = 0;
+
+  for (const line of lines) {
+    if (HEARTBEAT_PROMPT_LINE_RE.test(line)) {
+      heartbeatLineCount += 1;
+      continue;
+    }
+
+    const systemMatch = line.match(SYSTEM_LINE_RE);
+    if (!systemMatch) {
+      return text;
+    }
+
+    const payload = systemMatch[1]?.trim() ?? '';
+    const execMatch = payload.match(EXEC_SYSTEM_RE);
+    if (execMatch) {
+      execCount += 1;
+      const metadata = execMatch[1] ?? '';
+      const exitCode = metadata.match(/(?:^|,\s*)code\s+(-?\d+)/i)?.[1];
+      if ((exitCode && exitCode !== '0') || /signal\s+\S+/i.test(metadata)) {
+        abnormalExecCount += 1;
+      }
+      continue;
+    }
+
+    if (payload) {
+      otherSystemLineCount += 1;
+      continue;
+    }
+
+    return text;
+  }
+
+  if (execCount === 0 && heartbeatLineCount === 0) {
+    return text;
+  }
+
+  // Hide heartbeat-only prompt injection from the visible chat transcript.
+  // It's internal workspace context, not user-authored content.
+  if (execCount === 0 && otherSystemLineCount === 0 && heartbeatLineCount > 0) {
+    return '';
+  }
+
+  const summaryLines: string[] = [];
+  if (execCount > 0) {
+    let execSummary = `系统事件：已记录 ${execCount} 个后台执行结果`;
+    if (abnormalExecCount > 0) {
+      execSummary += `，其中 ${abnormalExecCount} 个异常退出`;
+    }
+    summaryLines.push(`${execSummary}。`);
+  }
+
+  if (otherSystemLineCount > 0) {
+    summaryLines.push(`系统提示：另有 ${otherSystemLineCount} 条附加系统事件。`);
+  }
+
+  if (heartbeatLineCount > 0) {
+    summaryLines.push('心跳检查：已附带工作区 HEARTBEAT 提示。');
+  }
+
+  return summaryLines.join('\n');
+}
+
+function stripInjectedConversationInfo(text: string): string {
+  if (!CONVERSATION_INFO_PREFIX_RE.test(text)) {
+    return text;
+  }
+
+  const withoutConversationInfo = text
+    .replace(/^Conversation info\s*\([^)]*\):\s*```[a-z]*\n[\s\S]*?```\s*/i, '')
+    .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '');
+
+  return withoutConversationInfo.replace(/^Execution playbook:\s*(?:\r?\n- .*)+\s*/i, '');
+}
+
 /**
  * Clean Gateway metadata from user message text for display.
  * Strips: [media attached: ... | ...], [message_id: ...],
  * and the timestamp prefix [Day Date Time Timezone].
  */
 function cleanUserText(text: string): string {
-  return text
+  const cleaned = stripInjectedConversationInfo(text
     // Remove [media attached: path (mime) | path] references
     .replace(/\s*\[media attached:[^\]]*\]/g, '')
     // Remove [message_id: uuid]
     .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')
-    // Remove Gateway-injected "Conversation info (untrusted metadata): ```json...```" block
-    .replace(/^Conversation info\s*\([^)]*\):\s*```[a-z]*\n[\s\S]*?```\s*/i, '')
-    // Fallback: remove "Conversation info (...): {...}" without code block wrapper
-    .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '')
     // Remove Gateway timestamp prefix like [Fri 2026-02-13 22:39 GMT+8]
-    .replace(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i, '')
+    .replace(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i, ''))
     .trim();
+
+  return summarizeSystemHeartbeatNoise(cleaned);
 }
 
 /**

@@ -74,33 +74,9 @@ export function SkillMarketplaceSheet({
     return 0;
   };
 
-  const installedSkillIndex = useMemo(() => {
-    const index = new Map<string, MarketplaceInstalledSkill>();
-
-    for (const entry of installedSkills) {
-      const sourceKey = entry.sourceId ?? '';
-      const keys = [entry.slug].map(normalizeSkillKey).filter(Boolean);
-      for (const key of keys) {
-        index.set(`${sourceKey}:${key}`, entry);
-      }
-    }
-
-    return index;
-  }, [installedSkills]);
-
   const sourcePriorityIndex = useMemo(() => {
     return new Map(sources.map((source, index) => [source.id, index]));
   }, [sources]);
-
-  const findInstalledSkillForSource = (skill: MarketplaceSkill) => {
-    const sourceKey = skill.sourceId ?? '';
-    const lookupKeys = [skill.slug, skill.name].map(normalizeSkillKey).filter(Boolean);
-    for (const key of lookupKeys) {
-      const match = installedSkillIndex.get(`${sourceKey}:${key}`);
-      if (match) return match;
-    }
-    return undefined;
-  };
 
   const findEffectiveInstalledSkill = (skill: MarketplaceSkill) => {
     const targetKey = normalizeSkillKey(skill.slug);

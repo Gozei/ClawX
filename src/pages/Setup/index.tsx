@@ -117,6 +117,19 @@ import { useBranding } from '@/lib/branding';
 
 // Use the shared provider registry for setup providers
 const providers = SETUP_PROVIDERS;
+const GATEWAY_STARTUP_WARN_MS = 15_000;
+const GATEWAY_STARTUP_SLOW_MS = 45_000;
+const GATEWAY_STARTUP_TIMEOUT_MS = 90_000;
+
+function getGatewayStartupStatusMessage(elapsedMs: number): string {
+  if (elapsedMs >= GATEWAY_STARTUP_SLOW_MS) {
+    return 'Gateway is taking longer than usual. Loading channels, plugins, or provider state may still be in progress...';
+  }
+  if (elapsedMs >= GATEWAY_STARTUP_WARN_MS) {
+    return 'Gateway is still starting. Waiting for OpenClaw runtime and channel initialization...';
+  }
+  return 'Starting OpenClaw runtime...';
+}
 
 function getProtocolBaseUrlPlaceholder(
   apiProtocol: ProviderAccount['apiProtocol'],
@@ -407,6 +420,8 @@ function RuntimeContent({ onStatusChange }: RuntimeContentProps) {
   });
   const [showLogs, setShowLogs] = useState(false);
   const [logContent, setLogContent] = useState('');
+  const [gatewayStartupElapsedMs, setGatewayStartupElapsedMs] = useState(0);
+  const gatewayStartupStartedAtRef = useRef<number | null>(null);
   const [openclawDir, setOpenclawDir] = useState('');
   const gatewayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -508,6 +523,32 @@ function RuntimeContent({ onStatusChange }: RuntimeContentProps) {
 
   // Update gateway check when gateway status changes
   useEffect(() => {
+    if (gatewayStatus.state === 'running' || gatewayStatus.state === 'error') {
+      gatewayStartupStartedAtRef.current = null;
+      setGatewayStartupElapsedMs(0);
+      return;
+    }
+
+    if (gatewayStatus.state !== 'starting' && gatewayStatus.state !== 'reconnecting' && gatewayStatus.state !== 'stopped') {
+      return;
+    }
+
+    if (gatewayStartupStartedAtRef.current === null) {
+      gatewayStartupStartedAtRef.current = Date.now();
+    }
+
+    const updateElapsed = () => {
+      const startedAt = gatewayStartupStartedAtRef.current;
+      if (startedAt === null) return;
+      setGatewayStartupElapsedMs(Date.now() - startedAt);
+    };
+
+    updateElapsed();
+    const timer = setInterval(updateElapsed, 1000);
+    return () => clearInterval(timer);
+  }, [gatewayStatus.state]);
+
+  useEffect(() => {
     if (gatewayStatus.state === 'running') {
       setChecks((prev) => ({
         ...prev,
@@ -521,11 +562,11 @@ function RuntimeContent({ onStatusChange }: RuntimeContentProps) {
     } else if (gatewayStatus.state === 'starting' || gatewayStatus.state === 'reconnecting') {
       setChecks((prev) => ({
         ...prev,
-        gateway: { status: 'checking', message: 'Starting...' },
+        gateway: { status: 'checking', message: getGatewayStartupStatusMessage(gatewayStartupElapsedMs) },
       }));
     }
     // 'stopped' state: keep current check status (likely 'checking') to allow startup time
-  }, [gatewayStatus, t]);
+  }, [gatewayStartupElapsedMs, gatewayStatus, t]);
 
   // Gateway startup timeout — show error only after giving enough time to initialize
   useEffect(() => {
@@ -550,7 +591,7 @@ function RuntimeContent({ onStatusChange }: RuntimeContentProps) {
         }
         return prev;
       });
-    }, 600 * 1000); // 600 seconds — enough for gateway to fully initialize
+    }, GATEWAY_STARTUP_TIMEOUT_MS);
 
     return () => {
       if (gatewayTimeoutRef.current) {

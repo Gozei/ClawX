@@ -89,8 +89,7 @@ function buildQrLoginKey(channelType: string, accountId?: string): string {
 }
 
 async function isLegacyConfiguredAccountId(channelType: string, accountId: string): Promise<boolean> {
-  const config = await readOpenClawConfig();
-  const configuredAccounts = listConfiguredChannelAccountsFromConfig(config) ?? {};
+  const configuredAccounts = await listConfiguredChannelAccounts();
   const storedChannelType = resolveStoredChannelType(channelType);
   const knownAccountIds = configuredAccounts[storedChannelType]?.accountIds ?? [];
   return knownAccountIds.includes(accountId);

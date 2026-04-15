@@ -144,7 +144,7 @@ describe('connectGatewaySocket', () => {
     expect(pendingRequests.size).toBe(0);
   });
 
-  it('still fails when the connect response exceeds the configured timeout', async () => {
+  it('still fails when the connect response exceeds the configured timeout after handshake retries are exhausted', async () => {
     const pendingRequests = new Map();
 
     const connectionPromise = connectGatewaySocket({
@@ -172,7 +172,25 @@ describe('connectGatewaySocket', () => {
     });
 
     await flushMicrotasks();
-    await vi.advanceTimersByTimeAsync(1_001);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await vi.advanceTimersByTimeAsync(1_001);
+      await flushMicrotasks();
+
+      if (attempt === 3) {
+        break;
+      }
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      const retrySocket = getLatestSocket();
+      retrySocket.emitOpen();
+      retrySocket.emitJsonMessage({
+        type: 'event',
+        event: 'connect.challenge',
+        payload: { nonce: `nonce-retry-${attempt}` },
+      });
+      await flushMicrotasks();
+    }
 
     const connectionError = await connectionErrorPromise;
     expect(connectionError).toBeInstanceOf(Error);

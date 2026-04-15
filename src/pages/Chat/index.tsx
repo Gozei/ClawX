@@ -36,8 +36,6 @@ export function Chat() {
   const { t } = useTranslation('chat');
   const navigate = useNavigate();
   const gatewayStatus = useGatewayStore((s) => s.status);
-  const startGateway = useGatewayStore((s) => s.start);
-  const restartGateway = useGatewayStore((s) => s.restart);
   const isGatewayRunning = gatewayStatus.state === 'running';
 
   const messages = useChatStore((s) => s.messages);
@@ -48,20 +46,18 @@ export function Chat() {
   const showThinking = useChatStore((s) => s.showThinking);
   const chatProcessDisplayMode = useSettingsStore((s) => s.chatProcessDisplayMode);
   const assistantMessageStyle = useSettingsStore((s) => s.assistantMessageStyle);
-  const streamingMessage = useChatStore((s) => s.streamingMessage);
+  const activeTurnBuffer = useChatStore((s) => s.activeTurnBuffer);
+  const rawStreamingMessage = useChatStore((s) => s.streamingMessage);
   const streamingTools = useChatStore((s) => s.streamingTools);
   const pendingFinal = useChatStore((s) => s.pendingFinal);
-  const lastUserMessageAt = useChatStore((s) => s.lastUserMessageAt);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const abortRun = useChatStore((s) => s.abortRun);
   const clearError = useChatStore((s) => s.clearError);
   const fetchAgents = useAgentsStore((s) => s.fetchAgents);
 
   const cleanupEmptySession = useChatStore((s) => s.cleanupEmptySession);
-  const loadHistory = useChatStore((s) => s.loadHistory);
 
   const safeMessages = Array.isArray(messages) ? messages : EMPTY_MESSAGES;
-  const [streamingTimestamp, setStreamingTimestamp] = useState<number>(0);
   const minLoading = useMinLoading(loading && safeMessages.length > 0);
   const { contentRef, scrollRef } = useStickToBottomInstant(currentSessionKey);
 
@@ -82,132 +78,68 @@ export function Chat() {
     void fetchAgents();
   }, [fetchAgents]);
 
-  // 网关可能晚于 UI 把助手消息写入 chat.history；末尾仍为用户时防抖静默补拉，避免长时间只显示「已处理」而无正文
-  const orphanHistoryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastMessageSig = useMemo(() => {
-    const last = safeMessages.length > 0 ? safeMessages[safeMessages.length - 1] : null;
-    if (!last) return '';
-    return `${currentSessionKey}|${last.id ?? ''}|${last.timestamp ?? ''}|${last.role ?? ''}|${safeMessages.length}`;
-  }, [currentSessionKey, safeMessages]);
-
-  useEffect(() => {
-    if (!isGatewayRunning || sending || loading) {
-      return undefined;
-    }
-    const last = safeMessages.length > 0 ? safeMessages[safeMessages.length - 1] : null;
-    if (!last || last.role !== 'user') {
-      if (orphanHistoryTimerRef.current) {
-        clearTimeout(orphanHistoryTimerRef.current);
-        orphanHistoryTimerRef.current = null;
-      }
-      return undefined;
-    }
-    if (orphanHistoryTimerRef.current) {
-      clearTimeout(orphanHistoryTimerRef.current);
-    }
-    orphanHistoryTimerRef.current = setTimeout(() => {
-      orphanHistoryTimerRef.current = null;
-      void loadHistory(true);
-    }, 1200);
-    return () => {
-      if (orphanHistoryTimerRef.current) {
-        clearTimeout(orphanHistoryTimerRef.current);
-        orphanHistoryTimerRef.current = null;
-      }
-    };
-  }, [isGatewayRunning, lastMessageSig, loadHistory, loading, sending]);
-
-  // Update timestamp when sending starts
-  useEffect(() => {
-    if (sending && streamingTimestamp === 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setStreamingTimestamp(Date.now() / 1000);
-    } else if (!sending && streamingTimestamp !== 0) {
-      setStreamingTimestamp(0);
-    }
-  }, [sending, streamingTimestamp]);
-
   // Gateway not running block has been completely removed so the UI always renders.
-
-  const streamMsg = streamingMessage && typeof streamingMessage === 'object'
-    ? streamingMessage as unknown as { role?: string; content?: unknown; timestamp?: number }
-    : null;
-  const streamText = streamMsg ? extractText(streamMsg) : (typeof streamingMessage === 'string' ? streamingMessage : '');
-  const hasStreamText = streamText.trim().length > 0;
-  const streamThinking = streamMsg ? extractThinking(streamMsg) : null;
-  const hasStreamThinking = showThinking && !!streamThinking && streamThinking.trim().length > 0;
-  const streamTools = streamMsg ? extractToolUse(streamMsg) : [];
-  const hasStreamTools = chatProcessDisplayMode === 'all' && streamTools.length > 0;
-  const streamImages = streamMsg ? extractImages(streamMsg) : [];
-  const hasStreamImages = streamImages.length > 0;
-  const hasStreamToolStatus = chatProcessDisplayMode === 'all' && streamingTools.length > 0;
-  const lastUserTsMs = typeof lastUserMessageAt === 'number'
-    ? (lastUserMessageAt < 1e12 ? lastUserMessageAt * 1000 : lastUserMessageAt)
-    : 0;
-  const latestPersistedAssistant = useMemo(() => [...safeMessages].reverse().find((message) => {
-    if (message.role !== 'assistant') return false;
-    if (!lastUserTsMs || !message.timestamp) return true;
-    const messageTsMs = message.timestamp < 1e12 ? message.timestamp * 1000 : message.timestamp;
-    return messageTsMs >= lastUserTsMs;
-  }), [lastUserTsMs, safeMessages]);
-  const latestPersistedAssistantText = latestPersistedAssistant ? extractText(latestPersistedAssistant).trim() : '';
-  const latestPersistedAssistantThinking = latestPersistedAssistant ? (extractThinking(latestPersistedAssistant)?.trim() ?? '') : '';
-  const latestPersistedAssistantImages = latestPersistedAssistant ? extractImages(latestPersistedAssistant) : [];
-  const latestPersistedAssistantTools = latestPersistedAssistant ? extractToolUse(latestPersistedAssistant) : [];
-  const isStreamingDuplicateOfPersistedAssistant = !!latestPersistedAssistant
-    && (
-      (hasStreamText && latestPersistedAssistantText === streamText.trim())
-      || (
-        !hasStreamText
-        && hasStreamThinking
-        && latestPersistedAssistantThinking === (streamThinking?.trim() ?? '')
-      )
-    )
-    && (!hasStreamImages || latestPersistedAssistantImages.length === streamImages.length)
-    && (!hasStreamTools || latestPersistedAssistantTools.length === streamTools.length);
-  const shouldRenderStreaming = sending
-    && !isStreamingDuplicateOfPersistedAssistant
-    && (hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus);
-  const hasAnyStreamContent = hasStreamText || hasStreamThinking || hasStreamTools || hasStreamImages || hasStreamToolStatus;
-  const streamingDisplayMessage = useMemo(() => (
-    shouldRenderStreaming
-      ? buildStreamingDisplayMessage(streamMsg, streamText, streamingTimestamp)
+  const fallbackStreamMsg = useMemo(() => (
+    !activeTurnBuffer && rawStreamingMessage && typeof rawStreamingMessage === 'object'
+      ? rawStreamingMessage as unknown as { role?: string; content?: unknown; timestamp?: number }
+      : activeTurnBuffer?.streamingDisplayMessage && typeof activeTurnBuffer.streamingDisplayMessage === 'object'
+        ? activeTurnBuffer.streamingDisplayMessage as unknown as { role?: string; content?: unknown; timestamp?: number }
       : null
-  ), [shouldRenderStreaming, streamMsg, streamText, streamingTimestamp]);
-  const activeTurnStartIndex = useMemo(() => (
-    sending ? findLastUserMessageIndex(safeMessages) : -1
-  ), [safeMessages, sending]);
-  const historyMessages = useMemo(() => (
-    activeTurnStartIndex >= 0 ? safeMessages.slice(0, activeTurnStartIndex) : safeMessages
-  ), [activeTurnStartIndex, safeMessages]);
+  ), [activeTurnBuffer, rawStreamingMessage]);
+  const fallbackStreamText = fallbackStreamMsg
+    ? extractText(fallbackStreamMsg)
+    : (!activeTurnBuffer && typeof rawStreamingMessage === 'string' ? rawStreamingMessage : '');
+  const fallbackActiveTurnStartIndex = !activeTurnBuffer && sending ? findLastUserMessageIndex(safeMessages) : -1;
+  const fallbackHistoryMessages = fallbackActiveTurnStartIndex >= 0 ? safeMessages.slice(0, fallbackActiveTurnStartIndex) : safeMessages;
+  const fallbackActiveTurnMessages = fallbackActiveTurnStartIndex >= 0 ? safeMessages.slice(fallbackActiveTurnStartIndex) : EMPTY_MESSAGES;
+  const fallbackActiveTurnUserMessage = fallbackActiveTurnMessages[0]?.role === 'user' ? fallbackActiveTurnMessages[0] : null;
+  const fallbackStreamingTimestamp = fallbackStreamMsg?.timestamp
+    ?? fallbackActiveTurnUserMessage?.timestamp
+    ?? safeMessages[safeMessages.length - 1]?.timestamp
+    ?? 0;
+  const fallbackStreamingDisplayMessage = buildStreamingDisplayMessage(
+    fallbackStreamMsg,
+    fallbackStreamText,
+    fallbackStreamingTimestamp,
+  );
+  const fallbackAssistantMessages = fallbackActiveTurnUserMessage
+    ? fallbackActiveTurnMessages.slice(1).filter((message) => message.role === 'assistant')
+    : EMPTY_MESSAGES;
+  const fallbackLatestPersistedAssistant = !activeTurnBuffer ? [...safeMessages].reverse().find((message) => {
+    if (message.role !== 'assistant') return false;
+    if (!fallbackActiveTurnUserMessage?.timestamp || !message.timestamp) return true;
+    return toTimestampMs(message.timestamp)! >= toTimestampMs(fallbackActiveTurnUserMessage.timestamp)!;
+  }) ?? null : null;
+  const fallbackIsStreamingDuplicate = !activeTurnBuffer
+    && !!fallbackLatestPersistedAssistant
+    && !!fallbackStreamingDisplayMessage
+    && extractText(fallbackLatestPersistedAssistant).trim().length > 0
+    && extractText(fallbackLatestPersistedAssistant).trim() === extractText(fallbackStreamingDisplayMessage).trim();
+  const fallbackPersistedFinalMessage = fallbackIsStreamingDuplicate && fallbackAssistantMessages.length > 0
+    ? fallbackAssistantMessages[fallbackAssistantMessages.length - 1]
+    : null;
+  const fallbackProcessMessages = fallbackPersistedFinalMessage
+    ? fallbackAssistantMessages.slice(0, -1)
+    : fallbackAssistantMessages;
+  const fallbackSplitStreaming = fallbackStreamingDisplayMessage
+    ? splitFinalMessageForTurnDisplay(fallbackStreamingDisplayMessage)
+    : null;
+
+  const historyMessages = activeTurnBuffer?.historyMessages ?? fallbackHistoryMessages;
   const deferredHistoryMessages = useDeferredValue(historyMessages);
-  const activeTurnMessages = useMemo(() => (
-    activeTurnStartIndex >= 0 ? safeMessages.slice(activeTurnStartIndex) : EMPTY_MESSAGES
-  ), [activeTurnStartIndex, safeMessages]);
-  const activeTurnUserMessage = activeTurnMessages[0]?.role === 'user' ? activeTurnMessages[0] : null;
+  const activeTurnUserMessage = activeTurnBuffer?.userMessage ?? fallbackActiveTurnUserMessage;
   const displayHistoryMessages = useMemo(() => (
     trimDeferredHistoryForActiveTurn(deferredHistoryMessages, activeTurnUserMessage)
   ), [activeTurnUserMessage, deferredHistoryMessages]);
-  const activeTurnAssistantMessages = useMemo(() => (
-    activeTurnUserMessage
-      ? activeTurnMessages.slice(1).filter((message) => message.role === 'assistant')
-      : EMPTY_MESSAGES
-  ), [activeTurnMessages, activeTurnUserMessage]);
-  const persistedActiveFinalMessage = isStreamingDuplicateOfPersistedAssistant && activeTurnAssistantMessages.length > 0
-    ? activeTurnAssistantMessages[activeTurnAssistantMessages.length - 1]
-    : null;
-  const activeTurnProcessMessages = useMemo(() => (
-    persistedActiveFinalMessage
-      ? activeTurnAssistantMessages.slice(0, -1)
-      : activeTurnAssistantMessages
-  ), [activeTurnAssistantMessages, persistedActiveFinalMessage]);
-  const streamingSplit = useMemo(() => (
-    streamingDisplayMessage
-      ? splitFinalMessageForTurnDisplay(streamingDisplayMessage)
-      : null
-  ), [streamingDisplayMessage]);
-  const streamingProcessMessage = streamingSplit?.collapsedProcessMessage ?? null;
-  const splitStreamingFinalMessage = streamingSplit?.finalDisplayMessage ?? null;
+  const activeTurnProcessMessages = activeTurnBuffer?.processMessages ?? fallbackProcessMessages;
+  const activeTurnAssistantMessages = activeTurnBuffer?.assistantMessages ?? fallbackAssistantMessages;
+  const persistedActiveFinalMessage = activeTurnBuffer?.persistedFinalMessage ?? fallbackPersistedFinalMessage;
+  const streamingProcessMessage = activeTurnBuffer?.processStreamingMessage ?? fallbackSplitStreaming?.collapsedProcessMessage ?? null;
+  const splitStreamingFinalMessage = activeTurnBuffer?.finalStreamingMessage ?? fallbackSplitStreaming?.finalDisplayMessage ?? fallbackStreamingDisplayMessage;
+  const hasAnyStreamContent = activeTurnBuffer?.hasAnyStreamContent ?? !!fallbackStreamingDisplayMessage;
+  const isStreamingDuplicateOfPersistedAssistant = activeTurnBuffer?.isStreamingDuplicateOfPersistedAssistant ?? fallbackIsStreamingDuplicate;
+  const hasStreamToolStatus = chatProcessDisplayMode === 'all' && streamingTools.length > 0;
+  const streamingDisplayMessage = activeTurnBuffer?.streamingDisplayMessage ?? fallbackStreamingDisplayMessage;
   const hasPersistedProcessMessages = activeTurnProcessMessages.some((message) => (
     hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle)
   ));
@@ -222,38 +154,30 @@ export function Chat() {
     || (sending && (activeTurnAssistantMessages.length > 0 || streamingDisplayMessage != null));
   const showProcessActivity = shouldUseProcessLayout && sending && !hasStreamingFinalMessage;
   const activeTurnProcessStreamingMessage = shouldUseProcessLayout
-    ? (hasStreamingProcessMessage
+    ? (isStreamingDuplicateOfPersistedAssistant
+        ? null
+        : hasStreamingProcessMessage
         ? streamingProcessMessage
-        : hasStreamToolStatus
+        : sending && hasStreamingFinalMessage
+          ? splitStreamingFinalMessage
+        : chatProcessDisplayMode === 'all' && streamingTools.length > 0
           ? {
               role: 'assistant' as const,
               content: '',
-              timestamp: streamingDisplayMessage?.timestamp ?? streamingTimestamp,
+              timestamp: splitStreamingFinalMessage?.timestamp ?? activeTurnUserMessage?.timestamp ?? 0,
             }
           : null)
     : null;
   const activeTurnFinalStreamingMessage = shouldUseProcessLayout
-    ? (hasStreamingFinalMessage ? splitStreamingFinalMessage : null)
-    : streamingDisplayMessage;
+    ? (!sending && hasStreamingFinalMessage && !isStreamingDuplicateOfPersistedAssistant ? splitStreamingFinalMessage : null)
+    : (isStreamingDuplicateOfPersistedAssistant ? null : splitStreamingFinalMessage);
   const activeTurnStartedAtMs = activeTurnUserMessage
-    ? toTimestampMs(activeTurnUserMessage.timestamp) ?? lastUserTsMs
-    : lastUserTsMs;
+    ? (activeTurnBuffer?.startedAtMs ?? toTimestampMs(activeTurnUserMessage.timestamp) ?? toTimestampMs(safeMessages[safeMessages.length - 1]?.timestamp) ?? 0)
+    : (activeTurnBuffer?.startedAtMs ?? toTimestampMs(safeMessages[safeMessages.length - 1]?.timestamp) ?? 0);
 
   const isEmpty = safeMessages.length === 0 && !sending;
-  const showGatewayOfflineState = !isGatewayRunning && safeMessages.length === 0 && !sending;
+  const showGatewayStartupInline = !isGatewayRunning && safeMessages.length === 0 && !sending;
   const showSessionLoadingState = loading && safeMessages.length === 0 && !sending;
-
-  const handleStartGateway = async () => {
-    try {
-      if (gatewayStatus.state === 'error') {
-        await restartGateway();
-      } else {
-        await startGateway();
-      }
-    } catch {
-      // keep the page calm; gateway errors are surfaced by store status
-    }
-  };
 
   return (
     <div
@@ -272,22 +196,23 @@ export function Chat() {
       {/* Messages Area */}
       <div ref={scrollRef} data-testid="chat-scroll-container" data-chat-scroll-container="true" className="flex-1 overflow-y-auto px-4 py-5">
         <div ref={contentRef} className="max-w-4xl mx-auto space-y-4">
-          {showGatewayOfflineState ? (
-            <GatewayOfflineState
-              state={gatewayStatus.state}
-              error={gatewayStatus.error}
-              port={gatewayStatus.port}
-              onStart={handleStartGateway}
-              onOpenSettings={() => navigate('/settings')}
-            />
-          ) : showSessionLoadingState ? (
+          {showSessionLoadingState ? (
             <div className="flex min-h-[40vh] items-center justify-center">
-              <div className="bg-background shadow-lg rounded-full p-2.5 border border-border">
+              <div className="bg-background shadow-lg rounded-lg p-2.5 border border-border">
                 <LoadingSpinner size="md" />
               </div>
             </div>
           ) : isEmpty ? (
-            <WelcomeScreen />
+            <WelcomeScreen
+              gatewayHint={showGatewayStartupInline ? {
+                state: gatewayStatus.state,
+                error: gatewayStatus.error,
+                port: gatewayStatus.port,
+                pid: gatewayStatus.pid,
+                reconnectAttempts: gatewayStatus.reconnectAttempts,
+              } : null}
+              onOpenSettings={() => navigate('/settings')}
+            />
           ) : (
             <>
               <HistoryMessages
@@ -342,17 +267,20 @@ export function Chat() {
         </div>
       </div>
 
-      {/* Error bar */}
+      {/* Session notice bar */}
       {error && (
-        <div className="px-4 py-2 bg-destructive/10 border-t border-destructive/20">
+        <div
+          className="border-t border-amber-500/20 bg-amber-500/10 px-4 py-2"
+          data-testid="chat-session-notice"
+        >
           <div className="max-w-4xl mx-auto flex items-center justify-between">
-            <p className="text-sm text-destructive flex items-center gap-2">
+            <p className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-300">
               <AlertCircle className="h-4 w-4" />
               {error}
             </p>
             <button
               onClick={clearError}
-              className="text-xs text-destructive/60 hover:text-destructive underline"
+              className="text-xs text-amber-700/70 underline hover:text-amber-700 dark:text-amber-300/70 dark:hover:text-amber-300"
             >
               {t('common:actions.dismiss')}
             </button>
@@ -371,8 +299,8 @@ export function Chat() {
 
       {/* Transparent loading overlay */}
       {minLoading && !sending && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/20 backdrop-blur-[1px] rounded-xl pointer-events-auto">
-          <div className="bg-background shadow-lg rounded-full p-2.5 border border-border">
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/20 backdrop-blur-[1px] rounded-lg pointer-events-auto">
+          <div className="bg-background shadow-lg rounded-lg p-2.5 border border-border">
             <LoadingSpinner size="md" />
           </div>
         </div>
@@ -397,6 +325,10 @@ function findProcessScrollContainer(element: HTMLElement | null): HTMLElement | 
 function toTimestampMs(timestamp: number | undefined): number | null {
   if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) return null;
   return timestamp < 1e12 ? timestamp * 1000 : timestamp;
+}
+
+function resolveMessageTimestampMs(message: RawMessage | null | undefined, fallbackMs = 0): number {
+  return toTimestampMs(message?.timestamp) ?? fallbackMs;
 }
 
 function findLastUserMessageIndex(messages: RawMessage[]): number {
@@ -615,20 +547,10 @@ function ProcessSection({
   const hasSection = visibleMessages.length > 0 || hasStreamingProcessContent || !!showActivity;
   // 仅有过程区、下方没有「最终回复」气泡时默认展开，避免只看见「已处理」一行误以为空白
   const [collapsed, setCollapsed] = useState(() => phase === 'processed' && !!showFinalDivider);
-  const [nowMs, setNowMs] = useState(Date.now());
-  const [frozenCompletedAtMs, setFrozenCompletedAtMs] = useState<number | null>(
-    phase === 'processed' ? (completedAtMs ?? Date.now()) : null,
-  );
+  const [nowMs, setNowMs] = useState(() => completedAtMs ?? startedAtMs);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
   const expandAnchorTopRef = useRef<number | null>(null);
   const expandScrollContainerRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    if (phase === 'processed' && frozenCompletedAtMs == null) {
-      setFrozenCompletedAtMs(completedAtMs ?? Date.now());
-      setCollapsed(!!showFinalDivider);
-    }
-  }, [completedAtMs, frozenCompletedAtMs, phase, showFinalDivider]);
 
   useEffect(() => {
     if (phase !== 'working') return undefined;
@@ -658,7 +580,7 @@ function ProcessSection({
   if (!hasSection) return null;
 
   const effectiveEndMs = phase === 'processed'
-    ? (frozenCompletedAtMs ?? completedAtMs ?? nowMs)
+    ? (completedAtMs ?? nowMs)
     : nowMs;
   const elapsedLabel = formatProcessDuration(
     Math.max(0, effectiveEndMs - startedAtMs),
@@ -829,13 +751,14 @@ function CollapsedProcessTurn({
 
       {hasProcessSection && (
         <ProcessSection
+          key={`collapsed:${userMessage.id ?? userMessage.timestamp ?? 'unknown'}:${finalMessage.id ?? finalMessage.timestamp ?? 'unknown'}`}
           processMessages={processMessages}
           phase="processed"
           showThinking={showThinking}
           chatProcessDisplayMode={chatProcessDisplayMode}
           assistantMessageStyle={assistantMessageStyle}
-          startedAtMs={toTimestampMs(userMessage.timestamp) ?? Date.now()}
-          completedAtMs={toTimestampMs(finalMessage.timestamp) ?? Date.now()}
+          startedAtMs={resolveMessageTimestampMs(userMessage)}
+          completedAtMs={resolveMessageTimestampMs(finalMessage, resolveMessageTimestampMs(userMessage))}
           showFinalDivider={finalHasVisibleContent}
         />
       )}
@@ -926,6 +849,7 @@ function ActiveTurn({
 
       {hasProcessSection && (
         <ProcessSection
+          key={`active:${userMessage.id ?? userMessage.timestamp ?? 'unknown'}:${sending ? 'working' : 'processed'}:${finalMessage?.id ?? finalMessage?.timestamp ?? 'none'}`}
           processMessages={liveProcessMessages}
           processStreamingMessage={processStreamingMessage}
           phase="working"
@@ -967,9 +891,22 @@ function ActiveTurn({
 
 // ── Welcome Screen ──────────────────────────────────────────────
 
-function WelcomeScreen() {
-  const { t } = useTranslation('chat');
+function WelcomeScreen({
+  gatewayHint,
+  onOpenSettings,
+}: {
+  gatewayHint: {
+    state: string;
+    error?: string;
+    port: number;
+    pid?: number;
+    reconnectAttempts?: number;
+  } | null;
+  onOpenSettings: () => void;
+}) {
+  const { t, i18n } = useTranslation('chat');
   const branding = useBranding();
+  const [elapsedMs, setElapsedMs] = useState(0);
   const quickActions = [
     {
       key: 'askQuestions',
@@ -991,11 +928,101 @@ function WelcomeScreen() {
     },
   ];
 
+  const isZh = (i18n?.resolvedLanguage || i18n?.language || '').startsWith('zh');
+  const isStarting = gatewayHint?.state === 'starting' || gatewayHint?.state === 'reconnecting';
+  const isError = gatewayHint?.state === 'error';
+
+  useEffect(() => {
+    if (!gatewayHint || !isStarting) {
+      return undefined;
+    }
+    const timer = setInterval(() => {
+      setElapsedMs((current) => current + 1000);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [gatewayHint, isStarting]);
+
+  const gatewayStatusTitle = isStarting
+    ? (isZh ? '正在连接工作引擎' : 'Connecting the workspace engine')
+    : isError
+      ? (isZh ? '工作引擎暂时不可用' : 'The workspace engine is temporarily unavailable')
+      : (isZh ? '工作引擎尚未启动' : 'The workspace engine is not running');
+  const gatewayStatusDescription = isStarting
+    ? (isZh ? 'Gateway 正在后台启动，界面已经就绪，稍后即可开始对话。' : 'The Gateway is starting in the background. The interface is ready and chat will be available shortly.')
+    : isError
+      ? (isZh ? '你可以先浏览页面内容，也可以打开设置检查运行环境。' : 'You can keep browsing the page or open settings to inspect the runtime.')
+      : (isZh ? '启动后即可开始新对话或恢复现有会话。' : 'Start it when you are ready to begin a new conversation.');
+  const elapsedLabel = elapsedMs > 0 ? formatProcessDuration(elapsedMs, i18n?.resolvedLanguage || i18n?.language) : null;
+  const gatewayStatusMeta = gatewayHint ? [
+    `port ${gatewayHint.port}`,
+    gatewayHint.pid ? `pid ${gatewayHint.pid}` : null,
+    gatewayHint.reconnectAttempts ? (isZh ? `重试 ${gatewayHint.reconnectAttempts}` : `retry ${gatewayHint.reconnectAttempts}`) : null,
+    elapsedLabel ? (isZh ? `已等待 ${elapsedLabel}` : `waiting ${elapsedLabel}`) : null,
+  ].filter(Boolean).join('  ·  ') : '';
+
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
       <div className="w-full max-w-5xl px-2">
         <div className="mx-auto max-w-3xl text-center">
-          <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-foreground/42">
+          {gatewayHint ? (
+            <div className="mx-auto mb-5 max-w-2xl rounded-[12px] border border-white/10 bg-white/[0.045] px-[clamp(14px,2.2vw,20px)] py-[clamp(12px,2vw,16px)] text-left shadow-[0_14px_36px_rgba(2,6,23,0.12)] backdrop-blur-sm">
+              <div className="flex items-start gap-3">
+                <div className={cn(
+                  "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border",
+                  isError
+                    ? 'border-amber-400/24 bg-amber-400/12 text-amber-300'
+                    : 'border-primary/20 bg-primary/10 text-primary',
+                )}>
+                  {isError ? (
+                    <AlertCircle className="h-4 w-4" />
+                  ) : (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="text-[clamp(13px,2vw,15px)] font-medium text-foreground">
+                      {gatewayStatusTitle}
+                    </div>
+                    <div className={cn(
+                      'inline-flex rounded-md px-2 py-0.5 text-[10px] font-medium',
+                      isError
+                        ? 'bg-amber-400/12 text-amber-200'
+                        : 'bg-emerald-400/12 text-emerald-200',
+                    )}>
+                      {isError ? (isZh ? '需要关注' : 'Attention') : (isZh ? '后台启动中' : 'Starting')}
+                    </div>
+                  </div>
+                  <div className="mt-1 text-[clamp(11px,1.8vw,13px)] leading-5 text-foreground/62">
+                    {gatewayStatusDescription}
+                  </div>
+                  <div className="mt-3 h-1.5 overflow-hidden rounded-md bg-white/8">
+                    <div
+                      className={cn('h-full rounded-md transition-[width] duration-500', isError ? 'bg-amber-400/80' : 'bg-primary/80')}
+                      style={{ width: isError ? '82%' : isStarting ? (elapsedMs > 30000 ? '78%' : elapsedMs > 12000 ? '62%' : elapsedMs > 4000 ? '44%' : '26%') : '16%' }}
+                    />
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[clamp(10px,1.7vw,12px)] text-foreground/42">
+                    <span>{gatewayStatusMeta}</span>
+                    <button
+                      type="button"
+                      onClick={onOpenSettings}
+                      className="rounded-md border border-white/10 px-2.5 py-1 text-foreground/62 transition hover:bg-white/[0.05] hover:text-foreground"
+                    >
+                      {isZh ? '打开设置' : 'Open settings'}
+                    </button>
+                  </div>
+                  {gatewayHint.error ? (
+                    <div className="mt-2 text-[11px] leading-5 text-amber-200/80">
+                      {gatewayHint.error}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-foreground/42">
             <Sparkles className="h-3.5 w-3.5 text-primary/80" />
             <span>{t('welcome.eyebrow', { appName: branding.productName })}</span>
           </div>
@@ -1013,9 +1040,9 @@ function WelcomeScreen() {
           {quickActions.map(({ key, icon: Icon, label, description }) => (
             <button
               key={key}
-              className="group rounded-[26px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 text-left shadow-[0_18px_45px_rgba(2,6,23,0.18)] transition duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-[linear-gradient(180deg,rgba(59,130,246,0.10),rgba(255,255,255,0.04))]"
+              className="group rounded-[14px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 text-left shadow-[0_18px_45px_rgba(2,6,23,0.18)] transition duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-[linear-gradient(180deg,rgba(59,130,246,0.10),rgba(255,255,255,0.04))]"
             >
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-primary/90 transition group-hover:border-primary/30 group-hover:bg-primary/12">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.06] text-primary/90 transition group-hover:border-primary/30 group-hover:bg-primary/12">
                 <Icon className="h-5 w-5" />
               </div>
 
@@ -1039,90 +1066,6 @@ function WelcomeScreen() {
   );
 }
 
-function GatewayOfflineState({
-  state,
-  error,
-  port,
-  onStart,
-  onOpenSettings,
-}: {
-  state: string;
-  error?: string;
-  port: number;
-  onStart: () => Promise<void>;
-  onOpenSettings: () => void;
-}) {
-  const { t } = useTranslation('chat');
-  const branding = useBranding();
-  const [pending, setPending] = useState(false);
-
-  const title = state === 'starting' || state === 'reconnecting'
-    ? t('offline.startingTitle')
-    : state === 'error'
-      ? t('offline.errorTitle')
-      : t('offline.stoppedTitle');
-  const description = state === 'starting' || state === 'reconnecting'
-    ? t('offline.startingDesc', { appName: branding.productName, port })
-    : state === 'error'
-      ? t('offline.errorDesc', { appName: branding.productName })
-      : t('offline.stoppedDesc', { appName: branding.productName, port });
-
-  const handleClick = async () => {
-    setPending(true);
-    try {
-      await onStart();
-    } finally {
-      setPending(false);
-    }
-  };
-
-  return (
-    <div className="flex min-h-[60vh] items-center justify-center">
-      <div className="w-full max-w-2xl rounded-[28px] border border-black/8 bg-white/80 px-8 py-10 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.04]">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#eff6ff] text-[#2563eb] dark:bg-[#172554] dark:text-[#93c5fd]">
-          {pending || state === 'starting' || state === 'reconnecting' ? (
-            <Loader2 className="h-6 w-6 animate-spin" />
-          ) : (
-            <Sparkles className="h-6 w-6" />
-          )}
-        </div>
-
-        <div className="mt-6 text-center">
-          <h2 className="text-3xl font-semibold tracking-tight text-foreground">{title}</h2>
-            <p className="mx-auto mt-3 max-w-xl text-[15px] leading-7 text-foreground/65">
-            {description}
-          </p>
-        </div>
-
-        {error ? (
-          <div className="mt-6 rounded-2xl border border-amber-200/70 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
-            <div className="font-medium">{t('offline.errorDetail')}</div>
-            <div className="mt-1 break-words opacity-85">{error}</div>
-          </div>
-        ) : null}
-
-        <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-          <button
-            type="button"
-            onClick={handleClick}
-            disabled={pending || state === 'starting' || state === 'reconnecting'}
-            className="rounded-full bg-[#2563eb] px-5 py-2.5 text-[14px] font-medium text-white transition hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {state === 'error' ? t('offline.retry') : t('offline.startNow')}
-          </button>
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            className="rounded-full border border-black/10 bg-white px-5 py-2.5 text-[14px] font-medium text-foreground/80 transition hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]"
-          >
-            {t('offline.openSettings')}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Typing Indicator ────────────────────────────────────────────
 
 function TypingIndicator() {
@@ -1131,7 +1074,7 @@ function TypingIndicator() {
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-1 bg-black/5 dark:bg-white/5 text-foreground">
         <Sparkles className="h-4 w-4" />
       </div>
-      <div className="bg-black/5 dark:bg-white/5 text-foreground rounded-2xl px-4 py-3">
+      <div className="bg-black/5 dark:bg-white/5 text-foreground rounded-xl px-4 py-3">
         <div className="flex gap-1">
           <span className="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
           <span className="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -1151,23 +1094,65 @@ function ProcessActivityIndicator({
   streamStyle?: boolean;
   label?: string | null;
 }) {
-  const { t } = useTranslation('chat');
+  const { t, i18n } = useTranslation('chat');
   const resolvedLabel = label || t('process.workingFor', { duration: '...' });
+  const language = i18n?.resolvedLanguage || i18n?.language;
+  const isZh = language?.startsWith('zh');
+  const activityPhrases = isZh
+    ? ['理解问题', '检索资料', '整理回答']
+    : ['Understanding', 'Retrieving', 'Composing'];
+  const [phraseIndex, setPhraseIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setPhraseIndex((current) => (current + 1) % activityPhrases.length);
+    }, 1800);
+    return () => clearInterval(timer);
+  }, [activityPhrases.length]);
+
+  const capsuleLabel = `${activityPhrases[phraseIndex]}${isZh ? '中' : ' in progress'}`;
+  const detailLabel = isZh ? '推理链路活跃' : 'Reasoning pipeline active';
 
   const statusBody = (
     <>
-      <div
-        aria-hidden="true"
-        data-testid="chat-process-activity-scan"
-        className="relative h-1.5 overflow-hidden rounded-full bg-black/[0.05] dark:bg-white/[0.08]"
-      >
-        <div
-          className="absolute inset-y-0 -left-1/3 w-1/3 rounded-full bg-gradient-to-r from-transparent via-black/15 to-transparent dark:via-white/25"
-          style={{ animation: 'chat-process-scan 1.6s linear infinite' }}
-        />
+      <div className="inline-flex max-w-full items-center gap-3 rounded-[20px] border border-primary/12 bg-[linear-gradient(180deg,rgba(59,130,246,0.10),rgba(59,130,246,0.04))] px-3.5 py-2.5 shadow-[0_10px_30px_rgba(59,130,246,0.10)] dark:border-primary/14 dark:bg-[linear-gradient(180deg,rgba(59,130,246,0.14),rgba(59,130,246,0.05))]">
+        <span
+          aria-hidden="true"
+          data-testid="chat-process-activity-scan"
+          className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center"
+        >
+          <span className="absolute inset-0 rounded-full bg-primary/[0.10]" />
+          <span className="absolute inset-[3px] rounded-full border border-primary/18" />
+          <span
+            className="absolute inset-[2px] rounded-full border border-primary/28"
+            style={{ animation: 'chat-thinking-pulse 1.8s ease-out infinite' }}
+          />
+          <span className="relative flex items-center gap-0.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary/90" style={{ animation: 'chat-thinking-dot 1.2s ease-in-out infinite' }} />
+            <span className="h-1.5 w-1.5 rounded-full bg-primary/75" style={{ animation: 'chat-thinking-dot 1.2s ease-in-out 0.18s infinite' }} />
+            <span className="h-1.5 w-1.5 rounded-full bg-primary/60" style={{ animation: 'chat-thinking-dot 1.2s ease-in-out 0.36s infinite' }} />
+          </span>
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-[13px] font-semibold tracking-[-0.01em] text-foreground/86 dark:text-foreground/88">
+            {capsuleLabel}
+          </span>
+          <span className="mt-0.5 block truncate text-[11px] text-foreground/48 dark:text-foreground/50">
+            {detailLabel}
+          </span>
+        </span>
       </div>
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+      <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
+        <span className="inline-flex h-2 w-2 rounded-full bg-primary/80 shadow-[0_0_12px_rgba(59,130,246,0.5)]" />
+        <span
+          aria-hidden="true"
+          className="inline-flex h-1 w-10 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/[0.08]"
+        >
+          <span
+            className="h-full w-1/2 rounded-full bg-gradient-to-r from-primary/35 via-primary/85 to-primary/35"
+            style={{ animation: 'chat-thinking-slide 1.4s ease-in-out infinite' }}
+          />
+        </span>
         <span data-testid="chat-process-activity-label">{resolvedLabel}</span>
       </div>
     </>
@@ -1176,16 +1161,16 @@ function ProcessActivityIndicator({
   if (streamStyle) {
     return (
       <div className="max-w-sm space-y-2 px-1.5 py-1" data-testid="chat-process-activity-stream">
-        <style>{'@keyframes chat-process-scan { 0% { transform: translateX(0); opacity: 0.15; } 50% { opacity: 1; } 100% { transform: translateX(420%); opacity: 0.15; } }'}</style>
+        <style>{'@keyframes chat-thinking-pulse { 0% { transform: scale(0.82); opacity: 0.0; } 35% { opacity: 0.38; } 100% { transform: scale(1.55); opacity: 0; } } @keyframes chat-thinking-dot { 0%, 100% { transform: translateY(0); opacity: 0.55; } 50% { transform: translateY(-2px); opacity: 1; } } @keyframes chat-thinking-slide { 0% { transform: translateX(-70%); opacity: 0.4; } 50% { opacity: 1; } 100% { transform: translateX(140%); opacity: 0.45; } }'}</style>
         {statusBody}
       </div>
     );
   }
 
   return (
-    <div className="rounded-2xl border border-black/6 bg-white/40 px-4 py-3 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm dark:border-white/8 dark:bg-white/[0.04]">
-      <style>{'@keyframes chat-process-scan { 0% { transform: translateX(0); opacity: 0.15; } 50% { opacity: 1; } 100% { transform: translateX(420%); opacity: 0.15; } }'}</style>
-      <div className="space-y-2">
+      <div className="rounded-[12px] border border-black/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.34),rgba(255,255,255,0.18))] px-4 py-3 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm dark:border-white/8 dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.025))]">
+      <style>{'@keyframes chat-thinking-pulse { 0% { transform: scale(0.82); opacity: 0.0; } 35% { opacity: 0.38; } 100% { transform: scale(1.55); opacity: 0; } } @keyframes chat-thinking-dot { 0%, 100% { transform: translateY(0); opacity: 0.55; } 50% { transform: translateY(-2px); opacity: 1; } } @keyframes chat-thinking-slide { 0% { transform: translateX(-70%); opacity: 0.4; } 50% { opacity: 1; } 100% { transform: translateX(140%); opacity: 0.45; } }'}</style>
+      <div className="space-y-2.5">
         {statusBody}
       </div>
     </div>
@@ -1199,7 +1184,7 @@ function ActivityIndicator({ phase }: { phase: 'tool_processing' }) {
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-1 bg-black/5 dark:bg-white/5 text-foreground">
         <Sparkles className="h-4 w-4" />
       </div>
-      <div className="bg-black/5 dark:bg-white/5 text-foreground rounded-2xl px-4 py-3">
+      <div className="bg-black/5 dark:bg-white/5 text-foreground rounded-xl px-4 py-3">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
           <span>Processing tool results…</span>

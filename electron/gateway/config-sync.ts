@@ -1,6 +1,6 @@
 import { app } from 'electron';
 import path from 'path';
-import { existsSync, readFileSync, mkdirSync, rmSync, readdirSync, renameSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync, readdirSync, renameSync, rmSync, type Dirent } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
@@ -75,10 +75,6 @@ function cleanupStaleBuiltInExtensions(): void {
   }
 }
 
-/**
- * 源码是否仍会加载已从新 OpenClaw 中移除的 telegram-core（含字面路径或通过变量拼接后运行时解析）。
- * 栈里常见为 src/channel.ts，未必出现完整字符串 root-alias.cjs/telegram-core。
- */
 function dingtalkExtensionReferencesLegacyTelegramCore(extRoot: string): boolean {
   const channelPaths = [
     join(extRoot, 'src', 'channel.ts'),
@@ -95,7 +91,7 @@ function dingtalkExtensionReferencesLegacyTelegramCore(extRoot: string): boolean
         return true;
       }
     } catch {
-      /* ignore */
+      // ignore per-file read failures
     }
   }
 
@@ -104,20 +100,21 @@ function dingtalkExtensionReferencesLegacyTelegramCore(extRoot: string): boolean
   const maxFiles = 120;
   while (stack.length > 0 && scanned < maxFiles) {
     const dir = stack.pop()!;
-    let entries: ReturnType<typeof readdirSync>;
+    let entries: Dirent[];
     try {
       entries = readdirSync(fsPath(dir), { withFileTypes: true });
     } catch {
       continue;
     }
     for (const ent of entries) {
-      if (ent.name === 'node_modules' || ent.name === '.git') continue;
-      const full = join(dir, ent.name);
+      const entryName = String(ent.name);
+      if (entryName === 'node_modules' || entryName === '.git') continue;
+      const full = join(dir, entryName);
       if (ent.isDirectory()) {
         stack.push(full);
         continue;
       }
-      if (!/\.(ts|tsx|js|mjs|cjs)$/i.test(ent.name)) continue;
+      if (!/\.(ts|tsx|js|mjs|cjs)$/i.test(entryName)) continue;
       scanned++;
       let text: string;
       try {
@@ -125,10 +122,7 @@ function dingtalkExtensionReferencesLegacyTelegramCore(extRoot: string): boolean
       } catch {
         continue;
       }
-      if (
-        text.includes('root-alias.cjs/telegram-core')
-        || text.includes('root-alias.cjs\\telegram-core')
-      ) {
+      if (text.includes('root-alias.cjs/telegram-core') || text.includes('root-alias.cjs\\telegram-core')) {
         return true;
       }
     }
@@ -136,12 +130,6 @@ function dingtalkExtensionReferencesLegacyTelegramCore(extRoot: string): boolean
   return false;
 }
 
-/**
- * 用户目录 ~/.openclaw/extensions/dingtalk 的旧版实现会 require
- * openclaw/dist/plugin-sdk/root-alias.cjs/telegram-core；新版 OpenClaw 已移除该子路径，
- * 导致插件加载阶段反复失败，Gateway 长时间无法发出 connect.challenge。
- * 在启动 Gateway 前将此类扩展重命名隔离，后续由 ensureConfiguredPluginsUpgraded 从 npm 再装兼容版本（若已配置）。
- */
 function quarantineLegacyDingtalkExtensionIfNeeded(openclawDir: string): void {
   const extRoot = join(homedir(), '.openclaw', 'extensions', 'dingtalk');
   if (!existsSync(fsPath(extRoot))) {
@@ -161,11 +149,28 @@ function quarantineLegacyDingtalkExtensionIfNeeded(openclawDir: string): void {
   }
   try {
     renameSync(fsPath(extRoot), fsPath(dest));
-    logger.warn(
-      `[plugin] 已隔离不兼容的 dingtalk 扩展（旧版 telegram-core 引用）。备份路径: ${dest}。若需钉钉频道，请使用与当前 OpenClaw 匹配的插件版本或从 ClawX 渠道配置重新安装。`,
-    );
+    logger.warn(`[plugin] Quarantined incompatible dingtalk extension that still references telegram-core. Backup path: ${dest}`);
   } catch (err) {
-    logger.warn('[plugin] 无法隔离不兼容的 dingtalk 扩展（可能被占用），请手动移走 ~/.openclaw/extensions/dingtalk 后重试:', err);
+    logger.warn('[plugin] Failed to quarantine incompatible dingtalk extension at ~/.openclaw/extensions/dingtalk', err);
+  }
+}
+
+function cleanupStalePluginInstallArtifacts(): void {
+  const extensionsRoot = join(homedir(), '.openclaw', 'extensions');
+  if (!existsSync(fsPath(extensionsRoot))) {
+    return;
+  }
+
+  try {
+    for (const entry of readdirSync(fsPath(extensionsRoot), { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (!entry.name.startsWith('.openclaw-install-')) continue;
+      const targetDir = join(extensionsRoot, entry.name);
+      logger.info(`[plugin] Removing stale plugin install artifact: ${entry.name}`);
+      rmSync(fsPath(targetDir), { recursive: true, force: true });
+    }
+  } catch (err) {
+    logger.warn('[plugin] Failed to remove stale plugin install artifacts:', err);
   }
 }
 
@@ -291,6 +296,12 @@ export async function syncGatewayConfigBeforeLaunch(
     logger.warn('Failed to quarantine legacy dingtalk extension:', err);
   }
 
+  try {
+    cleanupStalePluginInstallArtifacts();
+  } catch (err) {
+    logger.warn('Failed to clean stale plugin install artifacts:', err);
+  }
+
   // Auto-upgrade installed plugins before Gateway starts so that
   // the plugin manifest ID matches what sanitize wrote to the config.
   try {
@@ -328,7 +339,6 @@ export async function syncGatewayConfigBeforeLaunch(
     logger.warn('Failed to auto-upgrade plugins:', err);
   }
 
-  // 插件升级可能从 node_modules 再次拷入不兼容的 dingtalk，须在启动 Gateway 前再隔离一次
   try {
     quarantineLegacyDingtalkExtensionIfNeeded(getOpenClawDir());
   } catch (err) {
@@ -351,6 +361,12 @@ export async function syncGatewayConfigBeforeLaunch(
     await syncSessionIdleMinutesToOpenClaw();
   } catch (err) {
     logger.warn('Failed to sync session idle minutes to openclaw.json:', err);
+  }
+
+  try {
+    await sanitizeOpenClawConfig();
+  } catch (err) {
+    logger.warn('Failed to re-sanitize openclaw.json after launch sync:', err);
   }
 }
 

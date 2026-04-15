@@ -157,6 +157,30 @@ describe('ProviderService.listAccounts (openclaw.json as sole source of truth)',
     expect(result).toHaveLength(1);
   });
 
+  it('preserves multiple configured models when seeding from openclaw.json', async () => {
+    mocks.listProviderAccounts.mockResolvedValue([]);
+    mocks.getActiveOpenClawProviders.mockResolvedValue(new Set(['custom-provider']));
+    mocks.getOpenClawProvidersConfig.mockResolvedValue({
+      providers: {
+        'custom-provider': {
+          baseUrl: 'https://api.example.com/v1',
+          models: [
+            { id: 'qwen3.5-plus' },
+            { id: 'qwen3.5-max' },
+            'qwen3.5-coder',
+          ],
+        },
+      },
+      defaultModel: 'custom-provider/qwen3.5-max',
+    });
+
+    const result = await service.listAccounts();
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.model).toBe('qwen3.5-max');
+    expect(result[0]?.metadata?.customModels).toEqual(['qwen3.5-plus', 'qwen3.5-coder']);
+  });
+
   it('uses store metadata when match exists (does not re-seed)', async () => {
     mocks.listProviderAccounts.mockResolvedValue([
       makeAccount({ id: 'moonshot', vendorId: 'moonshot' as ProviderAccount['vendorId'], label: 'My Moonshot' }),

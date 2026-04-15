@@ -2,7 +2,7 @@
  * IPC Handlers
  * Registers all IPC handlers for main-renderer communication
  */
-import { ipcMain, BrowserWindow, shell, dialog, app, nativeImage } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, app, nativeImage, clipboard } from 'electron';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, extname, basename } from 'node:path';
@@ -2408,6 +2408,41 @@ function registerFileHandlers(): void {
         return { success: false, error: 'No image data provided' };
       }
       return { success: true, savedPath: result.filePath };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle('media:copyImage', async (_, params: {
+    base64?: string;
+    filePath?: string;
+  }) => {
+    try {
+      let image: Electron.NativeImage | null = null;
+
+      if (params.filePath) {
+        const fromPath = nativeImage.createFromPath(params.filePath);
+        if (!fromPath.isEmpty()) {
+          image = fromPath;
+        }
+      }
+
+      if (!image && params.base64) {
+        const normalized = params.base64.includes(',')
+          ? params.base64.slice(params.base64.indexOf(',') + 1)
+          : params.base64;
+        const fromBuffer = nativeImage.createFromBuffer(Buffer.from(normalized, 'base64'));
+        if (!fromBuffer.isEmpty()) {
+          image = fromBuffer;
+        }
+      }
+
+      if (!image || image.isEmpty()) {
+        return { success: false, error: 'No image data provided' };
+      }
+
+      clipboard.writeImage(image);
+      return { success: true };
     } catch (err) {
       return { success: false, error: String(err) };
     }

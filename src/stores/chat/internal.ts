@@ -20,6 +20,7 @@ export const initialChatState: Pick<
   | 'sessions'
   | 'currentSessionKey'
   | 'currentAgentId'
+  | 'sessionModels'
   | 'sessionLabels'
   | 'sessionLastActivity'
   | 'showThinking'
@@ -41,8 +42,12 @@ export const initialChatState: Pick<
     historyMessages: [],
     userMessage: null,
     assistantMessages: [],
+    processMessages: [],
     latestPersistedAssistant: null,
+    persistedFinalMessage: null,
     streamingDisplayMessage: null,
+    processStreamingMessage: null,
+    finalStreamingMessage: null,
     startedAtMs: null,
     hasAnyStreamContent: false,
     isStreamingDuplicateOfPersistedAssistant: false,
@@ -51,6 +56,7 @@ export const initialChatState: Pick<
   sessions: [],
   currentSessionKey: DEFAULT_SESSION_KEY,
   currentAgentId: 'main',
+  sessionModels: {},
   sessionLabels: {},
   sessionLastActivity: {},
 

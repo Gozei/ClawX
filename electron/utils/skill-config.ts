@@ -5,9 +5,8 @@
  *
  * All file I/O uses async fs/promises to avoid blocking the main thread.
  */
-import { readFile, writeFile, access, mkdir } from 'fs/promises';
+import { readFile, mkdir, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
-import { constants } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { getOpenClawDir, getResourcesDir } from './paths';
@@ -20,20 +19,10 @@ import {
     writeManagedSkillsState,
 } from './openclaw-config-assembler';
 
-const OPENCLAW_CONFIG_PATH = join(homedir(), '.openclaw', 'openclaw.json');
-
 interface SkillEntry {
     enabled?: boolean;
     apiKey?: string;
     env?: Record<string, string>;
-}
-
-interface OpenClawConfig {
-    skills?: {
-        entries?: Record<string, SkillEntry>;
-        [key: string]: unknown;
-    };
-    [key: string]: unknown;
 }
 
 interface PreinstalledSkillSpec {
@@ -60,10 +49,6 @@ interface PreinstalledMarker {
     slug: string;
     version: string;
     installedAt: string;
-}
-
-async function fileExists(p: string): Promise<boolean> {
-    try { await access(p, constants.F_OK); return true; } catch { return false; }
 }
 
 async function setSkillsEnabled(skillKeys: string[], enabled: boolean): Promise<void> {

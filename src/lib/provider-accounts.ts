@@ -127,6 +127,11 @@ function getCanonicalProviderKey(account: ProviderAccount, vendor?: ProviderVend
     return friendly.canonicalKey;
   }
 
+  // 未识别的自定义兼容接口仍按账号独立展示，避免不同账号模型被误合并。
+  if (account.vendorId === 'custom') {
+    return `custom-account:${account.id}`;
+  }
+
   return [
     account.vendorId,
     normalizeBaseUrl(account.baseUrl),

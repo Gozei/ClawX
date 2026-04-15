@@ -18,6 +18,7 @@ import { useProviderStore } from '@/stores/providers';
 import { useSkillsStore } from '@/stores/skills';
 import { useChatStore } from '@/stores/chat';
 import { hostApiFetch } from '@/lib/host-api';
+import { buildProviderListItems } from '@/lib/provider-accounts';
 import { subscribeHostEvent } from '@/lib/host-events';
 import { CHANNEL_ICONS, CHANNEL_NAMES, type ChannelType } from '@/types/channel';
 import type { AgentProfileType, AgentSummary, AgentWorkflowNode } from '@/types/agent';
@@ -59,6 +60,7 @@ interface RuntimeProviderOption {
   label: string;
   modelIdPlaceholder?: string;
   configuredModelId?: string;
+  suggestedModelIds: string[];
 }
 
 type AgentTriggerMode = 'manual' | 'channel' | 'schedule' | 'webhook';
@@ -221,6 +223,12 @@ function buildRuntimeProviderOptions(
   providerVendors: ProviderVendorInfo[],
   providerDefaultAccountId: string | null,
 ): RuntimeProviderOption[] {
+  const providerItems = buildProviderListItems(
+    providerAccounts,
+    providerStatuses,
+    providerVendors,
+    providerDefaultAccountId,
+  );
   const vendorMap = new Map<string, ProviderVendorInfo>(providerVendors.map((vendor) => [vendor.id, vendor]));
   const statusById = new Map<string, ProviderWithKeyInfo>(providerStatuses.map((status) => [status.id, status]));
   const entries = providerAccounts
@@ -242,6 +250,11 @@ function buildRuntimeProviderOptions(
         ? account.model.slice(runtimeProviderKey.length + 1)
         : account.model)
       : undefined;
+    const suggestedModelIds = providerItems
+      .find((item) => item.aliases.some((alias) => alias.id === account.id))
+      ?.models
+      .map((model) => model.id)
+      .filter(Boolean) || [];
 
     deduped.set(runtimeProviderKey, {
       runtimeProviderKey,
@@ -249,6 +262,7 @@ function buildRuntimeProviderOptions(
       label,
       modelIdPlaceholder: vendor?.modelIdPlaceholder,
       configuredModelId,
+      suggestedModelIds,
     });
   }
 
@@ -323,7 +337,10 @@ export function Agents() {
     [activeAgentId, agents],
   );
 
-  const visibleAgents = agents;
+  const visibleAgents = useMemo(
+    () => [...agents].sort((left, right) => Number(right.isDefault) - Number(left.isDefault)),
+    [agents],
+  );
   const visibleChannelGroups = channelGroups;
   const isUsingStableValue = loading && hasCompletedInitialLoad;
   const handleRefresh = () => {
@@ -350,7 +367,7 @@ export function Agents() {
                 data-testid="agents-refresh-button"
                 variant="outline"
                 onClick={handleRefresh}
-                className="h-10 rounded-full px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6"
+                className="h-10 rounded-lg px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6"
               >
                 <RefreshCw className={cn('h-3.5 w-3.5 mr-2', isUsingStableValue && 'animate-spin')} />
                 {t('refresh')}
@@ -358,7 +375,7 @@ export function Agents() {
               <Button
                 data-testid="agents-add-button"
                 onClick={() => setShowAddDialog(true)}
-                className="h-10 rounded-full px-4 text-[13px] font-medium shadow-none"
+                className="h-10 rounded-lg px-4 text-[13px] font-medium shadow-none"
               >
                 <Plus className="h-3.5 w-3.5 mr-2" />
                 {t('addAgent')}
@@ -386,7 +403,10 @@ export function Agents() {
             </div>
           )}
 
-          <div className="space-y-3">
+          <div
+            data-testid="agents-card-grid"
+            className="grid grid-cols-1 gap-4 pt-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+          >
             {visibleAgents.map((agent) => (
               <AgentCard
                 key={agent.id}
@@ -446,7 +466,7 @@ export function Agents() {
   );
 }
 
-function AgentCard({
+function AgentOverviewCard({
   agent,
   channelGroups,
   onOpenSettings,
@@ -459,169 +479,115 @@ function AgentCard({
 }) {
   const { t } = useTranslation('agents');
   const safeAgentName = toSafeText(agent.name, agent.id);
-  const safeModelDisplay = toSafeText(agent.modelDisplay, t('none'));
   const safeProfileTypeLabel = agent.profileType
     ? t(`profileTypes.${agent.profileType}.label`)
     : t('profileTypes.specialist.label');
-  const safeSkillIds = toSafeStringArray(agent.skillIds);
-  const safeWorkflowSteps = toSafeStringArray(agent.workflowSteps);
-  const safeTriggerModes = toSafeStringArray(agent.triggerModes);
   const safeObjective = toSafeText(agent.objective);
   const safeDescription = toSafeText(agent.description);
-  const boundChannelAccounts = channelGroups.flatMap((group) =>
-    group.accounts
-      .filter((account) => account.agentId === agent.id)
-      .map((account) => {
-        const channelName = CHANNEL_NAMES[group.channelType as ChannelType] || group.channelType;
-        const accountLabel =
-          account.accountId === 'default'
-            ? t('settingsDialog.mainAccount')
-            : account.name || account.accountId;
-        return `${channelName} · ${accountLabel}`;
-      }),
-  );
-  const channelsText = boundChannelAccounts.length > 0
-    ? boundChannelAccounts.join(', ')
-    : t('none');
-  const triggerText = safeTriggerModes.length > 0
-    ? summarizeNames(
-        safeTriggerModes.map((mode) =>
-          ['manual', 'channel', 'schedule', 'webhook'].includes(mode)
-            ? t(`settingsDialog.triggerModes.${mode}.label`)
-            : mode
-        ),
-        t('none'),
-      )
-    : t('none');
-  const summaryText = safeObjective || safeDescription || t('settingsDialog.description');
+  const roleDescription = safeDescription || safeObjective || t(`profileTypes.${agent.profileType || 'specialist'}.description`);
+  void channelGroups;
 
   return (
     <div
+      data-testid="agent-overview-card"
       className={cn(
-        'group relative overflow-hidden rounded-[28px] border p-5 transition-all',
-        'border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.03)_0%,rgba(255,255,255,0.02)_100%)] shadow-[0_12px_32px_rgba(0,0,0,0.12)]',
-        'hover:border-white/10 hover:bg-white/[0.04] dark:border-white/8 dark:hover:bg-white/[0.05]',
+        'group relative flex h-full min-h-[232px] flex-col overflow-hidden rounded-[18px] border px-5 pb-4 pt-5 transition-all',
+        'border-black/8 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.08)] hover:-translate-y-0.5 hover:shadow-[0_22px_48px_rgba(15,23,42,0.12)]',
+        'dark:border-white/8 dark:bg-white/[0.03] dark:shadow-none dark:hover:bg-white/[0.05]',
         agent.isDefault && 'ring-1 ring-primary/30'
       )}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="grid min-w-0 flex-1 grid-cols-[auto,minmax(0,1fr)] gap-4">
-          <div className="mt-1 flex h-[54px] w-[54px] shrink-0 items-center justify-center rounded-[20px] bg-primary/12 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-            <Bot className="h-[24px] w-[24px]" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="truncate text-[18px] font-semibold tracking-[-0.02em] text-foreground">{safeAgentName}</h2>
-              {agent.isDefault && (
-                <Badge
-                  variant="secondary"
-                  className="flex items-center gap-1 rounded-full border-0 bg-primary/14 px-2.5 py-1 text-[11px] font-medium text-primary shadow-none"
-                >
-                  <Check className="h-3 w-3" />
-                  {t('defaultBadge')}
-                </Badge>
-              )}
-            </div>
-            <p className="mt-1 max-w-2xl text-[14px] leading-6 text-foreground/70 line-clamp-2">
-              {summaryText}
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <span className="rounded-full border border-white/6 bg-white/[0.04] px-3 py-1 text-[12px] text-foreground/76">
-                {safeProfileTypeLabel}
-              </span>
-              <span className="rounded-full border border-white/6 bg-white/[0.04] px-3 py-1 text-[12px] text-foreground/76">
-                {t('modelLine', {
-                  model: safeModelDisplay,
-                  suffix: agent.inheritedModel ? ` (${t('inherited')})` : '',
-                })}
-              </span>
-            </div>
-          </div>
-        </div>
+      {!agent.isDefault && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="pointer-events-none absolute right-4 top-4 h-9 w-9 shrink-0 rounded-xl text-muted-foreground opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+          onClick={onDelete}
+          title={t('deleteAgent')}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      )}
 
-        <div className="flex shrink-0 items-center gap-1">
-          {!agent.isDefault && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 rounded-xl text-muted-foreground transition-all hover:bg-destructive/10 hover:text-destructive"
-              onClick={onDelete}
-              title={t('deleteAgent')}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 rounded-xl text-muted-foreground transition-all hover:bg-white/6 hover:text-foreground"
-            onClick={onOpenSettings}
-            title={t('settings')}
+      <div className="relative flex justify-center">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+          <Bot className="h-6 w-6" />
+        </div>
+        {agent.isDefault && (
+          <Badge
+            data-testid="agent-default-badge"
+            variant="secondary"
+            className="absolute left-1/2 top-1/2 ml-9 flex -translate-y-1/2 items-center gap-1 whitespace-nowrap rounded-md border-0 bg-primary/14 px-2.5 py-1 text-[11px] font-medium text-primary shadow-none"
           >
-            <Settings2 className="h-4 w-4" />
-          </Button>
-        </div>
+            <Check className="h-3 w-3" />
+            {t('defaultBadge')}
+          </Badge>
+        )}
       </div>
 
-      <div data-testid="agent-card-summary-grid" className="mt-5 grid gap-3 border-t border-black/10 pt-4 md:grid-cols-5 dark:border-white/6">
-        <AgentMetric
-          label={t('settingsDialog.profileTypeLabel')}
-          value={safeProfileTypeLabel}
-          tone="neutral"
-        />
-        <AgentMetric
-          label={t('channelsLine', { channels: '' }).replace(/：?\s*$/, '')}
-          value={channelsText}
-          tone={boundChannelAccounts.length > 0 ? 'primary' : 'muted'}
-        />
-        <AgentMetric
-          label={t('settingsDialog.overview.triggers')}
-          value={triggerText}
-          tone={safeTriggerModes.length > 0 ? 'primary' : 'muted'}
-        />
-        <StatPill label={t('skillCount', { count: safeSkillIds.length })} value={String(safeSkillIds.length)} />
-        <StatPill label={t('workflowCount', { count: safeWorkflowSteps.length })} value={String(safeWorkflowSteps.length)} />
+      <div className="mt-5 flex min-h-[28px] items-center justify-center">
+        <h2
+          data-testid="agent-title"
+          className="w-full break-keep px-2 text-center text-[18px] font-semibold leading-7 tracking-[-0.02em] text-foreground"
+        >
+          {safeAgentName}
+        </h2>
       </div>
+
+      <div className="mt-2.5 flex justify-center">
+        <Badge
+          data-testid="agent-role-type-badge"
+          variant="outline"
+          className="rounded-md border-black/10 bg-black/[0.03] px-3 py-1 text-[12px] font-medium text-foreground/82 dark:border-white/10 dark:bg-white/[0.04]"
+        >
+          {safeProfileTypeLabel}
+        </Badge>
+      </div>
+
+      <p
+        data-testid="agent-role-description"
+        className="mt-3.5 min-h-[48px] line-clamp-2 text-center text-[14px] leading-6 text-foreground/68"
+      >
+        {roleDescription}
+      </p>
+
+      <Button
+        data-testid="agent-open-settings-button"
+        variant="outline"
+        onClick={onOpenSettings}
+        title={t('settings')}
+        className="pointer-events-none mt-auto h-10 w-full rounded-lg border-black/10 bg-white/70 text-[13px] font-medium text-foreground opacity-0 shadow-none transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100 hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08]"
+      >
+        <Settings2 className="mr-2 h-4 w-4" />
+        {t('settings')}
+      </Button>
     </div>
   );
 }
 
-const agentMetricCardClasses = 'h-full min-h-[96px] rounded-2xl border border-black/10 bg-white px-4 py-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.04] dark:shadow-none';
-
-function AgentMetric({
-  label,
-  value,
-  tone,
+function AgentCard({
+  agent,
+  channelGroups,
+  onOpenSettings,
+  onDelete,
 }: {
-  label: string;
-  value: string;
-  tone: 'neutral' | 'primary' | 'muted';
+  agent: AgentSummary;
+  channelGroups: ChannelGroupItem[];
+  onOpenSettings: () => void;
+  onDelete: () => void;
 }) {
   return (
-    <div
-      data-testid="agent-card-summary-item"
-      className={cn(
-        agentMetricCardClasses,
-        tone === 'muted' ? 'text-foreground/62' : 'text-foreground',
-      )}
-    >
-      <p className="text-[11px] uppercase tracking-[0.16em] leading-4 text-foreground/42 [overflow-wrap:anywhere]">{label}</p>
-      <p className={cn('mt-2 line-clamp-2 text-[14px] leading-6', tone === 'muted' ? 'text-foreground/58' : 'text-foreground/82')}>{value}</p>
-    </div>
+    <AgentOverviewCard
+      agent={agent}
+      channelGroups={channelGroups}
+      onOpenSettings={onOpenSettings}
+      onDelete={onDelete}
+    />
   );
 }
 
-function StatPill({ label, value }: { label: string; value: string }) {
-  return (
-    <div data-testid="agent-card-summary-item" className={agentMetricCardClasses}>
-      <p className="text-[11px] uppercase tracking-[0.14em] leading-4 text-foreground/42 [overflow-wrap:anywhere]">{label}</p>
-      <p className="mt-2 text-[20px] font-semibold tracking-[-0.02em] text-foreground">{value}</p>
-    </div>
-  );
-}
-
-const inputClasses = 'h-[44px] rounded-xl font-mono text-[13px] bg-background dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
-const selectClasses = cn(selectBaseClasses, 'h-[44px] rounded-xl border-black/10 bg-background dark:bg-muted shadow-sm transition-all focus-visible:border-blue-500 focus-visible:ring-blue-500/50 dark:border-white/10');
+const inputClasses = 'h-[44px] rounded-lg font-mono text-[13px] bg-background dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
+const selectClasses = cn(selectBaseClasses, 'h-[44px] rounded-lg border-black/10 bg-background dark:bg-muted shadow-sm transition-all focus-visible:border-blue-500 focus-visible:ring-blue-500/50 dark:border-white/10');
 const workflowSelectClasses = cn(selectClasses, 'mt-2');
 const labelClasses = 'text-[14px] text-foreground/80 font-bold';
 const selectIconStyle = getSelectIconStyle();
@@ -799,6 +765,7 @@ function AddAgentDialog({
             </Button>
             <Button
               onClick={() => void handleSubmit()}
+              data-testid="add-agent-save-button"
               disabled={saving || !name.trim()}
               className="h-9 text-[13px] font-medium rounded-full px-4 shadow-none"
             >
@@ -847,7 +814,7 @@ function AgentSettingsModal({
   const safeChannelTypes = useMemo(() => toSafeStringArray(agent.channelTypes), [agent.channelTypes]);
   const safeSkillIds = useMemo(() => toSafeStringArray(agent.skillIds), [agent.skillIds]);
   const safeWorkflowSteps = useMemo(() => toSafeStringArray(agent.workflowSteps), [agent.workflowSteps]);
-  const safeWorkflowNodes = useMemo(() => normalizeWorkflowNodesFromAgent(agent), [agent.workflowNodes, agent.workflowSteps]);
+  const safeWorkflowNodes = useMemo(() => normalizeWorkflowNodesFromAgent(agent), [agent]);
   const safeTriggerModes = useMemo(() => toSafeStringArray(agent.triggerModes), [agent.triggerModes]);
   const safeDescription = useMemo(() => toSafeText(agent.description), [agent.description]);
   const safeObjective = useMemo(() => toSafeText(agent.objective), [agent.objective]);
@@ -893,7 +860,18 @@ function AgentSettingsModal({
     setWorkflowNodes(safeWorkflowNodes);
     setSelectedTriggerModes(safeTriggerModes.length > 0 ? safeTriggerModes : ['manual']);
     setSkillQuery('');
-  }, [agent.id]);
+  }, [
+    agent.id,
+    safeAgentName,
+    safeBoundaries,
+    safeDescription,
+    safeObjective,
+    safeOutputContract,
+    safeProfileType,
+    safeSkillIds,
+    safeTriggerModes,
+    safeWorkflowNodes,
+  ]);
 
   useEffect(() => {
     void fetchSkills();
@@ -1233,6 +1211,7 @@ function AgentSettingsModal({
     for (const option of runtimeProviderOptions) {
       const current = suggestions.get(option.runtimeProviderKey) || [];
       const next = new Set(current);
+      for (const modelId of option.suggestedModelIds) next.add(modelId);
       if (option.configuredModelId) next.add(option.configuredModelId);
       const parsedDefault = splitModelRef(defaultModelRef);
       if (parsedDefault && parsedDefault.providerKey === option.runtimeProviderKey && parsedDefault.modelId) {
@@ -1308,7 +1287,7 @@ function AgentSettingsModal({
 
   return (
     <div className={modalOverlayClasses}>
-      <Card className={cn(modalCardClasses, 'max-w-5xl rounded-3xl border-0 shadow-2xl bg-background dark:bg-card')}>
+      <Card data-testid="agent-settings-dialog" className={cn(modalCardClasses, 'max-w-5xl rounded-3xl border-0 shadow-2xl bg-background dark:bg-card')}>
         <CardHeader className="flex flex-row items-start justify-between pb-2 shrink-0">
           <div>
             <CardTitle className="text-2xl font-serif font-normal tracking-tight">
@@ -1319,6 +1298,7 @@ function AgentSettingsModal({
           </CardDescription>
         </div>
           <Button
+            data-testid="agent-settings-close-button"
             variant="ghost"
             size="icon"
             onClick={handleRequestClose}
@@ -2074,43 +2054,19 @@ function AgentModelModal({
   const { updateAgentModel, defaultModelRef } = useAgentsStore();
   const [selectedRuntimeProviderKey, setSelectedRuntimeProviderKey] = useState('');
   const [modelIdInput, setModelIdInput] = useState('');
+  const [setAsDefaultRole, setSetAsDefaultRole] = useState(agent.isDefault);
   const [savingModel, setSavingModel] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
-  const runtimeProviderOptions = useMemo<RuntimeProviderOption[]>(() => {
-    const vendorMap = new Map<string, ProviderVendorInfo>(providerVendors.map((vendor) => [vendor.id, vendor]));
-    const statusById = new Map<string, ProviderWithKeyInfo>(providerStatuses.map((status) => [status.id, status]));
-    const entries = providerAccounts
-      .filter((account) => account.enabled && hasConfiguredProviderCredentials(account, statusById))
-      .sort((left, right) => {
-        if (left.id === providerDefaultAccountId) return -1;
-        if (right.id === providerDefaultAccountId) return 1;
-        return right.updatedAt.localeCompare(left.updatedAt);
-      });
-
-    const deduped = new Map<string, RuntimeProviderOption>();
-    for (const account of entries) {
-      const runtimeProviderKey = resolveRuntimeProviderKey(account);
-      if (!runtimeProviderKey || deduped.has(runtimeProviderKey)) continue;
-      const vendor = vendorMap.get(account.vendorId);
-      const label = `${account.label} (${vendor?.name || account.vendorId})`;
-      const configuredModelId = account.model
-        ? (account.model.startsWith(`${runtimeProviderKey}/`)
-          ? account.model.slice(runtimeProviderKey.length + 1)
-          : account.model)
-        : undefined;
-
-      deduped.set(runtimeProviderKey, {
-        runtimeProviderKey,
-        accountId: account.id,
-        label,
-        modelIdPlaceholder: vendor?.modelIdPlaceholder,
-        configuredModelId,
-      });
-    }
-
-    return [...deduped.values()];
-  }, [providerAccounts, providerDefaultAccountId, providerStatuses, providerVendors]);
+  const runtimeProviderOptions = useMemo(
+    () => buildRuntimeProviderOptions(
+      providerAccounts,
+      providerStatuses,
+      providerVendors,
+      providerDefaultAccountId,
+    ),
+    [providerAccounts, providerDefaultAccountId, providerStatuses, providerVendors],
+  );
 
   useEffect(() => {
     const override = splitModelRef(agent.overrideModelRef);
@@ -2131,7 +2087,12 @@ function AgentModelModal({
     setModelIdInput('');
   }, [agent.modelRef, agent.overrideModelRef, defaultModelRef, runtimeProviderOptions]);
 
+  useEffect(() => {
+    setSetAsDefaultRole(agent.isDefault);
+  }, [agent.id, agent.isDefault]);
+
   const selectedProvider = runtimeProviderOptions.find((option) => option.runtimeProviderKey === selectedRuntimeProviderKey) || null;
+  const selectedProviderModelSuggestions = selectedProvider?.suggestedModelIds || [];
   const trimmedModelId = modelIdInput.trim();
   const nextModelRef = selectedRuntimeProviderKey && trimmedModelId
     ? `${selectedRuntimeProviderKey}/${trimmedModelId}`
@@ -2143,9 +2104,11 @@ function AgentModelModal({
     ? nextModelRef
     : null;
   const modelChanged = (desiredOverrideModelRef || '') !== currentOverrideModelRef;
+  const makeDefaultRequested = setAsDefaultRole && !agent.isDefault;
+  const hasPendingModelChanges = modelChanged || makeDefaultRequested;
 
   const handleRequestClose = () => {
-    if (savingModel || modelChanged) {
+    if (savingModel || hasPendingModelChanges) {
       setShowCloseConfirm(true);
       return;
     }
@@ -2153,27 +2116,29 @@ function AgentModelModal({
   };
 
   const handleSaveModel = async () => {
-    if (!selectedRuntimeProviderKey) {
-      toast.error(t('toast.agentModelProviderRequired'));
-      return;
+    if (modelChanged) {
+      if (!selectedRuntimeProviderKey) {
+        toast.error(t('toast.agentModelProviderRequired'));
+        return;
+      }
+      if (!trimmedModelId) {
+        toast.error(t('toast.agentModelIdRequired'));
+        return;
+      }
+      if (!nextModelRef.includes('/')) {
+        toast.error(t('toast.agentModelInvalid'));
+        return;
+      }
     }
-    if (!trimmedModelId) {
-      toast.error(t('toast.agentModelIdRequired'));
-      return;
-    }
-    if (!modelChanged) return;
-    if (!nextModelRef.includes('/')) {
-      toast.error(t('toast.agentModelInvalid'));
-      return;
-    }
+    if (!hasPendingModelChanges) return;
 
     setSavingModel(true);
     try {
-      await updateAgentModel(agent.id, desiredOverrideModelRef);
-      toast.success(desiredOverrideModelRef ? t('toast.agentModelUpdated') : t('toast.agentModelReset'));
+      await updateAgentModel(agent.id, desiredOverrideModelRef, { setAsDefault: makeDefaultRequested });
+      toast.success(t('toast.agentModelSettingsUpdated'));
       onClose();
     } catch (error) {
-      toast.error(t('toast.agentModelUpdateFailed', { error: String(error) }));
+      toast.error(t('toast.agentModelSettingsUpdateFailed', { error: String(error) }));
     } finally {
       setSavingModel(false);
     }
@@ -2192,7 +2157,7 @@ function AgentModelModal({
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-xl rounded-3xl border-0 shadow-2xl bg-background dark:bg-card overflow-hidden">
+      <Card data-testid="agent-model-dialog" className="w-full max-w-xl rounded-3xl border-0 shadow-2xl bg-background dark:bg-card overflow-hidden">
         <CardHeader className="flex flex-row items-start justify-between pb-2">
           <div>
             <CardTitle className="text-2xl font-serif font-normal tracking-tight">
@@ -2220,10 +2185,8 @@ function AgentModelModal({
               onChange={(event) => {
                 const nextProvider = event.target.value;
                 setSelectedRuntimeProviderKey(nextProvider);
-                if (!modelIdInput.trim()) {
-                  const option = runtimeProviderOptions.find((candidate) => candidate.runtimeProviderKey === nextProvider);
-                  setModelIdInput(option?.configuredModelId || '');
-                }
+                const option = runtimeProviderOptions.find((candidate) => candidate.runtimeProviderKey === nextProvider);
+                setModelIdInput(option?.configuredModelId || option?.suggestedModelIds[0] || '');
               }}
               className={selectClasses}
               style={selectIconStyle}
@@ -2246,6 +2209,28 @@ function AgentModelModal({
               className={inputClasses}
             />
           </div>
+          {selectedProviderModelSuggestions.length > 0 && (
+            <div className="space-y-2">
+              <Label className="text-[12px] text-foreground/70">{t('settingsDialog.workflowSuggestedModelsLabel')}</Label>
+              <div className="flex flex-wrap gap-2">
+                {selectedProviderModelSuggestions.map((modelId) => (
+                  <button
+                    key={modelId}
+                    type="button"
+                    onClick={() => setModelIdInput(modelId)}
+                    className={cn(
+                      'rounded-full border px-3 py-1.5 text-[12px] transition-colors',
+                      trimmedModelId === modelId
+                        ? 'border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-300'
+                        : 'border-black/10 bg-white/70 text-foreground/70 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]',
+                    )}
+                  >
+                    {modelId}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {!!nextModelRef && (
             <p className="text-[12px] font-mono text-foreground/70 break-all">
               {t('settingsDialog.modelPreview')}: {nextModelRef}
@@ -2256,33 +2241,52 @@ function AgentModelModal({
               {t('settingsDialog.modelProviderEmpty')}
             </p>
           )}
-          <div className="flex items-center justify-end gap-2 pt-2">
-            <Button
-              variant="outline"
-              onClick={handleUseDefaultModel}
-              disabled={savingModel || !normalizedDefaultModelRef || isUsingDefaultModelInForm}
-              className="h-9 text-[13px] font-medium rounded-full px-4 border-black/10 dark:border-white/10 bg-transparent hover:bg-black/5 dark:hover:bg-white/5 shadow-none text-foreground/80 hover:text-foreground"
-            >
-              {t('settingsDialog.useDefaultModel')}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleRequestClose}
-              className="h-9 text-[13px] font-medium rounded-full px-4 border-black/10 dark:border-white/10 bg-transparent hover:bg-black/5 dark:hover:bg-white/5 shadow-none text-foreground/80 hover:text-foreground"
-            >
-              {t('common:actions.cancel')}
-            </Button>
-            <Button
-              onClick={() => void handleSaveModel()}
-              disabled={savingModel || !selectedRuntimeProviderKey || !trimmedModelId || !modelChanged}
-              className="h-9 text-[13px] font-medium rounded-full px-4 shadow-none"
-            >
-              {savingModel ? (
-                <RefreshCw className="h-4 w-4 animate-spin" />
-              ) : (
-                t('common:actions.save')
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+            <label
+              className={cn(
+                'flex items-center gap-2 text-[13px] text-foreground/78 select-none',
+                agent.isDefault ? 'cursor-default opacity-70' : 'cursor-pointer',
               )}
-            </Button>
+            >
+              <input
+                data-testid="agent-set-default-checkbox"
+                type="checkbox"
+                checked={setAsDefaultRole}
+                disabled={agent.isDefault}
+                onChange={(event) => setSetAsDefaultRole(event.target.checked)}
+                className="h-4 w-4 rounded border-black/15 text-primary focus:ring-primary/30 disabled:cursor-not-allowed"
+              />
+              <span>{t('settingsDialog.setAsDefaultRole')}</span>
+            </label>
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={handleUseDefaultModel}
+                disabled={savingModel || !normalizedDefaultModelRef || isUsingDefaultModelInForm}
+                className="h-9 text-[13px] font-medium rounded-full px-4 border-black/10 dark:border-white/10 bg-transparent hover:bg-black/5 dark:hover:bg-white/5 shadow-none text-foreground/80 hover:text-foreground"
+              >
+                {t('settingsDialog.useDefaultModel')}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleRequestClose}
+                className="h-9 text-[13px] font-medium rounded-full px-4 border-black/10 dark:border-white/10 bg-transparent hover:bg-black/5 dark:hover:bg-white/5 shadow-none text-foreground/80 hover:text-foreground"
+              >
+                {t('common:actions.cancel')}
+              </Button>
+              <Button
+                data-testid="agent-model-save-button"
+                onClick={() => void handleSaveModel()}
+                disabled={savingModel || !hasPendingModelChanges || (modelChanged && (!selectedRuntimeProviderKey || !trimmedModelId))}
+                className="h-9 text-[13px] font-medium rounded-full px-4 shadow-none"
+              >
+                {savingModel ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  t('common:actions.save')
+                )}
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
