@@ -19,6 +19,7 @@ function isNonBodyAssistantBlockType(type: string | undefined): boolean {
 
 const SYSTEM_LINE_RE = /^System(?: \(untrusted\))?:\s*(?:\[[^\]]+\]\s*)?(.*)$/i;
 const EXEC_SYSTEM_RE = /^Exec (?:completed|finished)\s*\(([^)]*)\)(?:\s*::\s*([\s\S]*))?$/i;
+const CONVERSATION_INFO_PREFIX_RE = /^Conversation info\s*\([^)]*\):/i;
 const HEARTBEAT_PROMPT_LINE_RE =
   /^(如果存在 HEARTBEAT\.md|Read HEARTBEAT\.md if it exists|读取 HEARTBEAT\.md 时|Current time:|当前时间：)/i;
 
@@ -96,23 +97,31 @@ function summarizeSystemHeartbeatNoise(text: string): string {
   return summaryLines.join('\n');
 }
 
+function stripInjectedConversationInfo(text: string): string {
+  if (!CONVERSATION_INFO_PREFIX_RE.test(text)) {
+    return text;
+  }
+
+  const withoutConversationInfo = text
+    .replace(/^Conversation info\s*\([^)]*\):\s*```[a-z]*\n[\s\S]*?```\s*/i, '')
+    .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '');
+
+  return withoutConversationInfo.replace(/^Execution playbook:\s*(?:\r?\n- .*)+\s*/i, '');
+}
+
 /**
  * Clean Gateway metadata from user message text for display.
  * Strips: [media attached: ... | ...], [message_id: ...],
  * and the timestamp prefix [Day Date Time Timezone].
  */
 function cleanUserText(text: string): string {
-  const cleaned = text
+  const cleaned = stripInjectedConversationInfo(text
     // Remove [media attached: path (mime) | path] references
     .replace(/\s*\[media attached:[^\]]*\]/g, '')
     // Remove [message_id: uuid]
     .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')
-    // Remove Gateway-injected "Conversation info (untrusted metadata): ```json...```" block
-    .replace(/^Conversation info\s*\([^)]*\):\s*```[a-z]*\n[\s\S]*?```\s*/i, '')
-    // Fallback: remove "Conversation info (...): {...}" without code block wrapper
-    .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '')
     // Remove Gateway timestamp prefix like [Fri 2026-02-13 22:39 GMT+8]
-    .replace(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i, '')
+    .replace(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i, ''))
     .trim();
 
   return summarizeSystemHeartbeatNoise(cleaned);

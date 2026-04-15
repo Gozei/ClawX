@@ -63,10 +63,10 @@ interface ChannelConfigModalProps {
   onChannelSaved?: (channelType: ChannelType) => void | Promise<void>;
 }
 
-const inputClasses = 'h-[44px] rounded-xl font-mono text-[13px] bg-background dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
+const inputClasses = 'h-[44px] rounded-lg font-mono text-[13px] bg-background dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
 const labelClasses = 'text-[14px] text-foreground/80 font-bold';
-const outlineButtonClasses = 'h-9 text-[13px] font-medium rounded-full px-4 border-black/10 dark:border-white/10 bg-transparent hover:bg-black/5 dark:hover:bg-white/5 shadow-none text-foreground/80 hover:text-foreground';
-const primaryButtonClasses = 'h-9 text-[13px] font-medium rounded-full px-4 shadow-none';
+const outlineButtonClasses = 'h-9 text-[13px] font-medium rounded-lg px-4 border-black/10 dark:border-white/10 bg-transparent hover:bg-black/5 dark:hover:bg-white/5 shadow-none text-foreground/80 hover:text-foreground';
+const primaryButtonClasses = 'h-9 text-[13px] font-medium rounded-lg px-4 shadow-none';
 
 export function ChannelConfigModal({
   initialSelectedType = null,

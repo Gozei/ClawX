@@ -18,7 +18,9 @@ vi.mock('@electron/utils/agent-config', () => ({
   clearChannelBinding: vi.fn(),
   createAgent: vi.fn(),
   deleteAgentConfig: vi.fn(),
+  finalizePreparedAgentModelUpdate: vi.fn(),
   listAgentsSnapshot: vi.fn(),
+  prepareAgentModelUpdate: vi.fn(),
   removeAgentWorkspaceDirectory: vi.fn(),
   resolveAccountIdForAgent: vi.fn(),
   updateAgentModel: vi.fn(),
@@ -31,6 +33,7 @@ vi.mock('@electron/utils/channel-config', () => ({
 }));
 
 vi.mock('@electron/services/providers/provider-runtime-sync', () => ({
+  syncAgentModelOverrideToRuntime: vi.fn(),
   syncAllProviderAuthToRuntime: vi.fn(),
 }));
 
@@ -39,8 +42,17 @@ vi.mock('@electron/api/route-utils', () => ({
   sendJson: vi.fn(),
 }));
 
-import { createAgent, updateAgentStudio } from '@electron/utils/agent-config';
-import { syncAllProviderAuthToRuntime } from '@electron/services/providers/provider-runtime-sync';
+import {
+  createAgent,
+  finalizePreparedAgentModelUpdate,
+  prepareAgentModelUpdate,
+  updateAgentModel,
+  updateAgentStudio,
+} from '@electron/utils/agent-config';
+import {
+  syncAgentModelOverrideToRuntime,
+  syncAllProviderAuthToRuntime,
+} from '@electron/services/providers/provider-runtime-sync';
 import { parseJsonBody, sendJson } from '@electron/api/route-utils';
 
 function setPlatform(platform: string): void {
@@ -137,5 +149,145 @@ describe('handleAgentRoutes create flow', () => {
         },
       } as never,
     );
+  });
+});
+
+describe('handleAgentRoutes model refresh flow', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+  });
+
+  it('uses gateway config.patch for model switches when the gateway is running', async () => {
+    const { handleAgentRoutes } = await import('@electron/api/routes/agents');
+
+    vi.mocked(parseJsonBody).mockResolvedValue({ modelRef: 'moonshot/kimi-k2.5' });
+    vi.mocked(prepareAgentModelUpdate).mockResolvedValue({
+      agentId: 'main',
+      config: {
+        agents: {
+          list: [{ id: 'main', model: { primary: 'moonshot/kimi-k2.5' } }],
+        },
+      },
+      normalizedModelRef: 'moonshot/kimi-k2.5',
+      snapshot: {
+        agents: [],
+        defaultAgentId: 'main',
+        defaultModelRef: 'moonshot/kimi-k2.5',
+        configuredChannelTypes: [],
+        channelOwners: {},
+        channelAccountOwners: {},
+      },
+      studioByAgentId: {},
+      studioStateChanged: false,
+    } as never);
+    vi.mocked(syncAllProviderAuthToRuntime).mockResolvedValue(undefined);
+    vi.mocked(syncAgentModelOverrideToRuntime).mockResolvedValue(undefined);
+
+    const rpc = vi
+      .fn()
+      .mockResolvedValueOnce({
+        hash: 'hash-1',
+        config: {
+          agents: {
+            list: [{ id: 'main' }],
+          },
+        },
+      })
+      .mockResolvedValueOnce({ ok: true });
+
+    await handleAgentRoutes(
+      { method: 'PUT' } as never,
+      {} as never,
+      new URL('http://localhost/api/agents/main/model'),
+      {
+        gatewayManager: {
+          getStatus: () => ({ state: 'running' }),
+          rpc,
+          debouncedReload: vi.fn(),
+        },
+      } as never,
+    );
+
+    expect(rpc).toHaveBeenNthCalledWith(1, 'config.get', {}, 15000);
+    expect(rpc).toHaveBeenNthCalledWith(
+      2,
+      'config.patch',
+      {
+        baseHash: 'hash-1',
+        raw: JSON.stringify({
+          agents: {
+            list: [{ id: 'main', model: { primary: 'moonshot/kimi-k2.5' } }],
+          },
+        }),
+      },
+      15000,
+    );
+    expect(finalizePreparedAgentModelUpdate).toHaveBeenCalledTimes(1);
+    expect(updateAgentModel).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the legacy local update when gateway config.patch fails', async () => {
+    const { handleAgentRoutes } = await import('@electron/api/routes/agents');
+
+    vi.mocked(parseJsonBody).mockResolvedValue({ modelRef: 'moonshot/kimi-k2.5' });
+    vi.mocked(prepareAgentModelUpdate).mockResolvedValue({
+      agentId: 'main',
+      config: {
+        agents: {
+          list: [{ id: 'main', model: { primary: 'moonshot/kimi-k2.5' } }],
+        },
+      },
+      normalizedModelRef: 'moonshot/kimi-k2.5',
+      snapshot: {
+        agents: [],
+        defaultAgentId: 'main',
+        defaultModelRef: 'moonshot/kimi-k2.5',
+        configuredChannelTypes: [],
+        channelOwners: {},
+        channelAccountOwners: {},
+      },
+      studioByAgentId: {},
+      studioStateChanged: false,
+    } as never);
+    vi.mocked(updateAgentModel).mockResolvedValue({
+      agents: [],
+      defaultAgentId: 'main',
+      defaultModelRef: 'moonshot/kimi-k2.5',
+      configuredChannelTypes: [],
+      channelOwners: {},
+      channelAccountOwners: {},
+    } as never);
+    vi.mocked(syncAllProviderAuthToRuntime).mockResolvedValue(undefined);
+    vi.mocked(syncAgentModelOverrideToRuntime).mockResolvedValue(undefined);
+
+    const debouncedReload = vi.fn();
+    const rpc = vi
+      .fn()
+      .mockResolvedValueOnce({
+        hash: 'hash-1',
+        config: {
+          agents: {
+            list: [{ id: 'main' }],
+          },
+        },
+      })
+      .mockRejectedValueOnce(new Error('patch failed'));
+
+    await handleAgentRoutes(
+      { method: 'PUT' } as never,
+      {} as never,
+      new URL('http://localhost/api/agents/main/model'),
+      {
+        gatewayManager: {
+          getStatus: () => ({ state: 'running' }),
+          rpc,
+          debouncedReload,
+        },
+      } as never,
+    );
+
+    expect(updateAgentModel).toHaveBeenCalledWith('main', 'moonshot/kimi-k2.5');
+    expect(debouncedReload).toHaveBeenCalledTimes(1);
   });
 });

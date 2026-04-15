@@ -193,6 +193,58 @@ describe('provider-runtime-sync refresh strategy', () => {
     expect(gateway.debouncedRestart).not.toHaveBeenCalled();
   });
 
+  it('syncs the full configured model catalog when switching a custom default provider', async () => {
+    const customProvider = createProvider({
+      id: 'custom-bc28bf7e-5fbc-4016-a36b-66fbc93e9662',
+      name: 'JD Compatible',
+      type: 'custom',
+      model: 'gpt-5.4',
+      baseUrl: 'https://agentrs.jd.com/api/saas/openai-u/v1',
+      apiProtocol: 'openai-responses',
+      metadata: {
+        customModels: ['qwen3.5-plus', 'glm-5'],
+      },
+    });
+    mocks.getProvider.mockResolvedValue(customProvider);
+    mocks.getProviderConfig.mockReturnValue(undefined);
+    mocks.getApiKey.mockResolvedValue('sk-custom');
+
+    const gateway = createGateway('running');
+    await syncDefaultProviderToRuntime(customProvider.id, gateway as GatewayManager);
+
+    expect(mocks.syncProviderConfigToOpenClaw).toHaveBeenCalledWith(
+      'custom-custombc',
+      'gpt-5.4',
+      expect.objectContaining({
+        baseUrl: 'https://agentrs.jd.com/api/saas/openai-u/v1',
+      }),
+    );
+    expect(mocks.syncProviderConfigToOpenClaw).toHaveBeenCalledWith(
+      'custom-custombc',
+      'qwen3.5-plus',
+      expect.objectContaining({
+        baseUrl: 'https://agentrs.jd.com/api/saas/openai-u/v1',
+      }),
+    );
+    expect(mocks.syncProviderConfigToOpenClaw).toHaveBeenCalledWith(
+      'custom-custombc',
+      'glm-5',
+      expect.objectContaining({
+        baseUrl: 'https://agentrs.jd.com/api/saas/openai-u/v1',
+      }),
+    );
+    expect(mocks.updateAgentModelProvider).toHaveBeenCalledWith(
+      'custom-custombc',
+      expect.objectContaining({
+        models: [
+          { id: 'gpt-5.4', name: 'gpt-5.4' },
+          { id: 'qwen3.5-plus', name: 'qwen3.5-plus' },
+          { id: 'glm-5', name: 'glm-5' },
+        ],
+      }),
+    );
+  });
+
   it('skips refresh after switching default provider when gateway is stopped', async () => {
     const gateway = createGateway('stopped');
     await syncDefaultProviderToRuntime('moonshot', gateway as GatewayManager);

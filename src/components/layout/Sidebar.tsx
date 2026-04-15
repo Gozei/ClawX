@@ -7,7 +7,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
-  Network,
   Bot,
   Puzzle,
   Clock,
@@ -15,11 +14,9 @@ import {
   PanelLeftClose,
   PanelLeft,
   Plus,
-  Terminal,
-  ExternalLink,
-  Cpu,
   MoreHorizontal,
   Pin,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
@@ -29,10 +26,15 @@ import { useAgentsStore } from '@/stores/agents';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { hostApiFetch } from '@/lib/host-api';
 import { useTranslation } from 'react-i18next';
 import { AppLogo } from '@/components/branding/AppLogo';
 import { useBranding } from '@/lib/branding';
+import { SettingsHub } from '@/components/settings/SettingsHub';
+
+const SIDEBAR_EXPANDED_MIN_WIDTH = 240;
+const SIDEBAR_EXPANDED_MAX_WIDTH = 420;
+const SIDEBAR_COLLAPSED_WIDTH = 64;
+const SESSION_AGENT_BADGE_WIDTH = 'w-[63px]';
 
 interface NavItemProps {
   to: string;
@@ -52,7 +54,7 @@ function NavItem({ to, icon, label, badge, collapsed, onClick, testId }: NavItem
       data-testid={testId}
       className={({ isActive }) =>
         cn(
-          'flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-all duration-200',
+          'flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-[14px] font-medium transition-all duration-200',
           'text-foreground/78 hover:bg-[#eef3fb] hover:text-foreground dark:hover:bg-white/5',
           isActive
             ? 'bg-white text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
@@ -97,10 +99,13 @@ function getAgentIdFromSessionKey(sessionKey: string): string {
 export function Sidebar() {
   const branding = useBranding();
   const sidebarCollapsed = useSettingsStore((state) => state.sidebarCollapsed);
+  const sidebarWidth = useSettingsStore((state) => state.sidebarWidth);
   const setSidebarCollapsed = useSettingsStore((state) => state.setSidebarCollapsed);
+  const setSidebarWidth = useSettingsStore((state) => state.setSidebarWidth);
 
   const sessions = useChatStore((s) => s.sessions);
   const currentSessionKey = useChatStore((s) => s.currentSessionKey);
+  const sessionRunningState = useChatStore((s) => s.sessionRunningState ?? {});
   const sessionLabels = useChatStore((s) => s.sessionLabels);
   const sessionLastActivity = useChatStore((s) => s.sessionLastActivity);
   const switchSession = useChatStore((s) => s.switchSession);
@@ -136,31 +141,17 @@ export function Sidebar() {
   const getSessionLabel = (key: string, displayName?: string, label?: string) =>
     sessionLabels[key] ?? label ?? displayName ?? key;
 
-  const openDevConsole = async () => {
-    try {
-      const result = await hostApiFetch<{
-        success: boolean;
-        url?: string;
-        error?: string;
-      }>('/api/gateway/control-ui');
-      if (result.success && result.url) {
-        window.electron.openExternal(result.url);
-      } else {
-        console.error('Failed to get Dev Console URL:', result.error);
-      }
-    } catch (err) {
-      console.error('Error opening Dev Console:', err);
-    }
-  };
-
   const { t, i18n } = useTranslation(['common', 'chat']);
   const [sessionToDelete, setSessionToDelete] = useState<{ key: string; label: string } | null>(null);
   const [editingSessionKey, setEditingSessionKey] = useState<string | null>(null);
   const [editingSessionName, setEditingSessionName] = useState('');
   const [openSessionMenuKey, setOpenSessionMenuKey] = useState<string | null>(null);
+  const [settingsHubOpen, setSettingsHubOpen] = useState(false);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
   const isSubmittingRenameRef = useRef(false);
+  const resizeStartXRef = useRef<number | null>(null);
+  const resizeStartWidthRef = useRef(sidebarWidth);
 
   useEffect(() => {
     void fetchAgents();
@@ -195,6 +186,21 @@ export function Sidebar() {
     };
   }, [openSessionMenuKey]);
 
+  useEffect(() => {
+    if (!settingsHubOpen) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSettingsHubOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [settingsHubOpen]);
+
   const agentNameById = useMemo(
     () => Object.fromEntries((agents ?? []).map((agent) => [agent.id, agent.name])),
     [agents],
@@ -215,6 +221,8 @@ export function Sidebar() {
       unpin: 'Unpin',
     };
   }, [i18n.resolvedLanguage]);
+
+  const sessionSectionLabel = i18n.resolvedLanguage?.startsWith('zh') ? '会话记录' : 'Session History';
 
   const startRenamingSession = (sessionKey: string, currentLabel: string) => {
     isSubmittingRenameRef.current = false;
@@ -249,27 +257,61 @@ export function Sidebar() {
     }
   };
 
+  const startSidebarResize = (event: { clientX: number; preventDefault: () => void }) => {
+    if (sidebarCollapsed) return;
+    event.preventDefault();
+    resizeStartXRef.current = event.clientX;
+    resizeStartWidthRef.current = sidebarWidth;
+
+    const handlePointerMove = (moveEvent: MouseEvent) => {
+      if (resizeStartXRef.current == null) return;
+      const deltaX = moveEvent.clientX - resizeStartXRef.current;
+      const nextWidth = Math.max(
+        SIDEBAR_EXPANDED_MIN_WIDTH,
+        Math.min(SIDEBAR_EXPANDED_MAX_WIDTH, resizeStartWidthRef.current + deltaX),
+      );
+      setSidebarWidth(nextWidth);
+    };
+
+    const stopResizing = () => {
+      resizeStartXRef.current = null;
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', stopResizing);
+    };
+
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mouseup', stopResizing, { once: true });
+  };
+
   const renderSessionRow = (s: typeof sessions[number]) => {
     const agentId = getAgentIdFromSessionKey(s.key);
     const agentName = agentNameById[agentId] || agentId;
     const sessionLabel = getSessionLabel(s.key, s.displayName, s.label);
     const isEditing = editingSessionKey === s.key;
     const isMenuOpen = openSessionMenuKey === s.key;
+    const isSessionRunning = !!sessionRunningState[s.key];
 
     return (
       <div key={s.key} className="group relative flex items-center" data-testid={`sidebar-session-${s.key}`}>
         {isEditing ? (
           <div
             className={cn(
-              'w-full rounded-xl px-3 py-2 pr-12 text-left text-[13px]',
+              'w-full rounded-lg px-3 py-1.5 pr-12 text-left text-[13px]',
               isOnChat && currentSessionKey === s.key
                 ? 'bg-white text-foreground font-medium shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
                 : 'text-foreground/75',
             )}
           >
             <div className="flex min-w-0 items-center gap-2">
-              <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-foreground/70 ring-1 ring-black/5 dark:bg-white/[0.08] dark:ring-white/10">
-                {agentName}
+              <span
+                data-testid={`sidebar-session-role-${s.key}`}
+                className={cn(
+                  SESSION_AGENT_BADGE_WIDTH,
+                  'inline-flex shrink-0 items-center justify-center overflow-hidden rounded-md bg-white px-2 py-0.5 text-center text-[10px] font-medium text-foreground/70 ring-1 ring-black/5 whitespace-nowrap dark:bg-white/[0.08] dark:ring-white/10',
+                )}
+                title={agentName}
+              >
+                <span className="truncate">{agentName}</span>
               </span>
               <input
                 ref={renameInputRef}
@@ -299,7 +341,7 @@ export function Sidebar() {
               navigate('/');
             }}
             className={cn(
-              'w-full rounded-xl px-3 py-2 pr-12 text-left text-[13px] transition-all duration-200',
+              'w-full rounded-lg px-3 py-1.5 pr-12 text-left text-[13px] transition-all duration-200',
               'hover:bg-[#eef3fb] dark:hover:bg-white/5',
               isOnChat && currentSessionKey === s.key
                 ? 'bg-white text-foreground font-medium shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
@@ -307,11 +349,19 @@ export function Sidebar() {
             )}
           >
             <div className="flex min-w-0 items-center gap-2">
-              <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-foreground/70 ring-1 ring-black/5 dark:bg-white/[0.08] dark:ring-white/10">
-                {agentName}
+              <span
+                data-testid={`sidebar-session-role-${s.key}`}
+                className={cn(
+                  SESSION_AGENT_BADGE_WIDTH,
+                  'inline-flex shrink-0 items-center justify-center overflow-hidden rounded-md bg-white px-2 py-0.5 text-center text-[10px] font-medium text-foreground/70 ring-1 ring-black/5 whitespace-nowrap dark:bg-white/[0.08] dark:ring-white/10',
+                )}
+                title={agentName}
+              >
+                <span className="truncate">{agentName}</span>
               </span>
               <span
-                className="truncate"
+                data-testid={`sidebar-session-title-${s.key}`}
+                className="min-w-0 flex-1 truncate"
                 title={sessionLabel}
                 onDoubleClick={(e) => {
                   e.preventDefault();
@@ -330,7 +380,18 @@ export function Sidebar() {
             className="absolute right-1 flex items-center"
             data-testid={`sidebar-session-menu-root-${s.key}`}
           >
-            {s.pinned && (
+            {isSessionRunning && (
+              <div
+                data-testid={`sidebar-session-running-indicator-${s.key}`}
+                className={cn(
+                  'pointer-events-none absolute right-0 flex h-7 w-7 items-center justify-center rounded-md text-primary transition-all',
+                  isMenuOpen ? 'opacity-0' : 'opacity-100 group-hover:opacity-0',
+                )}
+              >
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              </div>
+            )}
+            {!isSessionRunning && s.pinned && (
               <div
                 data-testid={`sidebar-session-pin-indicator-${s.key}`}
                 className={cn(
@@ -338,7 +399,7 @@ export function Sidebar() {
                   isMenuOpen ? 'opacity-0' : 'opacity-100 group-hover:opacity-0',
                 )}
               >
-                <Pin className="h-3.5 w-3.5 fill-current rotate-45" />
+                <Pin className="h-3.5 w-3.5 rotate-[28deg]" />
               </div>
             )}
             <button
@@ -361,7 +422,7 @@ export function Sidebar() {
             </button>
 
             {isMenuOpen && (
-              <div className="absolute right-0 top-8 z-20 min-w-[120px] overflow-hidden rounded-xl border border-black/8 bg-white py-1 shadow-[0_12px_28px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-[#12161f]">
+              <div className="absolute right-0 top-8 z-20 min-w-[120px] overflow-hidden rounded-lg border border-black/8 bg-white py-1 shadow-[0_12px_28px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-[#12161f]">
                 <button
                   type="button"
                   data-testid={`sidebar-session-menu-rename-${s.key}`}
@@ -424,11 +485,11 @@ export function Sidebar() {
     .filter((session) => !session.pinned)
     .sort((a, b) => (sessionLastActivity[b.key] ?? 0) - (sessionLastActivity[a.key] ?? 0));
 
+  const renderedSidebarWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : sidebarWidth;
+
   const navItems = [
     { to: '/dashboard', icon: <LayoutDashboard className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.dashboard'), testId: 'sidebar-nav-dashboard' },
-    { to: '/models', icon: <Cpu className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.models'), testId: 'sidebar-nav-models' },
     { to: '/agents', icon: <Bot className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.agents'), testId: 'sidebar-nav-agents' },
-    { to: '/channels', icon: <Network className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.channels'), testId: 'sidebar-nav-channels' },
     { to: '/skills', icon: <Puzzle className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.skills'), testId: 'sidebar-nav-skills' },
     { to: '/cron', icon: <Clock className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.cronTasks'), testId: 'sidebar-nav-cron' },
   ];
@@ -437,9 +498,9 @@ export function Sidebar() {
     <aside
       data-testid="sidebar"
       className={cn(
-        'flex shrink-0 flex-col border-r border-black/6 bg-[#f3f6fb] text-foreground/90 transition-all duration-300 dark:bg-background',
-        sidebarCollapsed ? 'w-16' : 'w-64'
+        'relative flex shrink-0 flex-col border-r border-black/6 bg-[#f3f6fb] text-foreground/90 transition-[width] duration-200 dark:bg-background'
       )}
+      style={{ width: `${renderedSidebarWidth}px` }}
     >
       {/* Top Header Toggle */}
       <div className={cn("flex items-center px-3 py-3 h-14 border-b border-black/5", sidebarCollapsed ? "justify-center" : "justify-between")}>
@@ -459,7 +520,7 @@ export function Sidebar() {
         <Button
           variant="ghost"
           size="icon"
-          className="h-9 w-9 shrink-0 rounded-xl text-muted-foreground hover:bg-white hover:text-foreground dark:hover:bg-white/10"
+          className="h-9 w-9 shrink-0 rounded-lg text-muted-foreground hover:bg-white hover:text-foreground dark:hover:bg-white/10"
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
         >
           {sidebarCollapsed ? (
@@ -482,7 +543,7 @@ export function Sidebar() {
             navigate('/');
           }}
           className={cn(
-            'group mb-2 flex w-full items-center gap-2.5 rounded-2xl px-3.5 py-3 text-[14px] font-semibold transition-all duration-200',
+            'group mb-2 flex w-full items-center gap-2.5 rounded-[16px] px-3.5 py-3 text-[14px] font-semibold transition-all duration-200',
             'border-0 bg-[linear-gradient(135deg,#4f8df7_0%,#2f6fe4_100%)] text-white shadow-[0_14px_34px_rgba(47,111,228,0.28)]',
             'hover:-translate-y-0.5 hover:bg-[linear-gradient(135deg,#5b97fb_0%,#3169d6_100%)] hover:shadow-[0_18px_38px_rgba(47,111,228,0.34)] active:translate-y-0',
             sidebarCollapsed && 'justify-center px-0',
@@ -503,69 +564,50 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* Session list — below Settings, only when expanded */}
-      {!sidebarCollapsed && sessions.length > 0 && (
-        <div className="mt-3 flex-1 overflow-y-auto overflow-x-hidden px-2.5 pb-3">
-          {pinnedSessions.length > 0 && (
-            <div data-testid="sidebar-pinned-sessions">
-              <div className="px-3 pb-1 text-[11px] font-medium text-muted-foreground/70 tracking-[0.01em]">
-                Pinned
-              </div>
-              {pinnedSessions.map(renderSessionRow)}
-            </div>
-          )}
-          {unpinnedSessions.length > 0 && (
-            <div data-testid="sidebar-session-list">
-              {unpinnedSessions.map(renderSessionRow)}
-            </div>
-          )}
+      {/* Session list */}
+      {!sidebarCollapsed && (
+        <div className="mt-2 flex-1 overflow-y-auto overflow-x-hidden px-2.5 pb-2">
+          <div className="px-3 pb-1.5 text-[11px] font-medium text-muted-foreground/70 tracking-[0.01em]">
+            {sessionSectionLabel}
+          </div>
+          <div data-testid="sidebar-pinned-sessions">
+            {pinnedSessions.map(renderSessionRow)}
+          </div>
+          <div data-testid="sidebar-session-list">
+            {unpinnedSessions.map(renderSessionRow)}
+          </div>
         </div>
       )}
 
       {/* Footer */}
-      <div className="mt-auto border-t border-black/5 p-2.5">
-        <NavLink
-            to="/settings"
-            data-testid="sidebar-nav-settings"
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-all duration-200',
-                'text-foreground/78 hover:bg-[#eef3fb] dark:hover:bg-white/5',
-                isActive && 'bg-white text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10',
-                sidebarCollapsed ? 'justify-center px-0' : ''
-              )
-            }
-          >
-          {({ isActive }) => (
-            <>
-              <div className={cn("flex shrink-0 items-center justify-center", isActive ? "text-primary" : "text-muted-foreground")}>
-                <SettingsIcon className="h-[18px] w-[18px]" strokeWidth={2} />
-              </div>
-              {!sidebarCollapsed && <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{t('sidebar.settings')}</span>}
-            </>
-          )}
-        </NavLink>
-
+      <div className="relative mt-auto border-t border-black/5 p-2.5">
         <Button
-          data-testid="sidebar-open-dev-console"
+          data-testid="sidebar-nav-settings"
           variant="ghost"
           className={cn(
-            'mt-1 flex h-auto w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-all duration-200',
+            'flex h-auto w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-all duration-200',
             'text-foreground/78 hover:bg-[#eef3fb] dark:hover:bg-white/5',
-            sidebarCollapsed ? 'justify-center px-0' : 'justify-start'
+            sidebarCollapsed ? 'justify-center px-0' : 'justify-start',
           )}
-          onClick={openDevConsole}
+          onClick={() => setSettingsHubOpen(true)}
         >
           <div className="flex shrink-0 items-center justify-center text-muted-foreground">
-            <Terminal className="h-[18px] w-[18px]" strokeWidth={2} />
+            <SettingsIcon className="h-[18px] w-[18px]" strokeWidth={2} />
           </div>
-          {!sidebarCollapsed && (
-            <>
-              <span className="flex-1 text-left overflow-hidden text-ellipsis whitespace-nowrap">{t('common:sidebar.openClawPage')}</span>
-              <ExternalLink className="h-3 w-3 shrink-0 ml-auto opacity-50 text-muted-foreground" />
-            </>
-          )}
+          {!sidebarCollapsed && <span className="flex-1 text-left overflow-hidden text-ellipsis whitespace-nowrap">{t('sidebar.settings')}</span>}
         </Button>
+
+        {settingsHubOpen && (
+          <div
+            data-testid="settings-hub-sheet-container"
+            className="absolute bottom-full left-2.5 z-[130] mb-2 flex w-fit flex-col bg-transparent"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="w-fit">
+              <SettingsHub mode="sheet" onRequestClose={() => setSettingsHubOpen(false)} />
+            </div>
+          </div>
+        )}
       </div>
 
       <ConfirmDialog
@@ -583,6 +625,25 @@ export function Sidebar() {
         }}
         onCancel={() => setSessionToDelete(null)}
       />
+      {!sidebarCollapsed && (
+        <div
+          data-testid="sidebar-resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          onMouseDown={startSidebarResize}
+          className="absolute inset-y-0 -right-1 z-20 hidden w-2 cursor-col-resize md:block"
+        >
+          <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-black/8 transition-colors hover:bg-primary/45" />
+        </div>
+      )}
+
+      {settingsHubOpen && (
+        <div
+          className="fixed inset-0 z-[120] bg-black/28 dark:bg-black/52"
+          onClick={() => setSettingsHubOpen(false)}
+        />
+      )}
     </aside>
   );
 }

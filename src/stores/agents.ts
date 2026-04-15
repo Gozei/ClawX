@@ -27,7 +27,13 @@ interface AgentsState {
     }
   ) => Promise<void>;
   updateAgent: (agentId: string, name: string) => Promise<void>;
-  updateAgentModel: (agentId: string, modelRef: string | null) => Promise<void>;
+  updateAgentModel: (
+    agentId: string,
+    modelRef: string | null,
+    options?: {
+      setAsDefault?: boolean;
+    }
+  ) => Promise<void>;
   updateAgentStudio: (
     agentId: string,
     payload: {
@@ -129,14 +135,23 @@ export const useAgentsStore = create<AgentsState>((set) => ({
     }
   },
 
-  updateAgentModel: async (agentId: string, modelRef: string | null) => {
+  updateAgentModel: async (
+    agentId: string,
+    modelRef: string | null,
+    options?: {
+      setAsDefault?: boolean;
+    },
+  ) => {
     set({ error: null });
     try {
       const snapshot = await hostApiFetch<AgentsSnapshot & { success?: boolean }>(
         `/api/agents/${encodeURIComponent(agentId)}/model`,
         {
           method: 'PUT',
-          body: JSON.stringify({ modelRef }),
+          body: JSON.stringify({
+            modelRef,
+            setAsDefault: options?.setAsDefault === true,
+          }),
         }
       );
       set(applySnapshot(snapshot));

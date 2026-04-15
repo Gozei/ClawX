@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { closeElectronApp, expect, getStableWindow, test } from './fixtures/electron';
+import { closeElectronApp, expect, getStableWindow, openSettingsHub, test } from './fixtures/electron';
 
 const SESSION_KEY = 'agent:main:process-stream-style-test';
 const SESSION_FILE = 'process-stream-style-test.jsonl';
@@ -81,10 +81,8 @@ test.describe.skip('Chat process stream style', () => {
 
       await expect(page.getByText('The browser is ready now.')).toBeVisible({ timeout: 60_000 });
 
-      await page.getByTestId('sidebar-nav-settings').click();
-      await expect(page.getByTestId('settings-page')).toBeVisible();
+      await openSettingsHub(page);
       await page.getByTestId('settings-assistant-message-style-stream').click();
-      await page.goBack();
 
       await expect(page.getByTestId('chat-process-toggle')).toBeVisible({ timeout: 60_000 });
       await page.getByTestId('chat-process-toggle').click();

@@ -146,6 +146,7 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
       const isFirstUserMessage = !existingMessages.some((message) => message.role === 'user');
       const baseMessage = trimmed || (attachments?.length ? '请处理我上传的附件。' : '');
       const messageForGateway = injectAgentExecutionMetadata(baseMessage, currentSessionKey, isFirstUserMessage);
+      const visibleUserContent = trimmed || (attachments?.length ? '锛堝凡闄勫姞鏂囦欢锛? : '');
 
       // Add user message optimistically (with local file metadata for UI display)
       const nowMs = Date.now();
@@ -162,6 +163,7 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
           filePath: a.stagedPath,
         })),
       };
+      userMsg.content = visibleUserContent;
       set((s) => ({
         sessions: ensureSessionEntry(s.sessions, currentSessionKey),
         messages: [...s.messages, userMsg],

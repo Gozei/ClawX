@@ -42,13 +42,24 @@ test.describe('Sidebar draft sessions', () => {
     try {
       const page = await getStableWindow(app);
       await expect(page.getByTestId('main-layout')).toBeVisible();
-      await expect(page.getByTestId(`sidebar-session-${SESSION_KEY}`)).toBeVisible({ timeout: 60_000 });
+
+      const sessionRow = page.getByTestId(`sidebar-session-${SESSION_KEY}`);
+      if (await sessionRow.count() === 0) {
+        const startResult = await page.evaluate(async () => (
+          await window.electron.ipcRenderer.invoke('gateway:start')
+        ) as { success?: boolean; error?: string });
+        expect(startResult?.success, startResult?.error || 'gateway:start failed during E2E setup').toBe(true);
+      }
+      await expect(sessionRow).toBeVisible({ timeout: 60_000 });
 
       await page.getByTestId('sidebar-new-chat').click();
+      const composerInput = page.getByTestId('chat-composer').getByRole('textbox');
+      await composerInput.fill('draft that should stay with the current conversation');
       await page.getByTestId('sidebar').locator('button').first().click();
 
       await expect(page.getByText(/agent:main:session-\d+/)).toHaveCount(0);
       await expect(page.getByTestId(`sidebar-session-${SESSION_KEY}`)).toBeVisible();
+      await expect(composerInput).toHaveValue('');
     } finally {
       await closeElectronApp(app);
     }

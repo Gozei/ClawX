@@ -7,7 +7,7 @@
         "agents": "Roles",
         "channels": "Channels",
         "dashboard": "Dashboard",
-        "settings": "Settings",
+        "settings": "System Management",
         "devConsole": "Developer Console",
         "models": "Models",
         "deleteSessionConfirm": "Are you sure you want to delete session \"{{label}}\"?",

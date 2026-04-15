@@ -19,6 +19,53 @@ const LOAD_HISTORY_MIN_INTERVAL_MS = 800;
 let lastLoadSessionsAt = 0;
 let lastLoadHistoryAt = 0;
 
+function updateSessionRunningState(
+  sessionRunningState: Record<string, boolean> | undefined,
+  sessionKey: string,
+  isRunning: boolean,
+): Record<string, boolean> {
+  const current = sessionRunningState ?? {};
+  if (!sessionKey) return current;
+  if (isRunning) {
+    if (current[sessionKey]) return current;
+    return {
+      ...current,
+      [sessionKey]: true,
+    };
+  }
+  if (!current[sessionKey]) return current;
+  return Object.fromEntries(Object.entries(current).filter(([key]) => key !== sessionKey));
+}
+
+function getSessionIdentity(sessionKey: string | null | undefined): string {
+  if (!sessionKey) return '';
+  if (!sessionKey.startsWith('agent:')) return sessionKey;
+  const parts = sessionKey.split(':');
+  return parts.length >= 3 ? parts.slice(2).join(':') : sessionKey;
+}
+
+function sessionKeysMatch(left: string | null | undefined, right: string | null | undefined): boolean {
+  if (!left || !right) return false;
+  return left === right || getSessionIdentity(left) === getSessionIdentity(right);
+}
+
+function resolveSessionKeyAlias(
+  sessionKey: string,
+  state: { currentSessionKey?: string; sessions?: Array<{ key: string }> },
+): string {
+  const candidates = [
+    state.currentSessionKey,
+    ...(state.sessions ?? []).map((session) => session.key),
+  ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0);
+
+  for (const candidate of candidates) {
+    if (sessionKeysMatch(candidate, sessionKey)) {
+      return candidate;
+    }
+  }
+  return sessionKey;
+}
+
 interface GatewayHealth {
   ok: boolean;
   error?: string;
@@ -154,6 +201,20 @@ function handleGatewayNotification(notification: { method?: string; params?: Rec
     if (shouldProcessGatewayEvent(normalizedEvent)) {
       import('./chat')
         .then(({ useChatStore }) => {
+          const normalizedState = normalizedEvent.state != null ? String(normalizedEvent.state) : '';
+          const chatState = useChatStore.getState();
+          const normalizedSessionKey = normalizedEvent.sessionKey != null
+            ? resolveSessionKeyAlias(String(normalizedEvent.sessionKey), chatState)
+            : null;
+          if (normalizedSessionKey && (normalizedState === 'error' || normalizedState === 'aborted')) {
+            useChatStore.setState((state) => ({
+              sessionRunningState: updateSessionRunningState(
+                state.sessionRunningState,
+                normalizedSessionKey,
+                false,
+              ),
+            }));
+          }
           useChatStore.getState().handleChatEvent(normalizedEvent);
         })
         .catch(() => {});
@@ -166,10 +227,18 @@ function handleGatewayNotification(notification: { method?: string; params?: Rec
     import('./chat')
       .then(({ useChatStore }) => {
         const state = useChatStore.getState();
-        const resolvedSessionKey = String(sessionKey);
+        const rawSessionKey = String(sessionKey);
+        const resolvedSessionKey = resolveSessionKeyAlias(rawSessionKey, state);
+        useChatStore.setState((chatState) => ({
+          sessionRunningState: updateSessionRunningState(
+            chatState.sessionRunningState,
+            resolvedSessionKey,
+            true,
+          ),
+        }));
         const shouldRefreshSessions =
-          resolvedSessionKey !== state.currentSessionKey
-          || !state.sessions.some((session) => session.key === resolvedSessionKey);
+          !sessionKeysMatch(rawSessionKey, state.currentSessionKey)
+          || !state.sessions.some((session) => sessionKeysMatch(session.key, rawSessionKey));
         if (shouldRefreshSessions) {
           maybeLoadSessions(state, true);
         }
@@ -187,16 +256,26 @@ function handleGatewayNotification(notification: { method?: string; params?: Rec
     import('./chat')
       .then(({ useChatStore }) => {
         const state = useChatStore.getState();
-        const resolvedSessionKey = sessionKey != null ? String(sessionKey) : null;
-        const shouldRefreshSessions = resolvedSessionKey != null && (
-          resolvedSessionKey !== state.currentSessionKey
-          || !state.sessions.some((session) => session.key === resolvedSessionKey)
+        const rawSessionKey = sessionKey != null ? String(sessionKey) : null;
+        const resolvedSessionKey = rawSessionKey != null ? resolveSessionKeyAlias(rawSessionKey, state) : null;
+        if (resolvedSessionKey) {
+          useChatStore.setState((chatState) => ({
+            sessionRunningState: updateSessionRunningState(
+              chatState.sessionRunningState,
+              resolvedSessionKey,
+              false,
+            ),
+          }));
+        }
+        const shouldRefreshSessions = rawSessionKey != null && (
+          !sessionKeysMatch(rawSessionKey, state.currentSessionKey)
+          || !state.sessions.some((session) => sessionKeysMatch(session.key, rawSessionKey))
         );
         if (shouldRefreshSessions) {
           maybeLoadSessions(state);
         }
 
-        const matchesCurrentSession = resolvedSessionKey == null || resolvedSessionKey === state.currentSessionKey;
+        const matchesCurrentSession = resolvedSessionKey == null || sessionKeysMatch(resolvedSessionKey, state.currentSessionKey);
         const matchesActiveRun = runId != null && state.activeRunId != null && String(runId) === state.activeRunId;
         const shouldDeferHistoryRefresh = shouldDeferCompletedHistoryRefresh(state);
 

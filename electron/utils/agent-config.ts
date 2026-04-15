@@ -96,6 +96,13 @@ interface ChannelSectionConfig extends Record<string, unknown> {
 }
 
 interface AgentConfigDocument extends Record<string, unknown> {
+  models?: {
+    providers?: Record<string, {
+      models?: Array<{ id?: string | null }>;
+      [key: string]: unknown;
+    }>;
+    [key: string]: unknown;
+  };
   agents?: AgentsConfig;
   bindings?: BindingConfig[];
   channels?: Record<string, ChannelSectionConfig>;
@@ -152,6 +159,19 @@ export interface AgentsSnapshot {
   channelOwners: Record<string, string>;
   channelAccountOwners: Record<string, string>;
 }
+
+type PreparedAgentModelUpdate = {
+  agentId: string;
+  config: AgentConfigDocument;
+  normalizedModelRef: string | null;
+  snapshot: AgentsSnapshot;
+  studioByAgentId: Record<string, AgentStudioConfig>;
+  studioStateChanged: boolean;
+};
+
+type AgentModelUpdateOptions = {
+  setAsDefault?: boolean;
+};
 
 interface AgentStudioUpdates {
   profileType?: string | null;
@@ -628,6 +648,18 @@ function normalizeAgentsConfig(config: AgentConfigDocument): {
   };
 }
 
+function applyDefaultAgentSelection(entries: AgentListEntry[], defaultAgentId: string): AgentListEntry[] {
+  return entries.map((entry) => {
+    const nextEntry: AgentListEntry = { ...entry };
+    if (entry.id === defaultAgentId) {
+      nextEntry.default = true;
+    } else {
+      delete nextEntry.default;
+    }
+    return nextEntry;
+  });
+}
+
 function isChannelBinding(binding: unknown): binding is BindingConfig {
   if (!binding || typeof binding !== 'object') return false;
   const candidate = binding as BindingConfig;
@@ -914,11 +946,11 @@ async function buildSnapshotFromConfig(config: AgentConfigDocument): Promise<Age
   }
 
   const defaultModelConfig = (config.agents as AgentsConfig | undefined)?.defaults?.model;
-  const defaultModelLabel = formatModelLabel(defaultModelConfig);
   const defaultModelRef = resolveModelRef(defaultModelConfig);
+  const defaultModelLabel = defaultModelRef ? formatModelLabel(defaultModelRef) : null;
   const agents: AgentSummary[] = entries.map((entry) => {
     const explicitModelRef = resolveModelRef(entry.model);
-    const modelLabel = formatModelLabel(entry.model) || defaultModelLabel || 'Not configured';
+    const modelLabel = (explicitModelRef ? formatModelLabel(explicitModelRef) : null) || defaultModelLabel || 'Not configured';
     const inheritedModel = !explicitModelRef && Boolean(defaultModelLabel);
     const entryIdNorm = normalizeAgentIdForBinding(entry.id);
     const ownedChannels = agentChannelSets.get(entryIdNorm) ?? new Set<string>();
@@ -1067,42 +1099,68 @@ function isValidModelRef(modelRef: string): boolean {
   return firstSlash > 0 && firstSlash < modelRef.length - 1;
 }
 
-export async function updateAgentModel(agentId: string, modelRef: string | null): Promise<AgentsSnapshot> {
+export async function prepareAgentModelUpdate(
+  inputConfig: Record<string, unknown>,
+  agentId: string,
+  modelRef: string | null,
+  options: AgentModelUpdateOptions = {},
+): Promise<PreparedAgentModelUpdate> {
+  const config = JSON.parse(JSON.stringify(inputConfig ?? {})) as AgentConfigDocument;
+  const resolvedState = await resolveAgentStudioState(config);
+  const studioByAgentId = resolvedState.studioByAgentId;
+  const { agentsConfig, entries } = normalizeAgentsConfig(config);
+  const index = entries.findIndex((entry) => entry.id === agentId);
+  if (index === -1) {
+    throw new Error(`Agent "${agentId}" not found`);
+  }
+
+  const normalizedModelRef = typeof modelRef === 'string' ? modelRef.trim() : '';
+  const nextEntry: AgentListEntry = { ...entries[index] };
+
+  if (!normalizedModelRef) {
+    delete nextEntry.model;
+  } else {
+    if (!isValidModelRef(normalizedModelRef)) {
+      throw new Error('modelRef must be in "provider/model" format');
+    }
+    nextEntry.model = { primary: normalizedModelRef };
+  }
+
+  entries[index] = nextEntry;
+  config.agents = {
+    ...agentsConfig,
+    list: options.setAsDefault ? applyDefaultAgentSelection(entries, agentId) : entries,
+  };
+
+  return {
+    agentId,
+    config,
+    normalizedModelRef: normalizedModelRef || null,
+    snapshot: await buildSnapshotFromConfig(config),
+    studioByAgentId,
+    studioStateChanged: resolvedState.changed,
+  };
+}
+
+export async function finalizePreparedAgentModelUpdate(prepared: PreparedAgentModelUpdate): Promise<void> {
+  if (prepared.studioStateChanged) {
+    await writeAgentStudioMetadata(prepared.studioByAgentId);
+  }
+  await syncAgentWorkspaceStudioContextFromConfig(prepared.config, prepared.agentId);
+  logger.info('Updated agent model', { agentId: prepared.agentId, modelRef: prepared.normalizedModelRef });
+}
+
+export async function updateAgentModel(
+  agentId: string,
+  modelRef: string | null,
+  options: AgentModelUpdateOptions = {},
+): Promise<AgentsSnapshot> {
   return withConfigLock(async () => {
     const config = await readOpenClawConfig() as AgentConfigDocument;
-    const resolvedState = await resolveAgentStudioState(config);
-    const studioByAgentId = resolvedState.studioByAgentId;
-    const { agentsConfig, entries } = normalizeAgentsConfig(config);
-    const index = entries.findIndex((entry) => entry.id === agentId);
-    if (index === -1) {
-      throw new Error(`Agent "${agentId}" not found`);
-    }
-
-    const normalizedModelRef = typeof modelRef === 'string' ? modelRef.trim() : '';
-    const nextEntry: AgentListEntry = { ...entries[index] };
-
-    if (!normalizedModelRef) {
-      delete nextEntry.model;
-    } else {
-      if (!isValidModelRef(normalizedModelRef)) {
-        throw new Error('modelRef must be in "provider/model" format');
-      }
-      nextEntry.model = { primary: normalizedModelRef };
-    }
-
-    entries[index] = nextEntry;
-    config.agents = {
-      ...agentsConfig,
-      list: entries,
-    };
-
-    await writeOpenClawConfig(config);
-    if (resolvedState.changed) {
-      await writeAgentStudioMetadata(studioByAgentId);
-    }
-    await syncAgentWorkspaceStudioContextFromConfig(config, agentId);
-    logger.info('Updated agent model', { agentId, modelRef: normalizedModelRef || null });
-    return buildSnapshotFromConfig(config);
+    const prepared = await prepareAgentModelUpdate(config, agentId, modelRef, options);
+    await writeOpenClawConfig(prepared.config);
+    await finalizePreparedAgentModelUpdate(prepared);
+    return prepared.snapshot;
   });
 }
 
@@ -1196,10 +1254,7 @@ export async function deleteAgentConfig(agentId: string): Promise<{ snapshot: Ag
       : undefined;
 
     if (defaultAgentId === agentId && nextEntries.length > 0) {
-      nextEntries[0] = {
-        ...nextEntries[0],
-        default: true,
-      };
+      config.agents.list = applyDefaultAgentSelection(nextEntries, nextEntries[0].id);
     }
 
     const normalizedAgentId = normalizeAgentIdForBinding(agentId);

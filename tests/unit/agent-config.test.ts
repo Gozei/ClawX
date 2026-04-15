@@ -197,6 +197,70 @@ describe('agent config lifecycle', () => {
     });
   });
 
+  it('promotes the selected role to default when saving model settings', async () => {
+    await writeOpenClawJson({
+      agents: {
+        list: [
+          { id: 'main', name: 'Main', default: true },
+          { id: 'ops', name: 'Ops' },
+        ],
+      },
+    });
+
+    const { listAgentsSnapshot, updateAgentModel } = await import('@electron/utils/agent-config');
+
+    await updateAgentModel('ops', null, { setAsDefault: true });
+
+    const config = await readOpenClawJson();
+    const list = ((config.agents as { list: Array<{ id: string; default?: boolean }> }).list);
+    expect(list.find((agent) => agent.id === 'ops')?.default).toBe(true);
+    expect(list.find((agent) => agent.id === 'main')?.default).toBeUndefined();
+
+    const snapshot = await listAgentsSnapshot();
+    expect(snapshot.defaultAgentId).toBe('ops');
+    expect(snapshot.agents.find((agent) => agent.id === 'ops')?.isDefault).toBe(true);
+    expect(snapshot.agents.find((agent) => agent.id === 'main')?.isDefault).toBe(false);
+  });
+
+  it('preserves per-agent model overrides even when the openclaw provider catalog is incomplete', async () => {
+    await writeOpenClawJson({
+      models: {
+        providers: {
+          'custom-custombc': {
+            models: [{ id: 'gpt-5.4' }],
+          },
+        },
+      },
+      agents: {
+        defaults: {
+          model: {
+            primary: 'custom-custombc/gpt-5.4',
+          },
+        },
+        list: [
+          {
+            id: 'main',
+            name: 'Main',
+            default: true,
+            model: { primary: 'custom-custombc/glm-5' },
+          },
+        ],
+      },
+    });
+
+    const { listAgentsSnapshot } = await import('@electron/utils/agent-config');
+
+    const snapshot = await listAgentsSnapshot();
+    expect(snapshot.defaultModelRef).toBe('custom-custombc/gpt-5.4');
+    expect(snapshot.agents[0]).toMatchObject({
+      id: 'main',
+      modelRef: 'custom-custombc/glm-5',
+      overrideModelRef: 'custom-custombc/glm-5',
+      inheritedModel: false,
+      modelDisplay: 'glm-5',
+    });
+  });
+
   it('writes studio context into the agent workspace AGENTS.md file', async () => {
     await writeOpenClawJson({
       agents: {
