@@ -16,8 +16,10 @@ const gatewayEventDedupe = new Map<string, number>();
 const GATEWAY_EVENT_DEDUPE_TTL_MS = 30_000;
 const LOAD_SESSIONS_MIN_INTERVAL_MS = 1_200;
 const LOAD_HISTORY_MIN_INTERVAL_MS = 800;
+const GATEWAY_RPC_RECOVERY_COOLDOWN_MS = 30_000;
 let lastLoadSessionsAt = 0;
 let lastLoadHistoryAt = 0;
+let lastGatewayRpcRecoveryAt = 0;
 
 function updateSessionRunningState(
   sessionRunningState: Record<string, boolean> | undefined,
@@ -85,6 +87,43 @@ interface GatewayState {
   rpc: <T>(method: string, params?: unknown, timeoutMs?: number) => Promise<T>;
   setStatus: (status: GatewayStatus) => void;
   clearError: () => void;
+}
+
+function shouldAutoRecoverGatewayRpc(
+  method: string,
+  errorMessage: string,
+  gatewayState: GatewayStatus['state'],
+): boolean {
+  if (gatewayState === 'starting' || gatewayState === 'reconnecting') {
+    return false;
+  }
+
+  const lower = errorMessage.toLowerCase();
+  const gatewayLooksUnresponsive = lower.includes('rpc timeout')
+    || lower.includes('gateway socket closed')
+    || lower.includes('gateway not connected');
+  if (!gatewayLooksUnresponsive) {
+    return false;
+  }
+
+  return method === 'chat.send'
+    || method === 'chat.history'
+    || method === 'sessions.list';
+}
+
+function queueGatewayRpcRecovery(
+  get: () => GatewayState,
+  errorMessage: string,
+): void {
+  const now = Date.now();
+  if (now - lastGatewayRpcRecoveryAt < GATEWAY_RPC_RECOVERY_COOLDOWN_MS) {
+    return;
+  }
+  lastGatewayRpcRecoveryAt = now;
+  console.warn(`[gateway-store] auto-recovering gateway after critical RPC failure: ${errorMessage}`);
+  void get().restart().catch((error) => {
+    console.warn('[gateway-store] automatic gateway restart failed:', error);
+  });
 }
 
 function pruneGatewayEventDedupe(now: number): void {
@@ -510,13 +549,28 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
   },
 
   rpc: async <T>(method: string, params?: unknown, timeoutMs?: number): Promise<T> => {
+    if (method === 'chat.send' && get().status.state === 'running') {
+      const health = await get().checkHealth();
+      if (!health.ok) {
+        const errorMessage = health.error || 'Gateway is connected but not responding';
+        set({ lastError: errorMessage });
+        queueGatewayRpcRecovery(get, errorMessage);
+        throw new Error('Gateway is connected but not responding. Restarting gateway, please retry in a moment.');
+      }
+    }
+
     const response = await invokeIpc<{
       success: boolean;
       result?: T;
       error?: string;
     }>('gateway:rpc', method, params, timeoutMs);
     if (!response.success) {
-      throw new Error(response.error || `Gateway RPC failed: ${method}`);
+      const errorMessage = response.error || `Gateway RPC failed: ${method}`;
+      set({ lastError: errorMessage });
+      if (shouldAutoRecoverGatewayRpc(method, errorMessage, get().status.state)) {
+        queueGatewayRpcRecovery(get, errorMessage);
+      }
+      throw new Error(errorMessage);
     }
     return response.result as T;
   },

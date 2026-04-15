@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useAgentsStore } from '@/stores/agents';
 import { useProviderStore, type ProviderAccount } from '@/stores/providers';
 import { hostApiFetch } from '@/lib/host-api';
 import {
@@ -294,6 +295,7 @@ export function ProviderConfigPanel() {
     removeAccount,
     setDefaultAccount,
   } = useProviderStore();
+  const fetchAgents = useAgentsStore((state) => state.fetchAgents);
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [draft, setDraft] = useState<DraftState | null>(null);
@@ -415,7 +417,8 @@ export function ProviderConfigPanel() {
       if (defaultAccountId !== row.account.id) {
         await setDefaultAccount(row.account.id);
       }
-      toast.success('已设为默认模型');
+      await fetchAgents();
+      toast.success('已设为全局默认模型');
     } catch (error) {
       toast.error(`设置失败: ${error}`);
     }
@@ -568,13 +571,12 @@ export function ProviderConfigPanel() {
                           <div className="flex items-center gap-2">
                             <div className="font-medium text-[15px] text-foreground">{row.modelId}</div>
                             {row.isGlobalDefault ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/12 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                              <span
+                                data-testid={`models-config-global-default-badge-${row.key}`}
+                                className="inline-flex items-center gap-1 rounded-full bg-amber-500/12 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400"
+                              >
                                 <Star className="h-3 w-3 fill-current" />
                                 全局默认
-                              </span>
-                            ) : row.isDefault ? (
-                              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
-                                默认
                               </span>
                             ) : null}
                           </div>
@@ -619,7 +621,10 @@ export function ProviderConfigPanel() {
                           {row.isGlobalDefault ? (
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-amber-500/20 bg-amber-500/8 text-amber-600 dark:text-amber-400">
+                                <span
+                                  data-testid={`models-config-global-default-indicator-${row.key}`}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-amber-500/20 bg-amber-500/8 text-amber-600 dark:text-amber-400"
+                                >
                                   <Star className="h-4 w-4 fill-current" />
                                 </span>
                               </TooltipTrigger>
@@ -629,6 +634,7 @@ export function ProviderConfigPanel() {
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button
+                                  data-testid={`models-config-set-global-default-${row.key}`}
                                   variant="ghost"
                                   size="icon"
                                   className="h-8 w-8 rounded-full text-foreground/55 hover:text-amber-600 dark:hover:text-amber-400"
@@ -690,7 +696,13 @@ export function ProviderConfigPanel() {
             <div className="mt-6 space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="draft-vendor">厂商</Label>
-                <Select id="draft-vendor" value={draft.vendorId} onChange={(event) => updateDraft('vendorId', event.target.value as ProviderType)} disabled={draft.mode === 'edit'}>
+                <Select
+                  id="draft-vendor"
+                  data-testid="models-config-sheet-vendor-select"
+                  value={draft.vendorId}
+                  onChange={(event) => updateDraft('vendorId', event.target.value as ProviderType)}
+                  disabled={draft.mode === 'edit'}
+                >
                   {vendorOptions.map((vendor) => (
                     <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
                   ))}
@@ -699,17 +711,33 @@ export function ProviderConfigPanel() {
 
               <div className="space-y-2">
                 <Label htmlFor="draft-label">账户名称</Label>
-                <Input id="draft-label" value={draft.label} onChange={(event) => updateDraft('label', event.target.value)} />
+                <Input
+                  id="draft-label"
+                  data-testid="models-config-sheet-label-input"
+                  value={draft.label}
+                  onChange={(event) => updateDraft('label', event.target.value)}
+                />
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="draft-model">模型</Label>
-                  <Input id="draft-model" value={draft.modelId} onChange={(event) => updateDraft('modelId', event.target.value)} placeholder="gpt-5.4 / glm-5 / qwen3.5-plus" />
+                  <Input
+                    id="draft-model"
+                    data-testid="models-config-sheet-model-input"
+                    value={draft.modelId}
+                    onChange={(event) => updateDraft('modelId', event.target.value)}
+                    placeholder="gpt-5.4 / glm-5 / qwen3.5-plus"
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="draft-protocol">协议</Label>
-                  <Select id="draft-protocol" value={draft.apiProtocol} onChange={(event) => updateDraft('apiProtocol', event.target.value as DraftState['apiProtocol'])}>
+                  <Select
+                    id="draft-protocol"
+                    data-testid="models-config-sheet-protocol-select"
+                    value={draft.apiProtocol}
+                    onChange={(event) => updateDraft('apiProtocol', event.target.value as DraftState['apiProtocol'])}
+                  >
                     <option value="openai-completions">OpenAI Completions</option>
                     <option value="openai-responses">OpenAI Responses</option>
                     <option value="anthropic-messages">Anthropic Messages</option>
@@ -719,7 +747,13 @@ export function ProviderConfigPanel() {
 
               <div className="space-y-2">
                 <Label htmlFor="draft-base-url">Base URL</Label>
-                <Input id="draft-base-url" value={draft.baseUrl} onChange={(event) => updateDraft('baseUrl', event.target.value)} placeholder="https://api.example.com/v1" />
+                <Input
+                  id="draft-base-url"
+                  data-testid="models-config-sheet-base-url-input"
+                  value={draft.baseUrl}
+                  onChange={(event) => updateDraft('baseUrl', event.target.value)}
+                  placeholder="https://api.example.com/v1"
+                />
               </div>
 
               {draft.authMode !== 'local' && (
@@ -759,7 +793,12 @@ export function ProviderConfigPanel() {
 
           <SheetFooter className="mt-6 gap-2 border-t border-black/10 pt-4 dark:border-white/10">
             <Button variant="outline" onClick={() => setSheetOpen(false)}>取消</Button>
-            <Button variant="outline" onClick={() => void handleDraftTest()} disabled={!draft || draftTest.state === 'running'}>
+            <Button
+              data-testid="models-config-sheet-test-button"
+              variant="outline"
+              onClick={() => void handleDraftTest()}
+              disabled={!draft || draftTest.state === 'running'}
+            >
               {draftTest.state === 'running' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               测试连接
             </Button>

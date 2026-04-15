@@ -5,6 +5,7 @@ import type { ProviderConfig } from '../../utils/secure-storage';
 import { getAllProviders, getApiKey, getDefaultProvider, getProvider } from '../../utils/secure-storage';
 import { getProviderConfig, getProviderDefaultModel } from '../../utils/provider-registry';
 import {
+  getOpenClawProvidersConfig,
   removeProviderFromOpenClaw,
   removeProviderKeyFromOpenClaw,
   saveOAuthTokenToOpenClaw,
@@ -203,6 +204,10 @@ export async function getProviderFallbackModelRefs(config: ProviderConfig): Prom
 }
 
 type GatewayRefreshMode = 'reload' | 'restart';
+type GatewayConfigSnapshot = {
+  hash?: string;
+  config?: Record<string, unknown>;
+};
 
 const PROVIDER_REFRESH_DEBOUNCE_MS = 2500;
 let pendingGatewayRefreshTimer: NodeJS.Timeout | null = null;
@@ -274,6 +279,94 @@ function scheduleGatewayRefresh(
     }
     request.gatewayManager.debouncedReload();
   }, effectiveDelayMs);
+}
+
+function normalizeStringArray(values: string[] | undefined): string[] {
+  return (values ?? []).map((value) => value.trim()).filter(Boolean);
+}
+
+function normalizeModelIdSet(config: ProviderConfig): string[] {
+  return getConfiguredProviderModelIds(config).slice().sort();
+}
+
+function buildProviderHotPatchFingerprint(config: ProviderConfig): string {
+  return JSON.stringify({
+    type: config.type,
+    baseUrl: (config.baseUrl || '').trim(),
+    apiProtocol: config.apiProtocol || '',
+    headers: config.headers ?? {},
+    enabled: config.enabled,
+    fallbackModels: normalizeStringArray(config.fallbackModels),
+    fallbackProviderIds: normalizeStringArray(config.fallbackProviderIds),
+    modelProtocols: config.metadata?.modelProtocols ?? {},
+  });
+}
+
+function isDefaultModelSelectionOnlyUpdate(
+  previousConfig: ProviderConfig | undefined,
+  nextConfig: ProviderConfig,
+): boolean {
+  if (!previousConfig) {
+    return false;
+  }
+
+  if (previousConfig.id !== nextConfig.id || previousConfig.type !== nextConfig.type) {
+    return false;
+  }
+
+  if (buildProviderHotPatchFingerprint(previousConfig) !== buildProviderHotPatchFingerprint(nextConfig)) {
+    return false;
+  }
+
+  return (previousConfig.model || '').trim() !== (nextConfig.model || '').trim()
+    && JSON.stringify(normalizeModelIdSet(previousConfig)) === JSON.stringify(normalizeModelIdSet(nextConfig));
+}
+
+async function tryHotPatchDefaultProviderModel(
+  gatewayManager: GatewayManager | undefined,
+  runtimeProviderKey: string,
+  defaultModelRef: string,
+  fallbackModels: string[],
+): Promise<boolean> {
+  if (!gatewayManager || gatewayManager.getStatus().state !== 'running') {
+    return false;
+  }
+
+  const snapshot = await gatewayManager.rpc<GatewayConfigSnapshot>('config.get', {}, 15000);
+  if (!snapshot?.hash || !snapshot.config || typeof snapshot.config !== 'object' || Array.isArray(snapshot.config)) {
+    return false;
+  }
+
+  const providerSnapshot = await getOpenClawProvidersConfig();
+  const providerEntry = providerSnapshot.providers[runtimeProviderKey];
+  const patch: Record<string, unknown> = {
+    agents: {
+      defaults: {
+        model: {
+          primary: defaultModelRef,
+          fallbacks: fallbackModels,
+        },
+      },
+    },
+  };
+
+  if (providerEntry && typeof providerEntry === 'object' && !Array.isArray(providerEntry)) {
+    patch.models = {
+      providers: {
+        [runtimeProviderKey]: providerEntry,
+      },
+    };
+  }
+
+  await gatewayManager.rpc(
+    'config.patch',
+    {
+      baseHash: snapshot.hash,
+      raw: JSON.stringify(patch),
+    },
+    15000,
+  );
+  return true;
 }
 
 export async function syncProviderApiKeyToRuntime(
@@ -528,6 +621,34 @@ async function buildAgentModelProviderEntry(
   };
 }
 
+export async function syncAgentModelRefToRuntime(
+  agentId: string,
+  modelRef: string | null,
+): Promise<void> {
+  const normalizedModelRef = (modelRef || '').trim();
+  if (!normalizedModelRef) {
+    return;
+  }
+
+  const parsed = parseModelRef(normalizedModelRef);
+  if (!parsed) {
+    throw new Error(`Invalid modelRef: ${normalizedModelRef}`);
+  }
+
+  const runtimeProviderConfigs = await buildRuntimeProviderConfigMap();
+  const providerConfig = runtimeProviderConfigs.get(parsed.providerKey);
+  if (!providerConfig) {
+    throw new Error(`No provider account mapped to runtime key "${parsed.providerKey}"`);
+  }
+
+  const entry = await buildAgentModelProviderEntry(providerConfig, parsed.modelId);
+  if (!entry) {
+    throw new Error(`Unable to build runtime provider entry for "${normalizedModelRef}"`);
+  }
+
+  await updateSingleAgentModelProvider(agentId, parsed.providerKey, entry);
+}
+
 async function syncAgentModelsToRuntime(agentIds?: Set<string>): Promise<void> {
   const snapshot = await listAgentsSnapshot();
   const runtimeProviderConfigs = await buildRuntimeProviderConfigMap();
@@ -591,6 +712,9 @@ export async function syncUpdatedProviderToRuntime(
   config: ProviderConfig,
   apiKey: string | undefined,
   gatewayManager?: GatewayManager,
+  options?: {
+    previousConfig?: ProviderConfig;
+  },
 ): Promise<void> {
   const context = await syncProviderToRuntime(config, apiKey);
   if (!context) {
@@ -628,6 +752,31 @@ export async function syncUpdatedProviderToRuntime(
     await syncAgentModelsToRuntime();
   } catch (err) {
     logger.warn('[provider-runtime] Failed to sync per-agent model registries after provider update:', err);
+  }
+
+  const modelOverride = config.model ? `${ock}/${config.model}` : undefined;
+  if (
+    defaultProviderId === config.id
+    && apiKey === undefined
+    && modelOverride
+    && isDefaultModelSelectionOnlyUpdate(options?.previousConfig, config)
+  ) {
+    try {
+      const hotPatched = await tryHotPatchDefaultProviderModel(
+        gatewayManager,
+        ock,
+        modelOverride,
+        fallbackModels,
+      );
+      if (hotPatched) {
+        logger.info(
+          `[provider-runtime] Hot patched default model for provider "${ock}" without gateway reload`,
+        );
+        return;
+      }
+    } catch (err) {
+      logger.warn('[provider-runtime] Failed to hot patch default provider model, falling back to reload:', err);
+    }
   }
 
   scheduleGatewayRefresh(

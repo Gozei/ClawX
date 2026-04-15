@@ -76,8 +76,6 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
     setTelemetryEnabled,
     chatProcessDisplayMode,
     setChatProcessDisplayMode,
-    assistantMessageStyle,
-    setAssistantMessageStyle,
     chatFontScale,
     setChatFontScale,
   } = useSettingsStore();
@@ -646,32 +644,6 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
                       )}
                     >
                       {t(`advanced.chatProcessDisplayOptions.${mode}`)}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div>
-                  <Label className="text-[15px] font-medium text-foreground">{t('advanced.assistantMessageStyle')}</Label>
-                  <p className="text-[13px] text-muted-foreground mt-1">
-                    {t('advanced.assistantMessageStyleDesc')}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {(['bubble', 'stream'] as const).map((style) => (
-                    <Button
-                      key={style}
-                      type="button"
-                      variant={assistantMessageStyle === style ? 'default' : 'outline'}
-                      onClick={() => setAssistantMessageStyle(style)}
-                      data-testid={`settings-assistant-message-style-${style}`}
-                      className={cn(
-                        'rounded-full px-4 h-9',
-                        assistantMessageStyle !== style && 'bg-transparent border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5',
-                      )}
-                    >
-                      {t(`advanced.assistantMessageStyleOptions.${style}`)}
                     </Button>
                   ))}
                 </div>

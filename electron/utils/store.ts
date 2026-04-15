@@ -89,7 +89,7 @@ function createDefaultSettings(): AppSettings {
     telemetryEnabled: true,
     brandingOverrides: {},
     chatProcessDisplayMode: 'files',
-    assistantMessageStyle: 'bubble',
+    assistantMessageStyle: 'stream',
     chatFontScale: 100,
     machineId: '',
     hasReportedInstall: false,

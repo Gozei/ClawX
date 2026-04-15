@@ -31,7 +31,7 @@ test.describe('Settings hub menu', () => {
       await expect(page.getByTestId('settings-hub-sheet-container')).toHaveCount(0);
       await expect(page.getByTestId('settings-page')).toBeVisible();
       await expect(page.getByTestId('settings-updates-section')).toBeVisible();
-      await expect(page.getByTestId('settings-assistant-message-style-bubble')).toBeVisible();
+      await expect(page.locator('[data-testid="settings-assistant-message-style-bubble"]')).toHaveCount(0);
     } finally {
       await closeElectronApp(app);
     }

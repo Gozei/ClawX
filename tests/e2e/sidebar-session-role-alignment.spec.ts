@@ -135,4 +135,9 @@ test.describe('Sidebar session role alignment', () => {
   test.fixme('keeps multiple running indicators visible until hover reveals session actions', async () => {
     // Placeholder for the sidebar multi-session action-area regression coverage.
   });
+
+  // TODO: Re-enable once seeded sidebar session hydration is stable in Electron E2E on Windows.
+  test.fixme('shows the gateway restart hint with an elapsed timer above new chat while the gateway is starting', async () => {
+    // Placeholder for the sidebar gateway restart hint + elapsed timer regression coverage.
+  });
 });

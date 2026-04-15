@@ -14,14 +14,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { hostApiFetch } from '@/lib/host-api';
 import { invokeIpc } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
-import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
 import { useChatStore } from '@/stores/chat';
 import { useProviderStore } from '@/stores/providers';
 import { useSettingsStore } from '@/stores/settings';
 import type { AgentSummary } from '@/types/agent';
 import type { ProviderAccount } from '@/lib/providers';
-import { buildProviderListItems, type ProviderListItem } from '@/lib/provider-accounts';
+import { buildProviderListItems } from '@/lib/provider-accounts';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 
@@ -44,19 +43,11 @@ interface ChatInputProps {
   onStop?: () => void;
   disabled?: boolean;
   sending?: boolean;
-  isEmpty?: boolean;
 }
 
 type ModelOption = {
   value: string;
   label: string;
-  accountId: string;
-  vendorId: ProviderAccount['vendorId'];
-  modelId: string;
-  authMode: ProviderAccount['authMode'];
-  baseUrl?: string;
-  apiProtocol?: ProviderAccount['apiProtocol'];
-  validationKey: string;
 };
 
 const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
@@ -83,37 +74,6 @@ function getRuntimeProviderKey(account: ProviderAccount): string {
   return account.vendorId;
 }
 
-function getConfiguredModelIds(account: ProviderAccount): string[] {
-  return Array.from(new Set([
-    account.model || '',
-    ...(account.metadata?.customModels ?? []),
-  ].map((model) => model.trim()).filter(Boolean)));
-}
-
-function resolveModelSourceAccount(item: ProviderListItem, modelId: string): ProviderAccount {
-  const normalizedModelId = modelId.trim();
-  return [item.account, ...item.aliases].find((account) => (
-    getConfiguredModelIds(account).includes(normalizedModelId)
-  )) ?? item.account;
-}
-
-function getModelApiProtocol(
-  account: ProviderAccount,
-  modelId: string,
-): ProviderAccount['apiProtocol'] | undefined {
-  return account.metadata?.modelProtocols?.[modelId] || account.apiProtocol;
-}
-
-function shouldValidateModelOption(option: ModelOption): boolean {
-  return option.authMode === 'api_key' || option.authMode === 'local';
-}
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-  return String(error);
-}
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -164,24 +124,20 @@ function readFileAsBase64(file: globalThis.File): Promise<string> {
 
 // ── Component ────────────────────────────────────────────────────
 
-export function ChatInput({ onSend, onStop, disabled = false, sending = false, isEmpty = false }: ChatInputProps) {
+export function ChatInput({ onSend, onStop, disabled = false, sending = false }: ChatInputProps) {
   const { t } = useTranslation('chat');
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [targetAgentId, setTargetAgentId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const [pendingModelValue, setPendingModelValue] = useState<string | null>(null);
-  const [switchingModel, setSwitchingModel] = useState(false);
   const [modelSwitchWidth, setModelSwitchWidth] = useState('180px');
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const modelLabelMeasureRef = useRef<HTMLSpanElement>(null);
-  const validatedModelKeysRef = useRef<Set<string>>(new Set());
   const isComposingRef = useRef(false);
-  const gatewayStatus = useGatewayStore((s) => s.status);
   const agents = useAgentsStore((s) => s.agents);
   const defaultModelRef = useAgentsStore((s) => s.defaultModelRef);
   const fetchAgents = useAgentsStore((s) => s.fetchAgents);
@@ -190,7 +146,6 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
   const providerVendors = useProviderStore((s) => s.vendors);
   const providerDefaultAccountId = useProviderStore((s) => s.defaultAccountId);
   const refreshProviderSnapshot = useProviderStore((s) => s.refreshProviderSnapshot);
-  const getAccountApiKey = useProviderStore((s) => s.getAccountApiKey);
   const chatFontScale = useSettingsStore((s) => s.chatFontScale);
   const currentAgentId = useChatStore((s) => s.currentAgentId);
   const currentSessionKey = useChatStore((s) => s.currentSessionKey);
@@ -220,7 +175,6 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
   );
   const showAgentPicker = mentionableAgents.length > 0;
   const inputFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
-  const metaFontSize = `${Math.round(11 * (chatFontScale / 100) * 10) / 10}px`;
   const providerItems = useMemo(
     () => buildProviderListItems(providerAccounts, providerStatuses, providerVendors, providerDefaultAccountId),
     [providerAccounts, providerDefaultAccountId, providerStatuses, providerVendors],
@@ -232,42 +186,23 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
         .filter((model) => model.source !== 'recommended')
         .slice()
         .sort((left, right) => left.id.localeCompare(right.id))
-        .map((model) => {
-          const sourceAccount = resolveModelSourceAccount(item, model.id);
-          const apiProtocol = getModelApiProtocol(sourceAccount, model.id);
-          return {
-            value: `${runtimeProviderKey}/${model.id}`,
-            label: `${item.displayName} / ${model.id}`,
-            accountId: sourceAccount.id,
-            vendorId: sourceAccount.vendorId,
-            modelId: model.id,
-            authMode: sourceAccount.authMode,
-            baseUrl: sourceAccount.baseUrl,
-            apiProtocol,
-            validationKey: [
-              sourceAccount.id,
-              model.id,
-              sourceAccount.baseUrl || '',
-              apiProtocol || '',
-            ].join('|'),
-          };
-        });
+        .map((model) => ({
+          value: `${runtimeProviderKey}/${model.id}`,
+          label: `${item.displayName} / ${model.id}`,
+        }));
     })
   ), [providerItems]);
-  const fallbackAgentModelRef = currentSession
-    ? (currentAgent?.overrideModelRef || currentAgent?.modelRef || '')
-    : '';
-  const effectiveModelRef = (sessionModels[currentSessionKey] || currentSession?.model || defaultModelRef || fallbackAgentModelRef || '').trim();
+  const effectiveModelRef = (sessionModels[currentSessionKey] || currentSession?.model || defaultModelRef || '').trim();
   const selectedModelValue = useMemo(() => {
     if (!effectiveModelRef) return '';
     return modelOptions.some((option) => option.value === effectiveModelRef) ? effectiveModelRef : '';
   }, [effectiveModelRef, modelOptions]);
-  const activeModelValue = pendingModelValue ?? selectedModelValue;
+  const activeModelValue = selectedModelValue;
   const selectedModelLabel = useMemo(
     () => modelOptions.find((option) => option.value === activeModelValue)?.label || t('composer.selectModel'),
     [activeModelValue, modelOptions, t],
   );
-  const isModelSwitchDisabled = disabled || sending || switchingModel || modelOptions.length === 0;
+  const isModelSwitchDisabled = disabled || sending || modelOptions.length === 0;
   const attachmentKeys = useMemo(
     () => new Set(attachments.map((attachment) => attachment.dedupeKey).filter(Boolean)),
     [attachments],
@@ -290,8 +225,6 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
     setTargetAgentId(null);
     setPickerOpen(false);
     setModelMenuOpen(false);
-    setPendingModelValue(null);
-    setSwitchingModel(false);
     setDragOver(false);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -358,22 +291,8 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
   }, [providerAccounts.length, providerStatuses.length, providerVendors.length, refreshProviderSnapshot]);
 
   useEffect(() => {
-    validatedModelKeysRef.current.clear();
-  }, [providerAccounts, providerStatuses]);
-
-  useEffect(() => {
-    setPendingModelValue(null);
-    setSwitchingModel(false);
     setModelMenuOpen(false);
   }, [currentAgentId]);
-
-  useEffect(() => {
-    if (!pendingModelValue) return;
-    if (pendingModelValue === selectedModelValue) {
-      setPendingModelValue(null);
-      setSwitchingModel(false);
-    }
-  }, [pendingModelValue, selectedModelValue]);
 
   useEffect(() => {
     if (currentSession) return;
@@ -699,76 +618,52 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
     [stageBufferFiles],
   );
 
-  const commitSessionModel = useCallback((modelRef: string) => {
-    useChatStore.setState((state) => ({
-      sessionModels: {
-        ...state.sessionModels,
-        [currentSessionKey]: modelRef,
-      },
-      sessions: state.sessions.map((session) => (
-        session.key === currentSessionKey
-          ? { ...session, model: modelRef }
-          : session
-      )),
-    }));
+  const setSessionModel = useCallback((modelRef: string | null) => {
+    useChatStore.setState((state) => {
+      const nextSessionModels = { ...state.sessionModels };
+      if (modelRef) {
+        nextSessionModels[currentSessionKey] = modelRef;
+      } else {
+        delete nextSessionModels[currentSessionKey];
+      }
+
+      return {
+        sessionModels: nextSessionModels,
+        sessions: state.sessions.map((session) => (
+          session.key !== currentSessionKey
+            ? session
+            : (
+                modelRef
+                  ? { ...session, model: modelRef }
+                  : (() => {
+                      const { model: _model, ...rest } = session;
+                      return rest;
+                    })()
+              )
+        )),
+      };
+    });
   }, [currentSessionKey]);
 
-  const handleModelChange = useCallback(async (nextModelRef: string) => {
+  const handleModelChange = useCallback((nextModelRef: string) => {
     const normalizedNextModelRef = (nextModelRef || '').trim();
     const previousModelValue = selectedModelValue;
     const nextOption = modelOptions.find((option) => option.value === normalizedNextModelRef);
-    const previousLabel = modelOptions.find((option) => option.value === previousModelValue)?.label
-      || previousModelValue
-      || t('composer.selectModel');
     const nextLabel = nextOption?.label || normalizedNextModelRef || t('composer.selectModel');
 
     if (normalizedNextModelRef === previousModelValue) {
       return;
     }
 
-    setPendingModelValue(normalizedNextModelRef || '');
-    setSwitchingModel(true);
-
-    try {
-      if (nextOption && shouldValidateModelOption(nextOption) && !validatedModelKeysRef.current.has(nextOption.validationKey)) {
-        const apiKey = nextOption.authMode === 'api_key'
-          ? await getAccountApiKey(nextOption.accountId)
-          : null;
-        await hostApiFetch('/api/provider-drafts/test', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            accountId: nextOption.accountId,
-            vendorId: nextOption.vendorId,
-            ...(apiKey ? { apiKey } : {}),
-            model: nextOption.modelId,
-            ...(nextOption.baseUrl ? { baseUrl: nextOption.baseUrl } : {}),
-            ...(nextOption.apiProtocol ? { apiProtocol: nextOption.apiProtocol } : {}),
-          }),
-        });
-        validatedModelKeysRef.current.add(nextOption.validationKey);
-      }
-
-      commitSessionModel(normalizedNextModelRef);
-      toast.success(t('composer.modelSwitchSuccess', { model: nextLabel }));
-    } catch (error) {
-      toast.error(t('composer.modelSwitchFailed', {
-        model: previousLabel,
-        error: getErrorMessage(error),
-      }));
-    } finally {
-      setPendingModelValue(null);
-      setSwitchingModel(false);
-    }
-  }, [commitSessionModel, getAccountApiKey, modelOptions, selectedModelValue, t]);
+    setSessionModel(normalizedNextModelRef || null);
+    toast.success(t('composer.modelSwitchSuccess', { model: nextLabel }));
+  }, [modelOptions, selectedModelValue, setSessionModel, t]);
 
   return (
     <div
+      data-testid="chat-composer-shell"
       className={cn(
-        "p-4 pb-6 w-full mx-auto transition-all duration-300",
-        isEmpty ? "max-w-3xl" : "max-w-4xl"
+        'w-full max-w-4xl mx-auto px-4 pt-0 pb-6 transition-all duration-300'
       )}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -933,11 +828,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
                 >
                   {selectedModelLabel}
                 </span>
-                {switchingModel ? (
-                  <Loader2 className="pointer-events-none h-4 w-4 shrink-0 animate-spin text-current" />
-                ) : (
-                  <ChevronDown className="pointer-events-none h-4 w-4 shrink-0 text-current" />
-                )}
+                <ChevronDown className="pointer-events-none h-4 w-4 shrink-0 text-current" />
               </button>
               {modelMenuOpen && !isModelSwitchDisabled && (
                 <div className="absolute bottom-full left-0 z-20 mb-2 w-[max-content] min-w-full max-w-[360px] overflow-hidden rounded-xl border border-black/10 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-card">
@@ -987,33 +878,19 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
             </Button>
           </div>
         </div>
-        <div className="mt-2.5 flex items-center justify-between gap-2 px-4 text-muted-foreground/58" style={{ fontSize: metaFontSize }}>
-          <div className="flex items-center gap-1.5">
-            <div className={cn("w-1.5 h-1.5 rounded-full", gatewayStatus.state === 'running' ? "bg-green-500/80" : "bg-red-500/80")} />
-            <span>
-              {t('composer.gatewayStatus', {
-                state: gatewayStatus.state === 'running'
-                  ? t('composer.gatewayConnected')
-                  : gatewayStatus.state,
-                port: gatewayStatus.port,
-                pid: gatewayStatus.pid ? `| pid: ${gatewayStatus.pid}` : '',
-              })}
-            </span>
-          </div>
-          {hasFailedAttachments && (
-            <Button
-              variant="link"
-              size="sm"
-              className="h-auto p-0 text-[11px]"
-              onClick={() => {
-                setAttachments((prev) => prev.filter((att) => att.status !== 'error'));
-                void pickFiles();
-              }}
-            >
-              {t('composer.retryFailedAttachments')}
-            </Button>
-          )}
-        </div>
+        {hasFailedAttachments && (
+          <Button
+            variant="link"
+            size="sm"
+            className="mt-2.5 h-auto px-4 py-0 text-[11px] text-muted-foreground/58"
+            onClick={() => {
+              setAttachments((prev) => prev.filter((att) => att.status !== 'error'));
+              void pickFiles();
+            }}
+          >
+            {t('composer.retryFailedAttachments')}
+          </Button>
+        )}
       </div>
     </div>
   );

@@ -272,6 +272,7 @@ Deep AI Worker employs a **dual-process architecture** with a unified host API l
 - To verify the active listener:
   - macOS/Linux: `lsof -nP -iTCP:18789 -sTCP:LISTEN`
   - Windows (PowerShell): `Get-NetTCPConnection -LocalPort 18789 -State Listen`
+- **Windows startup optimization**: Deep AI Worker now disables Gateway Bonjour/mDNS advertising by default on Windows unless `discovery.mdns.mode` is explicitly set in `~/.openclaw/openclaw.json`. This avoids slow startup loops caused by local network advertisement on some systems. If you rely on LAN discovery or pairing, set `discovery.mdns.mode` to `minimal` or `full`.
 - **Legacy DingTalk extension**: Some hand-installed `~/.openclaw/extensions/dingtalk` builds import `openclaw/.../plugin-sdk/root-alias.cjs/telegram-core`, which newer bundled OpenClaw no longer provides. That makes Gateway plugin startup slow or stuck. On launch, Deep AI Worker detects this pattern and **renames** the folder to `dingtalk.disabled-by-clawx-*` (see logs). Reinstall a DingTalk plugin build that matches your OpenClaw version, or remove the extension if you do not use it.
 - Clicking the window close button (`X`) hides Deep AI Worker to tray; it does **not** fully quit the app. Use tray menu **Quit Deep AI Worker** for complete shutdown.
 

@@ -90,10 +90,14 @@ const HISTORY_INCOMPLETE_RETRY_DELAY_MS = 1_200;
 const HISTORY_INCOMPLETE_RETRY_WINDOW_MS = 120_000;
 const HISTORY_INCOMPLETE_RETRY_LIMIT = 3;
 const CHAT_EVENT_DEDUPE_TTL_MS = 30_000;
+const AUTO_SESSION_LABEL_MAX_CHARS = 30;
 const _chatEventDedupe = new Map<string, number>();
 const _sessionViewSnapshots = new Map<string, SessionViewSnapshot>();
 const _historyIncompleteRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const _historyIncompleteRetryAttempts = new Map<string, number>();
+const _sessionAutoLabelRequestsInFlight = new Map<string, Promise<string | null>>();
+const _runtimePatchedAgentModels = new Map<string, string | null>();
+const _runtimeAgentModelSyncInFlight = new Map<string, Promise<void>>();
 
 const EMPTY_SESSION_VIEW_SNAPSHOT: SessionViewSnapshot = {
   messages: [],
@@ -140,6 +144,77 @@ function clearHistoryIncompleteRetry(sessionKey: string): void {
     _historyIncompleteRetryTimers.delete(sessionKey);
   }
   _historyIncompleteRetryAttempts.delete(sessionKey);
+}
+
+function truncateAutoSessionLabel(value: string): string {
+  return Array.from(value.trim()).slice(0, AUTO_SESSION_LABEL_MAX_CHARS).join('');
+}
+
+function syncPersistedSessionLabel(
+  set: ChatStoreSet,
+  sessionKey: string,
+  label: string,
+): void {
+  const normalizedLabel = label.trim();
+  if (!normalizedLabel) return;
+
+  set((state) => {
+    const nextSessionLabels = state.sessionLabels[sessionKey] === normalizedLabel
+      ? state.sessionLabels
+      : { ...state.sessionLabels, [sessionKey]: normalizedLabel };
+
+    const nextSessions = state.sessions.map((session) => (
+      session.key === sessionKey
+        ? { ...session, label: normalizedLabel }
+        : session
+    ));
+    const sessionsChanged = nextSessions.some((session, index) => session !== state.sessions[index]);
+
+    if (!sessionsChanged && nextSessionLabels === state.sessionLabels) {
+      return {};
+    }
+
+    return {
+      sessions: sessionsChanged ? nextSessions : state.sessions,
+      sessionLabels: nextSessionLabels,
+    };
+  });
+}
+
+function queueAutoSessionLabelPersistence(
+  set: ChatStoreSet,
+  sessionKey: string,
+  rawLabel: string,
+): void {
+  if (!sessionKey.startsWith('agent:') || sessionKey.endsWith(':main')) return;
+
+  const normalizedLabel = truncateAutoSessionLabel(rawLabel);
+  if (!normalizedLabel) return;
+  if (_sessionAutoLabelRequestsInFlight.has(sessionKey)) return;
+
+  const request = hostApiFetch<{ success?: boolean; label?: string }>('/api/sessions/auto-label', {
+    method: 'POST',
+    body: JSON.stringify({ sessionKey, label: normalizedLabel }),
+  }).then((result) => {
+    if (!result?.success) return null;
+    const resolvedLabel = typeof result.label === 'string' ? result.label.trim() : normalizedLabel;
+    return resolvedLabel || normalizedLabel;
+  }).catch((error) => {
+    console.warn(`[autoSessionLabel] Failed to persist label for ${sessionKey}:`, error);
+    return null;
+  });
+
+  _sessionAutoLabelRequestsInFlight.set(sessionKey, request);
+  void request.finally(() => {
+    if (_sessionAutoLabelRequestsInFlight.get(sessionKey) === request) {
+      _sessionAutoLabelRequestsInFlight.delete(sessionKey);
+    }
+  });
+  void request.then((persistedLabel) => {
+    if (persistedLabel) {
+      syncPersistedSessionLabel(set, sessionKey, persistedLabel);
+    }
+  });
 }
 
 function cloneAttachedFiles(files: AttachedFileMeta[] | undefined): AttachedFileMeta[] | undefined {
@@ -553,6 +628,17 @@ function saveImageCache(cache: Map<string, AttachedFileMeta>): void {
 }
 
 const _imageCache = loadImageCache();
+const CONVERSATION_INFO_PREFIX_RE = /^Conversation info\s*\([^)]*\):/i;
+const SENDER_METADATA_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*```[a-z]*\s*[\s\S]*?```\s*/i;
+const SENDER_METADATA_JSON_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*\{[\s\S]*?\}\s*/i;
+const GATEWAY_TIMESTAMP_PREFIX_RE = /^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i;
+
+function isPreCompactionMemoryFlushPrompt(text: string): boolean {
+  const normalized = text.trim();
+  return /^Pre-compaction memory flush\./i.test(normalized)
+    && /Store durable memories only in memory\//i.test(normalized)
+    && /reply with NO_REPLY\./i.test(normalized);
+}
 
 /** Extract plain text from message content (string or content blocks) */
 function getMessageText(content: unknown): string {
@@ -564,6 +650,45 @@ function getMessageText(content: unknown): string {
       .join('\n');
   }
   return '';
+}
+
+function stripInjectedConversationInfo(text: string): string {
+  if (!CONVERSATION_INFO_PREFIX_RE.test(text)) {
+    return text;
+  }
+
+  const withoutConversationInfo = text
+    .replace(/^Conversation info\s*\([^)]*\):\s*```[a-z]*\n[\s\S]*?```\s*/i, '')
+    .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '');
+
+  return withoutConversationInfo.replace(/^Execution playbook:\s*(?:\r?\n- .*)+\s*/i, '');
+}
+
+function cleanUserMessageText(text: string): string {
+  const cleaned = stripInjectedConversationInfo(text
+    .replace(SENDER_METADATA_PREFIX_RE, '')
+    .replace(SENDER_METADATA_JSON_PREFIX_RE, '')
+    .replace(/\s*\[media attached:[^\]]*\]/g, '')
+    .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')
+    .replace(GATEWAY_TIMESTAMP_PREFIX_RE, ''))
+    .trim();
+
+  return isPreCompactionMemoryFlushPrompt(cleaned) ? '' : cleaned;
+}
+
+function getSessionLabelText(content: unknown): string {
+  return cleanUserMessageText(getMessageText(content));
+}
+
+function getComparableMessageText(
+  message: Pick<RawMessage, 'role' | 'content'> | null | undefined,
+): string {
+  if (!message) return '';
+  const rawText = getMessageText(message.content);
+  const comparableText = message.role === 'user'
+    ? cleanUserMessageText(rawText)
+    : rawText;
+  return comparableText.trim();
 }
 
 function translateChat(key: string, defaultValue: string, options?: Record<string, unknown>): string {
@@ -650,6 +775,13 @@ function getSendFailedError(error?: string): string {
     'sessionErrors.sendFailedWithDetail',
     'Failed to send message: {{error}}',
     { error: detail },
+  );
+}
+
+function getNoResponseError(): string {
+  return translateChat(
+    'sessionErrors.noResponse',
+    'No response received from the model. The provider may be unavailable or the API key may have insufficient quota. Please check your provider settings.',
   );
 }
 
@@ -1207,29 +1339,69 @@ async function loadCronFallbackMessages(sessionKey: string, limit = 200): Promis
   }
 }
 
+async function loadLocalSessionHistory(
+  sessionKey: string,
+  limit = 200,
+): Promise<{ resolved: boolean; messages: RawMessage[]; thinkingLevel: string | null }> {
+  try {
+    const response = await hostApiFetch<{
+      success?: boolean;
+      resolved?: boolean;
+      messages?: RawMessage[];
+      thinkingLevel?: string | null;
+    }>('/api/sessions/history', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKey, limit }),
+    });
+
+    return {
+      resolved: response?.resolved === true,
+      messages: Array.isArray(response?.messages) ? response.messages : [],
+      thinkingLevel: typeof response?.thinkingLevel === 'string' ? response.thinkingLevel : null,
+    };
+  } catch (error) {
+    console.warn('Failed to load local session history:', error);
+    return {
+      resolved: false,
+      messages: [],
+      thinkingLevel: null,
+    };
+  }
+}
+
 function normalizeAgentId(value: string | undefined | null): string {
   return (value ?? '').trim().toLowerCase() || 'main';
+}
+
+function resolveDefaultCanonicalPrefix(): string {
+  const defaultAgentId = normalizeAgentId(useAgentsStore.getState().defaultAgentId);
+  return `agent:${defaultAgentId}`;
 }
 
 function buildFallbackMainSessionKey(agentId: string): string {
   return `agent:${normalizeAgentId(agentId)}:main`;
 }
 
-function resolveSessionModelSnapshot(agentId: string): string {
-  const { agents, defaultModelRef } = useAgentsStore.getState();
-  const agent = agents.find((item) => item.id === agentId);
-  return (defaultModelRef || agent?.overrideModelRef || agent?.modelRef || '').trim();
+function resolveSessionModelSnapshot(): string {
+  const { defaultModelRef } = useAgentsStore.getState();
+  return (defaultModelRef || '').trim();
 }
 
 function resolveSessionPreferredModel(sessionKey: string): string | null {
   const chatState = useChatStore.getState();
   const sessionModel = chatState.sessionModels[sessionKey]
     || chatState.sessions.find((session) => session.key === sessionKey)?.model;
-  const agentId = getAgentIdFromSessionKey(sessionKey);
-  const { agents, defaultModelRef } = useAgentsStore.getState();
-  const agent = agents.find((item) => item.id === agentId);
-  const preferredModel = (sessionModel || defaultModelRef || agent?.overrideModelRef || agent?.modelRef || '').trim();
+  const { defaultModelRef } = useAgentsStore.getState();
+  const preferredModel = (sessionModel || defaultModelRef || '').trim();
   return preferredModel || null;
+}
+
+function resolveAgentConfiguredModel(agentId: string): string | null {
+  const normalizedAgentId = normalizeAgentId(agentId);
+  const { agents, defaultModelRef } = useAgentsStore.getState();
+  const agentModelRef = agents.find((agent) => agent.id === normalizedAgentId)?.modelRef;
+  const resolvedModel = (agentModelRef || defaultModelRef || '').trim();
+  return resolvedModel || null;
 }
 
 async function ensureSessionPreferredModelLoaded(
@@ -1297,6 +1469,52 @@ async function ensureSessionPreferredModelLoaded(
   });
 }
 
+async function syncSessionPreferredModelToRuntime(sessionKey: string): Promise<void> {
+  const agentId = getAgentIdFromSessionKey(sessionKey);
+  const preferredModel = resolveSessionPreferredModel(sessionKey);
+  if (!agentId || !preferredModel) {
+    return;
+  }
+
+  const expectedRuntimeModel = _runtimePatchedAgentModels.has(agentId)
+    ? (_runtimePatchedAgentModels.get(agentId) || null)
+    : resolveAgentConfiguredModel(agentId);
+  if (expectedRuntimeModel === preferredModel) {
+    return;
+  }
+
+  const existingRequest = _runtimeAgentModelSyncInFlight.get(agentId);
+  if (existingRequest) {
+    await existingRequest;
+    const latestRuntimeModel = _runtimePatchedAgentModels.has(agentId)
+      ? (_runtimePatchedAgentModels.get(agentId) || null)
+      : resolveAgentConfiguredModel(agentId);
+    if (latestRuntimeModel === preferredModel) {
+      return;
+    }
+  }
+
+  const request = hostApiFetch<{ success?: boolean; error?: string }>(
+    `/api/agents/${encodeURIComponent(agentId)}/model/runtime`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ modelRef: preferredModel }),
+    },
+  ).then((result) => {
+    if (!result?.success) {
+      throw new Error(result?.error || `Failed to switch runtime model for agent "${agentId}"`);
+    }
+    _runtimePatchedAgentModels.set(agentId, preferredModel);
+  }).finally(() => {
+    if (_runtimeAgentModelSyncInFlight.get(agentId) === request) {
+      _runtimeAgentModelSyncInFlight.delete(agentId);
+    }
+  });
+
+  _runtimeAgentModelSyncInFlight.set(agentId, request);
+  await request;
+}
+
 function resolveMainSessionKeyForAgent(agentId: string | undefined | null): string | null {
   if (!agentId) return null;
   const normalizedAgentId = normalizeAgentId(agentId);
@@ -1331,7 +1549,7 @@ function buildAgentExecutionMetadataForSession(sessionKey: string, mode: 'full' 
       }
     : {
         ...agent,
-        modelRef: preferredModel || agent.modelRef || null,
+        modelRef: preferredModel || null,
       };
   return buildAgentExecutionMetadata(agentForMetadata);
 }
@@ -1556,6 +1774,10 @@ function isToolResultRole(role: unknown): boolean {
 /** True for internal plumbing messages that should never be shown in the UI. */
 function isInternalMessage(msg: { role?: unknown; content?: unknown }): boolean {
   if (msg.role === 'system') return true;
+  if (msg.role === 'user') {
+    const text = getMessageText(msg.content);
+    if (isPreCompactionMemoryFlushPrompt(text)) return true;
+  }
   if (msg.role === 'assistant') {
     const text = getMessageText(msg.content);
     if (/^(HEARTBEAT_OK|NO_REPLY)\s*$/.test(text)) return true;
@@ -2102,7 +2324,22 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
 
     _loadSessionsInFlight = (async () => {
       try {
-        const data = await useGatewayStore.getState().rpc<Record<string, unknown>>('sessions.list', {});
+        let data: Record<string, unknown> | null = null;
+        try {
+          const localList = await hostApiFetch<{
+            success: boolean;
+            sessions?: Array<Record<string, unknown>>;
+          }>('/api/sessions/list');
+          if (localList?.success && Array.isArray(localList.sessions)) {
+            data = { sessions: localList.sessions };
+          }
+        } catch {
+          // Fall back to gateway enumeration when the host route is unavailable.
+        }
+
+        if (!data) {
+          data = await useGatewayStore.getState().rpc<Record<string, unknown>>('sessions.list', {});
+        }
         if (data) {
           const rawSessions = Array.isArray(data.sessions) ? data.sessions : [];
           const sessionKeys = rawSessions
@@ -2224,10 +2461,54 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             void get().loadHistory();
           }
 
-          // Background: fetch first user message for every non-main session to populate labels upfront.
-          // Uses a small limit so it's cheap; runs in parallel and doesn't block anything.
-          const sessionsToLabel = sessionsWithCurrent.filter((s) => !s.key.endsWith(':main'));
+          // Background: fetch first user message for unlabeled sessions without
+          // flooding Gateway chat.history calls for every row in the sidebar.
+          const sessionLabelsAfterLoad = get().sessionLabels;
+          const sessionsToLabel = sessionsWithCurrent.filter((session) => (
+            !session.key.endsWith(':main')
+            && !hasStoredSessionLabel(sessionsWithCurrent, session.key)
+            && !sessionLabelsAfterLoad[session.key]
+          ));
+          const shouldUseGatewayHistoryLabelPrefetch = false;
           if (sessionsToLabel.length > 0) {
+            const labelsToPersist: Array<{ sessionKey: string; label: string }> = [];
+            void hostApiFetch<{
+              success: boolean;
+              previews?: Record<string, { firstUserMessage: string | null }>;
+            }>('/api/sessions/previews', {
+              method: 'POST',
+              body: JSON.stringify({ sessionKeys: sessionsToLabel.map((session) => session.key) }),
+            }).then((result) => {
+              if (!result?.success || !result.previews) return;
+              set((s) => {
+                let nextSessionLabels = s.sessionLabels;
+                let changed = false;
+
+                for (const session of sessionsToLabel) {
+                  const labelText = result.previews?.[session.key]?.firstUserMessage?.trim();
+                  const autoLabel = labelText ? truncateAutoSessionLabel(labelText) : '';
+                  if (!autoLabel || s.sessionLabels[session.key] || hasStoredSessionLabel(s.sessions, session.key)) {
+                    continue;
+                  }
+                  if (!changed) {
+                    nextSessionLabels = { ...s.sessionLabels };
+                    changed = true;
+                  }
+                  nextSessionLabels[session.key] = autoLabel;
+                  labelsToPersist.push({ sessionKey: session.key, label: autoLabel });
+                }
+
+                return changed ? { sessionLabels: nextSessionLabels } : {};
+              });
+            }).catch(() => {
+              // ignore preview prefetch errors
+            }).finally(() => {
+              for (const { sessionKey, label } of labelsToPersist) {
+                queueAutoSessionLabelPersistence(set, sessionKey, label);
+              }
+            });
+          }
+          if (shouldUseGatewayHistoryLabelPrefetch && sessionsToLabel.length > 0) {
             void Promise.all(
               sessionsToLabel.map(async (session) => {
                 try {
@@ -2242,7 +2523,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                   set((s) => {
                     const next: Partial<typeof s> = {};
                     if (firstUser) {
-                      const labelText = getMessageText(firstUser.content).trim();
+                      const labelText = getSessionLabelText(firstUser.content);
                       if (labelText && !s.sessionLabels[session.key] && !hasStoredSessionLabel(s.sessions, session.key)) {
                         const truncated = labelText.length > 50 ? `${labelText.slice(0, 50)}…` : labelText;
                         next.sessionLabels = { ...s.sessionLabels, [session.key]: truncated };
@@ -2372,12 +2653,13 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       { currentSessionKey, messages, sessions, sessionLabels, sessionLastActivity },
       currentSessionKey,
     );
-    const prefix = getCanonicalPrefixFromSessionKey(currentSessionKey)
-      ?? getCanonicalPrefixFromSessions(sessions)
-      ?? DEFAULT_CANONICAL_PREFIX;
+    const prefix = resolveDefaultCanonicalPrefix()
+      || getCanonicalPrefixFromSessionKey(currentSessionKey)
+      || getCanonicalPrefixFromSessions(sessions)
+      || DEFAULT_CANONICAL_PREFIX;
     const newKey = `${prefix}:session-${Date.now()}`;
     const newAgentId = getAgentIdFromSessionKey(newKey);
-    const defaultSessionModel = resolveSessionModelSnapshot(newAgentId);
+    const defaultSessionModel = resolveSessionModelSnapshot();
     clearHistoryIncompleteRetry(currentSessionKey);
     if (leavingEmpty) {
       clearSessionView(currentSessionKey);
@@ -2533,21 +2815,21 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     const loadPromise = (async () => {
       const isCurrentSession = () => get().currentSessionKey === currentSessionKey;
       const getPreviewMergeKey = (message: RawMessage): string => (
-        `${message.id ?? ''}|${message.role}|${message.timestamp ?? ''}|${getMessageText(message.content)}`
+        `${message.id ?? ''}|${message.role}|${message.timestamp ?? ''}|${getComparableMessageText(message)}`
       );
       const messageExistsIn = (messagesToScan: RawMessage[], candidate: RawMessage): boolean => {
         if (candidate.id && messagesToScan.some((message) => message.id === candidate.id)) {
           return true;
         }
         const candidateKey = getPreviewMergeKey(candidate);
-        const candidateText = getMessageText(candidate.content).trim();
+        const candidateText = getComparableMessageText(candidate);
         return messagesToScan.some((message) => (
           getPreviewMergeKey(message) === candidateKey
           || (
             candidate.role === 'assistant'
             && message.role === candidate.role
             && candidateText.length > 0
-            && getMessageText(message.content).trim() === candidateText
+            && getComparableMessageText(message) === candidateText
           )
         ));
       };
@@ -2701,14 +2983,14 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         const optimisticUser = [...currentMsgs].reverse().find(
           (m) => m.role === 'user' && m.timestamp && Math.abs(toMs(m.timestamp) - userMsMs) < 5000,
         );
-        const optimisticUserText = optimisticUser ? getMessageText(optimisticUser.content).trim() : '';
+        const optimisticUserText = getComparableMessageText(optimisticUser);
         const hasRecentUser = enrichedMessages.some((m) => {
           if (m.role !== 'user') return false;
           if (m.timestamp && Math.abs(toMs(m.timestamp) - userMsMs) < 5000) {
             return true;
           }
           if (!optimisticUser || !optimisticUserText) return false;
-          const loadedText = getMessageText(m.content).trim();
+          const loadedText = getComparableMessageText(m);
           if (!loadedText || loadedText !== optimisticUserText) return false;
           if (!m.timestamp) return true;
           return Math.abs(toMs(m.timestamp) - userMsMs) < 60_000;
@@ -2825,6 +3107,31 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         };
       });
 
+      let recoveredAutoLabel = '';
+      let shouldPersistRecoveredAutoLabel = false;
+      if (!currentSessionKey.endsWith(':main')) {
+        const firstUserMsg = mergedMessagesForActiveSend.find((m) => m.role === 'user');
+        if (firstUserMsg) {
+          recoveredAutoLabel = truncateAutoSessionLabel(getSessionLabelText(firstUserMsg.content));
+          set((s) => {
+            const hasStoredLabel = hasStoredSessionLabel(s.sessions, currentSessionKey);
+            if (!recoveredAutoLabel || hasStoredLabel) {
+              return {};
+            }
+            shouldPersistRecoveredAutoLabel = true;
+            if (s.sessionLabels[currentSessionKey] === recoveredAutoLabel) {
+              return {};
+            }
+            return {
+              sessionLabels: { ...s.sessionLabels, [currentSessionKey]: recoveredAutoLabel },
+            };
+          });
+        }
+      }
+      if (shouldPersistRecoveredAutoLabel && recoveredAutoLabel) {
+        queueAutoSessionLabelPersistence(set, currentSessionKey, recoveredAutoLabel);
+      }
+
       // Extract first user message text as a session label for display in the toolbar.
       // Skip main sessions (key ends with ":main") — they rely on the Gateway-provided
       // displayName (e.g. the configured agent name "ClawX") instead.
@@ -2832,7 +3139,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       if (!isMainSession) {
         const firstUserMsg = mergedMessagesForActiveSend.find((m) => m.role === 'user');
         if (firstUserMsg) {
-          const labelText = getMessageText(firstUserMsg.content).trim();
+          const labelText = getSessionLabelText(firstUserMsg.content);
           set((s) => {
             const hasStoredLabel = hasStoredSessionLabel(s.sessions, currentSessionKey);
             if (!labelText || s.sessionLabels[currentSessionKey] || hasStoredLabel) {
@@ -2867,6 +3174,17 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       };
 
       try {
+        const shouldTryLocalSessionHistory = !isCronSessionKey(currentSessionKey)
+          && !get().sending
+          && !Boolean(get().sessionRunningState?.[currentSessionKey]);
+        if (shouldTryLocalSessionHistory) {
+          const localHistory = await loadLocalSessionHistory(currentSessionKey, 200);
+          if (localHistory.resolved) {
+            applyLoadedMessages(localHistory.messages, localHistory.thinkingLevel);
+            return;
+          }
+        }
+
         const data = await useGatewayStore.getState().rpc<Record<string, unknown>>(
           'chat.history',
           { sessionKey: currentSessionKey, limit: 200 },
@@ -2941,10 +3259,19 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     clearHistoryIncompleteRetry(currentSessionKey);
     await ensureSessionPreferredModelLoaded(currentSessionKey, set);
     const existingMessages = get().messages;
+    const existingSessions = get().sessions;
+    const existingSessionLabels = get().sessionLabels;
     const isFirstUserMessage = !existingMessages.some((message) => message.role === 'user');
     const baseMessage = trimmed || (attachments?.length ? 'Process the attached file(s).' : '');
     const messageForGateway = injectAgentExecutionMetadata(baseMessage, currentSessionKey, isFirstUserMessage);
     const visibleUserContent = trimmed || (attachments?.length ? '(file attached)' : '');
+    const autoSessionLabel = !currentSessionKey.endsWith(':main')
+      && isFirstUserMessage
+      && !existingSessionLabels[currentSessionKey]
+      && !hasStoredSessionLabel(existingSessions, currentSessionKey)
+      && trimmed
+      ? truncateAutoSessionLabel(trimmed)
+      : '';
 
     // Add user message optimistically (with local file metadata for UI display)
     const nowMs = Date.now();
@@ -2964,6 +3291,9 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       set((s) => ({
         sessions: ensureSessionEntry(s.sessions, currentSessionKey),
         messages: [...s.messages, userMsg],
+        ...(autoSessionLabel && !s.sessionLabels[currentSessionKey]
+          ? { sessionLabels: { ...s.sessionLabels, [currentSessionKey]: autoSessionLabel } }
+          : {}),
         sending: true,
         error: null,
         streamingText: '',
@@ -3021,7 +3351,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       }
       clearHistoryPoll();
       set((s) => ({
-        error: 'No response received from the model. The provider may be unavailable or the API key may have insufficient quota. Please check your provider settings.',
+        error: getNoResponseError(),
         sending: false,
         activeRunId: null,
         sendStage: null,
@@ -3037,6 +3367,8 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       if (hasMedia) {
         console.log('[sendMessage] Media paths:', attachments!.map(a => a.stagedPath));
       }
+
+      await syncSessionPreferredModelToRuntime(currentSessionKey);
 
       // Cache image attachments BEFORE the IPC call to avoid race condition:
       // history may reload (via Gateway event) before the RPC returns.
@@ -3117,6 +3449,13 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             pendingToolImages: [],
             sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, false),
           }));
+        }
+      } else if (autoSessionLabel) {
+        queueAutoSessionLabelPersistence(set, currentSessionKey, autoSessionLabel);
+        if (result.result?.runId) {
+          set({ activeRunId: result.result.runId, sendStage: 'awaiting_runtime' });
+        } else {
+          set({ sendStage: 'awaiting_runtime' });
         }
       } else if (result.result?.runId) {
         set({ activeRunId: result.result.runId, sendStage: 'awaiting_runtime' });

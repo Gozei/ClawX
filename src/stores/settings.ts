@@ -85,7 +85,7 @@ const defaultSettings = {
   telemetryEnabled: true,
   brandingOverrides: {},
   chatProcessDisplayMode: 'files' as ChatProcessDisplayMode,
-  assistantMessageStyle: 'bubble' as AssistantMessageStyle,
+  assistantMessageStyle: 'stream' as AssistantMessageStyle,
   chatFontScale: 100,
   gatewayAutoStart: true,
   gatewayPort: 18789,
@@ -119,6 +119,7 @@ export const useSettingsStore = create<SettingsState>()(
             ...state,
             ...settings,
             ...(resolvedLanguage ? { language: resolvedLanguage } : {}),
+            assistantMessageStyle: 'stream',
           }));
           if (resolvedLanguage) {
             i18n.changeLanguage(resolvedLanguage);
@@ -219,6 +220,11 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'clawx-settings',
+      merge: (persistedState, currentState) => ({
+        ...currentState,
+        ...(persistedState as Partial<SettingsState> | undefined),
+        assistantMessageStyle: 'stream',
+      }),
     }
   )
 );

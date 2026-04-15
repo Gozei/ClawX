@@ -14,7 +14,12 @@ async function seedSession(homeDir: string): Promise<void> {
       id: 'user-metadata-1',
       role: 'user',
       content: [
-        'Conversation info (untrusted metadata): ```json',
+        'Sender (untrusted metadata):',
+        '```json',
+        '{"label":"Deep AI Worker","id":"gateway-client","name":"Deep AI Worker","username":"Deep AI Worker"}',
+        '```',
+        '',
+        '[Wed 2026-04-15 15:43 GMT+8] Conversation info (untrusted metadata): ```json',
         '{"agent":{"id":"ops","name":"Operations","preferredModel":"custom-custombc/gpt-5.4"}}',
         '```',
         'Execution playbook:',
@@ -119,6 +124,7 @@ test.describe('Chat user message copy', () => {
 
       const userBubble = page.getByTestId('chat-message-content-user').first();
       await expect(userBubble).toContainText(SEEDED_USER_PROMPT);
+      await expect(userBubble).not.toContainText('Sender (untrusted metadata):');
       await expect(userBubble).not.toContainText('Execution playbook:');
       await expect(userBubble).not.toContainText('Conversation info (untrusted metadata):');
 

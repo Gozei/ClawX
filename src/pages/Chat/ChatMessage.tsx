@@ -152,9 +152,7 @@ export const ChatMessage = memo(function ChatMessage({
   const chatProcessDisplayMode = useSettingsStore((state) => state.chatProcessDisplayMode);
   const assistantMessageStyle = useSettingsStore((state) => state.assistantMessageStyle);
   const chatFontScale = useSettingsStore((state) => state.chatFontScale);
-  const agents = useAgentsStore((state) => state.agents);
   const defaultModelRef = useAgentsStore((state) => state.defaultModelRef);
-  const currentAgentId = useChatStore((state) => state.currentAgentId);
   const currentSessionKey = useChatStore((state) => state.currentSessionKey);
   const sessions = useChatStore((state) => state.sessions);
   const sessionModels = useChatStore((state) => state.sessionModels);
@@ -170,10 +168,6 @@ export const ChatMessage = memo(function ChatMessage({
   const bodyFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
   const metaFontSize = `${Math.round(12 * (chatFontScale / 100) * 10) / 10}px`;
   const attachmentGridClassName = 'grid w-full max-w-[720px] grid-cols-3 gap-2';
-  const currentAgent = useMemo(
-    () => (agents ?? []).find((agent) => agent.id === currentAgentId) ?? null,
-    [agents, currentAgentId],
-  );
   const currentSession = useMemo(
     () => (sessions ?? []).find((session) => session.key === currentSessionKey) ?? null,
     [currentSessionKey, sessions],
@@ -195,11 +189,8 @@ export const ChatMessage = memo(function ChatMessage({
         }));
     })
   ), [providerItems]);
-  const fallbackAgentModelRef = currentSession
-    ? (currentAgent?.overrideModelRef || currentAgent?.modelRef || '')
-    : '';
   const effectiveSessionModels = sessionModels ?? {};
-  const effectiveModelRef = (effectiveSessionModels[currentSessionKey] || currentSession?.model || defaultModelRef || fallbackAgentModelRef || '').trim();
+  const effectiveModelRef = (effectiveSessionModels[currentSessionKey] || currentSession?.model || defaultModelRef || '').trim();
   const currentModelLabel = useMemo(
     () => modelOptions.find((option) => option.value === effectiveModelRef)?.label || effectiveModelRef,
     [effectiveModelRef, modelOptions],

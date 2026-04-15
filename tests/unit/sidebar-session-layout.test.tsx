@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { Sidebar } from '@/components/layout/Sidebar';
 
@@ -116,6 +116,7 @@ describe('Sidebar session layout', () => {
     chatState.currentSessionKey = 'agent:main:sidebar-layout-a';
     chatState.sending = false;
     chatState.sessionRunningState = {};
+    gatewayState.status = { state: 'stopped' };
   });
 
   it('renders fixed-width role badges and flexed title columns for session rows', () => {
@@ -160,5 +161,43 @@ describe('Sidebar session layout', () => {
     expect(secondaryRunningIndicator).toHaveClass('opacity-100', 'group-hover:opacity-0');
     expect(activeMenuTrigger).toHaveClass('opacity-0', 'group-hover:opacity-100');
     expect(backgroundMenuTrigger).toHaveClass('opacity-0', 'group-hover:opacity-100');
+  });
+
+  it('shows a gateway restart hint above new chat with a ticking elapsed timer while the gateway is starting', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-04-15T00:00:00.000Z'));
+      gatewayState.status = { state: 'starting' };
+
+      render(
+        <MemoryRouter initialEntries={['/']}>
+          <Sidebar />
+        </MemoryRouter>,
+      );
+
+      expect(screen.getByTestId('sidebar-gateway-restarting-hint')).toHaveTextContent('Gateway starting');
+      expect(screen.getByTestId('sidebar-gateway-restarting-elapsed')).toHaveTextContent('(0s)');
+      expect(screen.getByTestId('sidebar-gateway-restarting-ellipsis')).toHaveTextContent('...');
+
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+
+      expect(screen.getByTestId('sidebar-gateway-restarting-elapsed')).toHaveTextContent('(3s)');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not show a gateway restart hint when the gateway is stopped', () => {
+    gatewayState.status = { state: 'stopped' };
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByTestId('sidebar-gateway-restarting-hint')).not.toBeInTheDocument();
   });
 });

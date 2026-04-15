@@ -5,15 +5,15 @@
  * are in the toolbar; messages render with markdown + streaming.
  */
 import { memo, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ChevronDown, ChevronRight, ListTodo, Loader2, Network, Sparkles, Workflow } from 'lucide-react';
 import { useChatStore, type RawMessage, type ToolStatus } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
+import { AppLogo } from '@/components/branding/AppLogo';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
-import { ChatToolbar } from './ChatToolbar';
+import { ChatToolbarV2 } from './ChatToolbarV2';
 import {
   assistantMessageShowsInChat,
   extractImages,
@@ -22,8 +22,8 @@ import {
   extractToolUse,
 } from './message-utils';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
 import { useBranding } from '@/lib/branding';
+import { cn } from '@/lib/utils';
 import { useStickToBottomInstant } from '@/hooks/use-stick-to-bottom-instant';
 import { useMinLoading } from '@/hooks/use-min-loading';
 import { useSettingsStore, type AssistantMessageStyle, type ChatProcessDisplayMode } from '@/stores/settings';
@@ -34,7 +34,6 @@ const EMPTY_MESSAGES: RawMessage[] = [];
 
 export function Chat() {
   const { t } = useTranslation('chat');
-  const navigate = useNavigate();
   const gatewayStatus = useGatewayStore((s) => s.status);
   const isGatewayRunning = gatewayStatus.state === 'running';
 
@@ -176,7 +175,6 @@ export function Chat() {
     : (activeTurnBuffer?.startedAtMs ?? toTimestampMs(safeMessages[safeMessages.length - 1]?.timestamp) ?? 0);
 
   const isEmpty = safeMessages.length === 0 && !sending;
-  const showGatewayStartupInline = !isGatewayRunning && safeMessages.length === 0 && !sending;
   const showSessionLoadingState = loading && safeMessages.length === 0 && !sending;
 
   return (
@@ -189,13 +187,16 @@ export function Chat() {
       }}
     >
       {/* Toolbar */}
-      <div className="flex shrink-0 items-center justify-end border-b border-black/5 bg-white/32 px-4 py-2 backdrop-blur-md dark:border-white/5 dark:bg-white/[0.02]">
-        <ChatToolbar />
+      <div
+        data-testid="chat-toolbar-header"
+        className="flex h-14 shrink-0 items-center justify-end border-b border-black/5 bg-white/32 px-4 backdrop-blur-md dark:border-white/5 dark:bg-white/[0.02]"
+      >
+        <ChatToolbarV2 />
       </div>
 
       {/* Messages Area */}
-      <div ref={scrollRef} data-testid="chat-scroll-container" data-chat-scroll-container="true" className="flex-1 overflow-y-auto px-4 py-5">
-        <div ref={contentRef} className="max-w-4xl mx-auto space-y-4">
+      <div ref={scrollRef} data-testid="chat-scroll-container" data-chat-scroll-container="true" className="flex-1 overflow-y-auto px-4 pt-5 pb-8">
+        <div ref={contentRef} data-testid="chat-content-column" className="max-w-4xl mx-auto space-y-4">
           {showSessionLoadingState ? (
             <div className="flex min-h-[40vh] items-center justify-center">
               <div className="bg-background shadow-lg rounded-lg p-2.5 border border-border">
@@ -203,16 +204,7 @@ export function Chat() {
               </div>
             </div>
           ) : isEmpty ? (
-            <WelcomeScreen
-              gatewayHint={showGatewayStartupInline ? {
-                state: gatewayStatus.state,
-                error: gatewayStatus.error,
-                port: gatewayStatus.port,
-                pid: gatewayStatus.pid,
-                reconnectAttempts: gatewayStatus.reconnectAttempts,
-              } : null}
-              onOpenSettings={() => navigate('/settings')}
-            />
+            <WelcomeScreenMinimal />
           ) : (
             <>
               <HistoryMessages
@@ -294,7 +286,6 @@ export function Chat() {
         onStop={abortRun}
         disabled={!isGatewayRunning}
         sending={sending}
-        isEmpty={isEmpty}
       />
 
       {/* Transparent loading overlay */}
@@ -891,7 +882,30 @@ function ActiveTurn({
 
 // ── Welcome Screen ──────────────────────────────────────────────
 
-function WelcomeScreen({
+function WelcomeScreenMinimal() {
+  const { t } = useTranslation('chat');
+
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="w-full px-2">
+        <div className="mx-auto max-w-4xl text-center">
+          <AppLogo
+            testId="chat-welcome-logo"
+            className="mx-auto mb-8 h-10 md:mb-10 md:h-12"
+          />
+          <h1
+            data-testid="chat-welcome-title"
+            className="text-[34px] font-semibold tracking-[-0.05em] text-foreground md:text-[50px]"
+          >
+            {t('welcome.subtitle', '把工作交给我，我来持续推进')}
+          </h1>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function WelcomeScreenLegacy({
   gatewayHint,
   onOpenSettings,
 }: {
@@ -1031,7 +1045,10 @@ function WelcomeScreen({
             {t('welcome.subtitle', { appName: branding.productName })}
           </h1>
 
-          <p className="mx-auto mt-4 max-w-2xl text-[17px] leading-8 text-foreground/62 md:text-[18px]">
+          <p
+            data-testid="chat-welcome-description"
+            className="mx-auto mt-4 max-w-4xl text-[17px] leading-8 text-foreground/62 md:text-[18px]"
+          >
             {t('welcome.description', { appName: branding.productName })}
           </p>
         </div>

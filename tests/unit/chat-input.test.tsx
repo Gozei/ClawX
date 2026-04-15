@@ -172,7 +172,16 @@ describe('ChatInput agent targeting', () => {
     expect(screen.queryByTitle('Choose agent')).not.toBeInTheDocument();
   });
 
-  it('lets the user select an agent target and sends it with the message', () => {
+  it('does not render a gateway status line below the composer', () => {
+    gatewayState.status = { state: 'starting', port: 18789, pid: 24412 };
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    expect(screen.queryByText(/gateway starting \| port: 18789/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/pid: 24412/i)).not.toBeInTheDocument();
+  });
+
+  it('lets the user select an agent target and sends it with the message', async () => {
     const onSend = vi.fn();
     agentsState.agents = [
       {
@@ -209,10 +218,12 @@ describe('ChatInput agent targeting', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Hello direct agent' } });
     fireEvent.click(screen.getByTitle('Send'));
 
-    expect(onSend).toHaveBeenCalledWith('Hello direct agent', undefined, 'research');
-  });
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith('Hello direct agent', undefined, 'research');
+    });
+  }, 10000);
 
-  it('shows model options in provider order and validates before updating the current session model', async () => {
+  it('shows model options in provider order and updates the current session model without retesting', async () => {
     agentsState.agents = [
       {
         id: 'main',
@@ -266,7 +277,6 @@ describe('ChatInput agent targeting', () => {
       { id: 'moonshot', name: 'Moonshot' },
     ];
     providerState.defaultAccountId = 'openai';
-    hostApiFetchMock.mockResolvedValueOnce({ valid: true, model: 'kimi-k2.5' });
 
     render(<ChatInput onSend={vi.fn()} />);
 
@@ -284,107 +294,10 @@ describe('ChatInput agent targeting', () => {
 
     fireEvent.click(screen.getByText('Moonshot / kimi-k2.5'));
 
-    await waitFor(() => {
-      expect(hostApiFetchMock).toHaveBeenCalledWith(
-        '/api/provider-drafts/test',
-        expect.objectContaining({
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      );
-    });
-
-    const validationPayload = JSON.parse(String(hostApiFetchMock.mock.calls[0]?.[1]?.body || '{}')) as {
-      accountId?: string;
-      vendorId?: string;
-      apiKey?: string;
-      model?: string;
-    };
-    expect(validationPayload.accountId).toBe('moonshot');
-    expect(validationPayload.vendorId).toBe('moonshot');
-    expect(validationPayload.apiKey).toBe('sk-test');
-    expect(validationPayload.model).toBe('kimi-k2.5');
-
-    await waitFor(() => {
-      expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Moonshot / kimi-k2.5');
-      expect(chatState.sessionModels['agent:main:main']).toBe('moonshot/kimi-k2.5');
-      expect(toastSuccessMock).toHaveBeenCalledWith('Switched to Moonshot / kimi-k2.5');
-    });
-  });
-
-  it('keeps the previous session model when model validation fails', async () => {
-    agentsState.agents = [
-      {
-        id: 'main',
-        name: 'Main',
-        isDefault: true,
-        modelDisplay: 'GPT-5.4',
-        modelRef: 'openai/gpt-5.4',
-        overrideModelRef: null,
-        inheritedModel: true,
-        workspace: '~/.openclaw/workspace',
-        agentDir: '~/.openclaw/agents/main/agent',
-        mainSessionKey: 'agent:main:main',
-        channelTypes: [],
-        skillIds: [],
-        workflowSteps: [],
-        triggerModes: [],
-      },
-    ];
-    providerState.accounts = [
-      {
-        id: 'openai',
-        vendorId: 'openai',
-        label: 'OpenAI',
-        authMode: 'api_key',
-        model: 'gpt-5.4',
-        enabled: true,
-        isDefault: true,
-        createdAt: '2026-04-13T00:00:00.000Z',
-        updatedAt: '2026-04-13T00:00:00.000Z',
-      },
-      {
-        id: 'moonshot',
-        vendorId: 'moonshot',
-        label: 'Moonshot',
-        authMode: 'api_key',
-        model: 'kimi-k2.5',
-        enabled: true,
-        isDefault: false,
-        createdAt: '2026-04-12T00:00:00.000Z',
-        updatedAt: '2026-04-12T00:00:00.000Z',
-      },
-    ];
-    providerState.statuses = [
-      { id: 'openai', hasKey: true, model: 'gpt-5.4' },
-      { id: 'moonshot', hasKey: true, model: 'kimi-k2.5' },
-    ];
-    providerState.vendors = [
-      { id: 'openai', name: 'OpenAI' },
-      { id: 'moonshot', name: 'Moonshot' },
-    ];
-    providerState.defaultAccountId = 'openai';
-    chatState.sessions = [{ key: 'agent:main:main', model: 'openai/gpt-5.4' }];
-    chatState.sessionModels = { 'agent:main:main': 'openai/gpt-5.4' };
-    hostApiFetchMock.mockRejectedValueOnce(new Error('Model not found'));
-
-    render(<ChatInput onSend={vi.fn()} />);
-
-    fireEvent.click(screen.getByTestId('chat-model-switch'));
-    fireEvent.click(screen.getByText('Moonshot / kimi-k2.5'));
-
-    await waitFor(() => {
-      expect(toastErrorMock).toHaveBeenCalledWith(
-        'Failed to switch model. Still using OpenAI / gpt-5.4: Model not found',
-      );
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('OpenAI / gpt-5.4');
-    });
-
-    expect(chatState.sessionModels['agent:main:main']).toBe('openai/gpt-5.4');
-    expect(chatState.sessions[0]?.model).toBe('openai/gpt-5.4');
+    expect(hostApiFetchMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Moonshot / kimi-k2.5');
+    expect(chatState.sessionModels['agent:main:main']).toBe('moonshot/kimi-k2.5');
+    expect(toastSuccessMock).toHaveBeenCalledWith('Switched to Moonshot / kimi-k2.5');
   });
 
   it('uses the global default model for a session when no session model is stored', () => {
@@ -446,6 +359,53 @@ describe('ChatInput agent targeting', () => {
     render(<ChatInput onSend={vi.fn()} />);
 
     expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('OpenAI / gpt-5.4');
+  });
+
+  it('leaves the session model blank when neither the session nor the global default has a model', () => {
+    agentsState.agents = [
+      {
+        id: 'main',
+        name: 'Main',
+        isDefault: true,
+        modelDisplay: 'GLM-5',
+        modelRef: 'custom-custombc/glm-5',
+        overrideModelRef: 'custom-custombc/glm-5',
+        inheritedModel: false,
+        workspace: '~/.openclaw/workspace',
+        agentDir: '~/.openclaw/agents/main/agent',
+        mainSessionKey: 'agent:main:main',
+        channelTypes: [],
+        skillIds: [],
+        workflowSteps: [],
+        triggerModes: [],
+      },
+    ];
+    providerState.accounts = [
+      {
+        id: 'custom-custombc',
+        vendorId: 'custom',
+        label: 'Jingdong',
+        authMode: 'api_key',
+        model: 'glm-5',
+        enabled: true,
+        isDefault: false,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [
+      { id: 'custom-custombc', hasKey: true, model: 'glm-5' },
+    ];
+    providerState.vendors = [
+      { id: 'custom', name: 'Custom' },
+    ];
+    chatState.sessions = [{ key: 'agent:main:main' }];
+    chatState.sessionModels = {};
+    agentsState.defaultModelRef = null as unknown as string;
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Switch model');
   });
 
   it('prefers the current session model over the global default model', () => {
