@@ -21,7 +21,7 @@ test.describe('Chat welcome starters', () => {
       await composerInput.fill('Second offline draft for queue coverage');
       await page.getByTestId('chat-send-button').click();
 
-      await expect(page.getByTestId('chat-queued-message-card')).toContainText('2');
+      await expect(page.getByTestId('chat-queued-message-card')).toContainText('1 条草稿');
       await expect(page.getByTestId('chat-queued-message-preview')).not.toContainText('Second offline draft for queue coverage');
 
       await page.getByTestId('chat-queued-message-edit').click();

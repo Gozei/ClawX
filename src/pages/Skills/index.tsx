@@ -23,6 +23,7 @@ const DEFAULT_QUERY = '';
 const DEFAULT_SOURCE_CATEGORY: SkillSourceCategory = 'all';
 const DEFAULT_STATUS_FILTER: StatusFilter = 'all';
 const DEFAULT_MISSING_FILTER: MissingFilter = 'all';
+let lastSkillsListSearchSnapshot = '';
 
 function readEnumParam<T extends string>(value: string | null, allowed: readonly T[], fallback: T): T {
   if (value && allowed.includes(value as T)) {
@@ -105,6 +106,24 @@ export function Skills() {
       missingFilter: updates.missingFilter ?? missingFilter,
     });
     setSearchParams(nextParams, { replace: true });
+  }, [missingFilter, query, setSearchParams, sourceCategory, statusFilter]);
+
+  useEffect(() => {
+    const currentListSearch = buildSkillsSearchParams({
+      query,
+      sourceCategory,
+      statusFilter,
+      missingFilter,
+    }).toString();
+
+    if (currentListSearch) {
+      lastSkillsListSearchSnapshot = currentListSearch;
+      return;
+    }
+
+    if (lastSkillsListSearchSnapshot) {
+      setSearchParams(lastSkillsListSearchSnapshot, { replace: true });
+    }
   }, [missingFilter, query, setSearchParams, sourceCategory, statusFilter]);
 
   useEffect(() => {

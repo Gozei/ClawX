@@ -2051,6 +2051,9 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     | 'toggleThinking'
     | 'refresh'
     | 'clearError'
+    | 'queueOfflineMessage'
+    | 'flushQueuedMessage'
+    | 'clearQueuedMessage'
   > = {
     messages: [],
     loading: false,

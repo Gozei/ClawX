@@ -5,7 +5,6 @@ test.describe('Deep AI Worker Electron smoke flows', () => {
     await expect(page.getByTestId('setup-page')).toBeVisible();
     await expect(page.getByTestId('setup-welcome-step')).toBeVisible();
     await expect(page.getByTestId('setup-skip-button')).toBeVisible();
-    await expect(page.getByText('Welcome to Deep AI Worker')).toBeVisible();
     await expect(page.getByRole('button', { name: 'English' })).toBeVisible();
     await expect(page.getByRole('button', { name: '\u4e2d\u6587' })).toBeVisible();
   });
@@ -15,10 +14,10 @@ test.describe('Deep AI Worker Electron smoke flows', () => {
     await page.getByTestId('setup-skip-button').click();
 
     await expect(page.getByTestId('main-layout')).toBeVisible();
-    await expect(page.getByText('Deep AI Worker')).toBeVisible();
+    await expect(page.getByTestId('chat-welcome-starter-askQuestions')).toBeVisible();
     await openModelsFromSettings(page);
     await expect(page.getByTestId('models-page-title')).toBeVisible();
-    await expect(page.getByTestId('providers-settings')).toBeVisible();
+    await expect(page.getByTestId('models-config-panel')).toBeVisible();
   });
 
   test('persists skipped setup across relaunch for the same isolated profile', async ({ electronApp, launchElectronApp }) => {

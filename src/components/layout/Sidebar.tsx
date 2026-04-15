@@ -35,6 +35,7 @@ const SIDEBAR_EXPANDED_MIN_WIDTH = 240;
 const SIDEBAR_EXPANDED_MAX_WIDTH = 420;
 const SIDEBAR_COLLAPSED_WIDTH = 64;
 const SESSION_AGENT_BADGE_WIDTH = 'w-[63px]';
+let lastSkillsSearchSnapshot = '';
 
 interface NavItemProps {
   to: string;
@@ -98,6 +99,7 @@ function getAgentIdFromSessionKey(sessionKey: string): string {
 
 export function Sidebar() {
   const branding = useBranding();
+  const location = useLocation();
   const sidebarCollapsed = useSettingsStore((state) => state.sidebarCollapsed);
   const sidebarWidth = useSettingsStore((state) => state.sidebarWidth);
   const setSidebarCollapsed = useSettingsStore((state) => state.setSidebarCollapsed);
@@ -136,7 +138,15 @@ export function Sidebar() {
   const fetchAgents = useAgentsStore((s) => s.fetchAgents);
 
   const navigate = useNavigate();
-  const isOnChat = useLocation().pathname === '/';
+  const isOnChat = location.pathname === '/';
+  const [lastSkillsSearch, setLastSkillsSearch] = useState(lastSkillsSearchSnapshot);
+
+  useEffect(() => {
+    if (location.pathname === '/skills') {
+      lastSkillsSearchSnapshot = location.search;
+      setLastSkillsSearch(location.search);
+    }
+  }, [location.pathname, location.search]);
 
   const getSessionLabel = (key: string, displayName?: string, label?: string) =>
     sessionLabels[key] ?? label ?? displayName ?? key;
@@ -490,7 +500,7 @@ export function Sidebar() {
   const navItems = [
     { to: '/dashboard', icon: <LayoutDashboard className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.dashboard'), testId: 'sidebar-nav-dashboard' },
     { to: '/agents', icon: <Bot className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.agents'), testId: 'sidebar-nav-agents' },
-    { to: '/skills', icon: <Puzzle className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.skills'), testId: 'sidebar-nav-skills' },
+    { to: `/skills${lastSkillsSearch}`, icon: <Puzzle className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.skills'), testId: 'sidebar-nav-skills' },
     { to: '/cron', icon: <Clock className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.cronTasks'), testId: 'sidebar-nav-cron' },
   ];
 

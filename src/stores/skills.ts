@@ -244,7 +244,11 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
         body: JSON.stringify({ slug, version, sourceId, force }),
       });
       if (!result.success) {
-        throw new Error(result.error || 'Install failed');
+        const appError = normalizeAppError(new Error(result.error || 'Install failed'), {
+          module: 'skills',
+          operation: 'install',
+        });
+        throw new Error(mapErrorCodeToSkillErrorKey(appError.code, 'install'));
       }
       await get().fetchSkills(true);
       await get().fetchMarketInstalledSkills();

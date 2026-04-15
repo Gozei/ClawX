@@ -63,10 +63,10 @@ test.describe('Deep AI Worker skills page flows', () => {
       await page.getByTestId('skills-filter-status-enabled').click();
       await expect(page.getByTestId('skills-filter-status-enabled')).toHaveAttribute('aria-pressed', 'true');
 
-      await page.getByTestId('sidebar-nav-settings').click();
-      await expect(page.getByTestId('settings-page')).toBeVisible();
+      await page.getByTestId('sidebar-nav-dashboard').click();
+      await expect(page.getByTestId('dashboard-page')).toBeVisible();
 
-      await page.goBack();
+      await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
       await expect(page.getByTestId('skills-search-input')).toHaveValue('demo');
       await expect(page.getByTestId('skills-filter-button')).toContainText('1');

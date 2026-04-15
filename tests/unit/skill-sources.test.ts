@@ -9,11 +9,11 @@ describe('skill source defaults', () => {
     vi.restoreAllMocks();
   });
 
-  it('builds the default ClawHub source and legacy env-backed source', () => {
+  it('builds the bundled default skill sources', async () => {
     process.env.CLAWHUB_SITE = 'http://127.0.0.1:4000';
     process.env.CLAWHUB_REGISTRY = 'http://127.0.0.1:4011';
 
-    const sources = buildDefaultSkillSources();
+    const sources = await buildDefaultSkillSources();
 
     expect(sources).toHaveLength(2);
     expect(sources.find((source) => source.id === 'clawhub')).toMatchObject({
@@ -23,7 +23,7 @@ describe('skill source defaults', () => {
     });
     expect(sources.find((source) => source.id === 'deepaiworker')).toMatchObject({
       id: 'deepaiworker',
-      label: 'deepaiworker',
+      label: 'DeepSkillHub',
       site: 'http://124.71.100.127:4000',
       registry: 'http://124.71.100.127:4011',
     });
