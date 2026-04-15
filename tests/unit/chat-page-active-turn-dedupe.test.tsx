@@ -20,9 +20,13 @@ const { agentsState, chatState, gatewayState, settingsState, useDeferredValueMoc
     pendingFinal: false,
     lastUserMessageAt: 1000,
     sendMessage: vi.fn(),
+    queueOfflineMessage: vi.fn(),
+    flushQueuedMessage: vi.fn(),
+    clearQueuedMessage: vi.fn(),
     abortRun: vi.fn(),
     clearError: vi.fn(),
     cleanupEmptySession: vi.fn(),
+    queuedMessages: {} as Record<string, unknown>,
   },
   gatewayState: {
     status: { state: 'running', port: 18789 },
@@ -54,6 +58,10 @@ vi.mock('react-i18next', async (importOriginal) => {
   return {
     ...actual,
     useTranslation: () => ({
+      i18n: {
+        resolvedLanguage: 'en',
+        language: 'en',
+      },
       t: (key: string) => key,
     }),
   };

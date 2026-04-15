@@ -40,10 +40,13 @@ export interface FileAttachment {
 
 interface ChatInputProps {
   onSend: (text: string, attachments?: FileAttachment[], targetAgentId?: string | null) => void;
+  onQueueOfflineMessage?: (text: string, attachments?: FileAttachment[], targetAgentId?: string | null) => void;
   onStop?: () => void;
   disabled?: boolean;
   sending?: boolean;
   isEmpty?: boolean;
+  prefillText?: string;
+  prefillNonce?: number;
 }
 
 type ModelOption = {
@@ -187,8 +190,17 @@ function readFileAsBase64(file: globalThis.File): Promise<string> {
 
 // ── Component ────────────────────────────────────────────────────
 
-export function ChatInput({ onSend, onStop, disabled = false, sending = false, isEmpty = false }: ChatInputProps) {
-  const { t } = useTranslation('chat');
+export function ChatInput({
+  onSend,
+  onQueueOfflineMessage,
+  onStop,
+  disabled = false,
+  sending = false,
+  isEmpty = false,
+  prefillText,
+  prefillNonce = 0,
+}: ChatInputProps) {
+  const { t, i18n } = useTranslation('chat');
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [targetAgentId, setTargetAgentId] = useState<string | null>(null);
@@ -523,10 +535,28 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
   const allReady = attachments.length === 0 || attachments.every(a => a.status === 'ready');
   const hasFailedAttachments = attachments.some((a) => a.status === 'error');
   const canSend = (input.trim() || attachments.length > 0) && allReady && !disabled && !sending;
-  const canStop = sending && !disabled && !!onStop;
+  const canQueueOffline = (input.trim() || attachments.length > 0) && allReady && disabled && !sending;
+  const canStop = sending && !!onStop;
+  const isZh = (i18n?.resolvedLanguage || i18n?.language || '').startsWith('zh');
+  const offlineDraftHint = isZh
+    ? '可以先把想法写成草稿，工作引擎恢复后再发送。'
+    : 'You can draft now and send as soon as the workspace engine reconnects.';
+
+  useEffect(() => {
+    if (!prefillText || prefillNonce === 0) {
+      return;
+    }
+    setInput(prefillText);
+    requestAnimationFrame(() => {
+      if (!textareaRef.current) return;
+      textareaRef.current.focus();
+      const cursor = prefillText.length;
+      textareaRef.current.setSelectionRange(cursor, cursor);
+    });
+  }, [prefillNonce, prefillText]);
 
   const handleSend = useCallback(() => {
-    if (!canSend) return;
+    if (!canSend && !canQueueOffline) return;
     const readyAttachments = attachments.filter(a => a.status === 'ready');
     // Capture values before clearing — clear input immediately for snappy UX,
     // but keep attachments available for the async send
@@ -544,10 +574,14 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-    onSend(textToSend, attachmentsToSend, targetAgentId);
+    if (disabled) {
+      onQueueOfflineMessage?.(textToSend, attachmentsToSend, targetAgentId);
+    } else {
+      onSend(textToSend, attachmentsToSend, targetAgentId);
+    }
     setTargetAgentId(null);
     setPickerOpen(false);
-  }, [input, attachments, canSend, onSend, targetAgentId]);
+  }, [input, attachments, canQueueOffline, canSend, disabled, onQueueOfflineMessage, onSend, targetAgentId]);
 
   const handleStop = useCallback(() => {
     if (!canStop) return;
@@ -728,8 +762,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
                   isComposingRef.current = false;
                 }}
                 onPaste={handlePaste}
-                placeholder={disabled ? t('composer.gatewayDisconnectedPlaceholder') : t('composer.messagePlaceholder')}
-                disabled={disabled}
+                placeholder={disabled && !input ? t('composer.gatewayDisconnectedPlaceholder') : t('composer.messagePlaceholder')}
                 className="min-h-[62px] max-h-[220px] resize-none border-0 bg-transparent px-3 py-2.5 leading-[1.75] tracking-[0.01em] text-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/52"
                 rows={1}
                 style={{ fontSize: inputFontSize }}
@@ -738,7 +771,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
 
             <Button
               onClick={sending ? handleStop : handleSend}
-              disabled={sending ? !canStop : !canSend}
+              disabled={sending ? !canStop : !(canSend || canQueueOffline)}
               size="icon"
               data-testid="chat-send-button"
               className={`mt-1 shrink-0 h-10 w-10 rounded-full transition-colors ${
@@ -747,7 +780,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
                   : 'bg-transparent text-muted-foreground/40 hover:bg-transparent'
               }`}
               variant={sending || canSend ? 'default' : 'ghost'}
-              title={sending ? t('composer.stop') : t('composer.send')}
+              title={sending ? t('composer.stop') : disabled ? (isZh ? '离线排队发送' : 'Queue to send') : t('composer.send')}
             >
               {sending ? (
                 <Square className="h-4 w-4" fill="currentColor" />
@@ -763,7 +796,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
               data-testid="chat-attach-button"
               className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-[13px] font-medium text-foreground/72 transition-colors hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/8"
               onClick={pickFiles}
-              disabled={disabled || sending}
+              disabled={sending}
               title={t('composer.attachFiles')}
             >
               <Paperclip className="h-4 w-4" />
@@ -780,7 +813,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
                     (pickerOpen || selectedTarget) && 'bg-primary/10 text-primary hover:bg-primary/20'
                   )}
                   onClick={() => setPickerOpen((open) => !open)}
-                  disabled={disabled || sending}
+                  disabled={sending}
                   title={t('composer.role', 'Role')}
                 >
                   <AtSign className="h-4 w-4" />
@@ -841,7 +874,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
                 onChange={(event) => {
                   void handleModelChange(event.target.value);
                 }}
-                disabled={disabled || sending || modelOptions.length === 0}
+                disabled={sending || modelOptions.length === 0}
               >
                 {selectedModelValue === '' && (
                   <option value="">
@@ -858,6 +891,14 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
             </label>
           </div>
         </div>
+        {disabled && (
+          <div
+            className="mt-2 px-4 text-[12px] text-foreground/54"
+            data-testid="chat-composer-offline-hint"
+          >
+            {offlineDraftHint}
+          </div>
+        )}
         <div className="mt-2.5 flex items-center justify-between gap-2 px-4 text-muted-foreground/58" style={{ fontSize: metaFontSize }}>
           <div className="flex items-center gap-1.5">
             <div className={cn("w-1.5 h-1.5 rounded-full", gatewayStatus.state === 'running' ? "bg-green-500/80" : "bg-red-500/80")} />

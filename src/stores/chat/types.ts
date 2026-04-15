@@ -62,6 +62,20 @@ export interface ToolStatus {
   updatedAt: number;
 }
 
+export interface QueuedChatMessage {
+  id: string;
+  text: string;
+  attachments?: Array<{
+    fileName: string;
+    mimeType: string;
+    fileSize: number;
+    stagedPath: string;
+    preview: string | null;
+  }>;
+  targetAgentId?: string | null;
+  queuedAt: number;
+}
+
 export type ChatSendStage =
   | 'sending_to_gateway'
   | 'awaiting_runtime'
@@ -113,6 +127,7 @@ export interface ChatState {
   sessionLastActivity: Record<string, number>;
   /** Sidebar-only running state for sessions that still have work in flight */
   sessionRunningState?: Record<string, boolean>;
+  queuedMessages: Record<string, QueuedChatMessage[]>;
 
   // Thinking
   showThinking: boolean;
@@ -143,6 +158,19 @@ export interface ChatState {
   toggleThinking: () => void;
   refresh: () => Promise<void>;
   clearError: () => void;
+  queueOfflineMessage: (
+    text: string,
+    attachments?: Array<{
+      fileName: string;
+      mimeType: string;
+      fileSize: number;
+      stagedPath: string;
+      preview: string | null;
+    }>,
+    targetAgentId?: string | null,
+  ) => void;
+  flushQueuedMessage: (sessionKey?: string, queuedId?: string) => Promise<void>;
+  clearQueuedMessage: (sessionKey?: string, queuedId?: string) => void;
 }
 
 export const DEFAULT_CANONICAL_PREFIX = 'agent:main';

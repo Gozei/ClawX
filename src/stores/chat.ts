@@ -2080,6 +2080,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     sessionLabels: {},
     sessionLastActivity: {},
     sessionRunningState: {},
+    queuedMessages: {},
 
     showThinking: true,
     thinkingLevel: null,
@@ -3602,5 +3603,83 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
   },
 
   clearError: () => set({ error: null }),
+
+  queueOfflineMessage: (text, attachments, targetAgentId) => {
+    const trimmed = text.trim();
+    if (!trimmed && (!attachments || attachments.length === 0)) return;
+
+    const targetSessionKey = resolveMainSessionKeyForAgent(targetAgentId) ?? get().currentSessionKey;
+    const nowMs = Date.now();
+    set((state) => ({
+      queuedMessages: {
+        ...state.queuedMessages,
+        [targetSessionKey]: [
+          ...(state.queuedMessages[targetSessionKey] ?? []),
+          {
+            id: crypto.randomUUID(),
+            text: trimmed,
+            attachments,
+            targetAgentId,
+            queuedAt: nowMs,
+          },
+        ],
+      },
+      sessionLastActivity: { ...state.sessionLastActivity, [targetSessionKey]: nowMs },
+      sessions: ensureSessionEntry(state.sessions, targetSessionKey),
+    }));
+  },
+
+  clearQueuedMessage: (sessionKey, queuedId) => {
+    const targetSessionKey = sessionKey ?? get().currentSessionKey;
+    set((state) => ({
+      queuedMessages: (() => {
+        const currentQueue = state.queuedMessages[targetSessionKey] ?? [];
+        if (!queuedId) {
+          return clearSessionEntryFromMap(state.queuedMessages, targetSessionKey);
+        }
+        const nextQueue = currentQueue.filter((item) => item.id !== queuedId);
+        if (nextQueue.length === 0) {
+          return clearSessionEntryFromMap(state.queuedMessages, targetSessionKey);
+        }
+        return {
+          ...state.queuedMessages,
+          [targetSessionKey]: nextQueue,
+        };
+      })(),
+    }));
+  },
+
+  flushQueuedMessage: async (sessionKey, queuedId) => {
+    const targetSessionKey = sessionKey ?? get().currentSessionKey;
+    const queue = get().queuedMessages[targetSessionKey] ?? [];
+    const queued = queuedId
+      ? queue.find((item) => item.id === queuedId)
+      : queue[0];
+    if (!queued || get().sending) return;
+    set((state) => ({
+      queuedMessages: (() => {
+        const currentQueue = state.queuedMessages[targetSessionKey] ?? [];
+        const nextQueue = currentQueue.filter((item) => item.id !== queued.id);
+        if (nextQueue.length === 0) {
+          return clearSessionEntryFromMap(state.queuedMessages, targetSessionKey);
+        }
+        return {
+          ...state.queuedMessages,
+          [targetSessionKey]: nextQueue,
+        };
+      })(),
+    }));
+    try {
+      await get().sendMessage(queued.text, queued.attachments, queued.targetAgentId);
+    } catch (error) {
+      set((state) => ({
+        queuedMessages: {
+          ...state.queuedMessages,
+          [targetSessionKey]: [queued, ...(state.queuedMessages[targetSessionKey] ?? [])],
+        },
+        error: localizeChatErrorDetail(String(error)) || String(error),
+      }));
+    }
+  },
   };
 });

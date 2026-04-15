@@ -133,6 +133,10 @@ vi.mock('react-i18next', () => ({
   },
   useTranslation: () => ({
     t: translate,
+    i18n: {
+      resolvedLanguage: 'en',
+      language: 'en',
+    },
   }),
 }));
 
@@ -179,6 +183,55 @@ describe('ChatInput agent targeting', () => {
     render(<ChatInput onSend={vi.fn()} />);
 
     expect(screen.queryByTitle('Choose agent')).not.toBeInTheDocument();
+  });
+
+  it('keeps the composer editable while the gateway is disconnected so drafts are not blocked', () => {
+    gatewayState.status = { state: 'stopped', port: 18789 };
+
+    render(<ChatInput onSend={vi.fn()} disabled />);
+
+    const textbox = screen.getByRole('textbox');
+    expect(textbox).not.toBeDisabled();
+    expect(textbox).toHaveAttribute('placeholder', 'Gateway not connected...');
+    expect(screen.getByTestId('chat-composer-offline-hint')).toHaveTextContent(
+      'You can draft now and send as soon as the workspace engine reconnects.',
+    );
+  });
+
+  it('applies starter prompt prefills to the composer', async () => {
+    const { rerender } = render(<ChatInput onSend={vi.fn()} />);
+
+    rerender(
+      <ChatInput
+        onSend={vi.fn()}
+        prefillText="Help me understand this problem first, then give me a step-by-step plan."
+        prefillNonce={1}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('textbox')).toHaveValue(
+        'Help me understand this problem first, then give me a step-by-step plan.',
+      );
+    });
+  });
+
+  it('queues the message instead of dropping it when the gateway is offline', () => {
+    const onQueueOfflineMessage = vi.fn();
+    gatewayState.status = { state: 'stopped', port: 18789 };
+
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        onQueueOfflineMessage={onQueueOfflineMessage}
+        disabled
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Queue this for later' } });
+    fireEvent.click(screen.getByTitle('Queue to send'));
+
+    expect(onQueueOfflineMessage).toHaveBeenCalledWith('Queue this for later', undefined, null);
   });
 
   it('lets the user select an agent target and sends it with the message', () => {
