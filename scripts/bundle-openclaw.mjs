@@ -1,5 +1,7 @@
 #!/usr/bin/env zx
 
+import './setup-zx-shell.mjs';
+
 /**
  * bundle-openclaw.mjs
  *

@@ -100,8 +100,13 @@ function createGateway(state: 'running' | 'stopped' = 'running'): Pick<GatewayMa
   };
 }
 
+async function flushGatewayRefreshDebounce() {
+  await vi.advanceTimersByTimeAsync(2_500);
+}
+
 describe('provider-runtime-sync refresh strategy', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.clearAllMocks();
     mocks.getProviderAccount.mockResolvedValue(null);
     mocks.getProviderSecret.mockResolvedValue(undefined);
@@ -126,9 +131,15 @@ describe('provider-runtime-sync refresh strategy', () => {
     mocks.listAgentsSnapshot.mockResolvedValue({ agents: [] });
   });
 
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
   it('uses debouncedReload after saving provider config', async () => {
     const gateway = createGateway('running');
     await syncSavedProviderToRuntime(createProvider(), undefined, gateway as GatewayManager);
+    await flushGatewayRefreshDebounce();
 
     expect(gateway.debouncedReload).toHaveBeenCalledTimes(1);
     expect(gateway.debouncedRestart).not.toHaveBeenCalled();
@@ -137,6 +148,7 @@ describe('provider-runtime-sync refresh strategy', () => {
   it('uses debouncedRestart after deleting provider config', async () => {
     const gateway = createGateway('running');
     await syncDeletedProviderToRuntime(createProvider(), 'moonshot', gateway as GatewayManager);
+    await flushGatewayRefreshDebounce();
 
     expect(gateway.debouncedRestart).toHaveBeenCalledTimes(1);
     expect(gateway.debouncedReload).not.toHaveBeenCalled();
@@ -151,6 +163,7 @@ describe('provider-runtime-sync refresh strategy', () => {
     });
 
     await syncDeletedProviderToRuntime(customProvider, 'moonshot-cn', gateway as GatewayManager);
+    await flushGatewayRefreshDebounce();
 
     expect(mocks.removeProviderFromOpenClaw).toHaveBeenCalledWith('custom-moonshot');
     expect(mocks.removeProviderFromOpenClaw).toHaveBeenCalledWith('moonshot-cn');
@@ -179,6 +192,7 @@ describe('provider-runtime-sync refresh strategy', () => {
     });
 
     await syncDeletedProviderToRuntime(openaiProvider, 'openai', gateway as GatewayManager);
+    await flushGatewayRefreshDebounce();
 
     expect(mocks.removeProviderFromOpenClaw).toHaveBeenCalledWith('openai');
     expect(mocks.removeProviderFromOpenClaw).toHaveBeenCalledWith('openai-codex');
@@ -188,6 +202,7 @@ describe('provider-runtime-sync refresh strategy', () => {
   it('uses debouncedReload after switching default provider when gateway is running', async () => {
     const gateway = createGateway('running');
     await syncDefaultProviderToRuntime('moonshot', gateway as GatewayManager);
+    await flushGatewayRefreshDebounce();
 
     expect(gateway.debouncedReload).toHaveBeenCalledTimes(1);
     expect(gateway.debouncedRestart).not.toHaveBeenCalled();
@@ -211,24 +226,11 @@ describe('provider-runtime-sync refresh strategy', () => {
 
     const gateway = createGateway('running');
     await syncDefaultProviderToRuntime(customProvider.id, gateway as GatewayManager);
+    await flushGatewayRefreshDebounce();
 
     expect(mocks.syncProviderConfigToOpenClaw).toHaveBeenCalledWith(
       'custom-custombc',
-      'gpt-5.4',
-      expect.objectContaining({
-        baseUrl: 'https://agentrs.jd.com/api/saas/openai-u/v1',
-      }),
-    );
-    expect(mocks.syncProviderConfigToOpenClaw).toHaveBeenCalledWith(
-      'custom-custombc',
-      'qwen3.5-plus',
-      expect.objectContaining({
-        baseUrl: 'https://agentrs.jd.com/api/saas/openai-u/v1',
-      }),
-    );
-    expect(mocks.syncProviderConfigToOpenClaw).toHaveBeenCalledWith(
-      'custom-custombc',
-      'glm-5',
+      ['gpt-5.4', 'qwen3.5-plus', 'glm-5'],
       expect.objectContaining({
         baseUrl: 'https://agentrs.jd.com/api/saas/openai-u/v1',
       }),
@@ -248,6 +250,7 @@ describe('provider-runtime-sync refresh strategy', () => {
   it('skips refresh after switching default provider when gateway is stopped', async () => {
     const gateway = createGateway('stopped');
     await syncDefaultProviderToRuntime('moonshot', gateway as GatewayManager);
+    await flushGatewayRefreshDebounce();
 
     expect(gateway.debouncedReload).not.toHaveBeenCalled();
     expect(gateway.debouncedRestart).not.toHaveBeenCalled();
@@ -339,10 +342,11 @@ describe('provider-runtime-sync refresh strategy', () => {
 
     const gateway = createGateway('running');
     await syncSavedProviderToRuntime(ollamaProvider, undefined, gateway as GatewayManager);
+    await flushGatewayRefreshDebounce();
 
     expect(mocks.syncProviderConfigToOpenClaw).toHaveBeenCalledWith(
-      'ollama-ollamafd',
-      'qwen3:30b',
+      'ollamafd',
+      ['qwen3:30b'],
       expect.objectContaining({
         baseUrl: 'http://localhost:11434/v1',
         api: 'openai-completions',
@@ -367,10 +371,11 @@ describe('provider-runtime-sync refresh strategy', () => {
 
     const gateway = createGateway('running');
     await syncDefaultProviderToRuntime('ollamafd', gateway as GatewayManager);
+    await flushGatewayRefreshDebounce();
 
     expect(mocks.setOpenClawDefaultModelWithOverride).toHaveBeenCalledWith(
-      'ollama-ollamafd',
-      'ollama-ollamafd/qwen3:30b',
+      'ollamafd',
+      'ollamafd/qwen3:30b',
       expect.objectContaining({
         baseUrl: 'http://localhost:11434/v1',
         api: 'openai-completions',
@@ -393,11 +398,12 @@ describe('provider-runtime-sync refresh strategy', () => {
 
     const gateway = createGateway('running');
     await syncUpdatedProviderToRuntime(ollamaProvider, undefined, gateway as GatewayManager);
+    await flushGatewayRefreshDebounce();
 
     // Should use the custom/ollama branch with explicit override
     expect(mocks.setOpenClawDefaultModelWithOverride).toHaveBeenCalledWith(
-      'ollama-ollamafd',
-      'ollama-ollamafd/qwen3:30b',
+      'ollamafd',
+      'ollamafd/qwen3:30b',
       expect.objectContaining({
         baseUrl: 'http://localhost:11434/v1',
         api: 'openai-completions',
@@ -420,8 +426,9 @@ describe('provider-runtime-sync refresh strategy', () => {
 
     const gateway = createGateway('running');
     await syncDeletedProviderToRuntime(ollamaProvider, 'ollamafd', gateway as GatewayManager);
+    await flushGatewayRefreshDebounce();
 
-    expect(mocks.removeProviderFromOpenClaw).toHaveBeenCalledWith('ollama-ollamafd');
+    expect(mocks.removeProviderFromOpenClaw).toHaveBeenCalledWith('ollamafd');
     expect(mocks.removeProviderFromOpenClaw).toHaveBeenCalledWith('ollamafd');
     expect(gateway.debouncedRestart).toHaveBeenCalledTimes(1);
   });

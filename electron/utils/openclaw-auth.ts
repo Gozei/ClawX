@@ -282,6 +282,33 @@ function discoverBundledPlugins(): { all: Set<string>; enabledByDefault: string[
   return _bundledPluginCache;
 }
 
+function discoverInstalledTopLevelPluginIds(): Set<string> {
+  const installed = new Set<string>();
+  try {
+    const extensionsDir = join(homedir(), '.openclaw', 'extensions');
+    if (!existsSync(extensionsDir)) {
+      return installed;
+    }
+    for (const entry of readdirSync(extensionsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name.startsWith('.openclaw-install-')) continue;
+      const manifestPath = join(extensionsDir, entry.name, 'openclaw.plugin.json');
+      if (!existsSync(manifestPath)) continue;
+      try {
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        if (typeof manifest.id === 'string' && manifest.id.trim()) {
+          installed.add(manifest.id.trim());
+        }
+      } catch {
+        // Ignore malformed manifests from external plugins.
+      }
+    }
+  } catch {
+    // Ignore extension enumeration failures.
+  }
+  return installed;
+}
+
 
 function normalizeAuthProfileProviderKey(provider: string): string {
   return AUTH_PROFILE_PROVIDER_KEY_MAP[provider] ?? provider;
@@ -627,6 +654,7 @@ export async function setOpenClawDefaultModel(
 ): Promise<void> {
   return withConfigLock(async () => {
     const config = await readOpenClawJson();
+    normalizePluginsConfig(config);
     ensureMoonshotKimiWebSearchCnBaseUrl(config, provider);
     const managedProviders = await readManagedProvidersState();
     let nextProviders = { ...managedProviders.providers };
@@ -813,17 +841,38 @@ function ensureMoonshotKimiWebSearchCnBaseUrl(config: Record<string, unknown>, p
   config.tools = tools;
 }
 
+function normalizePluginsConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const rawPlugins = config.plugins;
+  if (Array.isArray(rawPlugins)) {
+    const nextPlugins: Record<string, unknown> = {};
+    if (rawPlugins.length > 0) {
+      nextPlugins.load = [...rawPlugins];
+    }
+    config.plugins = nextPlugins;
+    return nextPlugins;
+  }
+
+  if (rawPlugins && typeof rawPlugins === 'object') {
+    return rawPlugins as Record<string, unknown>;
+  }
+
+  const nextPlugins: Record<string, unknown> = {};
+  config.plugins = nextPlugins;
+  return nextPlugins;
+}
+
 /**
  * Register or update a provider's configuration in openclaw.json
  * without changing the current default model.
  */
 export async function syncProviderConfigToOpenClaw(
   provider: string,
-  modelId: string | undefined,
+  modelIds: string[],
   override: RuntimeProviderConfigOverride
 ): Promise<void> {
   return withConfigLock(async () => {
     const config = await readOpenClawJson();
+    normalizePluginsConfig(config);
     ensureMoonshotKimiWebSearchCnBaseUrl(config, provider);
     const managedProviders = await readManagedProvidersState();
     let nextProviders = { ...managedProviders.providers };
@@ -834,8 +883,7 @@ export async function syncProviderConfigToOpenClaw(
         api: override.api,
         apiKeyEnv: override.apiKeyEnv,
         headers: override.headers,
-        modelIds: modelId ? [modelId] : [],
-        mergeExistingModels: true,
+        modelIds,
       });
       nextProviders = (
         (config.models as Record<string, unknown> | undefined)?.providers as Record<string, Record<string, unknown>> | undefined
@@ -844,7 +892,7 @@ export async function syncProviderConfigToOpenClaw(
 
     // Ensure extension is enabled for oauth providers to prevent gateway wiping config
     if (isOpenClawOAuthPluginProviderKey(provider)) {
-      const plugins = (config.plugins || {}) as Record<string, unknown>;
+      const plugins = normalizePluginsConfig(config);
       const allow = Array.isArray(plugins.allow) ? [...plugins.allow as string[]] : [];
       const pEntries = (plugins.entries || {}) as Record<string, unknown>;
       const pluginId = getOAuthPluginId(provider);
@@ -912,7 +960,7 @@ export async function setOpenClawDefaultModelWithOverride(
 
     // Ensure the extension plugin is marked as enabled in openclaw.json
     if (isOpenClawOAuthPluginProviderKey(provider)) {
-      const plugins = (config.plugins || {}) as Record<string, unknown>;
+      const plugins = normalizePluginsConfig(config);
       const allow = Array.isArray(plugins.allow) ? [...plugins.allow as string[]] : [];
       const pEntries = (plugins.entries || {}) as Record<string, unknown>;
       const pluginId = getOAuthPluginId(provider);
@@ -1527,6 +1575,16 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
           modified = true;
         }
       }
+      if (Array.isArray(pluginsObj.allow)) {
+        const nextQqbotAllow = (pluginsObj.allow as string[]).filter(
+          (pluginId) => !QQBOT_PLUGIN_IDS.includes(pluginId as typeof QQBOT_PLUGIN_IDS[number]),
+        );
+        if (nextQqbotAllow.length !== (pluginsObj.allow as string[]).length) {
+          pluginsObj.allow = nextQqbotAllow;
+          console.log('[sanitize] Removed legacy qqbot plugin ids from plugins.allow');
+          modified = true;
+        }
+      }
 
       // ── qwen-portal → modelstudio migration ────────────────────
       // OpenClaw 2026.3.28 deprecated qwen-portal OAuth (portal.qwen.ai)
@@ -1592,19 +1650,31 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
         }
       }
 
-      // ── Reconcile built-in channels with restrictive plugin allowlists ──
-      // If plugins.allow is active because an external plugin is configured,
-      // configured built-in channels must also be present or they will be
-      // blocked on restart. If the allowlist only contains built-ins, drop it.
-      const configuredBuiltIns = new Set<string>();
-      const channelsObj = config.channels as Record<string, Record<string, unknown>> | undefined;
-      if (channelsObj && typeof channelsObj === 'object') {
-        for (const [channelId, section] of Object.entries(channelsObj)) {
-          if (!BUILTIN_CHANNEL_IDS.has(channelId)) continue;
-          if (!section || section.enabled === false) continue;
-          if (Object.keys(section).length > 0) {
-            configuredBuiltIns.add(channelId);
-          }
+      const INLINE_MANAGED_BUNDLED_PLUGIN_IDS = ['browser', 'openai', 'moonshot', 'zai'] as const;
+      for (const pluginId of INLINE_MANAGED_BUNDLED_PLUGIN_IDS) {
+        if (pEntries[pluginId]) {
+          delete pEntries[pluginId];
+          console.log(`[sanitize] Removed redundant bundled plugin entry from plugins.entries: ${pluginId}`);
+          modified = true;
+        }
+        const allowIndex = allowArr2.indexOf(pluginId);
+        if (allowIndex !== -1) {
+          allowArr2.splice(allowIndex, 1);
+          console.log(`[sanitize] Removed redundant bundled plugin id from plugins.allow: ${pluginId}`);
+          modified = true;
+        }
+      }
+
+      if (pEntries['memory-core']) {
+        const memoryCoreEntry = pEntries['memory-core'];
+        if ('config' in memoryCoreEntry) {
+          delete memoryCoreEntry.config;
+          console.log('[sanitize] Removed incompatible plugins.entries.memory-core.config');
+          modified = true;
+        }
+        if (memoryCoreEntry.enabled !== true) {
+          memoryCoreEntry.enabled = true;
+          modified = true;
         }
       }
 
@@ -1614,39 +1684,17 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
         modified = true;
       }
 
-      // Discover all bundled extension IDs and which ones are enabledByDefault
-      // so we can (a) exclude them from the "external" set (prevents stale
-      // entries surviving across OpenClaw upgrades) and (b) re-add the
-      // enabledByDefault ones to prevent the allowlist from blocking them.
+      // Keep only true external plugin ids in plugins.allow.
+      // A config written by newer OpenClaw versions may contain bundled
+      // provider/plugin ids that older runtimes reject during validation.
       const bundled = discoverBundledPlugins();
-
-      const externalPluginIds = allowArr2.filter(
-        (pluginId) => !BUILTIN_CHANNEL_IDS.has(pluginId) && !bundled.all.has(pluginId),
-      );
-      let nextAllow = [...externalPluginIds];
-      if (externalPluginIds.length > 0) {
-        for (const channelId of configuredBuiltIns) {
-          if (!nextAllow.includes(channelId)) {
-            nextAllow.push(channelId);
-            modified = true;
-            console.log(`[sanitize] Added configured built-in channel "${channelId}" to plugins.allow`);
-          }
-        }
-      }
-
-      // ── Ensure enabledByDefault built-in plugins survive restrictive allowlists ──
-      // OpenClaw's plugin enable logic checks the allowlist BEFORE enabledByDefault,
-      // so any bundled plugin with enabledByDefault: true (e.g. browser, diffs, etc.)
-      // gets blocked when plugins.allow is non-empty.  We add them back here.
-      // On upgrade, plugins removed from enabledByDefault are also removed from the
-      // allowlist because they were excluded from externalPluginIds above.
-      if (nextAllow.length > 0) {
-        for (const pluginId of bundled.enabledByDefault) {
-          if (!nextAllow.includes(pluginId)) {
-            nextAllow.push(pluginId);
-          }
-        }
-      }
+      const installedTopLevelPluginIds = discoverInstalledTopLevelPluginIds();
+      const nextAllow = allowArr2.filter((pluginId) => {
+        if (BUILTIN_CHANNEL_IDS.has(pluginId)) return false;
+        if (bundled.all.has(pluginId)) return false;
+        if (pluginId === 'wecom-openclaw-plugin') return false;
+        return installedTopLevelPluginIds.has(pluginId) || Boolean(pEntries[pluginId]);
+      });
 
       if (JSON.stringify(nextAllow) !== JSON.stringify(allowArr2)) {
         if (nextAllow.length > 0) {

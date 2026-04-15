@@ -99,12 +99,17 @@ vi.mock('@/components/branding/AppLogo', () => ({
   ),
 }));
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string) => key,
-    i18n: { resolvedLanguage: 'en' },
-  }),
-}));
+vi.mock('react-i18next', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-i18next')>();
+  return {
+    ...actual,
+    initReactI18next: actual.initReactI18next ?? { type: '3rdParty', init: () => {} },
+    useTranslation: () => ({
+      t: (key: string) => key,
+      i18n: { resolvedLanguage: 'en' },
+    }),
+  };
+});
 
 describe('Sidebar session layout', () => {
   beforeEach(() => {

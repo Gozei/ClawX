@@ -14,11 +14,11 @@ vi.mock('child_process', () => ({
 }));
 
 vi.mock('@electron/utils/agent-config', () => ({
+  applyPreparedAgentModelUpdate: vi.fn(),
   assignChannelToAgent: vi.fn(),
   clearChannelBinding: vi.fn(),
   createAgent: vi.fn(),
   deleteAgentConfig: vi.fn(),
-  finalizePreparedAgentModelUpdate: vi.fn(),
   listAgentsSnapshot: vi.fn(),
   prepareAgentModelUpdate: vi.fn(),
   removeAgentWorkspaceDirectory: vi.fn(),
@@ -43,8 +43,8 @@ vi.mock('@electron/api/route-utils', () => ({
 }));
 
 import {
+  applyPreparedAgentModelUpdate,
   createAgent,
-  finalizePreparedAgentModelUpdate,
   prepareAgentModelUpdate,
   updateAgentModel,
   updateAgentStudio,
@@ -223,7 +223,7 @@ describe('handleAgentRoutes model refresh flow', () => {
       },
       15000,
     );
-    expect(finalizePreparedAgentModelUpdate).toHaveBeenCalledTimes(1);
+    expect(applyPreparedAgentModelUpdate).toHaveBeenCalledTimes(1);
     expect(updateAgentModel).not.toHaveBeenCalled();
   });
 
@@ -287,7 +287,7 @@ describe('handleAgentRoutes model refresh flow', () => {
       } as never,
     );
 
-    expect(updateAgentModel).toHaveBeenCalledWith('main', 'moonshot/kimi-k2.5');
+    expect(updateAgentModel).toHaveBeenCalledWith('main', 'moonshot/kimi-k2.5', { setAsDefault: false });
     expect(debouncedReload).toHaveBeenCalledTimes(1);
   });
 });

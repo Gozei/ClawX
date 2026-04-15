@@ -1,9 +1,6 @@
 #!/usr/bin/env zx
 
-/**
- * 使用 execFile 调用 zx CLI，避免 Windows 下项目路径含空格时
- * `$`zx ${path}`` 触发 zx 8 的 “No quote function is defined”。
- */
+import './setup-zx-shell.mjs';
 import 'zx/globals';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -16,6 +13,7 @@ const ROOT = join(__dirname, '..');
 const lockPath = join(ROOT, 'build', 'preinstalled-skills', '.preinstalled-lock.json');
 const bundleScript = join(ROOT, 'scripts', 'bundle-preinstalled-skills.mjs');
 const openClawDir = join(ROOT, 'node_modules', 'openclaw');
+const zxCli = join(ROOT, 'node_modules', '.bin', process.platform === 'win32' ? 'zx.cmd' : 'zx');
 
 if (process.env.CLAWX_SKIP_PREINSTALLED_SKILLS_PREPARE === '1') {
   echo`Skipping preinstalled skills prepare (CLAWX_SKIP_PREINSTALLED_SKILLS_PREPARE=1).`;

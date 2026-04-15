@@ -394,7 +394,7 @@ describe('sanitizeOpenClawConfig', () => {
     logSpy.mockRestore();
   });
 
-  it('migrates legacy tools.web.search.kimi into moonshot plugin config', async () => {
+  it('sanitizes legacy tools.web.search.kimi for moonshot-managed config', async () => {
     await writeOpenClawJson({
       models: {
         providers: {
@@ -420,11 +420,10 @@ describe('sanitizeOpenClawConfig', () => {
     const tools = (result.tools as Record<string, unknown> | undefined) || {};
     const web = (tools.web as Record<string, unknown> | undefined) || {};
     const search = (web.search as Record<string, unknown> | undefined) || {};
-    const moonshot = ((((result.plugins as Record<string, unknown>).entries as Record<string, unknown>).moonshot as Record<string, unknown>).config as Record<string, unknown>).webSearch as Record<string, unknown>;
+    const kimi = (search.kimi as Record<string, unknown> | undefined) || {};
 
-    expect(search).not.toHaveProperty('kimi');
-    expect(moonshot).not.toHaveProperty('apiKey');
-    expect(moonshot.baseUrl).toBe('https://api.moonshot.cn/v1');
+    expect(kimi).not.toHaveProperty('apiKey');
+    expect(kimi.baseUrl).toBe('https://api.moonshot.cn/v1');
   });
 
   it('mirrors telegram default account credentials to top level during sanitize', async () => {
@@ -498,7 +497,7 @@ describe('syncProviderConfigToOpenClaw', () => {
     await rm(testUserData, { recursive: true, force: true });
   });
 
-  it('writes moonshot web search config to plugin config instead of tools.web.search.kimi', async () => {
+  it('writes moonshot web search config into tools.web.search.kimi compatibility config', async () => {
     await writeOpenClawJson({
       models: {
         providers: {},
@@ -507,7 +506,7 @@ describe('syncProviderConfigToOpenClaw', () => {
 
     const { syncProviderConfigToOpenClaw } = await import('@electron/utils/openclaw-auth');
 
-    await syncProviderConfigToOpenClaw('moonshot', 'kimi-k2.5', {
+    await syncProviderConfigToOpenClaw('moonshot', ['kimi-k2.5'], {
       baseUrl: 'https://api.moonshot.cn/v1',
       api: 'openai-completions',
     });
@@ -516,13 +515,13 @@ describe('syncProviderConfigToOpenClaw', () => {
     const tools = (result.tools as Record<string, unknown> | undefined) || {};
     const web = (tools.web as Record<string, unknown> | undefined) || {};
     const search = (web.search as Record<string, unknown> | undefined) || {};
-    const moonshot = ((((result.plugins as Record<string, unknown>).entries as Record<string, unknown>).moonshot as Record<string, unknown>).config as Record<string, unknown>).webSearch as Record<string, unknown>;
+    const kimi = (search.kimi as Record<string, unknown> | undefined) || {};
 
-    expect(search).not.toHaveProperty('kimi');
-    expect(moonshot.baseUrl).toBe('https://api.moonshot.cn/v1');
+    expect(kimi.baseUrl).toBe('https://api.moonshot.cn/v1');
+    expect(kimi).not.toHaveProperty('apiKey');
   });
 
-  it('preserves legacy plugins array by converting it into plugins.load during moonshot sync', async () => {
+  it('keeps legacy plugins array untouched during moonshot sync when paths are not sanitized', async () => {
     await writeOpenClawJson({
       plugins: ['/tmp/custom-plugin.js'],
       models: {
@@ -532,18 +531,20 @@ describe('syncProviderConfigToOpenClaw', () => {
 
     const { syncProviderConfigToOpenClaw } = await import('@electron/utils/openclaw-auth');
 
-    await syncProviderConfigToOpenClaw('moonshot', 'kimi-k2.5', {
+    await syncProviderConfigToOpenClaw('moonshot', ['kimi-k2.5'], {
       baseUrl: 'https://api.moonshot.cn/v1',
       api: 'openai-completions',
     });
 
     const result = await readOpenClawJson();
     const plugins = result.plugins as Record<string, unknown>;
-    const load = plugins.load as string[];
-    const moonshot = (((plugins.entries as Record<string, unknown>).moonshot as Record<string, unknown>).config as Record<string, unknown>).webSearch as Record<string, unknown>;
+    const tools = (result.tools as Record<string, unknown> | undefined) || {};
+    const web = (tools.web as Record<string, unknown> | undefined) || {};
+    const search = (web.search as Record<string, unknown> | undefined) || {};
+    const kimi = (search.kimi as Record<string, unknown> | undefined) || {};
 
-    expect(load).toEqual(['/tmp/custom-plugin.js']);
-    expect(moonshot.baseUrl).toBe('https://api.moonshot.cn/v1');
+    expect(plugins.load).toEqual(['/tmp/custom-plugin.js']);
+    expect(kimi.baseUrl).toBe('https://api.moonshot.cn/v1');
   });
 });
 

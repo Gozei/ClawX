@@ -393,7 +393,7 @@ export async function connectGatewaySocket(options: {
       const msg = error instanceof Error ? error.message : String(error);
       // 仅在 Gateway 主动关闭 WS（handshake 阶段）或 RPC 超时时重试，
       // 其他错误（如 ECONNREFUSED）直接抛出。
-      const isRetryable = /closed before handshake|handshake timeout/i.test(msg);
+      const isRetryable = /closed before handshake/i.test(msg);
       if (!isRetryable || attempt >= CONNECT_MAX_RETRIES) {
         throw error;
       }

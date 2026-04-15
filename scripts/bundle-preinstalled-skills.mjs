@@ -1,5 +1,6 @@
 #!/usr/bin/env zx
 
+import './setup-zx-shell.mjs';
 import 'zx/globals';
 // Windows 无 Git Bash 时 zx 默认的 useBash() 会静默失败，导致未设置 $.quote，
 // 项目路径含空格（如 Deep AI Worker）时 `$` 模板会报 No quote function is defined。

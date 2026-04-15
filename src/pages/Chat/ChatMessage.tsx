@@ -5,7 +5,8 @@
  */
 import { useState, useCallback, useEffect, useMemo, memo, lazy, Suspense } from 'react';
 import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
-import { FileTypeIcon, getFileVisual } from './file-icon';
+import { FileTypeIcon } from './file-icon';
+import { getFileVisual } from './file-visual';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -197,7 +198,8 @@ export const ChatMessage = memo(function ChatMessage({
   const fallbackAgentModelRef = currentSession
     ? (currentAgent?.overrideModelRef || currentAgent?.modelRef || '')
     : '';
-  const effectiveModelRef = (sessionModels[currentSessionKey] || currentSession?.model || defaultModelRef || fallbackAgentModelRef || '').trim();
+  const effectiveSessionModels = sessionModels ?? {};
+  const effectiveModelRef = (effectiveSessionModels[currentSessionKey] || currentSession?.model || defaultModelRef || fallbackAgentModelRef || '').trim();
   const currentModelLabel = useMemo(
     () => modelOptions.find((option) => option.value === effectiveModelRef)?.label || effectiveModelRef,
     [effectiveModelRef, modelOptions],

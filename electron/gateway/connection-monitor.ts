@@ -13,7 +13,8 @@ type PingOptions = {
 
 export class GatewayConnectionMonitor {
   private pingInterval: NodeJS.Timeout | null = null;
-  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private healthCheckTimer: NodeJS.Timeout | null = null;
+  private healthCheckInFlight = false;
   private lastPingAt = 0;
   private waitingForAlive = false;
   private consecutiveMisses = 0;
@@ -80,27 +81,52 @@ export class GatewayConnectionMonitor {
     onError: (error: unknown) => void;
     intervalMs?: number;
   }): void {
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-    }
+    const intervalMs = options.intervalMs ?? 30000;
 
-    this.healthCheckInterval = setInterval(async () => {
-      if (!options.shouldCheck()) {
+    if (this.healthCheckTimer) {
+      clearTimeout(this.healthCheckTimer);
+      this.healthCheckTimer = null;
+    }
+    this.healthCheckInFlight = false;
+
+    const runHealthCheck = async () => {
+      if (!this.healthCheckTimer) {
         return;
       }
 
+      if (this.healthCheckInFlight) {
+        this.healthCheckTimer = setTimeout(() => {
+          void runHealthCheck();
+        }, intervalMs);
+        return;
+      }
+
+      this.healthCheckInFlight = true;
       try {
-        const health = await options.checkHealth();
-        if (!health.ok) {
-          const errorMessage = health.error ?? 'Health check failed';
-          logger.warn(`Gateway health check failed: ${errorMessage}`);
-          options.onUnhealthy(errorMessage);
+        if (options.shouldCheck()) {
+          const health = await options.checkHealth();
+          if (!health.ok) {
+            const errorMessage = health.error ?? 'Health check failed';
+            logger.warn(`Gateway health check failed: ${errorMessage}`);
+            options.onUnhealthy(errorMessage);
+          }
         }
       } catch (error) {
         logger.error('Gateway health check error:', error);
         options.onError(error);
+      } finally {
+        this.healthCheckInFlight = false;
+        if (this.healthCheckTimer) {
+          this.healthCheckTimer = setTimeout(() => {
+            void runHealthCheck();
+          }, intervalMs);
+        }
       }
-    }, options.intervalMs ?? 30000);
+    };
+
+    this.healthCheckTimer = setTimeout(() => {
+      void runHealthCheck();
+    }, intervalMs);
   }
 
   clear(): void {
@@ -108,10 +134,11 @@ export class GatewayConnectionMonitor {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
     }
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-      this.healthCheckInterval = null;
+    if (this.healthCheckTimer) {
+      clearTimeout(this.healthCheckTimer);
+      this.healthCheckTimer = null;
     }
+    this.healthCheckInFlight = false;
     this.resetHeartbeatState();
   }
 

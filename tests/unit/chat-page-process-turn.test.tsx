@@ -42,31 +42,35 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => navigateMock,
 }));
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    i18n: {
-      resolvedLanguage: 'en',
-      language: 'en',
-    },
-    t: (key: string, params?: Record<string, string | number>) => {
-      switch (key) {
-        case 'process.durationHourMinute':
-          return `${params?.hours}h ${params?.minutes}m`;
-        case 'process.durationMinuteSecond':
-          return `${params?.minutes}m ${params?.seconds}s`;
-        case 'process.durationSecond':
-          return `${params?.seconds}s`;
-        case 'process.workingFor':
-          return `Working for ${params?.duration}`;
-        case 'process.processedFor':
-          return `Processed ${params?.duration}`;
-        default:
-          if (!params) return key;
-          return `${key}:${Object.values(params).join(' ')}`;
-      }
-    },
-  }),
-}));
+vi.mock('react-i18next', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-i18next')>();
+  return {
+    ...actual,
+    useTranslation: () => ({
+      i18n: {
+        resolvedLanguage: 'en',
+        language: 'en',
+      },
+      t: (key: string, params?: Record<string, string | number>) => {
+        switch (key) {
+          case 'process.durationHourMinute':
+            return `${params?.hours}h ${params?.minutes}m`;
+          case 'process.durationMinuteSecond':
+            return `${params?.minutes}m ${params?.seconds}s`;
+          case 'process.durationSecond':
+            return `${params?.seconds}s`;
+          case 'process.workingFor':
+            return `Working for ${params?.duration}`;
+          case 'process.processedFor':
+            return `Processed ${params?.duration}`;
+          default:
+            if (!params) return key;
+            return `${key}:${Object.values(params).join(' ')}`;
+        }
+      },
+    }),
+  };
+});
 
 vi.mock('@/stores/chat', () => ({
   useChatStore: (selector: (state: typeof chatState) => unknown) => selector(chatState),

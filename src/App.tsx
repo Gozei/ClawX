@@ -39,22 +39,20 @@ function RouteLoader() {
 function UpdateInstallOverlay() {
   const status = useUpdateStore((state) => state.status);
   const installPhaseStartedAt = useUpdateStore((state) => state.installPhaseStartedAt);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
-    if (status !== 'installing' || !installPhaseStartedAt) {
-      setElapsedSeconds(0);
-      return;
-    }
+    if (status !== 'installing' || !installPhaseStartedAt) return;
 
-    const tick = () => {
-      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - installPhaseStartedAt) / 1000)));
-    };
-
-    tick();
-    const timer = window.setInterval(tick, 1000);
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
     return () => { window.clearInterval(timer); };
   }, [installPhaseStartedAt, status]);
+
+  const elapsedSeconds = status === 'installing' && installPhaseStartedAt
+    ? Math.max(0, Math.floor((nowMs - installPhaseStartedAt) / 1000))
+    : 0;
 
   if (status !== 'installing') {
     return null;

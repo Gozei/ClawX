@@ -1150,6 +1150,11 @@ export async function finalizePreparedAgentModelUpdate(prepared: PreparedAgentMo
   logger.info('Updated agent model', { agentId: prepared.agentId, modelRef: prepared.normalizedModelRef });
 }
 
+export async function applyPreparedAgentModelUpdate(prepared: PreparedAgentModelUpdate): Promise<void> {
+  await writeOpenClawConfig(prepared.config);
+  await finalizePreparedAgentModelUpdate(prepared);
+}
+
 export async function updateAgentModel(
   agentId: string,
   modelRef: string | null,
@@ -1158,8 +1163,7 @@ export async function updateAgentModel(
   return withConfigLock(async () => {
     const config = await readOpenClawConfig() as AgentConfigDocument;
     const prepared = await prepareAgentModelUpdate(config, agentId, modelRef, options);
-    await writeOpenClawConfig(prepared.config);
-    await finalizePreparedAgentModelUpdate(prepared);
+    await applyPreparedAgentModelUpdate(prepared);
     return prepared.snapshot;
   });
 }

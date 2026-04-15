@@ -5,12 +5,33 @@ import { PORTS } from '../utils/config';
  * Allowed CORS origins — only the Electron renderer (Vite dev or production)
  * and the OpenClaw Gateway are permitted to make cross-origin requests.
  */
-const ALLOWED_ORIGINS = new Set([
-  `http://127.0.0.1:${PORTS.CLAWX_DEV}`,
-  `http://localhost:${PORTS.CLAWX_DEV}`,
-  `http://127.0.0.1:${PORTS.OPENCLAW_GATEWAY}`,
-  `http://localhost:${PORTS.OPENCLAW_GATEWAY}`,
-]);
+function getAllowedOrigins(): Set<string> {
+  const origins = new Set([
+    `http://127.0.0.1:${PORTS.CLAWX_DEV}`,
+    `http://localhost:${PORTS.CLAWX_DEV}`,
+    `http://127.0.0.1:${PORTS.OPENCLAW_GATEWAY}`,
+    `http://localhost:${PORTS.OPENCLAW_GATEWAY}`,
+  ]);
+
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL?.trim();
+  if (!devServerUrl) {
+    return origins;
+  }
+
+  try {
+    const parsed = new URL(devServerUrl);
+    origins.add(parsed.origin);
+
+    if (parsed.port) {
+      origins.add(`http://127.0.0.1:${parsed.port}`);
+      origins.add(`http://localhost:${parsed.port}`);
+    }
+  } catch {
+    // Ignore malformed dev server URLs and keep the static allow-list.
+  }
+
+  return origins;
+}
 
 export async function parseJsonBody<T>(req: IncomingMessage): Promise<T> {
   const chunks: Buffer[] = [];
@@ -47,7 +68,7 @@ export function setCorsHeaders(res: ServerResponse, origin?: string): void {
   // Only reflect the Origin header back if it is in the allow-list.
   // Omitting the header for unknown origins causes the browser to block
   // the response — this is the intended behavior for untrusted callers.
-  if (origin && ALLOWED_ORIGINS.has(origin)) {
+  if (origin && getAllowedOrigins().has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }

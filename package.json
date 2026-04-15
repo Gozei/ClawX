@@ -13,6 +13,7 @@
             "sharp"
         ],
         "overrides": {
+            "libsignal": "file:vendor/libsignal-node-direct.tar.gz",
             "isbinaryfile": "^5.0.0",
             "https-proxy-agent": "7.0.6"
         },

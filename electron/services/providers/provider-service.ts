@@ -96,6 +96,7 @@ function maskApiKey(apiKey: string | null): string | null {
 }
 
 const legacyProviderApiWarned = new Set<string>();
+const ACCOUNT_LIST_CACHE_TTL_MS = 1200;
 
 function logLegacyProviderApiUsage(method: string, replacement: string): void {
   if (legacyProviderApiWarned.has(method)) {
@@ -108,11 +109,31 @@ function logLegacyProviderApiUsage(method: string, replacement: string): void {
 }
 
 export class ProviderService {
+  private accountListCache:
+    | { value: ProviderAccount[]; expiresAt: number }
+    | null = null;
+  private accountListInFlight: Promise<ProviderAccount[]> | null = null;
+
+  private invalidateAccountListCache(): void {
+    this.accountListCache = null;
+    this.accountListInFlight = null;
+  }
+
   async listVendors(): Promise<ProviderDefinition[]> {
     return PROVIDER_DEFINITIONS;
   }
 
   async listAccounts(): Promise<ProviderAccount[]> {
+    const now = Date.now();
+    if (this.accountListCache && this.accountListCache.expiresAt > now) {
+      return this.accountListCache.value;
+    }
+
+    if (this.accountListInFlight) {
+      return this.accountListInFlight;
+    }
+
+    this.accountListInFlight = (async () => {
     await ensureProviderStoreMigrated();
 
     // ── openclaw.json is the ONLY source of truth ──
@@ -191,7 +212,19 @@ export class ProviderService {
       }
     }
 
-    return result;
+      this.accountListCache = {
+        value: result,
+        expiresAt: Date.now() + ACCOUNT_LIST_CACHE_TTL_MS,
+      };
+
+      return result;
+    })();
+
+    try {
+      return await this.accountListInFlight;
+    } finally {
+      this.accountListInFlight = null;
+    }
   }
 
 
@@ -285,6 +318,7 @@ export class ProviderService {
     if (apiKey !== undefined && apiKey.trim()) {
       await storeApiKey(account.id, apiKey.trim());
     }
+    this.invalidateAccountListCache();
     return (await getProviderAccount(account.id)) ?? account;
   }
 
@@ -318,6 +352,7 @@ export class ProviderService {
       }
     }
 
+    this.invalidateAccountListCache();
     return (await getProviderAccount(accountId)) ?? nextAccount;
   }
 
@@ -328,6 +363,7 @@ export class ProviderService {
     if (deleted && existing) {
       await suppressProviderKeys(getSuppressedProviderKeysForAccount(existing));
     }
+    this.invalidateAccountListCache();
     return deleted;
   }
 
@@ -445,6 +481,7 @@ export class ProviderService {
     await ensureProviderStoreMigrated();
     await setDefaultProviderAccount(accountId);
     await setDefaultProvider(accountId);
+    this.invalidateAccountListCache();
   }
 
   getVendorDefinition(vendorId: string): ProviderDefinition | undefined {

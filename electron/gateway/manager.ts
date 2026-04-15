@@ -179,6 +179,30 @@ export class GatewayManager extends EventEmitter {
     const message = error instanceof Error ? error.message : String(error);
     return /unknown method:\s*shutdown/i.test(message);
   }
+
+  private disposeWebSocket(target: WebSocket | null, options?: { terminate?: boolean; clearIfActive?: boolean }): void {
+    if (!target) {
+      return;
+    }
+
+    try {
+      target.removeAllListeners();
+    } catch {
+      // ignore listener cleanup failures
+    }
+
+    if (options?.terminate) {
+      try {
+        target.terminate();
+      } catch {
+        // ignore socket termination failures
+      }
+    }
+
+    if (options?.clearIfActive !== false && this.ws === target) {
+      this.ws = null;
+    }
+  }
   /**
    * Get current Gateway status
    */
@@ -379,8 +403,7 @@ export class GatewayManager extends EventEmitter {
     // never completes and the connection stays ESTABLISHED indefinitely,
     // accumulating leaked connections on every restart cycle.
     if (this.ws) {
-      try { this.ws.terminate(); } catch { /* ignore */ }
-      this.ws = null;
+      this.disposeWebSocket(this.ws, { terminate: true });
     }
 
     // Kill process
@@ -826,6 +849,9 @@ export class GatewayManager extends EventEmitter {
    */
   private async connect(port: number, _externalToken?: string): Promise<void> {
     const branding = await getResolvedBranding();
+    if (this.ws) {
+      this.disposeWebSocket(this.ws, { terminate: true });
+    }
     this.ws = await connectGatewaySocket({
       port,
       deviceIdentity: this.deviceIdentity,
@@ -850,6 +876,8 @@ export class GatewayManager extends EventEmitter {
       },
       onCloseAfterHandshake: (closeCode) => {
         this.connectionMonitor.clear();
+        clearPendingGatewayRequests(this.pendingRequests, new Error(`Gateway socket closed (code=${closeCode})`));
+        this.disposeWebSocket(this.ws, { clearIfActive: true });
         if (this.status.state === 'running') {
           this.setStatus({ state: 'stopped' });
           // On Windows, skip reconnect from WS close.  The Gateway is a local
