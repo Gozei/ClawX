@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const ICONS_DIR = path.join(PROJECT_ROOT, 'resources', 'icons');
-const SVG_SOURCE = path.join(ICONS_DIR, 'whale_logo.svg');
+const SVG_SOURCE = path.join(ICONS_DIR, 'icon.svg');
 
 echo`🎨 Generating ClawX icons using Node.js...`;
 
