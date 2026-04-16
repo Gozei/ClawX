@@ -2,7 +2,13 @@
 set -euo pipefail
 
 BASE_URL="https://deep-ai-worker-1253696187.cos.ap-guangzhou.myqcloud.com/latest"
-YML_URL="${BASE_URL}/latest.yml"
+YML_URL="${BASE_URL}/latest-linux.yml"
+
+if ! command -v curl >/dev/null 2>&1; then
+  echo "curl not found, installing curl ..."
+  apt-get update
+  apt-get install -y curl
+fi
 
 echo "Reading ${YML_URL} ..."
 
@@ -27,7 +33,7 @@ PKG_NAME="$(
 )"
 
 if [[ -z "${PKG_NAME}" ]]; then
-  echo "No linux-amd64.deb package found in latest.yml"
+  echo "No linux-amd64.deb package found in latest-linux.yml"
   exit 1
 fi
 
