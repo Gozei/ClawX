@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" version="1.1">
+  <g transform="translate(1024 0) scale(-1 1)">
   <defs>
     <linearGradient id="whaleGrad" x1="0.10" y1="0.30" x2="0.88" y2="0.72">
       <stop offset="0%" stop-color="#4cc9f5"/>
@@ -12,4 +13,6 @@
   <path d="M 180 363 L 200 407 L 224 447 L 258 492 L 286 521 L 313 544 L 347 568 L 386 590 L 424 606 L 407 580 L 380 567 L 345 544 L 318 522 L 287 491 L 264 463 L 242 430 L 213 371 Z" fill="#ffffff"/>
   <path d="M 234 380 L 261 432 L 299 482 L 316 500 L 347 527 L 386 553 L 361 511 L 314 465 L 292 437 L 274 407 L 260 394 Z" fill="#ffffff"/>
   <path d="M 349 423 L 343 432 L 343 442 L 346 449 L 357 456 L 368 457 L 375 455 L 358 451 L 351 441 L 354 435 L 362 440 L 368 439 L 372 434 L 371 425 L 361 419 Z" fill="#ffffff"/>
+
+  </g>
 </svg>
