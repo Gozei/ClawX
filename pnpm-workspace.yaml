@@ -1,6 +1,9 @@
 packages:
   - '.'
 
+onlyBuiltDependencies:
+  - openclaw
+
 ignoredBuiltDependencies:
   - electron
   - esbuild
