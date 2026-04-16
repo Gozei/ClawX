@@ -1131,36 +1131,48 @@ export async function syncGatewayTokenToConfig(token: string): Promise<void> {
   });
 }
 
+function isDefaultBrowserConfig(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const browser = value as Record<string, unknown>;
+  const keys = Object.keys(browser);
+  if (keys.some((key) => key !== 'enabled' && key !== 'defaultProfile')) {
+    return false;
+  }
+
+  const enabled = browser.enabled;
+  if (enabled !== undefined && enabled !== true) {
+    return false;
+  }
+
+  const defaultProfile = browser.defaultProfile;
+  if (defaultProfile !== undefined && defaultProfile !== 'openclaw') {
+    return false;
+  }
+
+  return true;
+}
+
 /**
- * Ensure browser automation is enabled in ~/.openclaw/openclaw.json.
+ * Remove redundant browser defaults from ~/.openclaw/openclaw.json.
+ *
+ * OpenClaw already defaults browser automation to enabled with the
+ * `openclaw` profile. Persisting only those defaults causes the runtime to
+ * rewrite config during startup, which can trigger noisy reload/restart
+ * loops on Windows.
  */
 export async function syncBrowserConfigToOpenClaw(): Promise<void> {
   return withConfigLock(async () => {
     const config = await readOpenClawJson();
-
-    const browser = (
-      config.browser && typeof config.browser === 'object'
-        ? { ...(config.browser as Record<string, unknown>) }
-        : {}
-    ) as Record<string, unknown>;
-
-    let changed = false;
-
-    if (browser.enabled === undefined) {
-      browser.enabled = true;
-      changed = true;
+    if (!isDefaultBrowserConfig(config.browser)) {
+      return;
     }
 
-    if (browser.defaultProfile === undefined) {
-      browser.defaultProfile = 'openclaw';
-      changed = true;
-    }
-
-    if (!changed) return;
-
-    config.browser = browser;
+    delete config.browser;
     await writeOpenClawJson(config);
-    console.log('Synced browser config to openclaw.json');
+    console.log('Removed redundant default browser config from openclaw.json');
   });
 }
 
