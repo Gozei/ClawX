@@ -11,7 +11,7 @@ import { dirname } from 'node:path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 const releaseDir = join(ROOT, process.env.COS_RELEASE_DIR || 'release');
-const prefix = (process.env.COS_PREFIX || 'latest').replace(/^\/+|\/+$/g, '');
+const prefix = (process.env.COS_PREFIX || 'deepclaw').replace(/^\/+|\/+$/g, '');
 const targetPlatform = (process.env.COS_PLATFORM || 'all').trim().toLowerCase();
 
 const secretId = process.env.COS_SECRET_ID;
