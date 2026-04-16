@@ -12,8 +12,6 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { invokeIpc } from '@/lib/api-client';
 import type { RawMessage, AttachedFileMeta } from '@/stores/chat';
-import { useAgentsStore } from '@/stores/agents';
-import { useChatStore } from '@/stores/chat';
 import { useProviderStore } from '@/stores/providers';
 import { useSettingsStore, type AssistantMessageStyle } from '@/stores/settings';
 import type { ProviderAccount } from '@/lib/providers';
@@ -80,6 +78,9 @@ function buildMessageSignature(message: RawMessage): string {
     message.id ?? '',
     message.role,
     message.timestamp ?? '',
+    message.provider ?? '',
+    message.model ?? '',
+    message.modelRef ?? '',
     text,
     thinking,
     images.map((image) => `${image.mimeType}:${image.data.length}`).join(','),
@@ -131,6 +132,43 @@ function imageSrc(img: ExtractedImage): string | null {
   return null;
 }
 
+function getMessageModelRef(message: RawMessage): string {
+  const directModelRef = typeof message.modelRef === 'string' ? message.modelRef.trim() : '';
+  if (directModelRef) {
+    return directModelRef;
+  }
+
+  const directModel = typeof message.model === 'string' ? message.model.trim() : '';
+  if (directModel.includes('/')) {
+    return directModel;
+  }
+
+  const directProvider = typeof message.provider === 'string' ? message.provider.trim() : '';
+  if (directModel && directProvider) {
+    return `${directProvider}/${directModel}`;
+  }
+
+  const details = message.details && typeof message.details === 'object'
+    ? message.details as Record<string, unknown>
+    : null;
+  const detailModelRef = typeof details?.modelRef === 'string' ? details.modelRef.trim() : '';
+  if (detailModelRef) {
+    return detailModelRef;
+  }
+
+  const detailModel = typeof details?.model === 'string' ? details.model.trim() : '';
+  if (detailModel.includes('/')) {
+    return detailModel;
+  }
+
+  const detailProvider = typeof details?.provider === 'string' ? details.provider.trim() : '';
+  if (detailModel && detailProvider) {
+    return `${detailProvider}/${detailModel}`;
+  }
+
+  return '';
+}
+
 export const ChatMessage = memo(function ChatMessage({
   message,
   showThinking,
@@ -152,10 +190,6 @@ export const ChatMessage = memo(function ChatMessage({
   const chatProcessDisplayMode = useSettingsStore((state) => state.chatProcessDisplayMode);
   const assistantMessageStyle = useSettingsStore((state) => state.assistantMessageStyle);
   const chatFontScale = useSettingsStore((state) => state.chatFontScale);
-  const defaultModelRef = useAgentsStore((state) => state.defaultModelRef);
-  const currentSessionKey = useChatStore((state) => state.currentSessionKey);
-  const sessions = useChatStore((state) => state.sessions);
-  const sessionModels = useChatStore((state) => state.sessionModels);
   const providerAccounts = useProviderStore((state) => state.accounts);
   const providerStatuses = useProviderStore((state) => state.statuses);
   const providerVendors = useProviderStore((state) => state.vendors);
@@ -168,10 +202,6 @@ export const ChatMessage = memo(function ChatMessage({
   const bodyFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
   const metaFontSize = `${Math.round(12 * (chatFontScale / 100) * 10) / 10}px`;
   const attachmentGridClassName = 'grid w-full max-w-[720px] grid-cols-3 gap-2';
-  const currentSession = useMemo(
-    () => (sessions ?? []).find((session) => session.key === currentSessionKey) ?? null,
-    [currentSessionKey, sessions],
-  );
   const providerItems = useMemo(
     () => buildProviderListItems(providerAccounts, providerStatuses, providerVendors, providerDefaultAccountId),
     [providerAccounts, providerDefaultAccountId, providerStatuses, providerVendors],
@@ -189,11 +219,13 @@ export const ChatMessage = memo(function ChatMessage({
         }));
     })
   ), [providerItems]);
-  const effectiveSessionModels = sessionModels ?? {};
-  const effectiveModelRef = (effectiveSessionModels[currentSessionKey] || currentSession?.model || defaultModelRef || '').trim();
+  const messageModelRef = useMemo(
+    () => getMessageModelRef(message),
+    [message],
+  );
   const currentModelLabel = useMemo(
-    () => modelOptions.find((option) => option.value === effectiveModelRef)?.label || effectiveModelRef,
-    [effectiveModelRef, modelOptions],
+    () => modelOptions.find((option) => option.value === messageModelRef)?.label || messageModelRef,
+    [messageModelRef, modelOptions],
   );
 
   const attachedFiles = useMemo(() => message._attachedFiles || [], [message._attachedFiles]);
@@ -208,7 +240,7 @@ export const ChatMessage = memo(function ChatMessage({
   return (
     <div
       className={cn(
-        'flex gap-3 group',
+        'group flex min-w-0 max-w-full gap-3',
         isUser ? 'flex-row-reverse' : 'flex-row',
       )}
       style={isStreaming ? undefined : { contentVisibility: 'auto', containIntrinsicSize: '160px' }}
@@ -517,7 +549,7 @@ const MessageBubble = memo(function MessageBubble({
 }) {
   const usesAssistantStreamStyle = !isUser && assistantMessageStyle === 'stream';
   const markdownFallback = (
-    <p className="whitespace-pre-wrap break-words break-all leading-[1.82]" style={{ fontSize }}>
+    <p className="min-w-0 whitespace-pre-wrap break-words leading-[1.82] [overflow-wrap:anywhere]" style={{ fontSize }}>
       {text}
     </p>
   );
@@ -526,7 +558,7 @@ const MessageBubble = memo(function MessageBubble({
     <div
       data-testid={!isUser ? (isError ? 'chat-assistant-error-message' : `chat-assistant-message-${assistantMessageStyle}`) : undefined}
       className={cn(
-        'relative',
+        'relative min-w-0 max-w-full',
         usesAssistantStreamStyle ? 'w-full px-1 py-0.5' : 'rounded-[16px] px-4 py-3.5',
         !isUser && !usesAssistantStreamStyle && 'w-full',
         isUser
@@ -539,21 +571,21 @@ const MessageBubble = memo(function MessageBubble({
       )}
     >
       {isUser ? (
-        <p className="whitespace-pre-wrap break-words break-all leading-[1.82]" style={{ fontSize }}>{text}</p>
+        <p className="min-w-0 whitespace-pre-wrap break-words leading-[1.82] [overflow-wrap:anywhere]" style={{ fontSize }}>{text}</p>
       ) : isStreaming ? (
-        <div className={cn(usesAssistantStreamStyle && 'max-w-none')} style={{ fontSize }}>
+        <div className={cn('min-w-0 max-w-full', usesAssistantStreamStyle && 'max-w-none')} style={{ fontSize }}>
           <StreamingMarkdownPreview
             content={text}
             trailingCursor
             className={cn(
               usesAssistantStreamStyle
-                ? 'space-y-2.5 text-[0.985em] text-foreground/94'
-                : 'space-y-2 text-[0.97em] text-foreground/92',
+                ? 'min-w-0 max-w-full space-y-2.5 text-[0.985em] text-foreground/94'
+                : 'min-w-0 max-w-full space-y-2 text-[0.97em] text-foreground/92',
             )}
           />
         </div>
       ) : (
-        <div className={cn('prose prose-sm dark:prose-invert max-w-none break-words break-all leading-[1.82]', usesAssistantStreamStyle && '[&>*]:my-3 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0')} style={{ fontSize }}>
+        <div className={cn('chat-markdown prose prose-sm dark:prose-invert min-w-0 max-w-none break-words leading-[1.82]', usesAssistantStreamStyle && '[&>*]:my-3 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0')} style={{ fontSize }}>
           <Suspense fallback={markdownFallback}>
             <MarkdownRenderer
               content={text}
@@ -563,13 +595,13 @@ const MessageBubble = memo(function MessageBubble({
                   const isInline = !match && !className;
                   if (isInline) {
                     return (
-                      <code className="bg-background/50 px-1.5 py-0.5 rounded text-sm font-mono break-words break-all" {...props}>
+                      <code className="rounded bg-background/50 px-1.5 py-0.5 text-sm font-mono break-words [overflow-wrap:anywhere]" {...props}>
                         {children}
                       </code>
                     );
                   }
                   return (
-                    <pre className="bg-background/50 rounded-lg p-4 overflow-x-auto">
+                    <pre className="max-w-full overflow-x-auto rounded-lg bg-background/50 p-4">
                       <code className={cn('text-sm font-mono', className)} {...props}>
                         {children}
                       </code>
@@ -578,7 +610,7 @@ const MessageBubble = memo(function MessageBubble({
                 },
                 a({ href, children }) {
                   return (
-                    <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-words break-all">
+                    <a href={href} target="_blank" rel="noopener noreferrer" className="break-words text-primary hover:underline [overflow-wrap:anywhere]">
                       {children}
                     </a>
                   );
@@ -601,9 +633,9 @@ const ThinkingBlock = memo(function ThinkingBlock({ content }: { content: string
   const summary = preview.length > 84 ? `${preview.slice(0, 81)}...` : preview;
 
   return (
-    <div className="w-full rounded-lg border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-[14px]">
+    <div className="w-full min-w-0 rounded-lg border border-black/10 bg-black/5 text-[14px] dark:border-white/10 dark:bg-white/5">
       <button
-        className="flex items-center gap-2 w-full px-3 py-2 text-muted-foreground hover:text-foreground transition-colors"
+        className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-muted-foreground transition-colors hover:text-foreground"
         onClick={() => setExpanded(!expanded)}
       >
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -613,9 +645,9 @@ const ThinkingBlock = memo(function ThinkingBlock({ content }: { content: string
         ) : null}
       </button>
       {expanded && (
-        <div className="px-3 pb-3 text-muted-foreground">
-          <div className="prose prose-sm dark:prose-invert max-w-none opacity-75">
-            <Suspense fallback={<p className="whitespace-pre-wrap break-words">{content}</p>}>
+        <div className="min-w-0 px-3 pb-3 text-muted-foreground">
+          <div className="chat-markdown prose prose-sm dark:prose-invert min-w-0 max-w-none opacity-75">
+            <Suspense fallback={<p className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{content}</p>}>
               <MarkdownRenderer content={content} />
             </Suspense>
           </div>

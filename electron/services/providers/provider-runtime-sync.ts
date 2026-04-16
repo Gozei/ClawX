@@ -48,6 +48,11 @@ type RuntimeProviderSyncContext = {
   meta: ReturnType<typeof getProviderConfig>;
   api: string;
 };
+type RuntimeProviderModelEntry = {
+  id: string;
+  name: string;
+  api?: string;
+};
 type ProviderProtocol = 'openai-completions' | 'openai-responses' | 'anthropic-messages';
 const SUPPORTED_PROVIDER_PROTOCOLS: ProviderProtocol[] = ['openai-completions', 'openai-responses', 'anthropic-messages'];
 
@@ -76,6 +81,23 @@ function getConfiguredProviderModelIds(config: ProviderConfig): string[] {
     (config.model || '').trim(),
     ...((config.metadata?.customModels ?? []).map((modelId) => modelId.trim())),
   ].filter(Boolean)));
+}
+
+function buildRuntimeProviderModelEntries(
+  config: ProviderConfig,
+  fallbackApi: string | undefined,
+): RuntimeProviderModelEntry[] {
+  return getConfiguredProviderModelIds(config).map((modelId) => {
+    const entry: RuntimeProviderModelEntry = {
+      id: modelId,
+      name: modelId,
+    };
+    const api = resolveProviderApiProtocol(config, fallbackApi, modelId);
+    if (api) {
+      entry.api = api;
+    }
+    return entry;
+  });
 }
 
 function normalizeProviderBaseUrl(
@@ -480,14 +502,15 @@ async function syncRuntimeProviderConfig(
   config: ProviderConfig,
   context: RuntimeProviderSyncContext,
 ): Promise<void> {
-  const configuredModelIds = getConfiguredProviderModelIds(config);
+  const fallbackApi = isUnregisteredProviderType(config.type) ? 'openai-completions' : context.meta?.api;
+  const configuredModels = buildRuntimeProviderModelEntries(config, fallbackApi);
   const override = {
     baseUrl: normalizeProviderBaseUrl(config, config.baseUrl || context.meta?.baseUrl, context.api),
     api: context.api,
     apiKeyEnv: context.meta?.apiKeyEnv,
     headers: config.headers ?? context.meta?.headers,
   };
-  await syncProviderConfigToOpenClaw(context.runtimeProviderKey, configuredModelIds, override);
+  await syncProviderConfigToOpenClaw(context.runtimeProviderKey, configuredModels, override);
 }
 
 async function syncCustomProviderAgentModel(
@@ -504,13 +527,13 @@ async function syncCustomProviderAgentModel(
     return;
   }
 
+  const configuredModels = buildRuntimeProviderModelEntries(config, 'openai-completions');
   const modelId = config.model;
-  const configuredModelIds = getConfiguredProviderModelIds(config);
   const api = resolveProviderApiProtocol(config, 'openai-completions', modelId) || 'openai-completions';
   await updateAgentModelProvider(runtimeProviderKey, {
     baseUrl: normalizeProviderBaseUrl(config, config.baseUrl, api),
     api,
-    models: configuredModelIds.map((id) => ({ id, name: id })),
+    models: configuredModels,
     apiKey: resolvedKey,
   });
 }
@@ -582,7 +605,7 @@ async function buildAgentModelProviderEntry(
 ): Promise<{
   baseUrl?: string;
   api?: string;
-  models?: Array<{ id: string; name: string }>;
+  models?: Array<{ id: string; name: string; api?: string }>;
   apiKey?: string;
   authHeader?: boolean;
 } | null> {
@@ -615,7 +638,11 @@ async function buildAgentModelProviderEntry(
   return {
     baseUrl,
     api,
-    models: [{ id: modelId, name: modelId }],
+    models: [{
+      id: modelId,
+      name: modelId,
+      ...(api ? { api } : {}),
+    }],
     apiKey,
     authHeader,
   };
@@ -945,12 +972,12 @@ export async function syncDefaultProviderToRuntime(
     providerKey &&
     provider.baseUrl
   ) {
-    const configuredModelIds = getConfiguredProviderModelIds(provider);
+    const configuredModels = buildRuntimeProviderModelEntries(provider, 'openai-completions');
     const api = resolveProviderApiProtocol(provider, 'openai-completions', provider.model) || 'openai-completions';
     await updateAgentModelProvider(ock, {
       baseUrl: normalizeProviderBaseUrl(provider, provider.baseUrl, api),
       api,
-      models: configuredModelIds.map((id) => ({ id, name: id })),
+      models: configuredModels,
       apiKey: providerKey,
     });
   }

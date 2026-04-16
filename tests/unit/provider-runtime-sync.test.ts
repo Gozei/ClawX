@@ -290,6 +290,11 @@ describe('provider-runtime-sync refresh strategy', () => {
       apiProtocol: 'openai-responses',
       metadata: {
         customModels: ['qwen3.5-plus', 'glm-5'],
+        modelProtocols: {
+          'gpt-5.4': 'openai-responses',
+          'qwen3.5-plus': 'openai-completions',
+          'glm-5': 'openai-completions',
+        },
       },
     });
     mocks.getProvider.mockResolvedValue(customProvider);
@@ -302,7 +307,11 @@ describe('provider-runtime-sync refresh strategy', () => {
 
     expect(mocks.syncProviderConfigToOpenClaw).toHaveBeenCalledWith(
       'custom-custombc',
-      ['gpt-5.4', 'qwen3.5-plus', 'glm-5'],
+      [
+        { id: 'gpt-5.4', name: 'gpt-5.4', api: 'openai-responses' },
+        { id: 'qwen3.5-plus', name: 'qwen3.5-plus', api: 'openai-completions' },
+        { id: 'glm-5', name: 'glm-5', api: 'openai-completions' },
+      ],
       expect.objectContaining({
         baseUrl: 'https://agentrs.jd.com/api/saas/openai-u/v1',
       }),
@@ -311,9 +320,9 @@ describe('provider-runtime-sync refresh strategy', () => {
       'custom-custombc',
       expect.objectContaining({
         models: [
-          { id: 'gpt-5.4', name: 'gpt-5.4' },
-          { id: 'qwen3.5-plus', name: 'qwen3.5-plus' },
-          { id: 'glm-5', name: 'glm-5' },
+          { id: 'gpt-5.4', name: 'gpt-5.4', api: 'openai-responses' },
+          { id: 'qwen3.5-plus', name: 'qwen3.5-plus', api: 'openai-completions' },
+          { id: 'glm-5', name: 'glm-5', api: 'openai-completions' },
         ],
       }),
     );
@@ -395,7 +404,7 @@ describe('provider-runtime-sync refresh strategy', () => {
       expect.objectContaining({
         baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
         api: 'openai-completions',
-        models: [{ id: 'ark-code-latest', name: 'ark-code-latest' }],
+        models: [{ id: 'ark-code-latest', name: 'ark-code-latest', api: 'openai-completions' }],
       }),
     );
   });
@@ -418,7 +427,7 @@ describe('provider-runtime-sync refresh strategy', () => {
 
     expect(mocks.syncProviderConfigToOpenClaw).toHaveBeenCalledWith(
       'ollamafd',
-      ['qwen3:30b'],
+      [{ id: 'qwen3:30b', name: 'qwen3:30b', api: 'openai-completions' }],
       expect.objectContaining({
         baseUrl: 'http://localhost:11434/v1',
         api: 'openai-completions',

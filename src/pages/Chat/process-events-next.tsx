@@ -557,11 +557,11 @@ function ProcessEventDetail({
   if (isDirectContent(item)) {
     if (preferPlainText) {
       return (
-        <StreamingMarkdownPreview content={item.detail} className="space-y-2 text-foreground" />
+        <StreamingMarkdownPreview content={item.detail} className="min-w-0 max-w-full space-y-2 text-foreground" />
       );
     }
     return (
-      <div className="prose prose-sm dark:prose-invert max-w-none break-words text-foreground [&>*]:my-2.5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+      <div className="chat-markdown prose prose-sm dark:prose-invert min-w-0 max-w-none break-words text-foreground [&>*]:my-2.5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>
           {item.detail}
         </ReactMarkdown>
@@ -570,7 +570,7 @@ function ProcessEventDetail({
   }
 
   return (
-    <pre className="max-h-[24rem] overflow-auto rounded-xl border border-black/6 bg-black/[0.03] px-3 py-2.5 text-[12px] leading-6 text-foreground/80 dark:border-white/8 dark:bg-white/[0.03]">
+    <pre className="max-h-[24rem] max-w-full overflow-auto rounded-xl border border-black/6 bg-black/[0.03] px-3 py-2.5 text-[12px] leading-6 text-foreground/80 dark:border-white/8 dark:bg-white/[0.03]">
       {item.detail}
     </pre>
   );
@@ -589,7 +589,7 @@ function ProcessDirectContent({
   return (
     <div
       data-testid={item.kind === 'thinking' ? 'chat-process-thinking-content' : 'chat-process-note-content'}
-      className="px-1.5 py-1 text-[14px] leading-7 text-foreground"
+      className="min-w-0 px-1.5 py-1 text-[14px] leading-7 text-foreground"
     >
       <ProcessEventDetail item={item} preferPlainText={preferPlainText} />
     </div>
@@ -662,7 +662,7 @@ const ProcessEventRow = memo(function ProcessEventRow({
       {canExpand && expanded && (
         <div
           data-testid="chat-process-event-detail-panel"
-          className="mt-1 pl-1.5"
+          className="mt-1 min-w-0 pl-1.5"
         >
           <ProcessEventDetail item={item} />
         </div>
@@ -705,7 +705,7 @@ export const ProcessEventMessage = memo(function ProcessEventMessage({
   if (items.length === 0) return null;
 
   return (
-    <div className="space-y-0.5">
+    <div className="min-w-0 space-y-0.5">
       {items.map((item) => (
         isDirectContent(item) ? (
           <ProcessDirectContent

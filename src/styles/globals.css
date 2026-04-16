@@ -29,24 +29,24 @@
   }
 
   .dark {
-    --background: 220 14% 11%;
+    --background: 220 22% 15%;
     --foreground: 210 25% 96%;
-    --card: 220 14% 14%;
+    --card: 220 20% 18%;
     --card-foreground: 210 25% 96%;
-    --popover: 220 14% 14%;
+    --popover: 220 20% 18%;
     --popover-foreground: 210 25% 96%;
     --primary: 217 78% 62%;
     --primary-foreground: 210 40% 98%;
-    --secondary: 220 12% 18%;
+    --secondary: 220 17% 21%;
     --secondary-foreground: 210 25% 96%;
-    --muted: 220 12% 18%;
+    --muted: 220 17% 21%;
     --muted-foreground: 218 12% 70%;
-    --accent: 220 12% 20%;
+    --accent: 220 17% 23%;
     --accent-foreground: 210 25% 96%;
     --destructive: 0 62% 44%;
     --destructive-foreground: 210 25% 96%;
-    --border: 220 12% 24%;
-    --input: 220 12% 18%;
+    --border: 220 15% 28%;
+    --input: 220 17% 21%;
     --ring: 217 78% 62%;
   }
 }
@@ -163,6 +163,38 @@
 
 .prose th {
   background: hsl(var(--muted));
+}
+
+.chat-markdown {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat-markdown p,
+.chat-markdown li,
+.chat-markdown blockquote,
+.chat-markdown td,
+.chat-markdown th,
+.chat-markdown a,
+.chat-markdown code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chat-markdown pre {
+  max-width: 100%;
+}
+
+.chat-markdown table {
+  width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  vertical-align: top;
+  white-space: normal;
 }
 
 /* Typing indicator animation */

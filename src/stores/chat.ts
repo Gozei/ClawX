@@ -5,6 +5,7 @@
  */
 import { create } from 'zustand';
 import { buildAgentExecutionMetadata } from '@/lib/agent-execution-context';
+import { isWithinCompletedTurnProcessGrace } from '@/lib/chat-turn-grace';
 import { normalizeAppError } from '@/lib/error-model';
 import { hostApiFetch } from '@/lib/host-api';
 import i18n from '@/i18n';
@@ -17,6 +18,7 @@ import {
   DEFAULT_SESSION_KEY,
   type ActiveTurnBuffer,
   type AttachedFileMeta,
+  type ChatMessageDispatchOptions,
   type ChatSession,
   type ChatState,
   type ContentBlock,
@@ -27,6 +29,7 @@ import {
 export type {
   ActiveTurnBuffer,
   AttachedFileMeta,
+  ChatMessageDispatchOptions,
   ChatSession,
   ContentBlock,
   RawMessage,
@@ -628,7 +631,7 @@ function saveImageCache(cache: Map<string, AttachedFileMeta>): void {
 }
 
 const _imageCache = loadImageCache();
-const CONVERSATION_INFO_PREFIX_RE = /^Conversation info\s*\([^)]*\):/i;
+const SYSTEM_LINE_RE = /^System(?: \(untrusted\))?:\s*(?:\[[^\]]+\]\s*)?(.*)$/i;
 const SENDER_METADATA_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*```[a-z]*\s*[\s\S]*?```\s*/i;
 const SENDER_METADATA_JSON_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*\{[\s\S]*?\}\s*/i;
 const GATEWAY_TIMESTAMP_PREFIX_RE = /^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i;
@@ -653,11 +656,34 @@ function getMessageText(content: unknown): string {
 }
 
 function stripInjectedConversationInfo(text: string): string {
-  if (!CONVERSATION_INFO_PREFIX_RE.test(text)) {
-    return text;
-  }
+  const hasStructuredInjection = /Conversation info\s*\([^)]*\):|Execution playbook:|Sender(?: \(untrusted metadata\))?:/i.test(text);
+  const withoutLeadingSystemLines = (() => {
+    if (!hasStructuredInjection) return text;
 
-  const withoutConversationInfo = text
+    const lines = text.split(/\r?\n/);
+    let index = 0;
+    let sawSystemLine = false;
+
+    while (index < lines.length) {
+      const line = lines[index].trim();
+      if (!line) {
+        index += 1;
+        continue;
+      }
+      if (SYSTEM_LINE_RE.test(line)) {
+        sawSystemLine = true;
+        index += 1;
+        continue;
+      }
+      break;
+    }
+
+    if (!sawSystemLine) return text;
+
+    const remainder = lines.slice(index).join('\n').trimStart();
+    return remainder || text;
+  })();
+  const withoutConversationInfo = withoutLeadingSystemLines
     .replace(/^Conversation info\s*\([^)]*\):\s*```[a-z]*\n[\s\S]*?```\s*/i, '')
     .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '');
 
@@ -665,13 +691,38 @@ function stripInjectedConversationInfo(text: string): string {
 }
 
 function cleanUserMessageText(text: string): string {
-  const cleaned = stripInjectedConversationInfo(text
+  const hadStructuredInjection = /Conversation info\s*\([^)]*\):|Execution playbook:|Sender(?: \(untrusted metadata\))?:/i.test(text);
+
+  const cleaned = (() => {
+    const stripped = stripInjectedConversationInfo(text
     .replace(SENDER_METADATA_PREFIX_RE, '')
     .replace(SENDER_METADATA_JSON_PREFIX_RE, '')
     .replace(/\s*\[media attached:[^\]]*\]/g, '')
     .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')
-    .replace(GATEWAY_TIMESTAMP_PREFIX_RE, ''))
-    .trim();
+    .replace(GATEWAY_TIMESTAMP_PREFIX_RE, ''));
+
+    if (!hadStructuredInjection) {
+      return stripped.trim();
+    }
+
+    const lines = stripped.split(/\r?\n/);
+    let index = 0;
+
+    while (index < lines.length) {
+      const line = lines[index].trim();
+      if (!line) {
+        index += 1;
+        continue;
+      }
+      if (SYSTEM_LINE_RE.test(line)) {
+        index += 1;
+        continue;
+      }
+      break;
+    }
+
+    return (index > 0 ? lines.slice(index).join('\n') : stripped).trim();
+  })();
 
   return isPreCompactionMemoryFlushPrompt(cleaned) ? '' : cleaned;
 }
@@ -1387,7 +1438,12 @@ function resolveSessionModelSnapshot(): string {
   return (defaultModelRef || '').trim();
 }
 
-function resolveSessionPreferredModel(sessionKey: string): string | null {
+function resolveSessionPreferredModel(sessionKey: string, modelRefOverride?: string | null): string | null {
+  const explicitModelRef = (modelRefOverride || '').trim();
+  if (explicitModelRef) {
+    return explicitModelRef;
+  }
+
   const chatState = useChatStore.getState();
   const sessionModel = chatState.sessionModels[sessionKey]
     || chatState.sessions.find((session) => session.key === sessionKey)?.model;
@@ -1469,9 +1525,12 @@ async function ensureSessionPreferredModelLoaded(
   });
 }
 
-async function syncSessionPreferredModelToRuntime(sessionKey: string): Promise<void> {
+async function syncSessionPreferredModelToRuntime(
+  sessionKey: string,
+  modelRefOverride?: string | null,
+): Promise<void> {
   const agentId = getAgentIdFromSessionKey(sessionKey);
-  const preferredModel = resolveSessionPreferredModel(sessionKey);
+  const preferredModel = resolveSessionPreferredModel(sessionKey, modelRefOverride);
   if (!agentId || !preferredModel) {
     return;
   }
@@ -1529,11 +1588,15 @@ function ensureSessionEntry(sessions: ChatSession[], sessionKey: string): ChatSe
   return [...sessions, { key: sessionKey, displayName: sessionKey }];
 }
 
-function buildAgentExecutionMetadataForSession(sessionKey: string, mode: 'full' | 'model_only' = 'full'): string | null {
+function buildAgentExecutionMetadataForSession(
+  sessionKey: string,
+  mode: 'full' | 'model_only' = 'full',
+  modelRefOverride?: string | null,
+): string | null {
   const agentId = getAgentIdFromSessionKey(sessionKey);
   const agent = useAgentsStore.getState().agents.find((item) => item.id === agentId);
   if (!agent) return null;
-  const preferredModel = resolveSessionPreferredModel(sessionKey);
+  const preferredModel = resolveSessionPreferredModel(sessionKey, modelRefOverride);
   const agentForMetadata = mode === 'model_only'
     ? {
         ...agent,
@@ -1554,10 +1617,15 @@ function buildAgentExecutionMetadataForSession(sessionKey: string, mode: 'full' 
   return buildAgentExecutionMetadata(agentForMetadata);
 }
 
-function injectAgentExecutionMetadata(message: string, sessionKey: string, isFirstUserMessage: boolean): string {
+function injectAgentExecutionMetadata(
+  message: string,
+  sessionKey: string,
+  isFirstUserMessage: boolean,
+  modelRefOverride?: string | null,
+): string {
   const metadata = isFirstUserMessage
-    ? buildAgentExecutionMetadataForSession(sessionKey, 'full')
-    : buildAgentExecutionMetadataForSession(sessionKey, 'model_only');
+    ? buildAgentExecutionMetadataForSession(sessionKey, 'full', modelRefOverride)
+    : buildAgentExecutionMetadataForSession(sessionKey, 'model_only', modelRefOverride);
   if (!metadata) return message;
   return message ? `${metadata}${message}` : metadata;
 }
@@ -2158,16 +2226,25 @@ function deriveActiveTurnBuffer(
   >,
 ): ActiveTurnBuffer {
   const safeMessages = Array.isArray(state.messages) ? state.messages : [];
-  const activeTurnStartIndex = state.sending ? findLastUserMessageIndex(safeMessages) : -1;
+  const lastUserTsMs = typeof state.lastUserMessageAt === 'number'
+    ? (state.lastUserMessageAt < 1e12 ? state.lastUserMessageAt * 1000 : state.lastUserMessageAt)
+    : 0;
+  const lastUserIndex = findLastUserMessageIndex(safeMessages);
+  const shouldRetainCompletedTurn = !state.sending
+    && lastUserIndex >= 0
+    && lastUserTsMs > 0
+    && isWithinCompletedTurnProcessGrace(lastUserTsMs)
+    && safeMessages.slice(lastUserIndex + 1).some((message) => (
+      message.role === 'assistant'
+      && (!message.timestamp || toMs(message.timestamp) >= lastUserTsMs)
+    ));
+  const activeTurnStartIndex = state.sending || shouldRetainCompletedTurn ? lastUserIndex : -1;
   const historyMessages = activeTurnStartIndex >= 0 ? safeMessages.slice(0, activeTurnStartIndex) : safeMessages;
   const activeTurnMessages = activeTurnStartIndex >= 0 ? safeMessages.slice(activeTurnStartIndex) : [];
   const userMessage = activeTurnMessages[0]?.role === 'user' ? activeTurnMessages[0] : null;
   const assistantMessages = userMessage
     ? activeTurnMessages.slice(1).filter((message) => message.role === 'assistant')
     : [];
-  const lastUserTsMs = typeof state.lastUserMessageAt === 'number'
-    ? (state.lastUserMessageAt < 1e12 ? state.lastUserMessageAt * 1000 : state.lastUserMessageAt)
-    : 0;
   const latestPersistedAssistant = [...safeMessages].reverse().find((message) => {
     if (message.role !== 'assistant') return false;
     if (!lastUserTsMs || !message.timestamp) return true;
@@ -3245,11 +3322,16 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     text: string,
     attachments?: Array<{ fileName: string; mimeType: string; fileSize: number; stagedPath: string; preview: string | null }>,
     targetAgentId?: string | null,
+    options?: ChatMessageDispatchOptions,
   ) => {
     const trimmed = text.trim();
     if (!trimmed && (!attachments || attachments.length === 0)) return;
 
-    const targetSessionKey = resolveMainSessionKeyForAgent(targetAgentId) ?? get().currentSessionKey;
+    const explicitSessionKey = (options?.sessionKey || '').trim();
+    const explicitModelRef = (options?.modelRef || '').trim() || null;
+    const targetSessionKey = explicitSessionKey
+      || resolveMainSessionKeyForAgent(targetAgentId)
+      || get().currentSessionKey;
 
     if (targetSessionKey !== get().currentSessionKey) {
       clearErrorRecoveryTimer();
@@ -3261,13 +3343,20 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
 
     const currentSessionKey = targetSessionKey;
     clearHistoryIncompleteRetry(currentSessionKey);
-    await ensureSessionPreferredModelLoaded(currentSessionKey, set);
+    if (!explicitModelRef) {
+      await ensureSessionPreferredModelLoaded(currentSessionKey, set);
+    }
     const existingMessages = get().messages;
     const existingSessions = get().sessions;
     const existingSessionLabels = get().sessionLabels;
     const isFirstUserMessage = !existingMessages.some((message) => message.role === 'user');
     const baseMessage = trimmed || (attachments?.length ? 'Process the attached file(s).' : '');
-    const messageForGateway = injectAgentExecutionMetadata(baseMessage, currentSessionKey, isFirstUserMessage);
+    const messageForGateway = injectAgentExecutionMetadata(
+      baseMessage,
+      currentSessionKey,
+      isFirstUserMessage,
+      explicitModelRef,
+    );
     const visibleUserContent = trimmed || (attachments?.length ? '(file attached)' : '');
     const autoSessionLabel = !currentSessionKey.endsWith(':main')
       && isFirstUserMessage
@@ -3372,7 +3461,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         console.log('[sendMessage] Media paths:', attachments!.map(a => a.stagedPath));
       }
 
-      await syncSessionPreferredModelToRuntime(currentSessionKey);
+      await syncSessionPreferredModelToRuntime(currentSessionKey, explicitModelRef);
 
       // Cache image attachments BEFORE the IPC call to avoid race condition:
       // history may reload (via Gateway event) before the RPC returns.
@@ -3946,11 +4035,15 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
 
   clearError: () => set({ error: null }),
 
-  queueOfflineMessage: (text, attachments, targetAgentId) => {
+  queueOfflineMessage: (text, attachments, targetAgentId, options) => {
     const trimmed = text.trim();
     if (!trimmed && (!attachments || attachments.length === 0)) return;
 
-    const targetSessionKey = resolveMainSessionKeyForAgent(targetAgentId) ?? get().currentSessionKey;
+    const explicitSessionKey = (options?.sessionKey || '').trim();
+    const explicitModelRef = (options?.modelRef || '').trim() || null;
+    const targetSessionKey = explicitSessionKey
+      || resolveMainSessionKeyForAgent(targetAgentId)
+      || get().currentSessionKey;
     const nowMs = Date.now();
     set((state) => ({
       queuedMessages: {
@@ -3962,6 +4055,8 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             text: trimmed,
             attachments,
             targetAgentId,
+            sessionKey: targetSessionKey,
+            modelRef: explicitModelRef,
             queuedAt: nowMs,
           },
         ],
@@ -4012,7 +4107,15 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       })(),
     }));
     try {
-      await get().sendMessage(queued.text, queued.attachments, queued.targetAgentId);
+      await get().sendMessage(
+        queued.text,
+        queued.attachments,
+        queued.targetAgentId,
+        {
+          sessionKey: queued.sessionKey || targetSessionKey,
+          modelRef: queued.modelRef ?? null,
+        },
+      );
     } catch (error) {
       set((state) => ({
         queuedMessages: {

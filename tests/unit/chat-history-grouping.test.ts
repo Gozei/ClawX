@@ -138,4 +138,49 @@ describe('groupMessagesForDisplay', () => {
       ],
     });
   });
+  it('skips internal pre-compaction memory flush turns entirely', () => {
+    const messages: RawMessage[] = [
+      {
+        id: 'flush-user-1',
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: [
+              'Pre-compaction memory flush. Store durable memories only in memory/2026-04-16.md (create memory/ if needed).',
+              'Treat workspace bootstrap/reference files such as MEMORY.md, DREAMS.md, SOUL.md, TOOLS.md, and AGENTS.md as read-only during this flush; never overwrite, replace, or edit them.',
+              'If memory/2026-04-16.md already exists, APPEND new content only and do not overwrite existing entries.',
+              'Do NOT create timestamped variant files (e.g., 2026-04-16-HHMM.md); always use the canonical 2026-04-16.md filename.',
+              'If nothing to store, reply with NO_REPLY.',
+              'Current time: Thursday, April 16th, 2026 - 14:48 (Etc/GMT-8)',
+            ].join('\n'),
+          },
+        ],
+      },
+      {
+        id: 'flush-assistant-1',
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'The user is asking me to store durable memories in memory/2026-04-16.md.' },
+          { type: 'text', text: 'NO_REPLY' },
+        ],
+      },
+      {
+        id: 'user-2',
+        role: 'user',
+        content: '正常对话',
+      },
+      {
+        id: 'assistant-2',
+        role: 'assistant',
+        content: '这是正常回复',
+      },
+    ];
+
+    const grouped = groupMessagesForDisplay(messages);
+
+    expect(grouped).toHaveLength(2);
+    expect(grouped[0]).toMatchObject({ type: 'message', message: { id: 'user-2' } });
+    expect(grouped[1]).toMatchObject({ type: 'message', message: { id: 'assistant-2' } });
+  });
 });

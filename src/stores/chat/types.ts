@@ -13,6 +13,10 @@ export interface RawMessage {
   content: unknown; // string | ContentBlock[]
   timestamp?: number;
   id?: string;
+  provider?: string;
+  model?: string;
+  api?: string;
+  modelRef?: string;
   toolCallId?: string;
   toolName?: string;
   details?: unknown;
@@ -52,6 +56,11 @@ export interface ChatSession {
   pinOrder?: number;
 }
 
+export interface ChatMessageDispatchOptions {
+  sessionKey?: string;
+  modelRef?: string | null;
+}
+
 export interface ToolStatus {
   id?: string;
   toolCallId?: string;
@@ -73,6 +82,8 @@ export interface QueuedChatMessage {
     preview: string | null;
   }>;
   targetAgentId?: string | null;
+  sessionKey: string;
+  modelRef?: string | null;
   queuedAt: number;
 }
 
@@ -152,6 +163,7 @@ export interface ChatState {
       preview: string | null;
     }>,
     targetAgentId?: string | null,
+    options?: ChatMessageDispatchOptions,
   ) => Promise<void>;
   abortRun: () => Promise<void>;
   handleChatEvent: (event: Record<string, unknown>) => void;
@@ -168,6 +180,7 @@ export interface ChatState {
       preview: string | null;
     }>,
     targetAgentId?: string | null,
+    options?: ChatMessageDispatchOptions,
   ) => void;
   flushQueuedMessage: (sessionKey?: string, queuedId?: string) => Promise<void>;
   clearQueuedMessage: (sessionKey?: string, queuedId?: string) => void;

@@ -264,6 +264,7 @@ describe('handleAgentRoutes model refresh flow', () => {
     vi.mocked(syncAgentModelOverrideToRuntime).mockResolvedValue(undefined);
 
     const debouncedReload = vi.fn();
+    const restart = vi.fn();
     const rpc = vi
       .fn()
       .mockResolvedValueOnce({
@@ -285,6 +286,7 @@ describe('handleAgentRoutes model refresh flow', () => {
           getStatus: () => ({ state: 'running' }),
           rpc,
           debouncedReload,
+          restart,
         },
       } as never,
     );
@@ -320,6 +322,7 @@ describe('handleAgentRoutes model refresh flow', () => {
     vi.mocked(syncAgentModelRefToRuntime).mockResolvedValue(undefined);
 
     const debouncedReload = vi.fn();
+    const restart = vi.fn();
     const rpc = vi
       .fn()
       .mockResolvedValueOnce({
@@ -341,6 +344,7 @@ describe('handleAgentRoutes model refresh flow', () => {
           getStatus: () => ({ state: 'running' }),
           rpc,
           debouncedReload,
+          restart,
         },
       } as never,
     );
@@ -364,5 +368,6 @@ describe('handleAgentRoutes model refresh flow', () => {
     expect(applyPreparedAgentModelUpdate).not.toHaveBeenCalled();
     expect(updateAgentModel).not.toHaveBeenCalled();
     expect(debouncedReload).not.toHaveBeenCalled();
+    expect(restart).not.toHaveBeenCalled();
   });
 });

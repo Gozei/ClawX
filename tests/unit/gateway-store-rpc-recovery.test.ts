@@ -19,13 +19,7 @@ describe('gateway store rpc recovery', () => {
     vi.clearAllMocks();
   });
 
-  it('preflights chat.send with gateway health before dispatch', async () => {
-    hostApiFetchMock.mockImplementation(async (path: string) => {
-      if (path === '/api/gateway/health') {
-        return { ok: true, uptime: 12 };
-      }
-      throw new Error(`Unexpected host API call: ${path}`);
-    });
+  it('dispatches chat.send without a gateway health preflight', async () => {
     invokeIpcMock.mockResolvedValue({ success: true, result: { runId: 'run-1' } });
 
     const { useGatewayStore } = await import('@/stores/gateway');
@@ -43,7 +37,7 @@ describe('gateway store rpc recovery', () => {
     );
 
     expect(result.runId).toBe('run-1');
-    expect(hostApiFetchMock).toHaveBeenCalledWith('/api/gateway/health');
+    expect(hostApiFetchMock).not.toHaveBeenCalled();
     expect(invokeIpcMock).toHaveBeenCalledWith(
       'gateway:rpc',
       'chat.send',
@@ -52,18 +46,18 @@ describe('gateway store rpc recovery', () => {
     );
   });
 
-  it('restarts the gateway when chat.send preflight detects an unresponsive socket', async () => {
-    hostApiFetchMock.mockImplementation(async (path: string, init?: { method?: string }) => {
-      if (path === '/api/gateway/health') {
-        return { ok: false, error: 'Gateway ping timeout after 3000ms' };
-      }
-      if (path === '/api/gateway/restart') {
-        return { success: true };
-      }
-      throw new Error(`Unexpected host API call: ${path} ${init?.method || ''}`);
-    });
+  it('does not restart the gateway when chat.send fails during an active turn', async () => {
+    hostApiFetchMock.mockResolvedValue({ success: true });
+    invokeIpcMock.mockResolvedValue({ success: false, error: 'Error: Gateway not connected' });
 
+    const { useChatStore } = await import('../../src/stores/chat');
     const { useGatewayStore } = await import('@/stores/gateway');
+    useChatStore.setState({
+      sending: true,
+      pendingFinal: false,
+      activeRunId: null,
+      sessionRunningState: {},
+    } as never);
     useGatewayStore.setState({
       status: { state: 'running', port: 18789, pid: 1234, connectedAt: Date.now() - 15_000 },
       health: null,
@@ -77,21 +71,67 @@ describe('gateway store rpc recovery', () => {
         { sessionKey: 'agent:main:main', message: 'hello' },
         120_000,
       ),
-    ).rejects.toThrow('Gateway is connected but not responding');
+    ).rejects.toThrow('Gateway not connected');
 
     await Promise.resolve();
 
-    expect(invokeIpcMock).not.toHaveBeenCalled();
-    expect(hostApiFetchMock).toHaveBeenNthCalledWith(1, '/api/gateway/health');
-    expect(hostApiFetchMock).toHaveBeenNthCalledWith(2, '/api/gateway/restart', { method: 'POST' });
-    expect(useGatewayStore.getState().status.state).toBe('starting');
+    expect(invokeIpcMock).toHaveBeenCalledWith(
+      'gateway:rpc',
+      'chat.send',
+      { sessionKey: 'agent:main:main', message: 'hello' },
+      120_000,
+    );
+    expect(hostApiFetchMock).not.toHaveBeenCalled();
+    expect(useGatewayStore.getState().status.state).toBe('running');
   });
 
-  it('restarts the gateway after a critical RPC timeout', async () => {
+  it('does not restart the gateway for chat.history timeouts during an active turn', async () => {
     hostApiFetchMock.mockResolvedValue({ success: true });
     invokeIpcMock.mockResolvedValue({ success: false, error: 'Error: RPC timeout: chat.history' });
 
+    const { useChatStore } = await import('../../src/stores/chat');
     const { useGatewayStore } = await import('@/stores/gateway');
+    useChatStore.setState({
+      sending: true,
+      pendingFinal: false,
+      activeRunId: 'run-live',
+      sessionRunningState: { 'agent:main:main': true },
+    } as never);
+    useGatewayStore.setState({
+      status: { state: 'running', port: 18789, pid: 1234, connectedAt: Date.now() - 30_000 },
+      health: null,
+      isInitialized: true,
+      lastError: null,
+    });
+
+    await expect(
+      useGatewayStore.getState().rpc('chat.history', { sessionKey: 'agent:main:main', limit: 1 }, 60_000),
+    ).rejects.toThrow('RPC timeout: chat.history');
+
+    await Promise.resolve();
+
+    expect(invokeIpcMock).toHaveBeenCalledWith(
+      'gateway:rpc',
+      'chat.history',
+      { sessionKey: 'agent:main:main', limit: 1 },
+      60_000,
+    );
+    expect(hostApiFetchMock).not.toHaveBeenCalled();
+    expect(useGatewayStore.getState().status.state).toBe('running');
+  });
+
+  it('restarts the gateway after an idle critical RPC timeout', async () => {
+    hostApiFetchMock.mockResolvedValue({ success: true });
+    invokeIpcMock.mockResolvedValue({ success: false, error: 'Error: RPC timeout: chat.history' });
+
+    const { useChatStore } = await import('../../src/stores/chat');
+    const { useGatewayStore } = await import('@/stores/gateway');
+    useChatStore.setState({
+      sending: false,
+      pendingFinal: false,
+      activeRunId: null,
+      sessionRunningState: {},
+    } as never);
     useGatewayStore.setState({
       status: { state: 'running', port: 18789, pid: 1234, connectedAt: Date.now() - 30_000 },
       health: null,
@@ -119,7 +159,14 @@ describe('gateway store rpc recovery', () => {
     hostApiFetchMock.mockResolvedValue({ success: true });
     invokeIpcMock.mockResolvedValue({ success: false, error: 'Error: RPC timeout: chat.history' });
 
+    const { useChatStore } = await import('../../src/stores/chat');
     const { useGatewayStore } = await import('@/stores/gateway');
+    useChatStore.setState({
+      sending: false,
+      pendingFinal: false,
+      activeRunId: null,
+      sessionRunningState: {},
+    } as never);
     useGatewayStore.setState({
       status: { state: 'running', port: 18789, pid: 1234, connectedAt: Date.now() - 30_000 },
       health: null,

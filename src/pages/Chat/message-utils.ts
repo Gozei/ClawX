@@ -19,7 +19,6 @@ function isNonBodyAssistantBlockType(type: string | undefined): boolean {
 
 const SYSTEM_LINE_RE = /^System(?: \(untrusted\))?:\s*(?:\[[^\]]+\]\s*)?(.*)$/i;
 const EXEC_SYSTEM_RE = /^Exec (?:completed|finished)\s*\(([^)]*)\)(?:\s*::\s*([\s\S]*))?$/i;
-const CONVERSATION_INFO_PREFIX_RE = /^Conversation info\s*\([^)]*\):/i;
 const SENDER_METADATA_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*```[a-z]*\s*[\s\S]*?```\s*/i;
 const SENDER_METADATA_JSON_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*\{[\s\S]*?\}\s*/i;
 const GATEWAY_TIMESTAMP_PREFIX_RE = /^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i;
@@ -107,12 +106,37 @@ function summarizeSystemHeartbeatNoise(text: string): string {
   return summaryLines.join('\n');
 }
 
-function stripInjectedConversationInfo(text: string): string {
-  if (!CONVERSATION_INFO_PREFIX_RE.test(text)) {
-    return text;
+function stripLeadingInjectedSystemLines(text: string, allow: boolean): string {
+  if (!allow) return text;
+
+  const lines = text.split(/\r?\n/);
+  let index = 0;
+  let sawSystemLine = false;
+
+  while (index < lines.length) {
+    const line = lines[index].trim();
+    if (!line) {
+      index += 1;
+      continue;
+    }
+    if (SYSTEM_LINE_RE.test(line)) {
+      sawSystemLine = true;
+      index += 1;
+      continue;
+    }
+    break;
   }
 
-  const withoutConversationInfo = text
+  if (!sawSystemLine) return text;
+
+  const remainder = lines.slice(index).join('\n').trimStart();
+  return remainder || text;
+}
+
+function stripInjectedConversationInfo(text: string): string {
+  const hasStructuredInjection = /Conversation info\s*\([^)]*\):|Execution playbook:|Sender(?: \(untrusted metadata\))?:/i.test(text);
+  const withoutLeadingSystemLines = stripLeadingInjectedSystemLines(text, hasStructuredInjection);
+  const withoutConversationInfo = withoutLeadingSystemLines
     .replace(/^Conversation info\s*\([^)]*\):\s*```[a-z]*\n[\s\S]*?```\s*/i, '')
     .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '');
 
@@ -125,7 +149,9 @@ function stripInjectedConversationInfo(text: string): string {
  * and the timestamp prefix [Day Date Time Timezone].
  */
 function cleanUserText(text: string): string {
-  const cleaned = stripInjectedConversationInfo(text
+  const hadStructuredInjection = /Conversation info\s*\([^)]*\):|Execution playbook:|Sender(?: \(untrusted metadata\))?:/i.test(text);
+
+  const cleaned = stripLeadingInjectedSystemLines(stripInjectedConversationInfo(text
     // Remove sender metadata blocks injected by bridge/gateway
     .replace(SENDER_METADATA_PREFIX_RE, '')
     .replace(SENDER_METADATA_JSON_PREFIX_RE, '')
@@ -138,7 +164,7 @@ function cleanUserText(text: string): string {
     // Fallback: remove "Conversation info (...): {...}" without code block wrapper
     .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '')
     // Remove Gateway timestamp prefix like [Fri 2026-02-13 22:39 GMT+8]
-    .replace(GATEWAY_TIMESTAMP_PREFIX_RE, ''))
+    .replace(GATEWAY_TIMESTAMP_PREFIX_RE, '')), hadStructuredInjection)
     .trim();
 
   if (isPreCompactionMemoryFlushPrompt(cleaned)) {
@@ -146,6 +172,48 @@ function cleanUserText(text: string): string {
   }
 
   return summarizeSystemHeartbeatNoise(cleaned);
+}
+
+function extractRawText(message: RawMessage | unknown): string {
+  if (!message || typeof message !== 'object') return '';
+  const msg = message as Record<string, unknown>;
+  const content = msg.content;
+
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return (content as ContentBlock[])
+      .filter((block) => block.type === 'text' && typeof block.text === 'string')
+      .map((block) => block.text!)
+      .join('\n\n');
+  }
+
+  if (typeof msg.text === 'string') {
+    return msg.text;
+  }
+
+  return '';
+}
+
+export function isInternalMaintenanceTurnUserMessage(message: RawMessage | unknown): boolean {
+  if (!message || typeof message !== 'object') return false;
+  const msg = message as Record<string, unknown>;
+  if (msg.role !== 'user') return false;
+
+  const rawText = extractRawText(message);
+  if (!rawText.trim()) return false;
+
+  const normalized = stripInjectedConversationInfo(rawText
+    .replace(SENDER_METADATA_PREFIX_RE, '')
+    .replace(SENDER_METADATA_JSON_PREFIX_RE, '')
+    .replace(/\s*\[media attached:[^\]]*\]/g, '')
+    .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')
+    .replace(GATEWAY_TIMESTAMP_PREFIX_RE, ''))
+    .trim();
+
+  return isPreCompactionMemoryFlushPrompt(normalized);
 }
 
 /**

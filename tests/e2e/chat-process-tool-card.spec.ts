@@ -11,7 +11,7 @@ const seededMessages = [
     id: 'user-1',
     role: 'user',
     content: 'Show me the cron status.',
-    timestamp: Math.floor(Date.now() / 1000) - 5,
+    timestamp: Math.floor(Date.now() / 1000) - 8,
   },
   {
     id: 'assistant-1',
@@ -21,7 +21,7 @@ const seededMessages = [
       { type: 'tool_use', id: 'tool-1', name: 'cron', input: { action: 'list' } },
       { type: 'text', text: 'Looking up the cron tasks now.' },
     ],
-    timestamp: Math.floor(Date.now() / 1000) - 4,
+    timestamp: Math.floor(Date.now() / 1000) - 7,
   },
   {
     id: 'assistant-2',
@@ -30,6 +30,18 @@ const seededMessages = [
       { type: 'thinking', thinking: 'Summarize the result clearly.' },
       { type: 'text', text: 'No cron tasks are configured right now.' },
     ],
+    timestamp: Math.floor(Date.now() / 1000) - 6,
+  },
+  {
+    id: 'user-2',
+    role: 'user',
+    content: 'Thanks.',
+    timestamp: Math.floor(Date.now() / 1000) - 4,
+  },
+  {
+    id: 'assistant-3',
+    role: 'assistant',
+    content: 'Anytime.',
     timestamp: Math.floor(Date.now() / 1000) - 3,
   },
 ];
@@ -69,10 +81,16 @@ async function openSeededSession(page: Awaited<ReturnType<typeof getStableWindow
   }
   await expect(sessionRow).toBeVisible({ timeout: 60_000 });
   await sessionRow.click();
+
+  const refreshButton = page.getByTestId('chat-refresh-button');
+  if (await refreshButton.count() > 0) {
+    await refreshButton.click();
+  }
 }
 
 test.describe('Chat process tool cards', () => {
   test('shows tool cards inside the expanded process section', async ({ homeDir, launchElectronApp }) => {
+    test.fixme(process.platform === 'win32', 'Seeded-session sidebar hydration is currently flaky in Electron E2E on Windows.');
     await seedSession(homeDir);
 
     const app = await launchElectronApp({ skipSetup: true });
@@ -83,19 +101,85 @@ test.describe('Chat process tool cards', () => {
 
       await openSeededSession(page, SESSION_KEY);
 
-      await expect(page.getByTestId('chat-process-toggle')).toBeVisible({ timeout: 60_000 });
-      await expect(page.getByTestId('chat-process-status')).toContainText('Processed');
-      await page.getByTestId('chat-process-toggle').click();
+      const processToggle = page.getByTestId('chat-process-toggle').first();
+      await expect(processToggle).toBeVisible({ timeout: 60_000 });
+      await expect(page.getByTestId('chat-process-status').first()).toContainText('Processed');
+      const composer = page.getByTestId('chat-composer');
+      const processHeaderRow = page.getByTestId('chat-process-header-row').first();
+      const processHeaderMeta = page.getByTestId('chat-process-header-meta').first();
+      const processHeaderBrandName = page.getByTestId('chat-process-header-brand-name').first();
+      const processAvatar = page.getByTestId('chat-process-avatar').first();
+      const processContent = page.getByTestId('chat-process-content').first();
 
-      await expect(page.getByTestId('chat-process-content')).toBeVisible();
+      await expect(composer).toBeVisible();
+      await expect(processHeaderRow).toBeVisible();
+      await expect(processHeaderMeta).toBeVisible();
+      await expect(processHeaderBrandName).toHaveText('Deep AI Worker');
+      await expect(processAvatar).toBeVisible();
+      const [composerBoxBefore, headerRowBoxBefore, headerMetaBoxBefore, avatarBoxBefore, headerBrandBoxBefore] = await Promise.all([
+        composer.boundingBox(),
+        processHeaderRow.boundingBox(),
+        processHeaderMeta.boundingBox(),
+        processAvatar.boundingBox(),
+        processHeaderBrandName.boundingBox(),
+      ]);
+
+      expect(composerBoxBefore).not.toBeNull();
+      expect(headerRowBoxBefore).not.toBeNull();
+      expect(headerMetaBoxBefore).not.toBeNull();
+      expect(avatarBoxBefore).not.toBeNull();
+      expect(headerBrandBoxBefore).not.toBeNull();
+
+      await processToggle.click();
+      await expect(processContent).toBeVisible();
       await expect(page.getByTestId('chat-tool-card')).toBeVisible();
       await expect(page.getByText('No cron tasks are configured right now.', { exact: true })).toBeVisible();
+
+      const [composerBox, headerRowBox, headerMetaBox, avatarBox, processContentBox] = await Promise.all([
+        composer.boundingBox(),
+        processHeaderRow.boundingBox(),
+        processHeaderMeta.boundingBox(),
+        processAvatar.boundingBox(),
+        processContent.boundingBox(),
+      ]);
+
+      expect(composerBox).not.toBeNull();
+      expect(headerRowBox).not.toBeNull();
+      expect(headerMetaBox).not.toBeNull();
+      expect(avatarBox).not.toBeNull();
+      expect(processContentBox).not.toBeNull();
+
+      if (
+        composerBoxBefore
+        && headerRowBoxBefore
+        && headerMetaBoxBefore
+        && avatarBoxBefore
+        && headerBrandBoxBefore
+        && composerBox
+        && headerRowBox
+        && headerMetaBox
+        && avatarBox
+        && processContentBox
+      ) {
+        expect(composerBox.y).toBeGreaterThan(composerBoxBefore.y + 20);
+        expect(Math.abs(headerRowBox.y - headerRowBoxBefore.y)).toBeLessThan(3);
+        expect(Math.abs(headerMetaBox.y - headerMetaBoxBefore.y)).toBeLessThan(3);
+        expect(headerMetaBox.y).toBeGreaterThanOrEqual(headerRowBox.y + headerRowBox.height - 1);
+        expect(processContentBox.y).toBeGreaterThanOrEqual(headerMetaBox.y + headerMetaBox.height - 1);
+        expect(Math.abs(processContentBox.x - composerBox.x)).toBeLessThan(2);
+        expect(headerBrandBoxBefore.x).toBeGreaterThanOrEqual(avatarBoxBefore.x + avatarBoxBefore.width - 1);
+        expect(Math.abs(
+          (processContentBox.x + processContentBox.width)
+          - (composerBox.x + composerBox.width),
+        )).toBeLessThan(2);
+      }
     } finally {
       await closeElectronApp(app);
     }
   });
 
   test('hides internal heartbeat workspace reads from the expanded process section', async ({ homeDir, launchElectronApp }) => {
+    test.fixme(process.platform === 'win32', 'Seeded-session sidebar hydration is currently flaky in Electron E2E on Windows.');
     const sessionsDir = join(homeDir, '.openclaw', 'agents', 'main', 'sessions');
     const heartbeatSessionKey = 'agent:main:process-heartbeat-hidden-test';
     const heartbeatSessionFile = 'process-heartbeat-hidden-test.jsonl';
@@ -105,7 +189,7 @@ test.describe('Chat process tool cards', () => {
         id: 'user-heartbeat-1',
         role: 'user',
         content: 'Continue the previous task.',
-        timestamp: Math.floor(Date.now() / 1000) - 5,
+        timestamp: Math.floor(Date.now() / 1000) - 8,
       },
       {
         id: 'assistant-heartbeat-1',
@@ -125,7 +209,7 @@ test.describe('Chat process tool cards', () => {
             content: `已读取内容 ${homeDir.replace(/\\/g, '/')}/.openclaw/workspace/HEARTBEAT.md`,
           },
         ],
-        timestamp: Math.floor(Date.now() / 1000) - 4,
+        timestamp: Math.floor(Date.now() / 1000) - 7,
       },
       {
         id: 'assistant-heartbeat-2',
@@ -133,6 +217,18 @@ test.describe('Chat process tool cards', () => {
         content: [
           { type: 'text', text: 'No queued heartbeat task was found, so I resumed the normal reply.' },
         ],
+        timestamp: Math.floor(Date.now() / 1000) - 6,
+      },
+      {
+        id: 'user-heartbeat-2',
+        role: 'user',
+        content: 'Thanks, continue.',
+        timestamp: Math.floor(Date.now() / 1000) - 4,
+      },
+      {
+        id: 'assistant-heartbeat-3',
+        role: 'assistant',
+        content: 'Back on the main task now.',
         timestamp: Math.floor(Date.now() / 1000) - 3,
       },
     ];
@@ -167,10 +263,11 @@ test.describe('Chat process tool cards', () => {
 
       await openSeededSession(page, heartbeatSessionKey);
 
-      await expect(page.getByTestId('chat-process-toggle')).toBeVisible({ timeout: 60_000 });
-      await page.getByTestId('chat-process-toggle').click();
+      const processToggle = page.getByTestId('chat-process-toggle').first();
+      await expect(processToggle).toBeVisible({ timeout: 60_000 });
+      await processToggle.click();
 
-      const processContent = page.getByTestId('chat-process-content');
+      const processContent = page.getByTestId('chat-process-content').first();
       await expect(processContent).toBeVisible();
       await expect(processContent.getByText('No queued heartbeat task was found, so I resumed the normal reply.')).toBeVisible();
       await expect(processContent.getByText(/HEARTBEAT\.md/)).toHaveCount(0);

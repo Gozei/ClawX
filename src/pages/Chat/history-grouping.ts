@@ -1,4 +1,5 @@
 import type { ContentBlock, RawMessage } from '@/stores/chat';
+import { isInternalMaintenanceTurnUserMessage } from './message-utils';
 
 export type HistoryDisplayItem =
   | {
@@ -60,6 +61,11 @@ export function groupMessagesForDisplay(messages: RawMessage[]): HistoryDisplayI
         nextUserIndex = scanIndex;
         break;
       }
+    }
+
+    if (isInternalMaintenanceTurnUserMessage(currentMessage)) {
+      index = nextUserIndex - 1;
+      continue;
     }
 
     const turnMessages = messages.slice(index + 1, nextUserIndex);

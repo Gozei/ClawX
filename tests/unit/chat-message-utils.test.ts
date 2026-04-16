@@ -89,6 +89,80 @@ describe('chat message utils', () => {
     expect(extractText(message)).toBe('What can you do?');
   });
 
+  it('strips direct execution playbook metadata from user-visible text', () => {
+    const message: RawMessage = {
+      id: 'conversation-metadata-direct-1',
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: [
+            'Execution playbook:',
+            '- 你当前扮演的智能体是 "运营专家"（ID: agent）。',
+            '- 优先模型：custom-custombc/qwen3.5-plus',
+            '- 如果现有技能、模型或渠道不足以完成流程，请明确指出卡点，不要伪造执行结果。',
+            '',
+            '你现在是什么模型',
+          ].join('\n'),
+        },
+      ],
+      timestamp: 1713000004,
+    };
+
+    expect(extractText(message)).toBe('你现在是什么模型');
+  });
+
+  it('strips injected leading system and conversation metadata from user-visible text', () => {
+    const message: RawMessage = {
+      id: 'conversation-metadata-system-prefix-1',
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: [
+            'System: [2026-04-16 13:26:14 GMT+8] Gateway check: completed (config.patch)',
+            'System: Run available: openclaw doctor --non-interactive',
+            '',
+            'Conversation info (untrusted metadata): ```json',
+            '{"message_id":"openclaw-weixin:1776317819759-0deed226","timestamp":"Thu 2026-04-16 13:37 GMT+8"}',
+            '```',
+            '',
+            'What model are you using?',
+          ].join('\n'),
+        },
+      ],
+      timestamp: 1713000005,
+    };
+
+    expect(extractText(message)).toBe('What model are you using?');
+  });
+
+  it('strips localized leading system lines before injected conversation metadata', () => {
+    const message: RawMessage = {
+      id: 'conversation-metadata-system-prefix-zh-1',
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: [
+            'System: [2026-04-16 14:41:36 GMT+8] 网关检查：已完成（config.patch）',
+            'System: 可运行：openclaw doctor --non-interactive',
+            '',
+            'Conversation info (untrusted metadata):',
+            '```json',
+            '{"message_id":"openclaw-weixin:1776321697380-53b9b5a0","timestamp":"Thu 2026-04-16 14:25 GMT+8"}',
+            '```',
+            '',
+            '你现在是什么模型',
+          ].join('\n'),
+        },
+      ],
+      timestamp: 1713000006,
+    };
+
+    expect(extractText(message)).toBe('你现在是什么模型');
+  });
+
   it('hides pre-compaction memory flush prompts from user-visible text', () => {
     const message: RawMessage = {
       id: 'pre-compaction-flush-1',

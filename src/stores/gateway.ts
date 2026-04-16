@@ -89,11 +89,31 @@ interface GatewayState {
   clearError: () => void;
 }
 
-function shouldAutoRecoverGatewayRpc(
+type ChatRuntimeRecoveryState = {
+  sending?: boolean;
+  pendingFinal?: boolean;
+  activeRunId?: string | null;
+  sessionRunningState?: Record<string, boolean>;
+};
+
+async function hasActiveChatTurn(): Promise<boolean> {
+  try {
+    const { useChatStore } = await import('./chat');
+    const state = useChatStore.getState() as ChatRuntimeRecoveryState;
+    return !!state.sending
+      || !!state.pendingFinal
+      || !!state.activeRunId
+      || Object.values(state.sessionRunningState ?? {}).some(Boolean);
+  } catch {
+    return false;
+  }
+}
+
+async function shouldAutoRecoverGatewayRpc(
   method: string,
   errorMessage: string,
   gatewayState: GatewayStatus['state'],
-): boolean {
+): Promise<boolean> {
   if (gatewayState === 'starting' || gatewayState === 'reconnecting') {
     return false;
   }
@@ -106,9 +126,22 @@ function shouldAutoRecoverGatewayRpc(
     return false;
   }
 
-  return method === 'chat.send'
-    || method === 'chat.history'
-    || method === 'sessions.list';
+  if (method === 'sessions.list') {
+    return true;
+  }
+
+  if (method !== 'chat.send' && method !== 'chat.history') {
+    return false;
+  }
+
+  // During an active chat turn, chat.send/chat.history may legitimately sit
+  // pending while the runtime is still working. Restarting the gateway from the
+  // renderer at that point is more disruptive than helpful.
+  if (await hasActiveChatTurn()) {
+    return false;
+  }
+
+  return true;
 }
 
 function queueGatewayRpcRecovery(
@@ -549,16 +582,6 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
   },
 
   rpc: async <T>(method: string, params?: unknown, timeoutMs?: number): Promise<T> => {
-    if (method === 'chat.send' && get().status.state === 'running') {
-      const health = await get().checkHealth();
-      if (!health.ok) {
-        const errorMessage = health.error || 'Gateway is connected but not responding';
-        set({ lastError: errorMessage });
-        queueGatewayRpcRecovery(get, errorMessage);
-        throw new Error('Gateway is connected but not responding. Restarting gateway, please retry in a moment.');
-      }
-    }
-
     const response = await invokeIpc<{
       success: boolean;
       result?: T;
@@ -567,7 +590,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
     if (!response.success) {
       const errorMessage = response.error || `Gateway RPC failed: ${method}`;
       set({ lastError: errorMessage });
-      if (shouldAutoRecoverGatewayRpc(method, errorMessage, get().status.state)) {
+      if (await shouldAutoRecoverGatewayRpc(method, errorMessage, get().status.state)) {
         queueGatewayRpcRecovery(get, errorMessage);
       }
       throw new Error(errorMessage);

@@ -726,9 +726,16 @@ type ProviderEntryBuildOptions = {
   apiKeyEnv?: string;
   headers?: Record<string, string>;
   authHeader?: boolean;
+  modelEntries?: RuntimeProviderModelInput[];
   modelIds?: string[];
   includeRegistryModels?: boolean;
   mergeExistingModels?: boolean;
+};
+
+type RuntimeProviderModelInput = string | {
+  id: string;
+  name?: string;
+  api?: string;
 };
 
 function normalizeModelRef(provider: string, modelOverride?: string): string | undefined {
@@ -750,18 +757,55 @@ function extractFallbackModelIds(provider: string, fallbackModels: string[]): st
 function mergeProviderModels(
   ...groups: Array<Array<Record<string, unknown>>>
 ): Array<Record<string, unknown>> {
-  const merged: Array<Record<string, unknown>> = [];
-  const seen = new Set<string>();
+  const merged = new Map<string, Record<string, unknown>>();
+  const order: string[] = [];
 
   for (const group of groups) {
     for (const item of group) {
       const id = typeof item?.id === 'string' ? item.id : '';
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      merged.push(item);
+      if (!id) continue;
+      if (!merged.has(id)) {
+        order.push(id);
+      }
+      merged.set(id, {
+        ...(merged.get(id) ?? {}),
+        ...item,
+        id,
+      });
     }
   }
-  return merged;
+  return order
+    .map((id) => merged.get(id))
+    .filter((item): item is Record<string, unknown> => Boolean(item));
+}
+
+function normalizeRuntimeModelEntries(
+  modelEntries?: RuntimeProviderModelInput[],
+  modelIds?: string[],
+): Array<Record<string, unknown>> {
+  const rawEntries = modelEntries ?? modelIds ?? [];
+  return rawEntries.flatMap((entry) => {
+    if (typeof entry === 'string') {
+      const id = entry.trim();
+      return id ? [{ id, name: id }] : [];
+    }
+
+    const id = entry.id.trim();
+    if (!id) {
+      return [];
+    }
+
+    const normalized: Record<string, unknown> = {
+      id,
+      name: entry.name?.trim() || id,
+    };
+
+    if (entry.api?.trim()) {
+      normalized.api = entry.api.trim();
+    }
+
+    return [normalized];
+  });
 }
 
 function upsertOpenClawProviderEntry(
@@ -784,7 +828,7 @@ function upsertOpenClawProviderEntry(
   const registryModels = options.includeRegistryModels
     ? ((getProviderConfig(provider)?.models ?? []).map((m) => ({ ...m })) as Array<Record<string, unknown>>)
     : [];
-  const runtimeModels = (options.modelIds ?? []).map((id) => ({ id, name: id }));
+  const runtimeModels = normalizeRuntimeModelEntries(options.modelEntries, options.modelIds);
 
   const nextProvider: Record<string, unknown> = {
     ...existingProvider,
@@ -867,7 +911,7 @@ function normalizePluginsConfig(config: Record<string, unknown>): Record<string,
  */
 export async function syncProviderConfigToOpenClaw(
   provider: string,
-  modelIds: string[],
+  modelEntries: RuntimeProviderModelInput[],
   override: RuntimeProviderConfigOverride
 ): Promise<void> {
   return withConfigLock(async () => {
@@ -883,7 +927,7 @@ export async function syncProviderConfigToOpenClaw(
         api: override.api,
         apiKeyEnv: override.apiKeyEnv,
         headers: override.headers,
-        modelIds,
+        modelEntries,
       });
       nextProviders = (
         (config.models as Record<string, unknown> | undefined)?.providers as Record<string, Record<string, unknown>> | undefined
@@ -1221,7 +1265,7 @@ export async function syncSessionIdleMinutesToOpenClaw(): Promise<void> {
 type AgentModelProviderEntry = {
   baseUrl?: string;
   api?: string;
-  models?: Array<{ id: string; name: string }>;
+  models?: Array<{ id: string; name: string; api?: string }>;
   apiKey?: string;
   /** When true, pi-ai sends Authorization: Bearer instead of x-api-key */
   authHeader?: boolean;
@@ -1256,7 +1300,7 @@ async function updateModelsJsonProviderEntriesForAgents(
 
     const mergedModels = (entry.models ?? []).map((m) => {
       const prev = existingModels.find((e) => e.id === m.id);
-      return prev ? { ...prev, id: m.id, name: m.name } : { ...m };
+      return prev ? { ...prev, ...m, id: m.id, name: m.name } : { ...m };
     });
 
     if (entry.baseUrl !== undefined) existing.baseUrl = entry.baseUrl;
