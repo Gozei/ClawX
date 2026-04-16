@@ -325,6 +325,66 @@ describe('chat target routing', () => {
     const sendMessagePayload = String((sendCall?.[1] as { message?: unknown })?.message);
     expect(sendMessagePayload).toContain('"preferredModel": "custom-custombc/qwen3.5-plus"');
     expect(sendMessagePayload).toContain('Current runtime model?');
+
+    const runtimeModelOrder = hostApiFetchMock.mock.invocationCallOrder.at(0) ?? Number.POSITIVE_INFINITY;
+    const chatSendOrder = gatewayRpcMock.mock.calls
+      .map(([method], index) => ({ method, order: gatewayRpcMock.mock.invocationCallOrder[index] ?? Number.POSITIVE_INFINITY }))
+      .find((entry) => entry.method === 'chat.send')?.order ?? Number.NEGATIVE_INFINITY;
+    expect(runtimeModelOrder).toBeLessThan(chatSendOrder);
+  });
+
+  it('flushes queued messages with their queued model snapshot without overwriting the current session model', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main', model: 'custom-custombc/gpt-5.4' }],
+      sessionModels: { 'agent:main:main': 'custom-custombc/gpt-5.4' },
+      queuedMessages: {
+        'agent:main:main': [
+          {
+            id: 'queued-1',
+            text: 'Use the queued model',
+            sessionKey: 'agent:main:main',
+            modelRef: 'custom-custombc/qwen3.5-plus',
+            queuedAt: Date.now(),
+          },
+        ],
+      },
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().flushQueuedMessage('agent:main:main', 'queued-1');
+
+    const runtimeModelCall = hostApiFetchMock.mock.calls.find(([path]) => path === '/api/agents/main/model/runtime');
+    expect(runtimeModelCall?.[1]).toEqual({
+      method: 'PUT',
+      body: JSON.stringify({ modelRef: 'custom-custombc/qwen3.5-plus' }),
+    });
+
+    const sendCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.send');
+    const sendMessagePayload = String((sendCall?.[1] as { message?: unknown })?.message);
+    expect(sendMessagePayload).toContain('"preferredModel": "custom-custombc/qwen3.5-plus"');
+    expect(sendMessagePayload).toContain('Use the queued model');
+
+    const state = useChatStore.getState();
+    expect(state.sessionModels['agent:main:main']).toBe('custom-custombc/gpt-5.4');
+    expect(state.queuedMessages['agent:main:main']).toBeUndefined();
   });
 
   it('refreshes agents and falls back to the default model before sending when no session model is stored', async () => {

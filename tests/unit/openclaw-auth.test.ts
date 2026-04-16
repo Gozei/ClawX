@@ -546,6 +546,42 @@ describe('syncProviderConfigToOpenClaw', () => {
     expect(plugins.load).toEqual(['/tmp/custom-plugin.js']);
     expect(kimi.baseUrl).toBe('https://api.moonshot.cn/v1');
   });
+
+  it('preserves per-model api protocols for mixed custom provider catalogs', async () => {
+    await writeOpenClawJson({
+      models: {
+        providers: {},
+      },
+    });
+
+    const { syncProviderConfigToOpenClaw } = await import('@electron/utils/openclaw-auth');
+
+    await syncProviderConfigToOpenClaw('custom-custombc', [
+      { id: 'gpt-5.4', api: 'openai-responses' },
+      { id: 'qwen3.5-plus', api: 'openai-completions' },
+      { id: 'glm-5', api: 'openai-completions' },
+    ], {
+      baseUrl: 'https://agentrs.jd.com/api/saas/openai-u/v1',
+      api: 'openai-responses',
+    });
+
+    const result = await readOpenClawJson();
+    const providers = ((result.models as Record<string, unknown>)?.providers ?? {}) as Record<string, {
+      models?: Array<Record<string, unknown>>;
+      api?: string;
+      baseUrl?: string;
+    }>;
+
+    expect(providers['custom-custombc']).toEqual({
+      baseUrl: 'https://agentrs.jd.com/api/saas/openai-u/v1',
+      api: 'openai-responses',
+      models: [
+        { id: 'gpt-5.4', name: 'gpt-5.4', api: 'openai-responses' },
+        { id: 'qwen3.5-plus', name: 'qwen3.5-plus', api: 'openai-completions' },
+        { id: 'glm-5', name: 'glm-5', api: 'openai-completions' },
+      ],
+    });
+  });
 });
 
 describe('auth-backed provider discovery', () => {

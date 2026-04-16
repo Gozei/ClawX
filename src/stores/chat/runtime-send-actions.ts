@@ -47,16 +47,29 @@ function ensureSessionEntry(sessions: ChatSession[], sessionKey: string): ChatSe
   return [...sessions, { key: sessionKey, displayName: sessionKey }];
 }
 
-function buildAgentExecutionMetadataForSession(sessionKey: string): string | null {
+function buildAgentExecutionMetadataForSession(
+  sessionKey: string,
+  modelRefOverride?: string | null,
+): string | null {
   const agentId = getAgentIdFromSessionKey(sessionKey);
   const agent = useAgentsStore.getState().agents.find((item) => item.id === agentId);
   if (!agent) return null;
-  return buildAgentExecutionMetadata(agent);
+  const explicitModelRef = (modelRefOverride || '').trim();
+  return buildAgentExecutionMetadata(
+    explicitModelRef
+      ? { ...agent, modelRef: explicitModelRef }
+      : agent,
+  );
 }
 
-function injectAgentExecutionMetadata(message: string, sessionKey: string, isFirstUserMessage: boolean): string {
+function injectAgentExecutionMetadata(
+  message: string,
+  sessionKey: string,
+  isFirstUserMessage: boolean,
+  modelRefOverride?: string | null,
+): string {
   if (!isFirstUserMessage) return message;
-  const metadata = buildAgentExecutionMetadataForSession(sessionKey);
+  const metadata = buildAgentExecutionMetadataForSession(sessionKey, modelRefOverride);
   if (!metadata) return message;
   return message ? `${metadata}${message}` : metadata;
 }
@@ -107,11 +120,16 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
       text: string,
       attachments?: Array<{ fileName: string; mimeType: string; fileSize: number; stagedPath: string; preview: string | null }>,
       targetAgentId?: string | null,
+      options?,
     ) => {
       const trimmed = text.trim();
       if (!trimmed && (!attachments || attachments.length === 0)) return;
 
-      const targetSessionKey = resolveMainSessionKeyForAgent(targetAgentId) ?? get().currentSessionKey;
+      const explicitSessionKey = (options?.sessionKey || '').trim();
+      const explicitModelRef = (options?.modelRef || '').trim() || null;
+      const targetSessionKey = explicitSessionKey
+        || resolveMainSessionKeyForAgent(targetAgentId)
+        || get().currentSessionKey;
       if (targetSessionKey !== get().currentSessionKey) {
         const current = get();
         const leavingEmpty = !current.currentSessionKey.endsWith(':main') && current.messages.length === 0;
@@ -145,7 +163,12 @@ export function createRuntimeSendActions(set: ChatSet, get: ChatGet): Pick<Runti
       const existingMessages = get().messages;
       const isFirstUserMessage = !existingMessages.some((message) => message.role === 'user');
       const baseMessage = trimmed || (attachments?.length ? '请处理我上传的附件。' : '');
-      const messageForGateway = injectAgentExecutionMetadata(baseMessage, currentSessionKey, isFirstUserMessage);
+      const messageForGateway = injectAgentExecutionMetadata(
+        baseMessage,
+        currentSessionKey,
+        isFirstUserMessage,
+        explicitModelRef,
+      );
       const visibleUserContent = trimmed || (attachments?.length ? '（已附加文件）' : '');
 
       // Add user message optimistically (with local file metadata for UI display)

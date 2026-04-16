@@ -72,6 +72,38 @@ describe('ProcessEventMessage', () => {
     );
   });
 
+  it('keeps direct note markdown inside the shrinkable chat markdown surface', () => {
+    render(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-note-overflow',
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: [
+                'A minimal environmental penalty icon, 28x28 pixels. A simple leaf outline drawn with gray lines (#808080), combined with a blue warning mark (#0b7fff).',
+                '',
+                '| Element | Description |',
+                '| --- | --- |',
+                '| Palette | Gray + blue (#0b7fff) |',
+              ].join('\n'),
+            },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="all"
+      />,
+    );
+
+    const note = screen.getByTestId('chat-process-note-content');
+    expect(note).toHaveClass('min-w-0');
+    expect(
+      within(note).getByText(/A minimal environmental penalty icon, 28x28 pixels\./).closest('.chat-markdown'),
+    ).not.toBeNull();
+    expect(within(note).getByText('Gray + blue (#0b7fff)')).toBeInTheDocument();
+  });
+
   it('keeps tool preview only in the collapsed row and removes row separators', () => {
     render(
       <ProcessEventMessage

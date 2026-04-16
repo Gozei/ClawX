@@ -114,6 +114,8 @@ function translate(key: string, vars?: Record<string, unknown>): string {
       return 'Send';
     case 'composer.stop':
       return 'Stop';
+    case 'composer.disclaimer':
+      return 'AI can make mistakes. Please verify important information.';
     case 'composer.gatewayConnected':
       return 'connected';
     case 'composer.gatewayStatus':
@@ -193,14 +195,84 @@ describe('ChatInput agent targeting', () => {
     expect(screen.queryByText(/pid: 24412/i)).not.toBeInTheDocument();
   });
 
-  it('keeps the composer editable while the gateway is disconnected without showing an offline hint', () => {
+  it('renders the composer disclaimer below the action row', () => {
+    render(<ChatInput onSend={vi.fn()} />);
+
+    const composer = screen.getByTestId('chat-composer');
+    const composerShell = screen.getByTestId('chat-composer-shell');
+    const disclaimer = screen.getByTestId('chat-composer-disclaimer');
+
+    expect(disclaimer).toHaveTextContent(
+      'AI can make mistakes. Please verify important information.',
+    );
+    expect(composer.contains(disclaimer)).toBe(false);
+    expect(composerShell).toHaveClass('pb-2');
+    expect(disclaimer).toHaveClass('mt-2');
+    expect(disclaimer).toHaveClass('text-xs', 'text-black');
+  });
+
+  it('keeps the composer editable for offline queueing while the gateway is disconnected', () => {
+    agentsState.agents = [
+      {
+        id: 'main',
+        name: 'Main',
+        isDefault: true,
+        modelDisplay: 'MiniMax',
+        inheritedModel: true,
+        workspace: '~/.openclaw/workspace',
+        agentDir: '~/.openclaw/agents/main/agent',
+        mainSessionKey: 'agent:main:main',
+        channelTypes: [],
+      },
+      {
+        id: 'research',
+        name: 'Research',
+        isDefault: false,
+        modelDisplay: 'Claude',
+        inheritedModel: false,
+        workspace: '~/.openclaw/workspace-research',
+        agentDir: '~/.openclaw/agents/research/agent',
+        mainSessionKey: 'agent:research:desk',
+        channelTypes: [],
+      },
+    ];
+    providerState.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI',
+        authMode: 'api_key',
+        model: 'gpt-5.4',
+        metadata: { customModels: ['gpt-5.4-mini'] },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [{ id: 'openai', hasKey: true, model: 'gpt-5.4' }];
+    providerState.vendors = [{ id: 'openai', name: 'OpenAI' }];
+    providerState.defaultAccountId = 'openai';
+    chatState.sessions = [{ key: 'agent:main:main', model: 'openai/gpt-5.4' }];
+    chatState.sessionModels = { 'agent:main:main': 'openai/gpt-5.4' };
     gatewayState.status = { state: 'stopped', port: 18789 };
 
-    render(<ChatInput onSend={vi.fn()} disabled />);
+    render(<ChatInput onSend={vi.fn()} onQueueOfflineMessage={vi.fn()} disabled />);
 
     const textbox = screen.getByRole('textbox');
     expect(textbox).not.toBeDisabled();
     expect(textbox).toHaveAttribute('placeholder', 'Gateway not connected...');
+    expect(screen.getByTestId('chat-attach-button')).not.toBeDisabled();
+    expect(screen.getByTestId('chat-agent-picker-button')).not.toBeDisabled();
+    expect(screen.getByTestId('chat-model-switch')).not.toBeDisabled();
+    expect(screen.getByTestId('chat-send-button')).toBeDisabled();
+    const composer = screen.getByTestId('chat-composer');
+    const disclaimer = screen.getByTestId('chat-composer-disclaimer');
+
+    expect(disclaimer).toHaveTextContent(
+      'AI can make mistakes. Please verify important information.',
+    );
+    expect(composer.contains(disclaimer)).toBe(false);
     expect(screen.queryByTestId('chat-composer-offline-hint')).not.toBeInTheDocument();
   });
 
@@ -222,22 +294,162 @@ describe('ChatInput agent targeting', () => {
     });
   });
 
-  it('queues the message instead of dropping it when the gateway is offline', () => {
+  it('queues the message instead of dropping it when the gateway is offline', async () => {
+    const onSend = vi.fn();
     const onQueueOfflineMessage = vi.fn();
+    providerState.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI',
+        authMode: 'api_key',
+        model: 'gpt-5.4',
+        metadata: { customModels: ['gpt-5.4-mini'] },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+      {
+        id: 'moonshot',
+        vendorId: 'moonshot',
+        label: 'Moonshot',
+        authMode: 'api_key',
+        model: 'kimi-k2.5',
+        metadata: { customModels: ['kimi-k2-turbo-preview'] },
+        enabled: true,
+        isDefault: false,
+        createdAt: '2026-04-12T00:00:00.000Z',
+        updatedAt: '2026-04-12T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [
+      { id: 'openai', hasKey: true, model: 'gpt-5.4' },
+      { id: 'moonshot', hasKey: true, model: 'kimi-k2.5' },
+    ];
+    providerState.vendors = [
+      { id: 'openai', name: 'OpenAI' },
+      { id: 'moonshot', name: 'Moonshot' },
+    ];
+    providerState.defaultAccountId = 'openai';
+    chatState.sessions = [{ key: 'agent:main:main', model: 'openai/gpt-5.4' }];
+    chatState.sessionModels = { 'agent:main:main': 'openai/gpt-5.4' };
     gatewayState.status = { state: 'stopped', port: 18789 };
 
     render(
       <ChatInput
-        onSend={vi.fn()}
+        onSend={onSend}
         onQueueOfflineMessage={onQueueOfflineMessage}
         disabled
       />,
     );
 
+    hostApiFetchMock.mockResolvedValueOnce({ success: true });
+    fireEvent.click(getModelSwitch());
+    fireEvent.click(screen.getByRole('button', { name: 'Moonshot / kimi-k2.5' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Moonshot / kimi-k2.5');
+    });
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Queue this for later' } });
-    fireEvent.click(screen.getByTitle('Queue to send'));
+    fireEvent.click(screen.getByTestId('chat-send-button'));
+    await waitFor(() => {
+      expect(onQueueOfflineMessage).toHaveBeenCalledWith(
+        'Queue this for later',
+        undefined,
+        null,
+        {
+          sessionKey: 'agent:main:main',
+          modelRef: 'moonshot/kimi-k2.5',
+        },
+      );
+    });
+    expect(onSend).not.toHaveBeenCalled();
+  });
 
-    expect(onQueueOfflineMessage).toHaveBeenCalledWith('Queue this for later', undefined, null);
+  it('keeps the composer interactive during an active run and queues the next draft', () => {
+    const onSend = vi.fn();
+    const onQueueOfflineMessage = vi.fn();
+    const onStop = vi.fn();
+    agentsState.agents = [
+      {
+        id: 'main',
+        name: 'Main',
+        isDefault: true,
+        modelDisplay: 'GPT-5.4',
+        modelRef: 'openai/gpt-5.4',
+        overrideModelRef: null,
+        inheritedModel: true,
+        workspace: '~/.openclaw/workspace',
+        agentDir: '~/.openclaw/agents/main/agent',
+        mainSessionKey: 'agent:main:main',
+        channelTypes: [],
+      },
+      {
+        id: 'research',
+        name: 'Research',
+        isDefault: false,
+        modelDisplay: 'Claude',
+        modelRef: 'moonshot/kimi-k2.5',
+        overrideModelRef: 'moonshot/kimi-k2.5',
+        inheritedModel: false,
+        workspace: '~/.openclaw/workspace-research',
+        agentDir: '~/.openclaw/agents/research/agent',
+        mainSessionKey: 'agent:research:desk',
+        channelTypes: [],
+      },
+    ];
+    providerState.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI',
+        authMode: 'api_key',
+        model: 'gpt-5.4',
+        metadata: { customModels: ['gpt-5.4-mini'] },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [{ id: 'openai', hasKey: true, model: 'gpt-5.4' }];
+    providerState.vendors = [{ id: 'openai', name: 'OpenAI' }];
+    providerState.defaultAccountId = 'openai';
+    chatState.sessions = [
+      { key: 'agent:main:main', model: 'openai/gpt-5.4' },
+    ];
+    chatState.sessionModels = {
+      'agent:main:main': 'openai/gpt-5.4',
+    };
+
+    render(
+      <ChatInput
+        onSend={onSend}
+        onQueueOfflineMessage={onQueueOfflineMessage}
+        onStop={onStop}
+        sending
+      />,
+    );
+
+    expect(screen.getByRole('textbox')).not.toBeDisabled();
+    expect(screen.getByTestId('chat-attach-button')).not.toBeDisabled();
+    expect(screen.getByTestId('chat-agent-picker-button')).not.toBeDisabled();
+    expect(screen.getByTestId('chat-model-switch')).not.toBeDisabled();
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Queue after this run finishes' } });
+    fireEvent.click(screen.getByTestId('chat-send-button'));
+
+    expect(onQueueOfflineMessage).toHaveBeenCalledWith(
+      'Queue after this run finishes',
+      undefined,
+      null,
+      {
+        sessionKey: 'agent:main:main',
+        modelRef: 'openai/gpt-5.4',
+      },
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onStop).not.toHaveBeenCalled();
   });
 
   it('lets the user select an agent target and sends it with the message', async () => {
@@ -275,14 +487,118 @@ describe('ChatInput agent targeting', () => {
     expect(screen.getByText('Research')).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Hello direct agent' } });
-    fireEvent.click(screen.getByTitle('Send'));
+    fireEvent.click(screen.getByTestId('chat-send-button'));
 
     await waitFor(() => {
       expect(onSend).toHaveBeenCalledWith('Hello direct agent', undefined, 'research');
     });
   });
 
-  it('shows model options in provider order and updates the current session model without retesting', async () => {
+  it('applies model switches to the targeted agent session when a role is selected', async () => {
+    agentsState.agents = [
+      {
+        id: 'main',
+        name: 'Main',
+        isDefault: true,
+        modelDisplay: 'GPT-5.4',
+        modelRef: 'openai/gpt-5.4',
+        overrideModelRef: null,
+        inheritedModel: true,
+        workspace: '~/.openclaw/workspace',
+        agentDir: '~/.openclaw/agents/main/agent',
+        mainSessionKey: 'agent:main:main',
+        channelTypes: [],
+        skillIds: [],
+        workflowSteps: [],
+        triggerModes: [],
+      },
+      {
+        id: 'research',
+        name: 'Research',
+        isDefault: false,
+        modelDisplay: 'Kimi',
+        modelRef: 'moonshot/kimi-k2.5',
+        overrideModelRef: 'moonshot/kimi-k2.5',
+        inheritedModel: false,
+        workspace: '~/.openclaw/workspace-research',
+        agentDir: '~/.openclaw/agents/research/agent',
+        mainSessionKey: 'agent:research:desk',
+        channelTypes: [],
+        skillIds: [],
+        workflowSteps: [],
+        triggerModes: [],
+      },
+    ];
+    providerState.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI',
+        authMode: 'api_key',
+        model: 'gpt-5.4',
+        metadata: { customModels: ['gpt-5.4-mini'] },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+      {
+        id: 'moonshot',
+        vendorId: 'moonshot',
+        label: 'Moonshot',
+        authMode: 'api_key',
+        model: 'kimi-k2.5',
+        enabled: true,
+        isDefault: false,
+        createdAt: '2026-04-12T00:00:00.000Z',
+        updatedAt: '2026-04-12T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [
+      { id: 'openai', hasKey: true, model: 'gpt-5.4' },
+      { id: 'moonshot', hasKey: true, model: 'kimi-k2.5' },
+    ];
+    providerState.vendors = [
+      { id: 'openai', name: 'OpenAI' },
+      { id: 'moonshot', name: 'Moonshot' },
+    ];
+    providerState.defaultAccountId = 'openai';
+    chatState.sessions = [
+      { key: 'agent:main:main', model: 'openai/gpt-5.4' },
+      { key: 'agent:research:desk', model: 'moonshot/kimi-k2.5' },
+    ];
+    chatState.sessionModels = {
+      'agent:main:main': 'openai/gpt-5.4',
+      'agent:research:desk': 'moonshot/kimi-k2.5',
+    };
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId('chat-agent-picker-button'));
+    fireEvent.click(screen.getByText('Research'));
+
+    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Moonshot / kimi-k2.5');
+
+    hostApiFetchMock.mockResolvedValueOnce({ success: true });
+    fireEvent.click(getModelSwitch());
+    fireEvent.click(screen.getByRole('button', { name: 'OpenAI / gpt-5.4-mini' }));
+
+    await waitFor(() => {
+      expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/model', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionKey: 'agent:research:desk',
+          modelRef: 'openai/gpt-5.4-mini',
+        }),
+      });
+      expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('OpenAI / gpt-5.4-mini');
+      expect(chatState.sessionModels['agent:research:desk']).toBe('openai/gpt-5.4-mini');
+      expect(chatState.sessionModels['agent:main:main']).toBe('openai/gpt-5.4');
+      expect(toastSuccessMock).toHaveBeenCalledWith('Switched to OpenAI / gpt-5.4-mini');
+    });
+  });
+
+  it('shows model options in provider order and persists the current session model selection', async () => {
     agentsState.agents = [
       {
         id: 'main',
@@ -336,9 +652,8 @@ describe('ChatInput agent targeting', () => {
       { id: 'moonshot', name: 'Moonshot' },
     ];
     providerState.defaultAccountId = 'openai';
-    hostApiFetchMock.mockResolvedValueOnce({ valid: true, model: 'kimi-k2.5' });
 
-    const { rerender } = render(<ChatInput onSend={vi.fn()} />);
+    render(<ChatInput onSend={vi.fn()} />);
 
     fireEvent.click(getModelSwitch());
 
@@ -352,57 +667,25 @@ describe('ChatInput agent targeting', () => {
       'Moonshot / kimi-k2.5',
     ]);
 
+    hostApiFetchMock.mockResolvedValueOnce({ success: true });
     fireEvent.click(screen.getByRole('button', { name: 'Moonshot / kimi-k2.5' }));
 
     await waitFor(() => {
-      expect(hostApiFetchMock).toHaveBeenCalledWith(
-        '/api/provider-drafts/test',
-        expect.objectContaining({
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+      expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/model', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionKey: 'agent:main:main',
+          modelRef: 'moonshot/kimi-k2.5',
         }),
-      );
-    });
-
-    const validationPayload = JSON.parse(String(hostApiFetchMock.mock.calls[0]?.[1]?.body || '{}')) as {
-      accountId?: string;
-      vendorId?: string;
-      apiKey?: string;
-      model?: string;
-    };
-    expect(validationPayload.accountId).toBe('moonshot');
-    expect(validationPayload.vendorId).toBe('moonshot');
-    expect(validationPayload.apiKey).toBe('sk-test');
-    expect(validationPayload.model).toBe('kimi-k2.5');
-
-    rerender(<ChatInput onSend={vi.fn()} />);
-
-    await waitFor(() => {
+      });
+      expect(invokeIpcMock).not.toHaveBeenCalled();
       expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Moonshot / kimi-k2.5');
       expect(chatState.sessionModels['agent:main:main']).toBe('moonshot/kimi-k2.5');
       expect(toastSuccessMock).toHaveBeenCalledWith('Switched to Moonshot / kimi-k2.5');
     });
   });
 
-  it('keeps the previous session model when model validation fails', async () => {
-    agentsState.agents = [
-      {
-        id: 'main',
-        name: 'Main',
-        isDefault: true,
-        modelDisplay: 'GPT-5.4',
-        modelRef: 'openai/gpt-5.4',
-        overrideModelRef: null,
-        inheritedModel: true,
-        workspace: '~/.openclaw/workspace',
-        agentDir: '~/.openclaw/agents/main/agent',
-        mainSessionKey: 'agent:main:main',
-        channelTypes: [],
-        skillIds: [],
-        workflowSteps: [],
-        triggerModes: [],
-      },
-    ];
+  it('shows a trailing spinner while waiting for session model persistence', async () => {
     providerState.accounts = [
       {
         id: 'openai',
@@ -410,6 +693,7 @@ describe('ChatInput agent targeting', () => {
         label: 'OpenAI',
         authMode: 'api_key',
         model: 'gpt-5.4',
+        metadata: { customModels: ['gpt-5.4-mini'] },
         enabled: true,
         isDefault: true,
         createdAt: '2026-04-13T00:00:00.000Z',
@@ -436,9 +720,92 @@ describe('ChatInput agent targeting', () => {
       { id: 'moonshot', name: 'Moonshot' },
     ];
     providerState.defaultAccountId = 'openai';
-    chatState.sessions = [{ key: 'agent:main:main', model: 'openai/gpt-5.4' }];
-    chatState.sessionModels = { 'agent:main:main': 'openai/gpt-5.4' };
-    hostApiFetchMock.mockRejectedValueOnce(new Error('Model not found'));
+
+    let resolvePersist: ((value: { success: boolean }) => void) | null = null;
+    const persistPromise = new Promise<{ success: boolean }>((resolve) => {
+      resolvePersist = resolve;
+    });
+    hostApiFetchMock.mockImplementationOnce(() => persistPromise);
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    fireEvent.click(getModelSwitch());
+    fireEvent.click(screen.getByRole('button', { name: 'Moonshot / kimi-k2.5' }));
+
+    await waitFor(() => {
+      expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/model', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionKey: 'agent:main:main',
+          modelRef: 'moonshot/kimi-k2.5',
+        }),
+      });
+    });
+
+    expect(getModelSwitch()).toBeDisabled();
+    expect(getModelSwitch()).toHaveAttribute('aria-busy', 'true');
+    expect(getModelSwitch()).toHaveClass('opacity-50');
+    expect(screen.getByTestId('chat-model-switch-spinner')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('OpenAI / gpt-5.4');
+    expect(chatState.sessionModels['agent:main:main']).toBe('openai/gpt-5.4');
+
+    await act(async () => {
+      resolvePersist?.({ success: true });
+      await persistPromise;
+    });
+
+    await waitFor(() => {
+      expect(getModelSwitch()).not.toBeDisabled();
+      expect(screen.queryByTestId('chat-model-switch-spinner')).not.toBeInTheDocument();
+      expect(screen.getByTestId('chat-model-switch-chevron')).toBeInTheDocument();
+      expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Moonshot / kimi-k2.5');
+      expect(chatState.sessionModels['agent:main:main']).toBe('moonshot/kimi-k2.5');
+      expect(toastSuccessMock).toHaveBeenCalledWith('Switched to Moonshot / kimi-k2.5');
+    });
+  });
+
+  it('keeps the previous model selected when persisting the session model fails', async () => {
+    providerState.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI',
+        authMode: 'api_key',
+        model: 'gpt-5.4',
+        metadata: { customModels: ['gpt-5.4-mini'] },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+      {
+        id: 'moonshot',
+        vendorId: 'moonshot',
+        label: 'Moonshot',
+        authMode: 'api_key',
+        model: 'kimi-k2.5',
+        enabled: true,
+        isDefault: false,
+        createdAt: '2026-04-12T00:00:00.000Z',
+        updatedAt: '2026-04-12T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [
+      { id: 'openai', hasKey: true, model: 'gpt-5.4' },
+      { id: 'moonshot', hasKey: true, model: 'kimi-k2.5' },
+    ];
+    providerState.vendors = [
+      { id: 'openai', name: 'OpenAI' },
+      { id: 'moonshot', name: 'Moonshot' },
+    ];
+    providerState.defaultAccountId = 'openai';
+    chatState.sessions = [
+      { key: 'agent:main:main', model: 'openai/gpt-5.4' },
+    ];
+    chatState.sessionModels = {
+      'agent:main:main': 'openai/gpt-5.4',
+    };
+    hostApiFetchMock.mockResolvedValueOnce({ success: false, error: 'Session not found: agent:main:main' });
 
     render(<ChatInput onSend={vi.fn()} />);
 
@@ -447,16 +814,11 @@ describe('ChatInput agent targeting', () => {
 
     await waitFor(() => {
       expect(toastErrorMock).toHaveBeenCalledWith(
-        'Failed to switch model. Still using OpenAI / gpt-5.4: Model not found',
+        'Failed to switch model. Still using OpenAI / gpt-5.4: Session not found: agent:main:main',
       );
     });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('OpenAI / gpt-5.4');
-    });
-
+    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('OpenAI / gpt-5.4');
     expect(chatState.sessionModels['agent:main:main']).toBe('openai/gpt-5.4');
-    expect(chatState.sessions[0]?.model).toBe('openai/gpt-5.4');
   });
 
   it('uses the global default model for a session when no session model is stored', () => {
@@ -561,6 +923,38 @@ describe('ChatInput agent targeting', () => {
     chatState.sessions = [{ key: 'agent:main:main' }];
     chatState.sessionModels = {};
     agentsState.defaultModelRef = null as unknown as string;
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Switch model');
+  });
+
+  it('does not show a model when the models page has no configured models, even if a stale default model exists', () => {
+    agentsState.agents = [
+      {
+        id: 'main',
+        name: 'Main',
+        isDefault: true,
+        modelDisplay: 'GPT-5.4',
+        modelRef: 'openai/gpt-5.4',
+        overrideModelRef: null,
+        inheritedModel: true,
+        workspace: '~/.openclaw/workspace',
+        agentDir: '~/.openclaw/agents/main/agent',
+        mainSessionKey: 'agent:main:main',
+        channelTypes: [],
+        skillIds: [],
+        workflowSteps: [],
+        triggerModes: [],
+      },
+    ];
+    providerState.accounts = [];
+    providerState.statuses = [];
+    providerState.vendors = [];
+    providerState.defaultAccountId = null;
+    chatState.sessions = [{ key: 'agent:main:main' }];
+    chatState.sessionModels = {};
+    agentsState.defaultModelRef = 'openai/gpt-5.4';
 
     render(<ChatInput onSend={vi.fn()} />);
 

@@ -30,6 +30,7 @@ import { useTranslation } from 'react-i18next';
 import { AppLogo } from '@/components/branding/AppLogo';
 import { useBranding } from '@/lib/branding';
 import { SettingsHub } from '@/components/settings/SettingsHub';
+import { isSessionRunning } from '@/stores/chat/session-running';
 
 const SIDEBAR_EXPANDED_MIN_WIDTH = 240;
 const SIDEBAR_EXPANDED_MAX_WIDTH = 420;
@@ -121,6 +122,11 @@ export function Sidebar() {
 
   const sessions = useChatStore((s) => s.sessions);
   const currentSessionKey = useChatStore((s) => s.currentSessionKey);
+  const sending = useChatStore((s) => s.sending);
+  const pendingFinal = useChatStore((s) => s.pendingFinal);
+  const sendStage = useChatStore((s) => s.sendStage);
+  const streamingMessage = useChatStore((s) => s.streamingMessage);
+  const streamingTools = useChatStore((s) => s.streamingTools);
   const sessionRunningState = useChatStore((s) => s.sessionRunningState ?? {});
   const sessionLabels = useChatStore((s) => s.sessionLabels);
   const sessionLastActivity = useChatStore((s) => s.sessionLastActivity);
@@ -278,6 +284,14 @@ export function Sidebar() {
   const gatewayRestartElapsedLabel = showGatewayRestartHint
     ? formatGatewayRestartElapsed(gatewayRestartElapsedSeconds, isChinese)
     : '';
+  const currentSessionRunSnapshot = useMemo(() => ({
+    currentSessionKey,
+    sending,
+    pendingFinal,
+    sendStage,
+    streamingMessage,
+    streamingTools,
+  }), [currentSessionKey, pendingFinal, sending, sendStage, streamingMessage, streamingTools]);
 
   const startRenamingSession = (sessionKey: string, currentLabel: string) => {
     isSubmittingRenameRef.current = false;
@@ -344,7 +358,7 @@ export function Sidebar() {
     const sessionLabel = getSessionLabel(s.key, s.displayName, s.label);
     const isEditing = editingSessionKey === s.key;
     const isMenuOpen = openSessionMenuKey === s.key;
-    const isSessionRunning = !!sessionRunningState[s.key];
+    const isSessionRunningNow = isSessionRunning(s.key, sessionRunningState, currentSessionRunSnapshot);
 
     return (
       <div key={s.key} className="group relative flex items-center" data-testid={`sidebar-session-${s.key}`}>
@@ -435,7 +449,7 @@ export function Sidebar() {
             className="absolute right-1 flex items-center"
             data-testid={`sidebar-session-menu-root-${s.key}`}
           >
-            {isSessionRunning && (
+            {isSessionRunningNow && (
               <div
                 data-testid={`sidebar-session-running-indicator-${s.key}`}
                 className={cn(
@@ -446,7 +460,7 @@ export function Sidebar() {
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               </div>
             )}
-            {!isSessionRunning && s.pinned && (
+            {!isSessionRunningNow && s.pinned && (
               <div
                 data-testid={`sidebar-session-pin-indicator-${s.key}`}
                 className={cn(
@@ -594,13 +608,13 @@ export function Sidebar() {
         {!sidebarCollapsed && showGatewayRestartHint && (
           <div
             data-testid="sidebar-gateway-restarting-hint"
-            className="mb-2 rounded-[14px] border border-amber-200/70 bg-amber-50/90 px-3.5 py-2 text-[12px] font-medium text-amber-700 shadow-[0_4px_14px_rgba(245,158,11,0.10)] dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200"
+            className="mb-2 rounded-[14px] border border-red-200/80 bg-red-50/95 px-3.5 py-2 text-[12px] font-medium text-red-600 shadow-[0_4px_14px_rgba(248,113,113,0.10)] dark:border-red-300/20 dark:bg-red-400/10 dark:text-red-200"
           >
             <div className="inline-flex items-center">
               <span>{gatewayRestartHintLabel}</span>
               <span
                 data-testid="sidebar-gateway-restarting-elapsed"
-                className="ml-1 text-amber-700/80 dark:text-amber-200/80"
+                className="ml-1 text-red-600/80 dark:text-red-200/80"
               >
                 {isChinese ? `（${gatewayRestartElapsedLabel}）` : `(${gatewayRestartElapsedLabel})`}
               </span>
@@ -637,9 +651,6 @@ export function Sidebar() {
 
             if (messages.length > 0 || hasPersistedCurrentSession) {
               newSession();
-            }
-            if (!sidebarCollapsed) {
-              setSidebarCollapsed(true);
             }
             navigate('/');
           }}

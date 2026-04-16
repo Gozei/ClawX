@@ -1,5 +1,5 @@
-import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
+import { createServer as createTcpServer, type AddressInfo } from 'node:net';
 import type { Page } from '@playwright/test';
 import { completeSetup, expect, openModelsFromSettings, test } from './fixtures/electron';
 
@@ -52,6 +52,37 @@ async function hostApiJson<T>(
   }
 
   return response as T;
+}
+
+async function allocateGatewayPort(): Promise<number> {
+  return await new Promise((resolvePort, reject) => {
+    const server = createTcpServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('Failed to allocate an isolated gateway port')));
+        return;
+      }
+      const { port } = address;
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolvePort(port);
+      });
+    });
+  });
+}
+
+async function configureIsolatedGatewayPort(page: Page): Promise<number> {
+  const port = await allocateGatewayPort();
+  await hostApiJson(page, '/api/settings/gatewayPort', {
+    method: 'PUT',
+    body: { value: port },
+  });
+  return port;
 }
 
 async function readGatewayStatus(page: Page): Promise<GatewayStatus> {
@@ -149,7 +180,7 @@ async function startMockOpenAiServer(): Promise<{
   baseUrl: string;
   close: () => Promise<void>;
 }> {
-  const server = createServer((req, res) => {
+  const server = createHttpServer((req, res) => {
     if (req.method !== 'POST' || req.url !== '/v1/chat/completions') {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: { message: 'Not found' } }));
@@ -256,6 +287,7 @@ test.describe('Gateway runtime behavior', () => {
       await seedDefaultProvider(page, mockServer.baseUrl);
       await page.reload();
       await expect(page.getByTestId('main-layout')).toBeVisible();
+      await configureIsolatedGatewayPort(page);
       await startGateway(page);
       await waitForGatewayStable(page);
 
@@ -312,6 +344,7 @@ test.describe('Gateway runtime behavior', () => {
       await seedDefaultProvider(page, mockServer.baseUrl);
       await page.reload();
       await expect(page.getByTestId('main-layout')).toBeVisible();
+      await configureIsolatedGatewayPort(page);
       await startGateway(page);
       await waitForGatewayStable(page);
 

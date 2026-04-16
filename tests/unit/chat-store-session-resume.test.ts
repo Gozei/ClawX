@@ -388,6 +388,78 @@ describe('chat store session resume', () => {
     expect(next.sessionModels['agent:main:main']).toBe('custom-custombc/gpt-5.4');
   });
 
+  it('uses the persisted session model for runtime sync and send after reloading sessions', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.send') return Promise.resolve({ runId: 'run-live' });
+      if (method === 'chat.history') return Promise.resolve({ messages: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    hostApiFetchMock.mockReset();
+    hostApiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/sessions/list') {
+        return Promise.resolve({
+          success: true,
+          sessions: [
+            {
+              key: 'agent:main:main',
+              modelProvider: 'custom-custombc',
+              model: 'qwen3.5-plus',
+              updatedAt: userTimestampMs,
+            },
+          ],
+        });
+      }
+      if (path === '/api/sessions/metadata') {
+        return Promise.resolve({ success: true, metadata: {} });
+      }
+      if (path === '/api/agents/main/model/runtime') {
+        return Promise.resolve({ success: true });
+      }
+      throw new Error(`Unexpected host route: ${path}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [],
+      sessionModels: {},
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().loadSessions();
+    await useChatStore.getState().sendMessage('现在使用哪个模型？');
+
+    expect(useChatStore.getState().sessionModels['agent:main:main']).toBe('custom-custombc/qwen3.5-plus');
+    expect(hostApiFetchMock).toHaveBeenCalledWith('/api/agents/main/model/runtime', {
+      method: 'PUT',
+      body: JSON.stringify({ modelRef: 'custom-custombc/qwen3.5-plus' }),
+    });
+
+    const sendCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.send');
+    const sendPayload = String((sendCall?.[1] as { message?: unknown } | undefined)?.message ?? '');
+    expect(sendPayload).toContain('"preferredModel": "custom-custombc/qwen3.5-plus"');
+    expect(sendPayload).toContain('现在使用哪个模型？');
+  });
+
   it('loads sessions from the host session list route before falling back to gateway enumeration', async () => {
     gatewayRpcMock.mockReset();
     gatewayRpcMock.mockImplementation((method: string) => {

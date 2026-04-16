@@ -48,8 +48,11 @@
         "targetChip": "@{{agent}}",
         "agentPickerTitle": "Route the next message to another role",
         "gatewayDisconnectedPlaceholder": "Gateway not connected...",
+        "modelSwitchSuccess": "Switched to {{model}}",
+        "modelSwitchFailed": "Failed to switch model. Still using {{model}}: {{error}}",
         "send": "Send",
         "stop": "Stop",
+        "disclaimer": "AI can make mistakes. Please verify important information.",
         "gatewayConnected": "connected",
         "gatewayStatus": "gateway {{state}} | port: {{port}} {{pid}}",
         "retryFailedAttachments": "Retry failed attachments"

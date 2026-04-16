@@ -33,8 +33,8 @@ async function seedSession(homeDir: string): Promise<void> {
   );
 }
 
-test.describe('Sidebar new session collapse', () => {
-  test('collapses the sidebar when clicking new session, including after reopening it', async ({ homeDir, launchElectronApp }) => {
+test.describe('Sidebar new session behavior', () => {
+  test('keeps the sidebar expanded when clicking new session, including after reopening it', async ({ homeDir, launchElectronApp }) => {
     await seedSession(homeDir);
 
     const app = await launchElectronApp({ skipSetup: true });
@@ -48,7 +48,10 @@ test.describe('Sidebar new session collapse', () => {
 
       await page.getByTestId('sidebar-new-chat').click();
 
-      await expect(page.getByTestId(`sidebar-session-${SESSION_KEY}`)).toHaveCount(0);
+      await expect(page.getByTestId(`sidebar-session-${SESSION_KEY}`)).toBeVisible();
+      await expect(sidebar).toHaveCSS('width', '256px');
+
+      await sidebar.locator('button').first().click();
       await expect(sidebar).toHaveCSS('width', '64px');
 
       await sidebar.locator('button').first().click();
@@ -57,7 +60,7 @@ test.describe('Sidebar new session collapse', () => {
 
       await page.getByTestId('sidebar-new-chat').click();
 
-      await expect(sidebar).toHaveCSS('width', '64px');
+      await expect(sidebar).toHaveCSS('width', '256px');
     } finally {
       await closeElectronApp(app);
     }

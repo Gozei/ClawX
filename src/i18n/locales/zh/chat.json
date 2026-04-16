@@ -49,8 +49,11 @@
         "targetChip": "@{{agent}}",
         "agentPickerTitle": "将下一条消息直接发送给其他 Role",
         "gatewayDisconnectedPlaceholder": "网关未连接...",
+        "modelSwitchSuccess": "已切换到 {{model}}",
+        "modelSwitchFailed": "模型切换失败，当前仍为 {{model}}：{{error}}",
         "send": "发送",
         "stop": "停止",
+        "disclaimer": "AI\u4e5f\u4f1a\u72af\u9519\uff0c\u8bf7\u4ed4\u7ec6\u6838\u67e5\u4fe1\u606f",
         "gatewayConnected": "已连接",
         "gatewayStatus": "gateway {{state}} | port: {{port}} {{pid}}",
         "retryFailedAttachments": "重试失败附件"

@@ -41,6 +41,7 @@ desktop.ini
 coverage/
 playwright-report/
 test-results/
+test-results-*/
 
 # Cache
 .cache/
@@ -66,5 +67,7 @@ artifacts/
 docs/pr-session-notes-*.md
 
 .cursor/
+.codex-temp/
 .pnpm-store/
 package-lock.json
+scratch/

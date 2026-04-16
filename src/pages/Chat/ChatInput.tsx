@@ -7,21 +7,23 @@
  * are sent with the message (no base64 over WebSocket).
  */
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
-import { SendHorizontal, Square, X, Paperclip, Music, FileArchive, File, Loader2, AtSign, FileCode, FileImage, ChevronDown, Cpu } from 'lucide-react';
+import { SendHorizontal, Square, X, Paperclip, Loader2, AtSign, ChevronDown, Cpu } from 'lucide-react';
+import { FileTypeIcon } from './file-icon';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { hostApiFetch } from '@/lib/host-api';
 import { invokeIpc } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import { useAgentsStore } from '@/stores/agents';
-import { useChatStore } from '@/stores/chat';
+import { useChatStore, type ChatMessageDispatchOptions } from '@/stores/chat';
 import { useProviderStore } from '@/stores/providers';
 import { useSettingsStore } from '@/stores/settings';
 import type { AgentSummary } from '@/types/agent';
 import type { ProviderAccount } from '@/lib/providers';
-import { buildProviderListItems, type ProviderListItem } from '@/lib/provider-accounts';
+import { buildProviderListItems } from '@/lib/provider-accounts';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
+import { CHAT_SURFACE_MAX_WIDTH_CLASS } from './layout';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -39,7 +41,12 @@ export interface FileAttachment {
 
 interface ChatInputProps {
   onSend: (text: string, attachments?: FileAttachment[], targetAgentId?: string | null) => void;
-  onQueueOfflineMessage?: (text: string, attachments?: FileAttachment[], targetAgentId?: string | null) => void;
+  onQueueOfflineMessage?: (
+    text: string,
+    attachments?: FileAttachment[],
+    targetAgentId?: string | null,
+    options?: ChatMessageDispatchOptions,
+  ) => void;
   onStop?: () => void;
   disabled?: boolean;
   sending?: boolean;
@@ -51,13 +58,6 @@ interface ChatInputProps {
 type ModelOption = {
   value: string;
   label: string;
-  accountId: string;
-  vendorId: ProviderAccount['vendorId'];
-  modelId: string;
-  authMode: ProviderAccount['authMode'];
-  baseUrl?: string;
-  apiProtocol?: ProviderAccount['apiProtocol'];
-  validationKey: string;
 };
 
 const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
@@ -84,36 +84,18 @@ function getRuntimeProviderKey(account: ProviderAccount): string {
   return account.vendorId;
 }
 
-function getConfiguredModelIds(account: ProviderAccount): string[] {
-  return Array.from(new Set([
-    account.model || '',
-    ...(account.metadata?.customModels ?? []),
-  ].map((model) => model.trim()).filter(Boolean)));
-}
-
-function resolveModelSourceAccount(item: ProviderListItem, modelId: string): ProviderAccount {
-  const normalizedModelId = modelId.trim();
-  return [item.account, ...item.aliases].find((account) => (
-    getConfiguredModelIds(account).includes(normalizedModelId)
-  )) ?? item.account;
-}
-
-function getModelApiProtocol(
-  account: ProviderAccount,
-  modelId: string,
-): ProviderAccount['apiProtocol'] | undefined {
-  return account.metadata?.modelProtocols?.[modelId] || account.apiProtocol;
-}
-
-function shouldValidateModelOption(option: ModelOption): boolean {
-  return option.authMode === 'api_key' || option.authMode === 'local';
-}
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
+function resolveComposerSessionKey(
+  agents: AgentSummary[],
+  currentSessionKey: string,
+  targetAgentId: string | null,
+): string {
+  const normalizedTargetAgentId = (targetAgentId || '').trim().toLowerCase();
+  if (!normalizedTargetAgentId) {
+    return currentSessionKey;
   }
-  return String(error);
+
+  return agents.find((agent) => agent.id === normalizedTargetAgentId)?.mainSessionKey
+    || `agent:${normalizedTargetAgentId}:main`;
 }
 
 
@@ -124,32 +106,6 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-function FileExtIcon({ ext, color, className }: { ext: string; color: string; className?: string }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" fill={`${color}20`}/>
-      <path d="M14 2v4a2 2 0 0 0 2 2h4"/>
-      <text x="12" y="18" fontSize="6.5" fontFamily="sans-serif" fontWeight="bold" textAnchor="middle" stroke="none" fill={color}>{ext.toUpperCase()}</text>
-    </svg>
-  );
-}
-
-function FileIcon({ mimeType, fileName, className }: { mimeType: string; fileName?: string; className?: string }) {
-  const t = mimeType.toLowerCase();
-  const n = (fileName || '').toLowerCase();
-
-  if (t.startsWith('image/') || t.startsWith('video/') || n.match(/\.(jpg|jpeg|png|gif|webp|mp4|mov|avi|webm)$/i)) return <FileImage color="#8b5cf6" className={className} />;
-  if (t.startsWith('audio/') || n.match(/\.(mp3|wav|ogg|m4a)$/i)) return <Music color="#eab308" className={className} />;
-  if (t.includes('pdf') || n.endsWith('.pdf')) return <FileExtIcon ext="PDF" color="#ef4444" className={className} />;
-  if (t.includes('spreadsheet') || t.includes('excel') || t.includes('csv') || n.match(/\.(xls|xlsx|csv)$/i)) return <FileExtIcon ext="XLS" color="#22c55e" className={className} />;
-  if (t.includes('wordprocessing') || t.includes('msword') || t.includes('document') || n.match(/\.(doc|docx)$/i)) return <FileExtIcon ext="DOC" color="#3b82f6" className={className} />;
-  if (t.includes('presentation') || t.includes('powerpoint') || n.match(/\.(ppt|pptx)$/i)) return <FileExtIcon ext="PPT" color="#f97316" className={className} />;
-  if (t.startsWith('text/') || t === 'application/json' || t === 'application/xml' || n.match(/\.(txt|json|xml|md|csv|log)$/i)) return <FileCode color="#64748b" className={className} />;
-  if (t.includes('zip') || t.includes('compressed') || t.includes('archive') || t.includes('tar') || t.includes('rar') || t.includes('7z') || n.match(/\.(zip|rar|7z|tar|gz)$/i)) return <FileArchive color="#ec4899" className={className} />;
-
-  return <File color="#94a3b8" className={className} />;
 }
 
 function normalizePath(value: string): string {
@@ -205,6 +161,7 @@ export function ChatInput({
   const [targetAgentId, setTargetAgentId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [modelSwitchPending, setModelSwitchPending] = useState(false);
   const [modelSwitchWidth, setModelSwitchWidth] = useState('180px');
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -220,7 +177,6 @@ export function ChatInput({
   const providerVendors = useProviderStore((s) => s.vendors);
   const providerDefaultAccountId = useProviderStore((s) => s.defaultAccountId);
   const refreshProviderSnapshot = useProviderStore((s) => s.refreshProviderSnapshot);
-  const getAccountApiKey = useProviderStore((s) => s.getAccountApiKey);
   const chatFontScale = useSettingsStore((s) => s.chatFontScale);
   const currentAgentId = useChatStore((s) => s.currentAgentId);
   const currentSessionKey = useChatStore((s) => s.currentSessionKey);
@@ -248,6 +204,14 @@ export function ChatInput({
     () => (agents ?? []).find((agent) => agent.id === targetAgentId) ?? null,
     [agents, targetAgentId],
   );
+  const activeComposerSessionKey = useMemo(
+    () => resolveComposerSessionKey(agents ?? [], currentSessionKey, targetAgentId),
+    [agents, currentSessionKey, targetAgentId],
+  );
+  const activeComposerSession = useMemo(
+    () => (sessions ?? []).find((session) => session.key === activeComposerSessionKey) ?? null,
+    [activeComposerSessionKey, sessions],
+  );
   const showAgentPicker = mentionableAgents.length > 0;
   const inputFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
   const providerItems = useMemo(
@@ -261,29 +225,18 @@ export function ChatInput({
         .filter((model) => model.source !== 'recommended')
         .slice()
         .sort((left, right) => left.id.localeCompare(right.id))
-        .map((model) => {
-          const sourceAccount = resolveModelSourceAccount(item, model.id);
-          const apiProtocol = getModelApiProtocol(sourceAccount, model.id);
-          return {
-            value: `${runtimeProviderKey}/${model.id}`,
-            label: `${item.displayName} / ${model.id}`,
-            accountId: sourceAccount.id,
-            vendorId: sourceAccount.vendorId,
-            modelId: model.id,
-            authMode: sourceAccount.authMode,
-            baseUrl: sourceAccount.baseUrl,
-            apiProtocol,
-            validationKey: [
-              sourceAccount.id,
-              model.id,
-              sourceAccount.baseUrl || '',
-              apiProtocol || '',
-            ].join('|'),
-          };
-        });
+        .map((model) => ({
+          value: `${runtimeProviderKey}/${model.id}`,
+          label: `${item.displayName} / ${model.id}`,
+        }));
     })
   ), [providerItems]);
-  const effectiveModelRef = (sessionModels[currentSessionKey] || currentSession?.model || defaultModelRef || '').trim();
+  const effectiveModelRef = (
+    sessionModels[activeComposerSessionKey]
+    || activeComposerSession?.model
+    || defaultModelRef
+    || ''
+  ).trim();
   const selectedModelValue = useMemo(() => {
     if (!effectiveModelRef) return '';
     return modelOptions.some((option) => option.value === effectiveModelRef) ? effectiveModelRef : '';
@@ -293,7 +246,12 @@ export function ChatInput({
     () => modelOptions.find((option) => option.value === selectedModelValue)?.label || t('composer.selectModel'),
     [modelOptions, selectedModelValue, t],
   );
-  const isModelSwitchDisabled = sending || modelOptions.length === 0;
+  const isZh = (i18n?.resolvedLanguage || i18n?.language || '').startsWith('zh');
+  const queueActionLabel = isZh ? '加入队列' : 'Queue to send';
+  const canEditDraft = !disabled || !!onQueueOfflineMessage;
+  const hasModelOptions = modelOptions.length > 0;
+  const isModelSwitchUnavailable = !hasModelOptions;
+  const isModelSwitchDisabled = isModelSwitchUnavailable || modelSwitchPending;
   const attachmentKeys = useMemo(
     () => new Set(attachments.map((attachment) => attachment.dedupeKey).filter(Boolean)),
     [attachments],
@@ -332,10 +290,10 @@ export function ChatInput({
 
   // Focus textarea on mount (avoids Windows focus loss after session delete + native dialog)
   useEffect(() => {
-    if (textareaRef.current) {
+    if (canEditDraft && textareaRef.current) {
       textareaRef.current.focus();
     }
-  }, [disabled]);
+  }, [canEditDraft]);
 
   useEffect(() => {
     if (!targetAgentId) return;
@@ -439,6 +397,7 @@ export function ChatInput({
   // ── File staging via native dialog ─────────────────────────────
 
   const pickFiles = useCallback(async () => {
+    if (!canEditDraft) return;
     try {
       const result = await invokeIpc('dialog:open', {
         properties: ['openFile', 'multiSelections'],
@@ -533,11 +492,12 @@ export function ChatInput({
           : a,
       ));
     }
-  }, [attachmentKeys, currentSessionKey]);
+  }, [attachmentKeys, canEditDraft, currentSessionKey]);
 
   // ── Stage browser File objects (paste / drag-drop) ─────────────
 
   const stageBufferFiles = useCallback(async (files: globalThis.File[]) => {
+    if (!canEditDraft) return;
     const draftSessionKey = currentSessionKey;
     const seenKeys = new Set(attachmentKeys);
     let skippedDuplicates = false;
@@ -602,7 +562,7 @@ export function ChatInput({
         ));
       }
     }
-  }, [attachmentKeys, currentSessionKey]);
+  }, [attachmentKeys, canEditDraft, currentSessionKey]);
 
   // ── Attachment management ──────────────────────────────────────
 
@@ -612,10 +572,14 @@ export function ChatInput({
 
   const allReady = attachments.length === 0 || attachments.every(a => a.status === 'ready');
   const hasFailedAttachments = attachments.some((a) => a.status === 'error');
-  const canSend = (input.trim() || attachments.length > 0) && allReady && !disabled && !sending;
-  const canQueueOffline = (input.trim() || attachments.length > 0) && allReady && disabled && !sending;
+  const hasDraftContent = input.trim().length > 0 || attachments.length > 0;
+  const canSend = hasDraftContent && allReady && !disabled && !sending;
+  const canQueueDraft = hasDraftContent && allReady && !!onQueueOfflineMessage && (disabled || sending);
   const canStop = sending && !!onStop;
-  const isZh = (i18n?.resolvedLanguage || i18n?.language || '').startsWith('zh');
+  const canPrimaryAction = canSend || canQueueDraft || canStop;
+  const primaryActionTitle = sending
+    ? (canQueueDraft ? queueActionLabel : t('composer.stop'))
+    : (canQueueDraft ? queueActionLabel : t('composer.send'));
 
   useEffect(() => {
     if (!prefillText || prefillNonce === 0) {
@@ -630,8 +594,8 @@ export function ChatInput({
     });
   }, [prefillNonce, prefillText]);
 
-  const handleSend = useCallback(() => {
-    if (!canSend && !canQueueOffline) return;
+  const handleSubmitDraft = useCallback(() => {
+    if (!canSend && !canQueueDraft) return;
     const readyAttachments = attachments.filter(a => a.status === 'ready');
     // Capture values before clearing — clear input immediately for snappy UX,
     // but keep attachments available for the async send
@@ -649,19 +613,42 @@ export function ChatInput({
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-    if (disabled) {
-      onQueueOfflineMessage?.(textToSend, attachmentsToSend, targetAgentId);
+    if (canQueueDraft) {
+      onQueueOfflineMessage?.(textToSend, attachmentsToSend, targetAgentId, {
+        sessionKey: activeComposerSessionKey,
+        modelRef: effectiveModelRef || null,
+      });
+      toast.success(isZh ? '已加入待发送队列' : 'Added to the send queue');
     } else {
       onSend(textToSend, attachmentsToSend, targetAgentId);
     }
     setTargetAgentId(null);
     setPickerOpen(false);
-  }, [input, attachments, canQueueOffline, canSend, disabled, onQueueOfflineMessage, onSend, targetAgentId]);
+  }, [
+    activeComposerSessionKey,
+    attachments,
+    canQueueDraft,
+    canSend,
+    effectiveModelRef,
+    input,
+    isZh,
+    onQueueOfflineMessage,
+    onSend,
+    targetAgentId,
+  ]);
 
   const handleStop = useCallback(() => {
     if (!canStop) return;
     onStop?.();
   }, [canStop, onStop]);
+
+  const handlePrimaryAction = useCallback(() => {
+    if (canQueueDraft || !sending) {
+      handleSubmitDraft();
+      return;
+    }
+    handleStop();
+  }, [canQueueDraft, handleStop, handleSubmitDraft, sending]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -675,15 +662,16 @@ export function ChatInput({
           return;
         }
         e.preventDefault();
-        handleSend();
+        handleSubmitDraft();
       }
     },
-    [handleSend, input, targetAgentId],
+    [handleSubmitDraft, input, targetAgentId],
   );
 
   // Handle paste (Ctrl/Cmd+V with files)
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
+      if (!canEditDraft) return;
       const items = e.clipboardData?.items;
       if (!items) return;
 
@@ -699,7 +687,7 @@ export function ChatInput({
         stageBufferFiles(pastedFiles);
       }
     },
-    [stageBufferFiles],
+    [canEditDraft, stageBufferFiles],
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -716,6 +704,7 @@ export function ChatInput({
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
+      if (!canEditDraft) return;
       e.preventDefault();
       e.stopPropagation();
       setDragOver(false);
@@ -723,22 +712,22 @@ export function ChatInput({
         stageBufferFiles(Array.from(e.dataTransfer.files));
       }
     },
-    [stageBufferFiles],
+    [canEditDraft, stageBufferFiles],
   );
 
   const setSessionModel = useCallback((modelRef: string | null) => {
     useChatStore.setState((state) => {
       const nextSessionModels = { ...state.sessionModels };
       if (modelRef) {
-        nextSessionModels[currentSessionKey] = modelRef;
+        nextSessionModels[activeComposerSessionKey] = modelRef;
       } else {
-        delete nextSessionModels[currentSessionKey];
+        delete nextSessionModels[activeComposerSessionKey];
       }
 
       return {
         sessionModels: nextSessionModels,
         sessions: state.sessions.map((session) => (
-          session.key !== currentSessionKey
+          session.key !== activeComposerSessionKey
             ? session
             : (
                 modelRef
@@ -751,36 +740,36 @@ export function ChatInput({
         )),
       };
     });
-  }, [currentSessionKey]);
+  }, [activeComposerSessionKey]);
 
   const handleModelChange = useCallback(async (nextModelRef: string) => {
-    if (!currentAgentId) return;
     const normalizedNextModelRef = (nextModelRef || '').trim();
-    if (!normalizedNextModelRef || normalizedNextModelRef === selectedModelValue) return;
-
+    const previousModelValue = selectedModelValue;
     const nextOption = modelOptions.find((option) => option.value === normalizedNextModelRef);
-    const previousLabel = modelOptions.find((option) => option.value === selectedModelValue)?.label
-      || selectedModelValue
-      || t('composer.selectModel');
     const nextLabel = nextOption?.label || normalizedNextModelRef || t('composer.selectModel');
+    const previousLabel = modelOptions.find((option) => option.value === previousModelValue)?.label
+      || selectedModelLabel
+      || t('composer.selectModel');
+
+    if (normalizedNextModelRef === previousModelValue) {
+      return;
+    }
 
     try {
-      if (nextOption && shouldValidateModelOption(nextOption)) {
-        const apiKey = nextOption.authMode === 'api_key'
-          ? await getAccountApiKey(nextOption.accountId)
-          : null;
-        await hostApiFetch('/api/provider-drafts/test', {
+      setModelSwitchPending(true);
+      const result = await hostApiFetch<{ success?: boolean; error?: string }>(
+        '/api/sessions/model',
+        {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            accountId: nextOption.accountId,
-            vendorId: nextOption.vendorId,
-            ...(apiKey ? { apiKey } : {}),
-            model: nextOption.modelId,
-            ...(nextOption.baseUrl ? { baseUrl: nextOption.baseUrl } : {}),
-            ...(nextOption.apiProtocol ? { apiProtocol: nextOption.apiProtocol } : {}),
+            sessionKey: activeComposerSessionKey,
+            modelRef: normalizedNextModelRef || null,
           }),
-        });
+        },
+      );
+
+      if (!result?.success) {
+        throw new Error(result?.error || 'Failed to persist session model');
       }
 
       setSessionModel(normalizedNextModelRef || null);
@@ -788,25 +777,27 @@ export function ChatInput({
     } catch (error) {
       toast.error(t('composer.modelSwitchFailed', {
         model: previousLabel,
-        error: getErrorMessage(error),
+        error: error instanceof Error ? error.message : String(error),
       }));
+    } finally {
+      setModelSwitchPending(false);
     }
-  }, [currentAgentId, getAccountApiKey, modelOptions, selectedModelValue, setSessionModel, t]);
+  }, [activeComposerSessionKey, modelOptions, selectedModelLabel, selectedModelValue, setSessionModel, t]);
 
   return (
     <div
       data-testid="chat-composer-shell"
       className={cn(
-        'w-full max-w-4xl mx-auto px-4 pt-0 pb-6 transition-all duration-300'
+        'w-full px-4 pt-0 pb-2 transition-all duration-300'
       )}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="w-full">
+      <div className={cn('mx-auto w-full', CHAT_SURFACE_MAX_WIDTH_CLASS)}>
         {/* Attachment Previews */}
         {attachments.length > 0 && (
-          <div className="flex gap-2 mb-3 flex-wrap">
+          <div className="mb-3 grid grid-cols-3 gap-2">
             {attachments.map((att) => (
               <AttachmentPreview
                 key={att.id}
@@ -819,16 +810,16 @@ export function ChatInput({
 
         {/* Input Row */}
         <div className={cn(
-          'relative rounded-[32px] border px-3 pb-3 pt-3 shadow-[0_20px_56px_rgba(15,23,42,0.12)] backdrop-blur-xl transition-all',
-          'bg-[linear-gradient(180deg,rgba(255,255,255,0.84)_0%,rgba(248,250,252,0.72)_100%)] dark:bg-[linear-gradient(180deg,rgba(27,34,46,0.90)_0%,rgba(22,28,38,0.84)_100%)]',
-          dragOver ? 'border-primary/60 ring-2 ring-primary/20' : 'border-black/8 dark:border-white/10'
+          'relative rounded-[20px] border px-3 pb-3 pt-3 shadow-[0_20px_56px_rgba(15,23,42,0.12)] backdrop-blur-xl transition-all',
+          'bg-[linear-gradient(180deg,rgba(255,255,255,0.84)_0%,rgba(248,250,252,0.72)_100%)] dark:bg-[linear-gradient(180deg,rgba(39,48,64,0.96)_0%,rgba(34,42,56,0.92)_100%)]',
+          dragOver ? 'border-primary/60 ring-2 ring-primary/20' : 'border-black/8 dark:border-white/[0.14]'
         )} data-testid="chat-composer">
           {selectedTarget && (
             <div className="px-2.5 pb-1 pt-1">
               <button
                 type="button"
                 onClick={() => setTargetAgentId(null)}
-                className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/7 px-3 py-1 text-[13px] font-medium text-foreground transition-colors hover:bg-primary/12"
+                className="inline-flex items-center gap-1.5 rounded-[10px] border border-primary/20 bg-primary/7 px-3 py-1 text-[13px] font-medium text-foreground transition-colors hover:bg-primary/12"
                 title={t('composer.clearTarget')}
               >
                 <span>{t('composer.targetChip', { agent: selectedTarget.name })}</span>
@@ -852,24 +843,25 @@ export function ChatInput({
                 }}
                 onPaste={handlePaste}
                 placeholder={disabled && !input ? t('composer.gatewayDisconnectedPlaceholder') : t('composer.messagePlaceholder')}
-                className="min-h-[62px] max-h-[220px] resize-none border-0 bg-transparent px-3 py-2.5 leading-[1.75] tracking-[0.01em] text-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/52"
+                disabled={!canEditDraft}
+                className="min-h-[24px] max-h-[220px] resize-none border-0 bg-transparent px-3 py-1 leading-[1.6] tracking-[0.01em] text-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/52"
                 rows={1}
                 style={{ fontSize: inputFontSize }}
               />
             </div>
 
             <Button
-              onClick={sending ? handleStop : handleSend}
-              disabled={sending ? !canStop : !(canSend || canQueueOffline)}
+              onClick={handlePrimaryAction}
+              disabled={!canPrimaryAction}
               size="icon"
-              data-testid="chat-send-button"
-              className={`mt-1 shrink-0 h-10 w-10 rounded-full transition-colors ${
-                (sending || canSend || canQueueOffline)
+              data-testid="chat-send-button-hidden"
+              className={`hidden shrink-0 h-10 w-10 rounded-[12px] transition-colors ${
+                (sending || canSend || canQueueDraft)
                   ? 'bg-[linear-gradient(135deg,#4f8df7_0%,#2f6fe4_100%)] text-white shadow-[0_10px_24px_rgba(47,111,228,0.28)] hover:brightness-105'
                   : 'bg-transparent text-muted-foreground/40 hover:bg-transparent'
               }`}
-              variant={sending || canSend || canQueueOffline ? 'default' : 'ghost'}
-              title={sending ? t('composer.stop') : disabled ? (isZh ? '离线排队发送' : 'Queue to send') : t('composer.send')}
+              variant={sending || canSend || canQueueDraft ? 'default' : 'ghost'}
+              title={primaryActionTitle}
             >
               {sending ? (
                 <Square className="h-4 w-4" fill="currentColor" />
@@ -879,17 +871,18 @@ export function ChatInput({
             </Button>
           </div>
 
-          <div className="mt-2 flex flex-wrap items-center gap-2 px-2">
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-2">
+            <div className="flex flex-wrap items-center gap-0">
             <button
               type="button"
               data-testid="chat-attach-button"
-              className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-[13px] font-medium text-foreground/72 transition-colors hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/8"
+              className="inline-flex h-9 items-center gap-2 rounded-[10px] px-3 text-[13px] font-medium text-foreground/68 transition-colors hover:bg-black/5 hover:text-foreground/82 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/8"
               onClick={pickFiles}
-              disabled={sending}
+              disabled={!canEditDraft}
               title={t('composer.attachFiles')}
             >
               <Paperclip className="h-4 w-4" />
-              <span>{t('composer.attachFiles')}</span>
+              <span>文件</span>
             </button>
 
             {showAgentPicker && (
@@ -898,15 +891,15 @@ export function ChatInput({
                   type="button"
                   data-testid="chat-agent-picker-button"
                 className={cn(
-                  'inline-flex h-9 items-center gap-2 rounded-full px-3 text-[13px] font-medium text-foreground/72 transition-colors hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/8',
+                  'inline-flex h-9 items-center gap-2 rounded-[10px] px-3 text-[13px] font-medium text-foreground/68 transition-colors hover:bg-black/5 hover:text-foreground/82 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/8',
                   (pickerOpen || selectedTarget) && 'bg-primary/10 text-primary hover:bg-primary/20'
                 )}
                 onClick={() => setPickerOpen((open) => !open)}
-                disabled={sending}
-                title={t('composer.pickAgent')}
+                disabled={!canEditDraft}
+                title={t('composer.role', '角色')}
               >
                 <AtSign className="h-4 w-4" />
-                <span>{selectedTarget ? selectedTarget.name : t('composer.pickAgent')}</span>
+                <span>{selectedTarget ? selectedTarget.name : t('composer.role', '角色')}</span>
                 {selectedTarget && (
                     <span
                       role="button"
@@ -925,7 +918,7 @@ export function ChatInput({
                   )}
                 </button>
                 {pickerOpen && (
-                  <div className="absolute left-0 bottom-full z-20 mb-2 w-72 overflow-hidden rounded-2xl border border-black/10 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-card">
+                  <div className="absolute left-0 bottom-full z-20 mb-2 w-72 overflow-hidden rounded-xl border border-black/10 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-card">
                     <div className="px-3 py-2 text-[11px] font-medium text-muted-foreground/80">
                       {t('composer.agentPickerTitle', { currentAgent: currentAgentName })}
                     </div>
@@ -962,7 +955,8 @@ export function ChatInput({
                 className={cn(
                   'inline-flex h-9 max-w-full items-center gap-1.5 rounded-[10px] pl-2.5 pr-2 text-[13px] font-medium text-foreground/68 transition-colors',
                   !isModelSwitchDisabled && 'hover:bg-black/5 hover:text-foreground/82 dark:hover:bg-white/8',
-                  isModelSwitchDisabled && 'cursor-not-allowed opacity-50'
+                  isModelSwitchUnavailable && 'cursor-not-allowed opacity-50',
+                  modelSwitchPending && 'cursor-wait opacity-50 text-foreground/62'
                 )}
                 title={t('composer.switchModel')}
                 style={{ width: modelSwitchWidth }}
@@ -972,6 +966,7 @@ export function ChatInput({
                   }
                 }}
                 disabled={isModelSwitchDisabled}
+                aria-busy={modelSwitchPending}
               >
                 <Cpu aria-hidden="true" className="pointer-events-none h-4 w-4 shrink-0 text-current" />
                 <span
@@ -980,7 +975,22 @@ export function ChatInput({
                 >
                   {selectedModelLabel}
                 </span>
-                <ChevronDown className="pointer-events-none h-4 w-4 shrink-0 text-current" />
+                <span
+                  className="pointer-events-none flex h-4 w-4 shrink-0 items-center justify-center"
+                  data-testid="chat-model-switch-trailing"
+                >
+                  {modelSwitchPending ? (
+                    <Loader2
+                      data-testid="chat-model-switch-spinner"
+                      className="h-4 w-4 animate-spin text-current"
+                    />
+                  ) : (
+                    <ChevronDown
+                      data-testid="chat-model-switch-chevron"
+                      className="h-4 w-4 text-current"
+                    />
+                  )}
+                </span>
               </button>
               {modelMenuOpen && !isModelSwitchDisabled && (
                 <div className="absolute bottom-full left-0 z-20 mb-2 w-[max-content] min-w-full max-w-[360px] overflow-hidden rounded-xl border border-black/10 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-card">
@@ -1007,6 +1017,28 @@ export function ChatInput({
                 </div>
               )}
             </div>
+
+            </div>
+
+            <Button
+              onClick={handlePrimaryAction}
+              disabled={!canPrimaryAction}
+              size="icon"
+              data-testid="chat-send-button"
+              className={`shrink-0 h-10 w-10 rounded-[12px] transition-colors ${
+                (sending || canSend || canQueueDraft)
+                  ? 'bg-[linear-gradient(135deg,#4f8df7_0%,#2f6fe4_100%)] text-white shadow-[0_10px_24px_rgba(47,111,228,0.28)] hover:brightness-105'
+                  : 'bg-transparent text-muted-foreground/40 hover:bg-transparent'
+              }`}
+              variant={sending || canSend || canQueueDraft ? 'default' : 'ghost'}
+              title={primaryActionTitle}
+            >
+              {sending ? (
+                <Square className="h-4 w-4" fill="currentColor" />
+              ) : (
+                <SendHorizontal className="h-[18px] w-[18px]" strokeWidth={2} />
+              )}
+            </Button>
           </div>
         </div>
         {hasFailedAttachments && (
@@ -1022,6 +1054,12 @@ export function ChatInput({
             {t('composer.retryFailedAttachments')}
           </Button>
         )}
+        <p
+          data-testid="chat-composer-disclaimer"
+          className="mt-2 px-2 text-center text-xs leading-5 text-black dark:text-white/90"
+        >
+          {t('composer.disclaimer')}
+        </p>
       </div>
     </div>
   );
@@ -1037,9 +1075,9 @@ function AttachmentPreview({
   onRemove: () => void;
 }) {
   return (
-    <div className="relative group overflow-hidden rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 shadow-sm">
-      <div className="flex items-center gap-3 px-3 h-14 min-w-[180px] max-w-[240px]">
-        <FileIcon mimeType={attachment.mimeType} fileName={attachment.fileName} className="h-8 w-8 shrink-0 drop-shadow-sm" />
+    <div className="relative min-w-0 overflow-hidden rounded-xl border border-black/10 bg-white/80 shadow-[0_14px_34px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.06]">
+      <div className="flex h-14 min-w-0 items-center gap-3 px-3">
+        <FileTypeIcon mimeType={attachment.mimeType} fileName={attachment.fileName} />
         <div className="min-w-0 overflow-hidden leading-tight flex flex-col justify-center">
           <p className="text-[13px] font-medium truncate">{attachment.fileName}</p>
           <p className="text-[10px] text-muted-foreground">
@@ -1064,7 +1102,7 @@ function AttachmentPreview({
 
       <button
         onClick={onRemove}
-        className="absolute right-1.5 top-1.5 rounded-full border border-black/8 bg-white/92 p-1 text-foreground shadow-sm transition-colors hover:bg-white dark:border-white/10 dark:bg-black/70 dark:hover:bg-black"
+        className="absolute right-1.5 top-1.5 rounded-[8px] border border-black/8 bg-white/92 p-1 text-foreground shadow-sm transition-colors hover:bg-white dark:border-white/10 dark:bg-black/70 dark:hover:bg-black"
         title="Remove file"
       >
         <X className="h-3.5 w-3.5" />
@@ -1087,7 +1125,7 @@ function AgentPickerItem({
       type="button"
       onClick={onSelect}
       className={cn(
-        'flex w-full flex-col items-start rounded-xl px-3 py-2 text-left transition-colors',
+        'flex w-full flex-col items-start rounded-[10px] px-3 py-2 text-left transition-colors',
         selected ? 'bg-primary/10 text-foreground' : 'hover:bg-black/5 dark:hover:bg-white/5'
       )}
     >

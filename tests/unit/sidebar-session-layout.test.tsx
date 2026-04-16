@@ -27,6 +27,10 @@ const { settingsState, chatState, gatewayState, agentsState } = vi.hoisted(() =>
     ],
     currentSessionKey: 'agent:main:sidebar-layout-a',
     sending: false,
+    pendingFinal: false,
+    sendStage: null as string | null,
+    streamingMessage: null as unknown,
+    streamingTools: [] as Array<Record<string, unknown>>,
     sessionRunningState: {} as Record<string, boolean>,
     sessionLabels: {},
     sessionLastActivity: {
@@ -115,6 +119,10 @@ describe('Sidebar session layout', () => {
   beforeEach(() => {
     chatState.currentSessionKey = 'agent:main:sidebar-layout-a';
     chatState.sending = false;
+    chatState.pendingFinal = false;
+    chatState.sendStage = null;
+    chatState.streamingMessage = null;
+    chatState.streamingTools = [];
     chatState.sessionRunningState = {};
     gatewayState.status = { state: 'stopped' };
   });
@@ -176,7 +184,13 @@ describe('Sidebar session layout', () => {
       );
 
       expect(screen.getByTestId('sidebar-gateway-restarting-hint')).toHaveTextContent('Gateway starting');
+      expect(screen.getByTestId('sidebar-gateway-restarting-hint')).toHaveClass(
+        'border-red-200/80',
+        'bg-red-50/95',
+        'text-red-600',
+      );
       expect(screen.getByTestId('sidebar-gateway-restarting-elapsed')).toHaveTextContent('(0s)');
+      expect(screen.getByTestId('sidebar-gateway-restarting-elapsed')).toHaveClass('text-red-600/80');
       expect(screen.getByTestId('sidebar-gateway-restarting-ellipsis')).toHaveTextContent('...');
 
       act(() => {

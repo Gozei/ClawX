@@ -239,6 +239,55 @@ describe('handleSessionRoutes', () => {
     expect(stored.sessions[0]?.pinOrder).toBeUndefined();
   });
 
+  it('persists a session model override in sessions.json', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      JSON.stringify({
+        sessions: [
+          { key: 'agent:main:session-1', label: 'Pinned me', updatedAt: 1 },
+        ],
+      }, null, 2),
+      'utf8',
+    );
+
+    parseJsonBodyMock.mockResolvedValueOnce({
+      sessionKey: 'agent:main:session-1',
+      modelRef: 'custom-custombc/qwen3.5-plus',
+    });
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    const handled = await handleSessionRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/model'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
+      success: true,
+      modelRef: 'custom-custombc/qwen3.5-plus',
+    });
+
+    const stored = JSON.parse(await readFile(join(sessionsDir, 'sessions.json'), 'utf8')) as {
+      sessions: Array<{
+        key: string;
+        model?: string;
+        modelProvider?: string;
+        modelOverride?: string;
+        providerOverride?: string;
+      }>;
+    };
+    expect(stored.sessions[0]).toMatchObject({
+      model: 'qwen3.5-plus',
+      modelProvider: 'custom-custombc',
+      modelOverride: 'qwen3.5-plus',
+      providerOverride: 'custom-custombc',
+    });
+  });
+
   it('returns first-user previews without reading full chat history through the gateway', async () => {
     const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
     await mkdir(sessionsDir, { recursive: true });

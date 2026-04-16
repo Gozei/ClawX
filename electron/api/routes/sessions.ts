@@ -727,6 +727,23 @@ function updateSessionEntry(
   return found;
 }
 
+function parseSessionModelRef(modelRef: unknown): { modelProvider: string; model: string } | null {
+  const normalizedModelRef = typeof modelRef === 'string' ? modelRef.trim() : '';
+  if (!normalizedModelRef) {
+    return null;
+  }
+
+  const separatorIndex = normalizedModelRef.indexOf('/');
+  if (separatorIndex <= 0 || separatorIndex >= normalizedModelRef.length - 1) {
+    return null;
+  }
+
+  return {
+    modelProvider: normalizedModelRef.slice(0, separatorIndex),
+    model: normalizedModelRef.slice(separatorIndex + 1),
+  };
+}
+
 export async function handleSessionRoutes(
   req: IncomingMessage,
   res: ServerResponse,
@@ -880,6 +897,58 @@ export async function handleSessionRoutes(
 
       await writeSessionStoreDocument(resolved.sessionsJsonPath, sessionsJson);
       sendJson(res, 200, { success: true, pinned, pinOrder: pinned ? pinOrder ?? 1 : undefined });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === '/api/sessions/model' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{ sessionKey: string; modelRef?: string | null }>(req);
+      const sessionKey = typeof body.sessionKey === 'string' ? body.sessionKey : '';
+      const resolved = getSessionPaths(sessionKey);
+      if (!resolved) {
+        sendJson(res, 400, { success: false, error: `Invalid sessionKey: ${sessionKey}` });
+        return true;
+      }
+
+      const normalizedModelRef = typeof body.modelRef === 'string' ? body.modelRef.trim() : '';
+      const parsedModel = normalizedModelRef ? parseSessionModelRef(normalizedModelRef) : null;
+      if (normalizedModelRef && !parsedModel) {
+        sendJson(res, 400, { success: false, error: 'modelRef must be in "provider/model" format' });
+        return true;
+      }
+
+      const sessionsIndex = await loadMutableSessionStoreDocument(resolved.sessionsJsonPath);
+      const sessionsJson = sessionsIndex.document;
+      const found = updateSessionEntry(
+        sessionsJson,
+        sessionKey,
+        (session) => {
+          const nextSession = { ...session };
+          if (parsedModel) {
+            nextSession.modelProvider = parsedModel.modelProvider;
+            nextSession.model = parsedModel.model;
+            nextSession.providerOverride = parsedModel.modelProvider;
+            nextSession.modelOverride = parsedModel.model;
+          } else {
+            delete nextSession.modelProvider;
+            delete nextSession.model;
+            delete nextSession.providerOverride;
+            delete nextSession.modelOverride;
+          }
+          return nextSession;
+        },
+      );
+
+      if (!found) {
+        sendJson(res, 404, { success: false, error: `Session not found: ${sessionKey}` });
+        return true;
+      }
+
+      await writeSessionStoreDocument(resolved.sessionsJsonPath, sessionsJson);
+      sendJson(res, 200, { success: true, modelRef: normalizedModelRef || null });
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
     }

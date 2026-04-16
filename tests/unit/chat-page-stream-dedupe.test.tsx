@@ -13,6 +13,7 @@ const { agentsState, chatState, gatewayState, settingsState } = vi.hoisted(() =>
     currentSessionKey: 'agent:main:main',
     loading: false,
     sending: true,
+    sessionRunningState: {} as Record<string, boolean>,
     error: null as string | null,
     showThinking: true,
     streamingMessage: null as unknown,
@@ -79,6 +80,7 @@ vi.mock('@/hooks/use-stick-to-bottom-instant', () => ({
   useStickToBottomInstant: () => ({
     contentRef: { current: null },
     scrollRef: { current: null },
+    stopScroll: vi.fn(),
   }),
 }));
 
@@ -98,10 +100,6 @@ vi.mock('@/components/common/LoadingSpinner', () => ({
 
 vi.mock('@/pages/Chat/ChatInput', () => ({
   ChatInput: () => <div data-testid="chat-input" />,
-}));
-
-vi.mock('@/pages/Chat/ChatToolbar', () => ({
-  ChatToolbar: () => <div data-testid="chat-toolbar" />,
 }));
 
 vi.mock('@/pages/Chat/ChatToolbarV2', () => ({
@@ -141,6 +139,7 @@ describe('Chat streaming dedupe', () => {
     chatState.currentSessionKey = 'agent:main:main';
     chatState.loading = false;
     chatState.sending = true;
+    chatState.sessionRunningState = { 'agent:main:main': true };
     chatState.error = null;
     chatState.showThinking = true;
     chatState.streamingMessage = {
@@ -149,6 +148,7 @@ describe('Chat streaming dedupe', () => {
       timestamp: 1003,
     };
     chatState.streamingTools = [];
+    chatState.sendStage = 'running';
     chatState.pendingFinal = false;
     chatState.lastUserMessageAt = 1000;
     settingsState.chatProcessDisplayMode = 'all';

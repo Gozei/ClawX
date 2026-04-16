@@ -232,7 +232,7 @@ function renderInlineContent(text: string, trailingCursor = false): ReactNode[] 
     if (token.kind === 'code') {
       return (
         <Fragment key={key}>
-          <code className="rounded-md bg-black/[0.05] px-1.5 py-0.5 font-mono text-[0.92em] text-foreground/92 dark:bg-white/[0.07]">
+          <code className="rounded-md bg-black/[0.05] px-1.5 py-0.5 font-mono text-[0.92em] text-foreground/92 [overflow-wrap:anywhere] dark:bg-white/[0.07]">
             {token.value}
           </code>
           {cursor}
@@ -276,7 +276,7 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
 
   return (
     <div className={cn(
-      'space-y-2 whitespace-pre-wrap break-words',
+      'min-w-0 max-w-full space-y-2 whitespace-pre-wrap break-words [overflow-wrap:anywhere]',
       '[&_strong]:font-semibold [&_strong]:text-foreground',
       '[&_code]:font-mono',
       className,
@@ -296,7 +296,7 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
           return (
             <pre
               key={block.key}
-              className="overflow-x-auto rounded-2xl border border-black/5 bg-black/[0.025] px-3.5 py-3 text-[12px] leading-6 text-foreground/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] dark:border-white/7 dark:bg-white/[0.025]"
+              className="max-w-full overflow-x-auto rounded-2xl border border-black/5 bg-black/[0.025] px-3.5 py-3 text-[12px] leading-6 text-foreground/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] dark:border-white/7 dark:bg-white/[0.025]"
             >
               {block.text}
               {showCursor ? <span className="ml-0.5 inline-block h-4 w-2 animate-pulse rounded-sm bg-foreground/45 align-[-2px]" /> : null}
@@ -328,7 +328,7 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
           return (
             <div
               key={block.key}
-              className="border-l-2 border-black/8 pl-3.5 text-[14px] leading-7 text-foreground/70 dark:border-white/10"
+              className="min-w-0 border-l-2 border-black/8 pl-3.5 text-[14px] leading-7 text-foreground/70 dark:border-white/10"
             >
               {renderInlineContent(block.text, showCursor)}
             </div>
@@ -341,7 +341,7 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
               {block.items.map((item, itemIndex) => {
                 const itemHasCursor = showCursor && itemIndex === block.items.length - 1;
                 return (
-                  <div key={`${block.key}-${itemIndex}`} className="flex items-start gap-3 text-[14px] leading-7 text-foreground">
+                  <div key={`${block.key}-${itemIndex}`} className="flex min-w-0 items-start gap-3 text-[14px] leading-7 text-foreground">
                     <span className="mt-[0.6rem] h-1.5 w-1.5 shrink-0 rounded-full bg-foreground/24" aria-hidden="true" />
                     <span className="min-w-0 flex-1 text-foreground/90">
                       {renderInlineContent(item, itemHasCursor)}
@@ -359,7 +359,7 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
               {block.items.map((item, itemIndex) => {
                 const itemHasCursor = showCursor && itemIndex === block.items.length - 1;
                 return (
-                  <div key={`${block.key}-${itemIndex}`} className="flex items-start gap-3 text-[14px] leading-7 text-foreground">
+                  <div key={`${block.key}-${itemIndex}`} className="flex min-w-0 items-start gap-3 text-[14px] leading-7 text-foreground">
                     <span className="mt-[0.08rem] min-w-[1.5rem] shrink-0 text-[13px] text-foreground/42 tabular-nums">
                       {item.order}.
                     </span>
@@ -374,7 +374,7 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
         }
 
         return (
-          <div key={block.key} className="text-[14px] leading-7 text-foreground/86">
+          <div key={block.key} className="min-w-0 text-[14px] leading-7 text-foreground/86">
             {renderInlineContent(block.text, showCursor)}
           </div>
         );
