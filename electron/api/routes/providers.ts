@@ -23,6 +23,7 @@ import { providerAccountToConfig } from '../../services/providers/provider-store
 import type { ProviderAccount } from '../../shared/providers/types';
 import { logger } from '../../utils/logger';
 import { getApiKey } from '../../utils/secure-storage';
+import { emitMutationAudit } from '../audit-utils';
 
 const legacyProviderRoutesWarned = new Set<string>();
 
@@ -62,12 +63,35 @@ export async function handleProviderRoutes(
   }
 
   if (url.pathname === '/api/provider-accounts' && req.method === 'POST') {
+    const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ account: ProviderAccount; apiKey?: string }>(req);
       const account = await providerService.createAccount(body.account, body.apiKey);
       await syncSavedProviderToRuntime(providerAccountToConfig(account), body.apiKey, ctx.gatewayManager);
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'provider.account.create',
+        resourceType: 'provider-account',
+        resourceId: account.id,
+        result: 'success',
+        changedKeys: [
+          ...Object.keys(body.account ?? {}),
+          ...(body.apiKey !== undefined ? ['apiKey'] : []),
+        ],
+        metadata: {
+          vendorId: account.vendorId,
+          authMode: account.authMode,
+        },
+      });
       sendJson(res, 200, { success: true, account });
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'provider.account.create',
+        resourceType: 'provider-account',
+        result: 'failure',
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
@@ -109,17 +133,42 @@ export async function handleProviderRoutes(
   }
 
   if (url.pathname === '/api/provider-accounts/default' && req.method === 'PUT') {
+    const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ accountId: string }>(req);
       const currentDefault = await providerService.getDefaultAccountId();
       if (currentDefault === body.accountId) {
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'provider.account.set-default',
+          resourceType: 'provider-account',
+          resourceId: body.accountId,
+          result: 'noop',
+          changedKeys: ['defaultAccountId'],
+        });
         sendJson(res, 200, { success: true, noChange: true });
         return true;
       }
       await providerService.setDefaultAccount(body.accountId);
       await syncDefaultProviderToRuntime(body.accountId, ctx.gatewayManager);
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'provider.account.set-default',
+        resourceType: 'provider-account',
+        resourceId: body.accountId,
+        result: 'success',
+        changedKeys: ['defaultAccountId'],
+      });
       sendJson(res, 200, { success: true });
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'provider.account.set-default',
+        resourceType: 'provider-account',
+        result: 'failure',
+        changedKeys: ['defaultAccountId'],
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
@@ -133,6 +182,7 @@ export async function handleProviderRoutes(
 
   if (url.pathname.startsWith('/api/provider-accounts/') && req.method === 'PUT') {
     const accountId = decodeURIComponent(url.pathname.slice('/api/provider-accounts/'.length));
+    const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ updates: Partial<ProviderAccount>; apiKey?: string }>(req);
       const existing = await providerService.getAccount(accountId);
@@ -142,13 +192,49 @@ export async function handleProviderRoutes(
       }
       const hasPatchChanges = hasObjectChanges(existing as unknown as Record<string, unknown>, body.updates);
       if (!hasPatchChanges && body.apiKey === undefined) {
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'provider.account.update',
+          resourceType: 'provider-account',
+          resourceId: accountId,
+          result: 'noop',
+          changedKeys: Object.keys(body.updates ?? {}),
+        });
         sendJson(res, 200, { success: true, noChange: true, account: existing });
         return true;
       }
+      const previousConfig = providerAccountToConfig(existing);
       const nextAccount = await providerService.updateAccount(accountId, body.updates, body.apiKey);
-      await syncUpdatedProviderToRuntime(providerAccountToConfig(nextAccount), body.apiKey, ctx.gatewayManager);
+      await syncUpdatedProviderToRuntime(
+        providerAccountToConfig(nextAccount),
+        body.apiKey,
+        ctx.gatewayManager,
+        { previousConfig },
+      );
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'provider.account.update',
+        resourceType: 'provider-account',
+        resourceId: accountId,
+        result: 'success',
+        changedKeys: [
+          ...Object.keys(body.updates ?? {}),
+          ...(body.apiKey !== undefined ? ['apiKey'] : []),
+        ],
+        metadata: {
+          vendorId: nextAccount.vendorId,
+        },
+      });
       sendJson(res, 200, { success: true, account: nextAccount });
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'provider.account.update',
+        resourceType: 'provider-account',
+        resourceId: accountId,
+        result: 'failure',
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
@@ -186,6 +272,7 @@ export async function handleProviderRoutes(
 
   if (url.pathname.startsWith('/api/provider-accounts/') && req.method === 'DELETE') {
     const accountId = decodeURIComponent(url.pathname.slice('/api/provider-accounts/'.length));
+    const startedAt = Date.now();
     try {
       const existing = await providerService.getAccount(accountId);
       const runtimeProviderKey = existing?.authMode === 'oauth_browser'
@@ -200,6 +287,17 @@ export async function handleProviderRoutes(
           accountId,
           runtimeProviderKey,
         );
+        emitMutationAudit(req, ctx, {
+          startedAt,
+          action: 'provider.account.delete-key',
+          resourceType: 'provider-account',
+          resourceId: accountId,
+          result: 'success',
+          changedKeys: ['apiKey'],
+          metadata: {
+            vendorId: existing?.vendorId,
+          },
+        });
         sendJson(res, 200, { success: true });
         return true;
       }
@@ -210,8 +308,29 @@ export async function handleProviderRoutes(
         ctx.gatewayManager,
         runtimeProviderKey,
       );
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'provider.account.delete',
+        resourceType: 'provider-account',
+        resourceId: accountId,
+        result: 'success',
+        changedKeys: ['*'],
+        metadata: {
+          vendorId: existing?.vendorId,
+        },
+      });
       sendJson(res, 200, { success: true });
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: url.searchParams.get('apiKeyOnly') === '1'
+          ? 'provider.account.delete-key'
+          : 'provider.account.delete',
+        resourceType: 'provider-account',
+        resourceId: accountId,
+        result: 'failure',
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;

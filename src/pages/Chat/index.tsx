@@ -10,10 +10,11 @@ import { AlertCircle, ChevronDown, ChevronRight, ListTodo, Loader2, Network, Spa
 import { useChatStore, type RawMessage, type ToolStatus } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
+import { AppLogo } from '@/components/branding/AppLogo';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
-import { ChatToolbar } from './ChatToolbar';
+import { ChatToolbarV2 } from './ChatToolbarV2';
 import {
   assistantMessageShowsInChat,
   extractImages,
@@ -22,8 +23,8 @@ import {
   extractToolUse,
 } from './message-utils';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
 import { useBranding } from '@/lib/branding';
+import { cn } from '@/lib/utils';
 import { useStickToBottomInstant } from '@/hooks/use-stick-to-bottom-instant';
 import { useMinLoading } from '@/hooks/use-min-loading';
 import { useSettingsStore, type AssistantMessageStyle, type ChatProcessDisplayMode } from '@/stores/settings';
@@ -33,10 +34,12 @@ import { getProcessActivityLabel, getProcessEventItems, ProcessEventMessage, Pro
 const EMPTY_MESSAGES: RawMessage[] = [];
 
 export function Chat() {
-  const { t } = useTranslation('chat');
+  const { t, i18n } = useTranslation('chat');
   const navigate = useNavigate();
   const gatewayStatus = useGatewayStore((s) => s.status);
   const isGatewayRunning = gatewayStatus.state === 'running';
+  const startGateway = useGatewayStore((s) => s.start);
+  const restartGateway = useGatewayStore((s) => s.restart);
 
   const messages = useChatStore((s) => s.messages);
   const currentSessionKey = useChatStore((s) => s.currentSessionKey);
@@ -52,11 +55,22 @@ export function Chat() {
   const streamingTools = useChatStore((s) => s.streamingTools);
   const pendingFinal = useChatStore((s) => s.pendingFinal);
   const sendMessage = useChatStore((s) => s.sendMessage);
+  const queueOfflineMessage = useChatStore((s) => s.queueOfflineMessage);
+  const flushQueuedMessage = useChatStore((s) => s.flushQueuedMessage);
+  const clearQueuedMessage = useChatStore((s) => s.clearQueuedMessage);
   const abortRun = useChatStore((s) => s.abortRun);
   const clearError = useChatStore((s) => s.clearError);
   const fetchAgents = useAgentsStore((s) => s.fetchAgents);
+  const queuedMessages = useChatStore((s) => s.queuedMessages[s.currentSessionKey]);
+  const queuedMessage = queuedMessages?.[0] ?? null;
+  const queuedMessageCount = queuedMessages?.length ?? 0;
 
   const cleanupEmptySession = useChatStore((s) => s.cleanupEmptySession);
+  const [composerPrefill, setComposerPrefill] = useState<{ text: string; nonce: number }>({
+    text: '',
+    nonce: 0,
+  });
+  const autoFlushAttemptedQueuedIdRef = useRef<string | null>(null);
 
   const safeMessages = Array.isArray(messages) ? messages : EMPTY_MESSAGES;
   const minLoading = useMinLoading(loading && safeMessages.length > 0);
@@ -78,6 +92,24 @@ export function Chat() {
   useEffect(() => {
     void fetchAgents();
   }, [fetchAgents]);
+
+  useEffect(() => {
+    if (!isGatewayRunning || !queuedMessage) {
+      autoFlushAttemptedQueuedIdRef.current = null;
+      return;
+    }
+
+    if (sending) {
+      return;
+    }
+
+    if (autoFlushAttemptedQueuedIdRef.current === queuedMessage.id) {
+      return;
+    }
+
+    autoFlushAttemptedQueuedIdRef.current = queuedMessage.id;
+    void flushQueuedMessage(currentSessionKey, queuedMessage.id);
+  }, [currentSessionKey, flushQueuedMessage, isGatewayRunning, queuedMessage, sending]);
 
   // Gateway not running block has been completely removed so the UI always renders.
   const fallbackStreamMsg = useMemo(() => (
@@ -179,6 +211,25 @@ export function Chat() {
   const isEmpty = safeMessages.length === 0 && !sending;
   const showGatewayStartupInline = !isGatewayRunning && safeMessages.length === 0 && !sending;
   const showSessionLoadingState = loading && safeMessages.length === 0 && !sending;
+  const isZh = (i18n.resolvedLanguage || i18n.language || '').startsWith('zh');
+  const handleUseStarterPrompt = (text: string) => {
+    setComposerPrefill({ text, nonce: Date.now() });
+  };
+  const handleEditQueuedDraft = (queuedId: string, text: string) => {
+    handleUseStarterPrompt(text);
+    clearQueuedMessage(currentSessionKey, queuedId);
+  };
+  const handleSendQueuedDraftNow = (queuedId: string) => {
+    if (!isGatewayRunning) return;
+    void flushQueuedMessage(currentSessionKey, queuedId);
+  };
+  const handleGatewayRecovery = () => {
+    if (gatewayStatus.state === 'error') {
+      void restartGateway();
+      return;
+    }
+    void startGateway();
+  };
 
   return (
     <div
@@ -190,13 +241,16 @@ export function Chat() {
       }}
     >
       {/* Toolbar */}
-      <div className="flex shrink-0 items-center justify-end border-b border-black/5 bg-white/32 px-4 py-2 backdrop-blur-md dark:border-white/5 dark:bg-white/[0.02]">
-        <ChatToolbar />
+      <div
+        data-testid="chat-toolbar-header"
+        className="flex h-14 shrink-0 items-center justify-end border-b border-black/5 bg-white/32 px-4 backdrop-blur-md dark:border-white/5 dark:bg-white/[0.02]"
+      >
+        <ChatToolbarV2 />
       </div>
 
       {/* Messages Area */}
-      <div ref={scrollRef} data-testid="chat-scroll-container" data-chat-scroll-container="true" className="flex-1 overflow-y-auto px-4 py-5">
-        <div ref={contentRef} className="max-w-4xl mx-auto space-y-4">
+      <div ref={scrollRef} data-testid="chat-scroll-container" data-chat-scroll-container="true" className="flex-1 overflow-y-auto px-4 pt-5 pb-8">
+        <div ref={contentRef} data-testid="chat-content-column" className="max-w-4xl mx-auto space-y-4">
           {showSessionLoadingState ? (
             <div className="flex min-h-[40vh] items-center justify-center">
               <div className="bg-background shadow-lg rounded-full p-2.5 border border-border">
@@ -204,16 +258,22 @@ export function Chat() {
               </div>
             </div>
           ) : isEmpty ? (
-            <WelcomeScreen
-              gatewayHint={showGatewayStartupInline ? {
-                state: gatewayStatus.state,
-                error: gatewayStatus.error,
-                port: gatewayStatus.port,
-                pid: gatewayStatus.pid,
-                reconnectAttempts: gatewayStatus.reconnectAttempts,
-              } : null}
-              onOpenSettings={() => navigate('/settings')}
-            />
+            showGatewayStartupInline ? (
+              <WelcomeScreen
+                gatewayHint={{
+                  state: gatewayStatus.state,
+                  error: gatewayStatus.error,
+                  port: gatewayStatus.port,
+                  pid: gatewayStatus.pid,
+                  reconnectAttempts: gatewayStatus.reconnectAttempts,
+                }}
+                onOpenSettings={() => navigate('/settings')}
+                onRecoverGateway={handleGatewayRecovery}
+                onUseStarterPrompt={handleUseStarterPrompt}
+              />
+            ) : (
+              <WelcomeScreenMinimal />
+            )
           ) : (
             <>
               <HistoryMessages
@@ -291,13 +351,98 @@ export function Chat() {
         </div>
       )}
 
+      {queuedMessageCount > 0 && !sending && (
+        isGatewayRunning ? (
+          <div
+            className="border-t border-sky-500/20 bg-sky-500/10 px-4 py-2"
+            data-testid="chat-queued-message-notice"
+          >
+            <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
+              <p className="flex items-center gap-2 text-sm text-sky-700 dark:text-sky-300">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {isZh ? '工作引擎已恢复，正在发送你刚才排队的草稿…' : 'Workspace engine is back. Sending your queued draft now...'}
+              </p>
+              <button
+                onClick={() => clearQueuedMessage(currentSessionKey)}
+                className="text-xs text-sky-700/70 underline hover:text-sky-700 dark:text-sky-300/70 dark:hover:text-sky-300"
+              >
+                {t('common:actions.dismiss')}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="border-t border-sky-500/20 bg-sky-500/10 px-4 py-3" data-testid="chat-queued-message-card">
+            <div className="max-w-4xl mx-auto flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 text-sm font-medium text-sky-700 dark:text-sky-300">
+                  <span className="inline-flex h-2 w-2 rounded-full bg-sky-500/80" />
+                  <span>{isZh ? '草稿已加入待发送队列' : 'Draft queued to send'}</span>
+                </div>
+                <p className="mt-1 text-sm text-sky-700/84 dark:text-sky-200/86">
+                  {isZh ? '工作引擎恢复后会自动发送。你也可以先继续编辑，或者暂时移除这条草稿。' : 'It will send automatically when the workspace engine reconnects. You can also keep editing it or remove it for now.'}
+                </p>
+                {queuedMessageCount > 1 ? (
+                  <p className="mt-1 text-xs leading-5 text-sky-700/72 dark:text-sky-200/72">
+                    {isZh
+                      ? `当前队列中还有 ${queuedMessageCount - 1} 条草稿在这条之后等待发送`
+                      : `${queuedMessageCount - 1} more queued draft(s) will send after this one`}
+                  </p>
+                ) : null}
+                <div className="mt-3 rounded-2xl border border-sky-500/18 bg-white/60 px-4 py-3 text-sm text-foreground shadow-sm dark:border-sky-400/16 dark:bg-white/[0.03]">
+                  <div className="line-clamp-3 whitespace-pre-wrap break-words" data-testid="chat-queued-message-preview">
+                    {queuedMessage.text || (isZh ? '这条草稿只包含附件。' : 'This queued draft only contains attachments.')}
+                  </div>
+                  {queuedMessage.attachments?.length ? (
+                    <div className="mt-2 text-xs text-foreground/58">
+                      {isZh
+                        ? `包含 ${queuedMessage.attachments.length} 个附件`
+                        : `${queuedMessage.attachments.length} attachment(s) included`}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => queuedMessage && handleEditQueuedDraft(queuedMessage.id, queuedMessage.text)}
+                  data-testid="chat-queued-message-edit"
+                  className="rounded-full bg-white px-3 py-1.5 text-sm font-medium text-sky-700 shadow-sm transition hover:bg-sky-50 dark:bg-white/10 dark:text-sky-200 dark:hover:bg-white/14"
+                >
+                  {isZh ? '继续编辑' : 'Edit draft'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => queuedMessage && clearQueuedMessage(currentSessionKey, queuedMessage.id)}
+                  data-testid="chat-queued-message-remove"
+                  className="rounded-full border border-sky-500/18 px-3 py-1.5 text-sm font-medium text-sky-700 transition hover:bg-sky-500/8 dark:border-sky-400/18 dark:text-sky-200 dark:hover:bg-sky-400/10"
+                >
+                  {isZh ? '移除草稿' : 'Remove draft'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => queuedMessage && handleSendQueuedDraftNow(queuedMessage.id)}
+                  data-testid="chat-queued-message-send-now"
+                  disabled={!isGatewayRunning}
+                  className="rounded-full bg-sky-600 px-3 py-1.5 text-sm font-medium text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isZh ? '立即发送' : 'Send now'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      )}
+
       {/* Input Area */}
       <ChatInput
         onSend={sendMessage}
+        onQueueOfflineMessage={queueOfflineMessage}
         onStop={abortRun}
         disabled={!isGatewayRunning}
         sending={sending}
         isEmpty={isEmpty}
+        prefillText={composerPrefill.text}
+        prefillNonce={composerPrefill.nonce}
       />
 
       {/* Transparent loading overlay */}
@@ -914,9 +1059,34 @@ function ActiveTurn({
 
 // ── Welcome Screen ──────────────────────────────────────────────
 
+function WelcomeScreenMinimal() {
+  const { t } = useTranslation('chat');
+
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="w-full px-2">
+        <div className="mx-auto max-w-4xl text-center">
+          <AppLogo
+            testId="chat-welcome-logo"
+            className="mx-auto mb-8 h-10 md:mb-10 md:h-12"
+          />
+          <h1
+            data-testid="chat-welcome-title"
+            className="text-[34px] font-semibold tracking-[-0.05em] text-foreground md:text-[50px]"
+          >
+            {t('welcome.subtitle', '把工作交给我，我来持续推进')}
+          </h1>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WelcomeScreen({
   gatewayHint,
   onOpenSettings,
+  onRecoverGateway,
+  onUseStarterPrompt,
 }: {
   gatewayHint: {
     state: string;
@@ -926,34 +1096,61 @@ function WelcomeScreen({
     reconnectAttempts?: number;
   } | null;
   onOpenSettings: () => void;
+  onRecoverGateway: () => void;
+  onUseStarterPrompt: (text: string) => void;
 }) {
   const { t, i18n } = useTranslation('chat');
   const branding = useBranding();
   const [elapsedMs, setElapsedMs] = useState(0);
+  const isZh = (i18n?.resolvedLanguage || i18n?.language || '').startsWith('zh');
   const quickActions = [
     {
       key: 'askQuestions',
       icon: ListTodo,
       label: t('welcome.askQuestions'),
       description: t('welcome.askQuestionsDesc'),
+      prompt: isZh
+        ? '请先帮我理解这个问题的关键点，再给我一个分步骤的建议方案。'
+        : 'Help me understand this problem first, then give me a step-by-step plan.',
     },
     {
       key: 'creativeTasks',
       icon: Workflow,
       label: t('welcome.creativeTasks'),
       description: t('welcome.creativeTasksDesc'),
+      prompt: isZh
+        ? '请基于这个目标给我 3 个不同方向的方案，并说明各自适用场景。'
+        : 'Give me three distinct approaches for this goal and when each one fits best.',
     },
     {
       key: 'brainstorming',
       icon: Network,
       label: t('welcome.brainstorming'),
       description: t('welcome.brainstormingDesc'),
+      prompt: isZh
+        ? '我们来一起头脑风暴，请先提出 10 个方向，再帮我筛选最值得尝试的 3 个。'
+        : 'Let us brainstorm together: propose 10 directions first, then narrow them down to the best 3 to try.',
     },
   ];
-
-  const isZh = (i18n?.resolvedLanguage || i18n?.language || '').startsWith('zh');
   const isStarting = gatewayHint?.state === 'starting' || gatewayHint?.state === 'reconnecting';
   const isError = gatewayHint?.state === 'error';
+  const recoveryLabel = isError
+    ? (isZh ? '立即重试' : 'Retry now')
+    : (isZh ? '启动引擎' : 'Start engine');
+  const gatewayChecklist = isStarting
+    ? [
+        isZh ? '你现在就可以先写草稿，连接恢复后再发送。' : 'You can draft right now and send once the connection is ready.',
+        isZh ? '如果等待时间较长，先打开设置检查运行环境。' : 'If it takes longer than expected, open Settings to inspect the runtime.',
+      ]
+    : isError
+      ? [
+          isZh ? '先重试一次；如果仍失败，再查看设置和诊断信息。' : 'Retry once first; if it still fails, inspect Settings and diagnostics.',
+          isZh ? '你的会话记录会保留，不会因为重试而丢失。' : 'Your conversation history stays available while you recover the engine.',
+        ]
+      : [
+          isZh ? '启动后就可以发送新消息或恢复已有会话。' : 'Once the engine starts you can send a new message or resume an existing session.',
+          isZh ? '如果只是想整理思路，可以先在下方输入框中写草稿。' : 'If you just want to think through something, you can draft in the composer below first.',
+        ];
 
   useEffect(() => {
     if (!gatewayHint || !isStarting) {
@@ -986,7 +1183,7 @@ function WelcomeScreen({
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
       <div className="w-full max-w-5xl px-2">
-        <div className="mx-auto max-w-3xl text-center">
+        <div className="mx-auto max-w-[920px] text-center">
           {gatewayHint ? (
             <div className="mx-auto mb-5 max-w-2xl rounded-[22px] border border-white/10 bg-white/[0.045] px-[clamp(14px,2.2vw,20px)] py-[clamp(12px,2vw,16px)] text-left shadow-[0_14px_36px_rgba(2,6,23,0.12)] backdrop-blur-sm">
               <div className="flex items-start gap-3">
@@ -1027,13 +1224,33 @@ function WelcomeScreen({
                   </div>
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[clamp(10px,1.7vw,12px)] text-foreground/42">
                     <span>{gatewayStatusMeta}</span>
-                    <button
-                      type="button"
-                      onClick={onOpenSettings}
-                      className="rounded-full border border-white/10 px-2.5 py-1 text-foreground/62 transition hover:bg-white/[0.05] hover:text-foreground"
-                    >
-                      {isZh ? '打开设置' : 'Open settings'}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!isStarting && (
+                        <button
+                          type="button"
+                          onClick={onRecoverGateway}
+                          data-testid="chat-welcome-recover-gateway"
+                          className="rounded-full bg-primary px-3 py-1 text-white transition hover:brightness-105"
+                        >
+                          {recoveryLabel}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={onOpenSettings}
+                        className="rounded-full border border-white/10 px-2.5 py-1 text-foreground/62 transition hover:bg-white/[0.05] hover:text-foreground"
+                      >
+                        {isZh ? '打开设置' : 'Open settings'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-1.5 text-[12px] leading-5 text-foreground/60">
+                    {gatewayChecklist.map((item) => (
+                      <div key={item} className="flex items-start gap-2">
+                        <span className="mt-[6px] inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-primary/70" />
+                        <span>{item}</span>
+                      </div>
+                    ))}
                   </div>
                   {gatewayHint.error ? (
                     <div className="mt-2 text-[11px] leading-5 text-amber-200/80">
@@ -1050,32 +1267,45 @@ function WelcomeScreen({
             <span>{t('welcome.eyebrow', { appName: branding.productName })}</span>
           </div>
 
-          <h1 className="mt-6 text-[40px] font-semibold tracking-[-0.05em] text-foreground md:text-[58px]">
+          <h1
+            className="mx-auto mt-5 max-w-[13.5ch] text-[clamp(34px,5.4vw,56px)] font-semibold leading-[1.06] tracking-[-0.045em] text-foreground"
+            style={{ textWrap: 'balance' }}
+          >
             {t('welcome.subtitle', { appName: branding.productName })}
           </h1>
 
-          <p className="mx-auto mt-4 max-w-2xl text-[17px] leading-8 text-foreground/62 md:text-[18px]">
+          <p
+            data-testid="chat-welcome-description"
+            className="mx-auto mt-5 max-w-[680px] text-[15px] leading-[1.9] text-foreground/62 md:text-[17px]"
+            style={{ textWrap: 'pretty' }}
+          >
             {t('welcome.description', { appName: branding.productName })}
           </p>
         </div>
 
         <div className="mt-10 grid gap-4 md:grid-cols-3">
-          {quickActions.map(({ key, icon: Icon, label, description }) => (
+          {quickActions.map(({ key, icon: Icon, label, description, prompt }) => (
             <button
               key={key}
-              className="group rounded-[26px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 text-left shadow-[0_18px_45px_rgba(2,6,23,0.18)] transition duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-[linear-gradient(180deg,rgba(59,130,246,0.10),rgba(255,255,255,0.04))]"
+              type="button"
+              data-testid={`chat-welcome-starter-${key}`}
+              onClick={() => onUseStarterPrompt(prompt)}
+              className="group rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] px-5 py-5 text-left shadow-[0_18px_45px_rgba(2,6,23,0.16)] transition duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-[linear-gradient(180deg,rgba(59,130,246,0.10),rgba(255,255,255,0.04))]"
             >
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-primary/90 transition group-hover:border-primary/30 group-hover:bg-primary/12">
-                <Icon className="h-5 w-5" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-[18px] border border-white/10 bg-white/[0.06] text-primary/90 transition group-hover:border-primary/30 group-hover:bg-primary/12">
+                <Icon className="h-[18px] w-[18px]" />
               </div>
 
-              <div className="mt-5">
-                <h3 className="text-[18px] font-semibold tracking-[-0.02em] text-foreground">
+              <div className="mt-4">
+                <h3 className="text-[17px] font-semibold tracking-[-0.02em] text-foreground">
                   {label}
                 </h3>
-                <p className="mt-2 text-[14px] leading-6 text-foreground/58">
+                <p className="mt-1.5 text-[13px] leading-6 text-foreground/58">
                   {description}
                 </p>
+                <div className="mt-4 text-[12px] font-medium text-primary/80">
+                  {isZh ? '填入示例提示词' : 'Insert starter prompt'}
+                </div>
               </div>
             </button>
           ))}

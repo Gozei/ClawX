@@ -1,5 +1,6 @@
 import { invokeIpc } from '@/lib/api-client';
 import { hostApiFetch } from '@/lib/host-api';
+import { useAgentsStore } from '@/stores/agents';
 import { CHAT_HISTORY_LABEL_PREFETCH_LIMIT, CHAT_HISTORY_RPC_TIMEOUT_MS, getCanonicalPrefixFromSessions, getMessageText, toMs } from './helpers';
 import { DEFAULT_CANONICAL_PREFIX, DEFAULT_SESSION_KEY, type ChatSession, type RawMessage } from './types';
 import type { ChatGet, ChatSet, SessionHistoryActions } from './store-api';
@@ -8,6 +9,15 @@ function getAgentIdFromSessionKey(sessionKey: string): string {
   if (!sessionKey.startsWith('agent:')) return 'main';
   const [, agentId] = sessionKey.split(':');
   return agentId || 'main';
+}
+
+function normalizeAgentId(value: string | undefined | null): string {
+  return (value ?? '').trim().toLowerCase() || 'main';
+}
+
+function resolveDefaultCanonicalPrefix(): string {
+  const defaultAgentId = normalizeAgentId(useAgentsStore.getState().defaultAgentId);
+  return `agent:${defaultAgentId}`;
 }
 
 function parseSessionUpdatedAtMs(value: unknown): number | undefined {
@@ -182,10 +192,51 @@ export function createSessionActions(
             get().loadHistory();
           }
 
-          // Background: fetch first user message for every non-main session to populate labels upfront.
-          // Uses a small limit so it's cheap; runs in parallel and doesn't block anything.
-          const sessionsToLabel = sessionsWithCurrent.filter((s) => !s.key.endsWith(':main'));
+          // Background: fetch first user message for unlabeled sessions without
+          // flooding Gateway chat.history calls for every row in the sidebar.
+          const sessionLabelsAfterLoad = get().sessionLabels;
+          const sessionsToLabel = sessionsWithCurrent.filter((session) => (
+            !session.key.endsWith(':main')
+            && !hasStoredSessionLabel(sessionsWithCurrent, session.key)
+            && !sessionLabelsAfterLoad[session.key]
+          ));
+          const shouldUseGatewayHistoryLabelPrefetch = false;
           if (sessionsToLabel.length > 0) {
+            void hostApiFetch<{
+              success: boolean;
+              previews?: Record<string, { firstUserMessage: string | null }>;
+            }>('/api/sessions/previews', {
+              method: 'POST',
+              body: JSON.stringify({ sessionKeys: sessionsToLabel.map((session) => session.key) }),
+            }).then((result) => {
+              if (!result?.success || !result.previews) return;
+              set((s) => {
+                const next: Partial<typeof s> = {};
+                let nextSessionLabels = s.sessionLabels;
+                let changed = false;
+
+                for (const session of sessionsToLabel) {
+                  const labelText = result.previews?.[session.key]?.firstUserMessage?.trim();
+                  if (!labelText || s.sessionLabels[session.key] || hasStoredSessionLabel(s.sessions, session.key)) {
+                    continue;
+                  }
+                  if (!changed) {
+                    nextSessionLabels = { ...s.sessionLabels };
+                    changed = true;
+                  }
+                  nextSessionLabels[session.key] = labelText.length > 50 ? `${labelText.slice(0, 50)}...` : labelText;
+                }
+
+                if (changed) {
+                  next.sessionLabels = nextSessionLabels;
+                }
+                return next;
+              });
+            }).catch(() => {
+              // ignore preview prefetch errors
+            });
+          }
+          if (shouldUseGatewayHistoryLabelPrefetch && sessionsToLabel.length > 0) {
             void Promise.all(
               sessionsToLabel.map(async (session) => {
                 try {
@@ -325,7 +376,7 @@ export function createSessionActions(
       // conversation history inaccessible when the user switches back to it.
       const { currentSessionKey, messages, sessionLastActivity, sessionLabels, sessions } = get();
       const leavingEmpty = isUnusedDraftSession({ currentSessionKey, messages, sessions, sessionLastActivity, sessionLabels }, currentSessionKey);
-      const prefix = getCanonicalPrefixFromSessions(get().sessions) ?? DEFAULT_CANONICAL_PREFIX;
+      const prefix = resolveDefaultCanonicalPrefix() || getCanonicalPrefixFromSessions(get().sessions) || DEFAULT_CANONICAL_PREFIX;
       const newKey = `${prefix}:session-${Date.now()}`;
       set((s) => ({
         currentSessionKey: newKey,

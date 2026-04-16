@@ -66,7 +66,12 @@ describe('chat message utils', () => {
         {
           type: 'text',
           text: [
-            'Conversation info (untrusted metadata): ```json',
+            'Sender (untrusted metadata):',
+            '```json',
+            '{"label":"Deep AI Worker","id":"gateway-client"}',
+            '```',
+            '',
+            '[Wed 2026-04-15 15:43 GMT+8] Conversation info (untrusted metadata): ```json',
             '{"agent":{"id":"ops","name":"Operations","preferredModel":"custom/gpt-5.4"}}',
             '```',
             'Execution playbook:',
@@ -82,5 +87,28 @@ describe('chat message utils', () => {
     };
 
     expect(extractText(message)).toBe('What can you do?');
+  });
+
+  it('hides pre-compaction memory flush prompts from user-visible text', () => {
+    const message: RawMessage = {
+      id: 'pre-compaction-flush-1',
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: [
+            'Pre-compaction memory flush. Store durable memories only in memory/2026-04-15.md (create memory/ if needed).',
+            'Treat workspace bootstrap/reference files such as MEMORY.md, SOUL.md, TOOLS.md, and AGENTS.md as read-only during this flush; never overwrite, replace, or edit them.',
+            'If memory/2026-04-15.md already exists, APPEND new content only and do not overwrite existing entries.',
+            'Do NOT create timestamped variant files (e.g., 2026-04-15-HHMM.md); always use the canonical 2026-04-15.md filename.',
+            'If nothing to store, reply with NO_REPLY.',
+            'Current time: Wednesday, April 15th, 2026 - 17:57 (Etc/GMT-8)',
+          ].join('\n'),
+        },
+      ],
+      timestamp: 1713000003,
+    };
+
+    expect(extractText(message)).toBe('');
   });
 });

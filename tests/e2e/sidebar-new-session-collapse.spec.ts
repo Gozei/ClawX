@@ -49,15 +49,15 @@ test.describe('Sidebar new session collapse', () => {
       await page.getByTestId('sidebar-new-chat').click();
 
       await expect(page.getByTestId(`sidebar-session-${SESSION_KEY}`)).toHaveCount(0);
-      await expect(sidebar).toHaveClass(/w-16/);
+      await expect(sidebar).toHaveCSS('width', '64px');
 
       await sidebar.locator('button').first().click();
-      await expect(page.getByTestId(`sidebar-session-${SESSION_KEY}`)).toHaveCount(0);
-      await expect(sidebar).toHaveClass(/w-64/);
+      await expect(page.getByTestId(`sidebar-session-${SESSION_KEY}`)).toBeVisible();
+      await expect(sidebar).toHaveCSS('width', '256px');
 
       await page.getByTestId('sidebar-new-chat').click();
 
-      await expect(sidebar).toHaveClass(/w-16/);
+      await expect(sidebar).toHaveCSS('width', '64px');
     } finally {
       await closeElectronApp(app);
     }

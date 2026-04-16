@@ -33,6 +33,7 @@ vi.mock('@electron/utils/channel-config', () => ({
 }));
 
 vi.mock('@electron/services/providers/provider-runtime-sync', () => ({
+  syncAgentModelRefToRuntime: vi.fn(),
   syncAgentModelOverrideToRuntime: vi.fn(),
   syncAllProviderAuthToRuntime: vi.fn(),
 }));
@@ -50,6 +51,7 @@ import {
   updateAgentStudio,
 } from '@electron/utils/agent-config';
 import {
+  syncAgentModelRefToRuntime,
   syncAgentModelOverrideToRuntime,
   syncAllProviderAuthToRuntime,
 } from '@electron/services/providers/provider-runtime-sync';
@@ -289,5 +291,78 @@ describe('handleAgentRoutes model refresh flow', () => {
 
     expect(updateAgentModel).toHaveBeenCalledWith('main', 'moonshot/kimi-k2.5', { setAsDefault: false });
     expect(debouncedReload).toHaveBeenCalledTimes(1);
+  });
+
+  it('hot patches the runtime model without persisting agent config', async () => {
+    const { handleAgentRoutes } = await import('@electron/api/routes/agents');
+
+    vi.mocked(parseJsonBody).mockResolvedValue({ modelRef: 'moonshot/kimi-k2.5' });
+    vi.mocked(prepareAgentModelUpdate).mockResolvedValue({
+      agentId: 'main',
+      config: {
+        agents: {
+          list: [{ id: 'main', model: { primary: 'moonshot/kimi-k2.5' } }],
+        },
+      },
+      normalizedModelRef: 'moonshot/kimi-k2.5',
+      snapshot: {
+        agents: [],
+        defaultAgentId: 'main',
+        defaultModelRef: 'moonshot/kimi-k2.5',
+        configuredChannelTypes: [],
+        channelOwners: {},
+        channelAccountOwners: {},
+      },
+      studioByAgentId: {},
+      studioStateChanged: false,
+    } as never);
+    vi.mocked(syncAllProviderAuthToRuntime).mockResolvedValue(undefined);
+    vi.mocked(syncAgentModelRefToRuntime).mockResolvedValue(undefined);
+
+    const debouncedReload = vi.fn();
+    const rpc = vi
+      .fn()
+      .mockResolvedValueOnce({
+        hash: 'hash-1',
+        config: {
+          agents: {
+            list: [{ id: 'main' }],
+          },
+        },
+      })
+      .mockResolvedValueOnce({ ok: true });
+
+    await handleAgentRoutes(
+      { method: 'PUT' } as never,
+      {} as never,
+      new URL('http://localhost/api/agents/main/model/runtime'),
+      {
+        gatewayManager: {
+          getStatus: () => ({ state: 'running' }),
+          rpc,
+          debouncedReload,
+        },
+      } as never,
+    );
+
+    expect(rpc).toHaveBeenNthCalledWith(1, 'config.get', {}, 15000);
+    expect(rpc).toHaveBeenNthCalledWith(
+      2,
+      'config.patch',
+      {
+        baseHash: 'hash-1',
+        raw: JSON.stringify({
+          agents: {
+            list: [{ id: 'main', model: { primary: 'moonshot/kimi-k2.5' } }],
+          },
+        }),
+      },
+      15000,
+    );
+    expect(syncAllProviderAuthToRuntime).toHaveBeenCalledTimes(1);
+    expect(syncAgentModelRefToRuntime).toHaveBeenCalledWith('main', 'moonshot/kimi-k2.5');
+    expect(applyPreparedAgentModelUpdate).not.toHaveBeenCalled();
+    expect(updateAgentModel).not.toHaveBeenCalled();
+    expect(debouncedReload).not.toHaveBeenCalled();
   });
 });

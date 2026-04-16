@@ -7,6 +7,17 @@ import { randomBytes } from 'crypto';
 import { app } from 'electron';
 import type { BrandingOverrides } from '../../shared/branding';
 import { resolveSupportedLanguage } from '../../shared/language';
+import {
+  DEFAULT_APP_LOG_RETENTION_DAYS,
+  DEFAULT_AUDIT_LOG_RETENTION_DAYS,
+  DEFAULT_LOG_FILE_MAX_SIZE_MB,
+  normalizeAppLogLevel,
+  normalizeAuditMode,
+  normalizeLogFileMaxSizeMb,
+  normalizeLogRetentionDays,
+  type AppLogLevel,
+  type AuditMode,
+} from '../../shared/logging';
 
 type ChatProcessDisplayMode = 'all' | 'files' | 'hidden';
 type AssistantMessageStyle = 'bubble' | 'stream';
@@ -32,6 +43,12 @@ export interface AppSettings {
   startMinimized: boolean;
   launchAtStartup: boolean;
   telemetryEnabled: boolean;
+  logLevel: AppLogLevel;
+  auditEnabled: boolean;
+  auditMode: AuditMode;
+  appLogRetentionDays: number;
+  auditLogRetentionDays: number;
+  logFileMaxSizeMb: number;
   brandingOverrides: BrandingOverrides;
   chatProcessDisplayMode: ChatProcessDisplayMode;
   hideInternalRoutineProcesses: boolean;
@@ -88,6 +105,12 @@ function createDefaultSettings(): AppSettings {
     startMinimized: false,
     launchAtStartup: false,
     telemetryEnabled: true,
+    logLevel: normalizeAppLogLevel('debug'),
+    auditEnabled: true,
+    auditMode: normalizeAuditMode('minimal'),
+    appLogRetentionDays: normalizeLogRetentionDays(DEFAULT_APP_LOG_RETENTION_DAYS, DEFAULT_APP_LOG_RETENTION_DAYS),
+    auditLogRetentionDays: normalizeLogRetentionDays(DEFAULT_AUDIT_LOG_RETENTION_DAYS, DEFAULT_AUDIT_LOG_RETENTION_DAYS),
+    logFileMaxSizeMb: normalizeLogFileMaxSizeMb(DEFAULT_LOG_FILE_MAX_SIZE_MB, DEFAULT_LOG_FILE_MAX_SIZE_MB),
     brandingOverrides: {},
     chatProcessDisplayMode: 'files',
     hideInternalRoutineProcesses: true,

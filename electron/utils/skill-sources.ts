@@ -88,14 +88,12 @@ export async function readSkillSourcesState(): Promise<SkillSourcesState> {
   const filePath = getSourceConfigPath();
   const defaults = await buildDefaultSkillSources();
   let sources: SkillSourceConfig[] = [];
-  let updatedAt = new Date(0).toISOString();
 
   try {
     const raw = await readFile(filePath, 'utf8');
     const parsed = JSON.parse(raw) as SkillSourcesState;
     if (parsed?.version === 1 && Array.isArray(parsed.sources)) {
       sources = parsed.sources.map(normalizeSource).filter((source): source is SkillSourceConfig => Boolean(source));
-      updatedAt = parsed.updatedAt || updatedAt;
     }
   } catch {
     // File not found or invalid, will use defaults

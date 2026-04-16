@@ -19,8 +19,19 @@ function isNonBodyAssistantBlockType(type: string | undefined): boolean {
 
 const SYSTEM_LINE_RE = /^System(?: \(untrusted\))?:\s*(?:\[[^\]]+\]\s*)?(.*)$/i;
 const EXEC_SYSTEM_RE = /^Exec (?:completed|finished)\s*\(([^)]*)\)(?:\s*::\s*([\s\S]*))?$/i;
+const CONVERSATION_INFO_PREFIX_RE = /^Conversation info\s*\([^)]*\):/i;
+const SENDER_METADATA_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*```[a-z]*\s*[\s\S]*?```\s*/i;
+const SENDER_METADATA_JSON_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*\{[\s\S]*?\}\s*/i;
+const GATEWAY_TIMESTAMP_PREFIX_RE = /^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i;
 const HEARTBEAT_PROMPT_LINE_RE =
   /^(如果存在 HEARTBEAT\.md|Read HEARTBEAT\.md if it exists|读取 HEARTBEAT\.md 时|Current time:|当前时间：)/i;
+
+function isPreCompactionMemoryFlushPrompt(text: string): boolean {
+  const normalized = text.trim();
+  return /^Pre-compaction memory flush\./i.test(normalized)
+    && /Store durable memories only in memory\//i.test(normalized)
+    && /reply with NO_REPLY\./i.test(normalized);
+}
 
 function summarizeSystemHeartbeatNoise(text: string): string {
   const lines = text
@@ -97,6 +108,10 @@ function summarizeSystemHeartbeatNoise(text: string): string {
 }
 
 function stripInjectedConversationInfo(text: string): string {
+  if (!CONVERSATION_INFO_PREFIX_RE.test(text)) {
+    return text;
+  }
+
   const withoutConversationInfo = text
     .replace(/^Conversation info\s*\([^)]*\):\s*```[a-z]*\n[\s\S]*?```\s*/i, '')
     .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '');
@@ -111,6 +126,9 @@ function stripInjectedConversationInfo(text: string): string {
  */
 function cleanUserText(text: string): string {
   const cleaned = stripInjectedConversationInfo(text
+    // Remove sender metadata blocks injected by bridge/gateway
+    .replace(SENDER_METADATA_PREFIX_RE, '')
+    .replace(SENDER_METADATA_JSON_PREFIX_RE, '')
     // Remove [media attached: path (mime) | path] references
     .replace(/\s*\[media attached:[^\]]*\]/g, '')
     // Remove [message_id: uuid]
@@ -120,8 +138,12 @@ function cleanUserText(text: string): string {
     // Fallback: remove "Conversation info (...): {...}" without code block wrapper
     .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '')
     // Remove Gateway timestamp prefix like [Fri 2026-02-13 22:39 GMT+8]
-    .replace(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i, '')
-    .trim());
+    .replace(GATEWAY_TIMESTAMP_PREFIX_RE, ''))
+    .trim();
+
+  if (isPreCompactionMemoryFlushPrompt(cleaned)) {
+    return '';
+  }
 
   return summarizeSystemHeartbeatNoise(cleaned);
 }

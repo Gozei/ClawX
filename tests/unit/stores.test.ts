@@ -20,6 +20,13 @@ describe('Settings Store', () => {
       autoDownloadUpdate: false,
       startMinimized: false,
       launchAtStartup: false,
+      telemetryEnabled: true,
+      logLevel: 'debug',
+      auditEnabled: true,
+      auditMode: 'minimal',
+      appLogRetentionDays: 14,
+      auditLogRetentionDays: 30,
+      logFileMaxSizeMb: 64,
       updateChannel: 'stable',
     });
   });
@@ -29,6 +36,9 @@ describe('Settings Store', () => {
     expect(state.theme).toBe('system');
     expect(state.sidebarCollapsed).toBe(false);
     expect(state.gatewayAutoStart).toBe(true);
+    expect(state.logLevel).toBe('debug');
+    expect(state.auditEnabled).toBe(true);
+    expect(state.appLogRetentionDays).toBe(14);
   });
   
   it('should update theme', () => {
@@ -93,6 +103,104 @@ describe('Settings Store', () => {
       expect.objectContaining({
         path: '/api/settings/launchAtStartup',
         method: 'PUT',
+      }),
+    );
+  });
+
+  it('should persist logging preferences through host api', () => {
+    const invoke = vi.mocked(window.electron.ipcRenderer.invoke);
+    invoke
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          status: 200,
+          ok: true,
+          json: { success: true },
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          status: 200,
+          ok: true,
+          json: { success: true },
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          status: 200,
+          ok: true,
+          json: { success: true },
+        },
+      });
+
+    const { setLogLevel, setAuditEnabled, setAuditMode } = useSettingsStore.getState();
+    setLogLevel('warn');
+    setAuditEnabled(false);
+    setAuditMode('full');
+
+    const state = useSettingsStore.getState();
+    expect(state.logLevel).toBe('warn');
+    expect(state.auditEnabled).toBe(false);
+    expect(state.auditMode).toBe('full');
+    expect(invoke).toHaveBeenNthCalledWith(
+      1,
+      'hostapi:fetch',
+      expect.objectContaining({
+        path: '/api/settings/logLevel',
+        method: 'PUT',
+      }),
+    );
+    expect(invoke).toHaveBeenNthCalledWith(
+      2,
+      'hostapi:fetch',
+      expect.objectContaining({
+        path: '/api/settings/auditEnabled',
+        method: 'PUT',
+      }),
+    );
+    expect(invoke).toHaveBeenNthCalledWith(
+      3,
+      'hostapi:fetch',
+      expect.objectContaining({
+        path: '/api/settings/auditMode',
+        method: 'PUT',
+      }),
+    );
+  });
+
+  it('should persist log retention policy through host api in a single request', async () => {
+    const invoke = vi.mocked(window.electron.ipcRenderer.invoke);
+    invoke.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 200,
+        ok: true,
+        json: { success: true },
+      },
+    });
+
+    await useSettingsStore.getState().saveLoggingPolicy({
+      appLogRetentionDays: 21,
+      auditLogRetentionDays: 45,
+      logFileMaxSizeMb: 96,
+    });
+
+    const state = useSettingsStore.getState();
+    expect(state.appLogRetentionDays).toBe(21);
+    expect(state.auditLogRetentionDays).toBe(45);
+    expect(state.logFileMaxSizeMb).toBe(96);
+    expect(invoke).toHaveBeenCalledWith(
+      'hostapi:fetch',
+      expect.objectContaining({
+        path: '/api/settings',
+        method: 'PUT',
+        body: JSON.stringify({
+          appLogRetentionDays: 21,
+          auditLogRetentionDays: 45,
+          logFileMaxSizeMb: 96,
+        }),
       }),
     );
   });

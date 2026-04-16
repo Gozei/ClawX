@@ -104,22 +104,23 @@ Use the Notion API.
     const detail = await getSkillDetail(gatewayManager as never, 'notion');
 
     expect(detail).toEqual(expect.objectContaining({
-      skill: expect.objectContaining({
+      identity: expect.objectContaining({
         id: 'notion',
+        name: 'Notion',
+        baseDir: skillDir,
+        homepage: 'https://developers.notion.com',
+      }),
+      status: expect.objectContaining({
         enabled: true,
         ready: false,
+        missing: expect.objectContaining({
+          env: ['NOTION_API_KEY'],
+        }),
       }),
       config: expect.objectContaining({
         apiKey: 'secret-key',
       }),
-      runtime: expect.objectContaining({
-        missing: expect.objectContaining({
-          env: ['NOTION_API_KEY'],
-        }),
-        baseDir: skillDir,
-      }),
-      spec: expect.objectContaining({
-        homepage: 'https://developers.notion.com',
+      requirements: expect.objectContaining({
         primaryEnv: 'NOTION_API_KEY',
         requires: expect.objectContaining({
           env: ['NOTION_API_KEY'],
@@ -127,7 +128,7 @@ Use the Notion API.
         }),
       }),
     }));
-    expect(detail?.spec.rawMarkdown).toContain('Use the Notion API.');
+    expect(detail?.requirements.rawMarkdown).toContain('Use the Notion API.');
   });
 
   it('deletes the resolved skill directory', async () => {

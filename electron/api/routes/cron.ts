@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { join } from 'node:path';
 import type { HostApiContext } from '../context';
+import { emitMutationAudit } from '../audit-utils';
 import { parseJsonBody, sendJson } from '../route-utils';
 import { getOpenClawConfigDir } from '../../utils/paths';
 import { toOpenClawChannelType, toUiChannelType } from '../../utils/channel-alias';
@@ -476,6 +477,7 @@ export async function handleCronRoutes(
   }
 
   if (url.pathname === '/api/cron/jobs' && req.method === 'POST') {
+    const startedAt = Date.now();
     try {
       const input = await parseJsonBody<{
         name: string;
@@ -499,14 +501,36 @@ export async function handleCronRoutes(
         sessionTarget: 'isolated',
         delivery,
       });
-      sendJson(res, 200, result && typeof result === 'object' ? transformCronJob(result as GatewayCronJob) : result);
+      const transformed = result && typeof result === 'object' ? transformCronJob(result as GatewayCronJob) : result;
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'cron.job.create',
+        resourceType: 'cron-job',
+        resourceId: typeof transformed === 'object' && transformed && 'id' in transformed
+          ? String((transformed as { id?: string }).id ?? '')
+          : undefined,
+        result: 'success',
+        changedKeys: ['name', 'message', 'schedule', 'delivery', 'enabled'],
+        metadata: {
+          deliveryMode: delivery.mode,
+        },
+      });
+      sendJson(res, 200, transformed);
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'cron.job.create',
+        resourceType: 'cron-job',
+        result: 'failure',
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
   }
 
   if (url.pathname.startsWith('/api/cron/jobs/') && req.method === 'PUT') {
+    const startedAt = Date.now();
     try {
       const id = decodeURIComponent(url.pathname.slice('/api/cron/jobs/'.length));
       const input = await parseJsonBody<Record<string, unknown>>(req);
@@ -526,38 +550,113 @@ export async function handleCronRoutes(
         return true;
       }
       const result = await ctx.gatewayManager.rpc('cron.update', { id, patch });
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'cron.job.update',
+        resourceType: 'cron-job',
+        resourceId: id,
+        result: Object.keys(patch).length === 0 ? 'noop' : 'success',
+        changedKeys: Object.keys(patch),
+        metadata: {
+          deliveryMode: typeof deliveryPatch?.mode === 'string' ? deliveryPatch.mode : undefined,
+        },
+      });
       sendJson(res, 200, result && typeof result === 'object' ? transformCronJob(result as GatewayCronJob) : result);
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'cron.job.update',
+        resourceType: 'cron-job',
+        result: 'failure',
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
   }
 
   if (url.pathname.startsWith('/api/cron/jobs/') && req.method === 'DELETE') {
+    const startedAt = Date.now();
     try {
       const id = decodeURIComponent(url.pathname.slice('/api/cron/jobs/'.length));
-      sendJson(res, 200, await ctx.gatewayManager.rpc('cron.remove', { id }));
+      const result = await ctx.gatewayManager.rpc('cron.remove', { id });
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'cron.job.delete',
+        resourceType: 'cron-job',
+        resourceId: id,
+        result: 'success',
+        changedKeys: ['*'],
+      });
+      sendJson(res, 200, result);
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'cron.job.delete',
+        resourceType: 'cron-job',
+        result: 'failure',
+        changedKeys: ['*'],
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
   }
 
   if (url.pathname === '/api/cron/toggle' && req.method === 'POST') {
+    const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ id: string; enabled: boolean }>(req);
-      sendJson(res, 200, await ctx.gatewayManager.rpc('cron.update', { id: body.id, patch: { enabled: body.enabled } }));
+      const result = await ctx.gatewayManager.rpc('cron.update', { id: body.id, patch: { enabled: body.enabled } });
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'cron.job.toggle',
+        resourceType: 'cron-job',
+        resourceId: body.id,
+        result: 'success',
+        changedKeys: ['enabled'],
+        metadata: {
+          enabled: body.enabled,
+        },
+      });
+      sendJson(res, 200, result);
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'cron.job.toggle',
+        resourceType: 'cron-job',
+        result: 'failure',
+        changedKeys: ['enabled'],
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
   }
 
   if (url.pathname === '/api/cron/trigger' && req.method === 'POST') {
+    const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ id: string }>(req);
-      sendJson(res, 200, await ctx.gatewayManager.rpc('cron.run', { id: body.id, mode: 'force' }));
+      const result = await ctx.gatewayManager.rpc('cron.run', { id: body.id, mode: 'force' });
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'cron.job.trigger',
+        resourceType: 'cron-job',
+        resourceId: body.id,
+        result: 'success',
+        changedKeys: ['runNow'],
+      });
+      sendJson(res, 200, result);
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'cron.job.trigger',
+        resourceType: 'cron-job',
+        result: 'failure',
+        changedKeys: ['runNow'],
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;

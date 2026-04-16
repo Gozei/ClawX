@@ -8,4 +8,6 @@ export interface HostApiContext {
   clawHubService: ClawHubService;
   eventBus: HostEventBus;
   mainWindow: BrowserWindow | null;
+  requestId?: string;
+  requestOrigin?: string | null;
 }

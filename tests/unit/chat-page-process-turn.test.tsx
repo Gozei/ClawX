@@ -21,10 +21,14 @@ const { agentsState, chatState, gatewayState, settingsState } = vi.hoisted(() =>
     pendingFinal: false,
     lastUserMessageAt: 1000,
     sendMessage: vi.fn(),
+    queueOfflineMessage: vi.fn(),
+    flushQueuedMessage: vi.fn(),
+    clearQueuedMessage: vi.fn(),
     abortRun: vi.fn(),
     clearError: vi.fn(),
     cleanupEmptySession: vi.fn(),
     loadHistory: vi.fn(async () => {}),
+    queuedMessages: {} as Record<string, unknown>,
   },
   gatewayState: {
     status: { state: 'running', port: 18789 },
@@ -115,6 +119,10 @@ vi.mock('@/pages/Chat/ChatInput', () => ({
 
 vi.mock('@/pages/Chat/ChatToolbar', () => ({
   ChatToolbar: () => <div data-testid="chat-toolbar" />,
+}));
+
+vi.mock('@/pages/Chat/ChatToolbarV2', () => ({
+  ChatToolbarV2: () => <div data-testid="chat-toolbar" />,
 }));
 
 describe('Chat process turn rendering', () => {

@@ -5,6 +5,7 @@ const { gatewayRpcMock, hostApiFetchMock, agentsState } = vi.hoisted(() => ({
   hostApiFetchMock: vi.fn(),
   agentsState: {
     agents: [] as Array<Record<string, unknown>>,
+    defaultAgentId: 'main',
   },
 }));
 
@@ -49,6 +50,7 @@ describe('chat store session resume', () => {
         mainSessionKey: 'agent:other:main',
       },
     ];
+    agentsState.defaultAgentId = 'main';
 
     hostApiFetchMock.mockReset();
     hostApiFetchMock.mockResolvedValue({ success: true });
@@ -277,6 +279,86 @@ describe('chat store session resume', () => {
     ]);
   });
 
+  it('does not keep a duplicate optimistic user message when refreshed history wraps the same prompt in gateway metadata', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [
+            {
+              id: 'history-user-1',
+              role: 'user',
+              content: [
+                'Sender (untrusted metadata):',
+                '```json',
+                '{"label":"Deep AI Worker","id":"gateway-client"}',
+                '```',
+                '',
+                '[Wed 2026-04-15 15:43 GMT+8] Conversation info (untrusted metadata): ```json',
+                '{"agent":{"id":"main","name":"Main","preferredModel":"custom-custombc/glm-5"}}',
+                '```',
+                'Execution playbook:',
+                '- You are currently acting as the Main agent.',
+                '',
+                '现在再看下',
+              ].join('\n'),
+              timestamp: userTimestampSeconds + 12,
+            },
+            {
+              id: 'assistant-1',
+              role: 'assistant',
+              content: '我正在继续处理。',
+              timestamp: userTimestampSeconds + 13,
+            },
+          ],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        {
+          id: 'optimistic-user-1',
+          role: 'user',
+          content: '现在再看下',
+          timestamp: userTimestampSeconds,
+        },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sending: true,
+      activeRunId: 'run-live',
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().loadHistory(true);
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual([
+      'history-user-1',
+      'assistant-1',
+    ]);
+    expect(next.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+    expect(next.sending).toBe(false);
+    expect(next.activeRunId).toBeNull();
+  });
+
   it('combines modelProvider and model into a full session model ref when sessions load', async () => {
     gatewayRpcMock.mockReset();
     gatewayRpcMock.mockImplementation((method: string) => {
@@ -304,6 +386,348 @@ describe('chat store session resume', () => {
     expect(next.sessions[0]?.modelProvider).toBe('custom-custombc');
     expect(next.sessions[0]?.model).toBe('custom-custombc/gpt-5.4');
     expect(next.sessionModels['agent:main:main']).toBe('custom-custombc/gpt-5.4');
+  });
+
+  it('loads sessions from the host session list route before falling back to gateway enumeration', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+    hostApiFetchMock.mockReset();
+    hostApiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/sessions/list') {
+        return Promise.resolve({
+          success: true,
+          sessions: [
+            {
+              key: 'agent:main:session-recovered',
+              label: 'Recovered session',
+              updatedAt: userTimestampMs + 1000,
+            },
+            {
+              key: 'agent:main:main',
+              displayName: 'Main',
+              updatedAt: userTimestampMs,
+            },
+          ],
+        });
+      }
+      if (path === '/api/sessions/metadata') {
+        return Promise.resolve({ success: true, metadata: {} });
+      }
+      throw new Error(`Unexpected host route: ${path}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    await useChatStore.getState().loadSessions();
+
+    expect(gatewayRpcMock).not.toHaveBeenCalled();
+    expect(useChatStore.getState().sessions.map((session) => session.key)).toEqual([
+      'agent:main:session-recovered',
+      'agent:main:main',
+    ]);
+    expect(useChatStore.getState().sessions[0]?.label).toBe('Recovered session');
+  });
+
+  it('creates a new draft session under the configured default role instead of the previous role', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+    agentsState.defaultAgentId = 'main';
+    vi.setSystemTime(new Date('2026-04-15T10:00:00.000Z'));
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:other:main',
+      currentAgentId: 'other',
+      sessions: [{ key: 'agent:main:main' }, { key: 'agent:other:main' }],
+      messages: [{ id: 'assistant-1', role: 'assistant', content: 'Existing other history' }],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionModels: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sessionRunningState: {},
+      sendStage: null,
+    });
+
+    useChatStore.getState().newSession();
+    const expectedTimestamp = new Date('2026-04-15T10:00:00.000Z').valueOf();
+
+    expect(useChatStore.getState().currentSessionKey).toBe(`agent:main:session-${expectedTimestamp}`);
+    expect(useChatStore.getState().currentAgentId).toBe('main');
+    expect(useChatStore.getState().messages).toEqual([]);
+  });
+
+  it('loads inactive session history through the host route before falling back to gateway chat.history', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+    hostApiFetchMock.mockReset();
+    hostApiFetchMock
+      .mockResolvedValueOnce({
+        success: true,
+        resolved: true,
+        thinkingLevel: 'high',
+        messages: [
+          {
+            role: 'user',
+            content: [{
+              type: 'text',
+              text: 'Sender (untrusted metadata):\n```json\n{"label":"ClawX"}\n```\n\n[Fri 2026-04-03 14:35 GMT+8] Preview from local history',
+            }],
+            timestamp: userTimestampSeconds,
+            id: 'user-local',
+          },
+          {
+            role: 'assistant',
+            content: 'Reply from local history',
+            timestamp: assistantTimestampSeconds,
+            id: 'assistant-local',
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        label: 'Preview from local history',
+      });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:session-local',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:session-local' }],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionModels: {},
+      sessionRunningState: {},
+      messages: [],
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().loadHistory();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/history', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKey: 'agent:main:session-local', limit: 200 }),
+    });
+    expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/auto-label', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKey: 'agent:main:session-local', label: 'Preview from local history' }),
+    });
+    expect(gatewayRpcMock).not.toHaveBeenCalled();
+    expect(useChatStore.getState().messages.map((message) => message.id)).toEqual([
+      'user-local',
+      'assistant-local',
+    ]);
+    expect(useChatStore.getState().thinkingLevel).toBe('high');
+    expect(useChatStore.getState().sessionLabels['agent:main:session-local']).toBe('Preview from local history');
+    expect(useChatStore.getState().sessions[0]?.label).toBe('Preview from local history');
+  });
+
+  it('filters out pre-compaction memory flush prompts from loaded history', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: [
+                    'Pre-compaction memory flush. Store durable memories only in memory/2026-04-15.md (create memory/ if needed).',
+                    'Treat workspace bootstrap/reference files such as MEMORY.md, SOUL.md, TOOLS.md, and AGENTS.md as read-only during this flush; never overwrite, replace, or edit them.',
+                    'If memory/2026-04-15.md already exists, APPEND new content only and do not overwrite existing entries.',
+                    'Do NOT create timestamped variant files (e.g., 2026-04-15-HHMM.md); always use the canonical 2026-04-15.md filename.',
+                    'If nothing to store, reply with NO_REPLY.',
+                  ].join('\n'),
+                },
+              ],
+              timestamp: userTimestampSeconds - 1,
+              id: 'flush-prompt',
+            },
+            {
+              role: 'user',
+              content: '你是什么模型',
+              timestamp: userTimestampSeconds,
+              id: 'user-real',
+            },
+            {
+              role: 'assistant',
+              content: '我是 glm-5',
+              timestamp: assistantTimestampSeconds,
+              id: 'assistant-real',
+            },
+          ],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:session-flush',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:session-flush' }],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionModels: {},
+      sessionRunningState: { 'agent:main:session-flush': true },
+      messages: [],
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().loadHistory();
+
+    expect(useChatStore.getState().messages.map((message) => message.id)).toEqual([
+      'user-real',
+      'assistant-real',
+    ]);
+    expect(useChatStore.getState().sessionLabels['agent:main:session-flush']).toBe('你是什么模型');
+  });
+
+  it('prefetches sidebar labels through the host preview route instead of gateway chat.history', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'sessions.list') {
+        return Promise.resolve({
+          sessions: [
+            {
+              key: 'agent:main:main',
+              displayName: 'Main',
+              updatedAt: userTimestampMs,
+            },
+            {
+              key: 'agent:main:session-preview',
+              updatedAt: userTimestampMs - 1_000,
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+    hostApiFetchMock.mockReset();
+    hostApiFetchMock
+      .mockResolvedValueOnce({
+        success: true,
+        sessions: [
+          {
+            key: 'agent:main:main',
+            displayName: 'Main',
+            updatedAt: userTimestampMs,
+          },
+          {
+            key: 'agent:main:session-preview',
+            updatedAt: userTimestampMs - 1_000,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        metadata: {},
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        previews: {
+          'agent:main:session-preview': {
+            firstUserMessage: 'Preview from host route',
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        label: 'Preview from host route',
+      });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionModels: {},
+      messages: [],
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().loadSessions();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(gatewayRpcMock).not.toHaveBeenCalled();
+    expect(hostApiFetchMock).toHaveBeenNthCalledWith(1, '/api/sessions/list');
+    expect(hostApiFetchMock).toHaveBeenNthCalledWith(2, '/api/sessions/metadata', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKeys: ['agent:main:main', 'agent:main:session-preview'] }),
+    });
+    expect(hostApiFetchMock).toHaveBeenNthCalledWith(3, '/api/sessions/previews', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKeys: ['agent:main:session-preview'] }),
+    });
+    expect(hostApiFetchMock).toHaveBeenNthCalledWith(4, '/api/sessions/auto-label', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKey: 'agent:main:session-preview', label: 'Preview from host route' }),
+    });
+    expect(useChatStore.getState().sessionLabels['agent:main:session-preview']).toBe('Preview from host route');
   });
 
   it('remaps legacy session running state when sessions load canonical keys', async () => {

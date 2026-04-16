@@ -13,7 +13,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { hostApiFetch } from '@/lib/host-api';
 import { invokeIpc } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
-import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
 import { useChatStore } from '@/stores/chat';
 import { useProviderStore } from '@/stores/providers';
@@ -40,10 +39,13 @@ export interface FileAttachment {
 
 interface ChatInputProps {
   onSend: (text: string, attachments?: FileAttachment[], targetAgentId?: string | null) => void;
+  onQueueOfflineMessage?: (text: string, attachments?: FileAttachment[], targetAgentId?: string | null) => void;
   onStop?: () => void;
   disabled?: boolean;
   sending?: boolean;
   isEmpty?: boolean;
+  prefillText?: string;
+  prefillNonce?: number;
 }
 
 type ModelOption = {
@@ -113,6 +115,7 @@ function getErrorMessage(error: unknown): string {
   }
   return String(error);
 }
+
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -187,18 +190,31 @@ function readFileAsBase64(file: globalThis.File): Promise<string> {
 
 // ── Component ────────────────────────────────────────────────────
 
-export function ChatInput({ onSend, onStop, disabled = false, sending = false, isEmpty = false }: ChatInputProps) {
-  const { t } = useTranslation('chat');
+export function ChatInput({
+  onSend,
+  onQueueOfflineMessage,
+  onStop,
+  disabled = false,
+  sending = false,
+  prefillText,
+  prefillNonce = 0,
+}: ChatInputProps) {
+  const { t, i18n } = useTranslation('chat');
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [targetAgentId, setTargetAgentId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [modelSwitchWidth, setModelSwitchWidth] = useState('180px');
+  const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
+  const modelLabelMeasureRef = useRef<HTMLSpanElement>(null);
   const isComposingRef = useRef(false);
-  const gatewayStatus = useGatewayStore((s) => s.status);
   const agents = useAgentsStore((s) => s.agents);
   const defaultModelRef = useAgentsStore((s) => s.defaultModelRef);
+  const fetchAgents = useAgentsStore((s) => s.fetchAgents);
   const providerAccounts = useProviderStore((s) => s.accounts);
   const providerStatuses = useProviderStore((s) => s.statuses);
   const providerVendors = useProviderStore((s) => s.vendors);
@@ -234,7 +250,6 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
   );
   const showAgentPicker = mentionableAgents.length > 0;
   const inputFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
-  const metaFontSize = `${Math.round(11 * (chatFontScale / 100) * 10) / 10}px`;
   const providerItems = useMemo(
     () => buildProviderListItems(providerAccounts, providerStatuses, providerVendors, providerDefaultAccountId),
     [providerAccounts, providerDefaultAccountId, providerStatuses, providerVendors],
@@ -268,22 +283,27 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
         });
     })
   ), [providerItems]);
-  const fallbackAgentModelRef = currentSession
-    ? (currentAgent?.overrideModelRef || currentAgent?.modelRef || '')
-    : '';
-  const effectiveModelRef = (sessionModels[currentSessionKey] || currentSession?.model || defaultModelRef || fallbackAgentModelRef || '').trim();
+  const effectiveModelRef = (sessionModels[currentSessionKey] || currentSession?.model || defaultModelRef || '').trim();
   const selectedModelValue = useMemo(() => {
     if (!effectiveModelRef) return '';
     return modelOptions.some((option) => option.value === effectiveModelRef) ? effectiveModelRef : '';
   }, [effectiveModelRef, modelOptions]);
+  const activeModelValue = selectedModelValue;
   const selectedModelLabel = useMemo(
     () => modelOptions.find((option) => option.value === selectedModelValue)?.label || t('composer.selectModel'),
     [modelOptions, selectedModelValue, t],
   );
+  const isModelSwitchDisabled = sending || modelOptions.length === 0;
   const attachmentKeys = useMemo(
     () => new Set(attachments.map((attachment) => attachment.dedupeKey).filter(Boolean)),
     [attachments],
   );
+
+  useLayoutEffect(() => {
+    const measuredLabelWidth = modelLabelMeasureRef.current?.offsetWidth ?? 0;
+    const nextWidthPx = Math.min(Math.max(Math.ceil(measuredLabelWidth + 64), 150), 360);
+    setModelSwitchWidth(`${nextWidthPx}px`);
+  }, [selectedModelLabel]);
 
   useLayoutEffect(() => {
     activeSessionKeyRef.current = currentSessionKey;
@@ -295,6 +315,8 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
     setAttachments([]);
     setTargetAgentId(null);
     setPickerOpen(false);
+    setModelMenuOpen(false);
+    setDragOver(false);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
@@ -310,7 +332,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
 
   // Focus textarea on mount (avoids Windows focus loss after session delete + native dialog)
   useEffect(() => {
-    if (!disabled && textareaRef.current) {
+    if (textareaRef.current) {
       textareaRef.current.focus();
     }
   }, [disabled]);
@@ -342,9 +364,77 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
   }, [pickerOpen]);
 
   useEffect(() => {
+    if (!modelMenuOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!modelMenuRef.current?.contains(event.target as Node)) {
+        setModelMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+    };
+  }, [modelMenuOpen]);
+
+  useEffect(() => {
     if (providerAccounts.length > 0 || providerStatuses.length > 0 || providerVendors.length > 0) return;
     void refreshProviderSnapshot();
   }, [providerAccounts.length, providerStatuses.length, providerVendors.length, refreshProviderSnapshot]);
+
+  useEffect(() => {
+    setModelMenuOpen(false);
+  }, [currentAgentId]);
+
+  useEffect(() => {
+    if (currentSession) return;
+    if (sessionModels[currentSessionKey]) return;
+    if (defaultModelRef?.trim()) {
+      useChatStore.setState((state) => {
+        if (state.sessionModels[currentSessionKey]) {
+          return {};
+        }
+        return {
+          sessionModels: {
+            ...state.sessionModels,
+            [currentSessionKey]: defaultModelRef.trim(),
+          },
+        };
+      });
+      return;
+    }
+
+    let cancelled = false;
+    void fetchAgents()
+      .then(() => {
+        if (cancelled) return;
+        const latestDefaultModelRef = (useAgentsStore.getState().defaultModelRef || '').trim();
+        if (!latestDefaultModelRef) return;
+        useChatStore.setState((state) => {
+          if (state.currentSessionKey !== currentSessionKey) {
+            return {};
+          }
+          if (state.sessionModels[currentSessionKey]) {
+            return {};
+          }
+          const storedModel = state.sessions.find((session) => session.key === currentSessionKey)?.model;
+          if (storedModel) {
+            return {};
+          }
+          return {
+            sessionModels: {
+              ...state.sessionModels,
+              [currentSessionKey]: latestDefaultModelRef,
+            },
+          };
+        });
+      })
+      .catch(() => {
+        // Ignore background refresh failures here; sendMessage performs its own guard before dispatch.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSession, currentSessionKey, defaultModelRef, fetchAgents, sessionModels]);
 
   // ── File staging via native dialog ─────────────────────────────
 
@@ -523,10 +613,25 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
   const allReady = attachments.length === 0 || attachments.every(a => a.status === 'ready');
   const hasFailedAttachments = attachments.some((a) => a.status === 'error');
   const canSend = (input.trim() || attachments.length > 0) && allReady && !disabled && !sending;
-  const canStop = sending && !disabled && !!onStop;
+  const canQueueOffline = (input.trim() || attachments.length > 0) && allReady && disabled && !sending;
+  const canStop = sending && !!onStop;
+  const isZh = (i18n?.resolvedLanguage || i18n?.language || '').startsWith('zh');
+
+  useEffect(() => {
+    if (!prefillText || prefillNonce === 0) {
+      return;
+    }
+    setInput(prefillText);
+    requestAnimationFrame(() => {
+      if (!textareaRef.current) return;
+      textareaRef.current.focus();
+      const cursor = prefillText.length;
+      textareaRef.current.setSelectionRange(cursor, cursor);
+    });
+  }, [prefillNonce, prefillText]);
 
   const handleSend = useCallback(() => {
-    if (!canSend) return;
+    if (!canSend && !canQueueOffline) return;
     const readyAttachments = attachments.filter(a => a.status === 'ready');
     // Capture values before clearing — clear input immediately for snappy UX,
     // but keep attachments available for the async send
@@ -544,10 +649,14 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-    onSend(textToSend, attachmentsToSend, targetAgentId);
+    if (disabled) {
+      onQueueOfflineMessage?.(textToSend, attachmentsToSend, targetAgentId);
+    } else {
+      onSend(textToSend, attachmentsToSend, targetAgentId);
+    }
     setTargetAgentId(null);
     setPickerOpen(false);
-  }, [input, attachments, canSend, onSend, targetAgentId]);
+  }, [input, attachments, canQueueOffline, canSend, disabled, onQueueOfflineMessage, onSend, targetAgentId]);
 
   const handleStop = useCallback(() => {
     if (!canStop) return;
@@ -593,9 +702,6 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
     [stageBufferFiles],
   );
 
-  // Handle drag & drop
-  const [dragOver, setDragOver] = useState(false);
-
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -620,6 +726,33 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
     [stageBufferFiles],
   );
 
+  const setSessionModel = useCallback((modelRef: string | null) => {
+    useChatStore.setState((state) => {
+      const nextSessionModels = { ...state.sessionModels };
+      if (modelRef) {
+        nextSessionModels[currentSessionKey] = modelRef;
+      } else {
+        delete nextSessionModels[currentSessionKey];
+      }
+
+      return {
+        sessionModels: nextSessionModels,
+        sessions: state.sessions.map((session) => (
+          session.key !== currentSessionKey
+            ? session
+            : (
+                modelRef
+                  ? { ...session, model: modelRef }
+                  : (() => {
+                      const { model: _model, ...rest } = session;
+                      return rest;
+                    })()
+              )
+        )),
+      };
+    });
+  }, [currentSessionKey]);
+
   const handleModelChange = useCallback(async (nextModelRef: string) => {
     if (!currentAgentId) return;
     const normalizedNextModelRef = (nextModelRef || '').trim();
@@ -629,7 +762,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
     const previousLabel = modelOptions.find((option) => option.value === selectedModelValue)?.label
       || selectedModelValue
       || t('composer.selectModel');
-    const nextLabel = nextOption?.label || normalizedNextModelRef;
+    const nextLabel = nextOption?.label || normalizedNextModelRef || t('composer.selectModel');
 
     try {
       if (nextOption && shouldValidateModelOption(nextOption)) {
@@ -650,17 +783,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
         });
       }
 
-      useChatStore.setState((state) => ({
-        sessionModels: {
-          ...state.sessionModels,
-          [currentSessionKey]: normalizedNextModelRef,
-        },
-        sessions: state.sessions.map((session) => (
-          session.key === currentSessionKey
-            ? { ...session, model: normalizedNextModelRef }
-            : session
-        )),
-      }));
+      setSessionModel(normalizedNextModelRef || null);
       toast.success(t('composer.modelSwitchSuccess', { model: nextLabel }));
     } catch (error) {
       toast.error(t('composer.modelSwitchFailed', {
@@ -668,13 +791,13 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
         error: getErrorMessage(error),
       }));
     }
-  }, [currentAgentId, currentSessionKey, getAccountApiKey, modelOptions, selectedModelValue, t]);
+  }, [currentAgentId, getAccountApiKey, modelOptions, selectedModelValue, setSessionModel, t]);
 
   return (
     <div
+      data-testid="chat-composer-shell"
       className={cn(
-        "p-4 pb-6 w-full mx-auto transition-all duration-300",
-        isEmpty ? "max-w-3xl" : "max-w-4xl"
+        'w-full max-w-4xl mx-auto px-4 pt-0 pb-6 transition-all duration-300'
       )}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -728,8 +851,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
                   isComposingRef.current = false;
                 }}
                 onPaste={handlePaste}
-                placeholder={disabled ? t('composer.gatewayDisconnectedPlaceholder') : t('composer.messagePlaceholder')}
-                disabled={disabled}
+                placeholder={disabled && !input ? t('composer.gatewayDisconnectedPlaceholder') : t('composer.messagePlaceholder')}
                 className="min-h-[62px] max-h-[220px] resize-none border-0 bg-transparent px-3 py-2.5 leading-[1.75] tracking-[0.01em] text-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/52"
                 rows={1}
                 style={{ fontSize: inputFontSize }}
@@ -738,16 +860,16 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
 
             <Button
               onClick={sending ? handleStop : handleSend}
-              disabled={sending ? !canStop : !canSend}
+              disabled={sending ? !canStop : !(canSend || canQueueOffline)}
               size="icon"
               data-testid="chat-send-button"
               className={`mt-1 shrink-0 h-10 w-10 rounded-full transition-colors ${
-                (sending || canSend)
+                (sending || canSend || canQueueOffline)
                   ? 'bg-[linear-gradient(135deg,#4f8df7_0%,#2f6fe4_100%)] text-white shadow-[0_10px_24px_rgba(47,111,228,0.28)] hover:brightness-105'
                   : 'bg-transparent text-muted-foreground/40 hover:bg-transparent'
               }`}
-              variant={sending || canSend ? 'default' : 'ghost'}
-              title={sending ? t('composer.stop') : t('composer.send')}
+              variant={sending || canSend || canQueueOffline ? 'default' : 'ghost'}
+              title={sending ? t('composer.stop') : disabled ? (isZh ? '离线排队发送' : 'Queue to send') : t('composer.send')}
             >
               {sending ? (
                 <Square className="h-4 w-4" fill="currentColor" />
@@ -763,7 +885,7 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
               data-testid="chat-attach-button"
               className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-[13px] font-medium text-foreground/72 transition-colors hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/8"
               onClick={pickFiles}
-              disabled={disabled || sending}
+              disabled={sending}
               title={t('composer.attachFiles')}
             >
               <Paperclip className="h-4 w-4" />
@@ -775,17 +897,17 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
                 <button
                   type="button"
                   data-testid="chat-agent-picker-button"
-                  className={cn(
-                    'inline-flex h-9 items-center gap-2 rounded-full px-3 text-[13px] font-medium text-foreground/72 transition-colors hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/8',
-                    (pickerOpen || selectedTarget) && 'bg-primary/10 text-primary hover:bg-primary/20'
-                  )}
-                  onClick={() => setPickerOpen((open) => !open)}
-                  disabled={disabled || sending}
-                  title={t('composer.role', 'Role')}
-                >
-                  <AtSign className="h-4 w-4" />
-                  <span>{selectedTarget ? selectedTarget.name : t('composer.role', 'Role')}</span>
-                  {selectedTarget && (
+                className={cn(
+                  'inline-flex h-9 items-center gap-2 rounded-full px-3 text-[13px] font-medium text-foreground/72 transition-colors hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/8',
+                  (pickerOpen || selectedTarget) && 'bg-primary/10 text-primary hover:bg-primary/20'
+                )}
+                onClick={() => setPickerOpen((open) => !open)}
+                disabled={sending}
+                title={t('composer.pickAgent')}
+              >
+                <AtSign className="h-4 w-4" />
+                <span>{selectedTarget ? selectedTarget.name : t('composer.pickAgent')}</span>
+                {selectedTarget && (
                     <span
                       role="button"
                       aria-label={t('common:actions.clear', 'Clear')}
@@ -826,65 +948,80 @@ export function ChatInput({ onSend, onStop, disabled = false, sending = false, i
               </div>
             )}
 
-            <label
-              data-testid="chat-model-switch"
-              className={cn(
-                'relative inline-flex h-9 min-w-[220px] max-w-full items-center overflow-hidden rounded-[10px] text-foreground/68 transition-colors',
-                modelOptions.length > 0 ? 'hover:bg-black/5 hover:text-foreground/82 dark:hover:bg-white/8' : 'opacity-60'
-              )}
-              title={t('composer.switchModel')}
-            >
-              <Cpu className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-current" />
-              <select
-                className="h-full w-full appearance-none bg-transparent pl-9 pr-9 text-[13px] font-medium text-current outline-none disabled:cursor-not-allowed"
-                value={selectedModelValue}
-                onChange={(event) => {
-                  void handleModelChange(event.target.value);
-                }}
-                disabled={disabled || sending || modelOptions.length === 0}
+            <div ref={modelMenuRef} className="relative">
+              <span
+                ref={modelLabelMeasureRef}
+                aria-hidden="true"
+                className="pointer-events-none absolute -z-10 overflow-hidden whitespace-nowrap px-0 text-[13px] font-medium opacity-0"
               >
-                {selectedModelValue === '' && (
-                  <option value="">
-                    {selectedModelLabel}
-                  </option>
+                {selectedModelLabel}
+              </span>
+              <button
+                type="button"
+                data-testid="chat-model-switch"
+                className={cn(
+                  'inline-flex h-9 max-w-full items-center gap-1.5 rounded-[10px] pl-2.5 pr-2 text-[13px] font-medium text-foreground/68 transition-colors',
+                  !isModelSwitchDisabled && 'hover:bg-black/5 hover:text-foreground/82 dark:hover:bg-white/8',
+                  isModelSwitchDisabled && 'cursor-not-allowed opacity-50'
                 )}
-                {modelOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground/72" />
-            </label>
+                title={t('composer.switchModel')}
+                style={{ width: modelSwitchWidth }}
+                onClick={() => {
+                  if (!isModelSwitchDisabled) {
+                    setModelMenuOpen((open) => !open);
+                  }
+                }}
+                disabled={isModelSwitchDisabled}
+              >
+                <Cpu aria-hidden="true" className="pointer-events-none h-4 w-4 shrink-0 text-current" />
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-left text-current"
+                >
+                  {selectedModelLabel}
+                </span>
+                <ChevronDown className="pointer-events-none h-4 w-4 shrink-0 text-current" />
+              </button>
+              {modelMenuOpen && !isModelSwitchDisabled && (
+                <div className="absolute bottom-full left-0 z-20 mb-2 w-[max-content] min-w-full max-w-[360px] overflow-hidden rounded-xl border border-black/10 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-card">
+                  <div className="max-h-64 overflow-y-auto">
+                    {modelOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={cn(
+                          'flex w-full items-center rounded-[10px] px-3 py-2 text-left text-[13px] font-medium transition-colors',
+                          option.value === activeModelValue
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-foreground/82 hover:bg-black/5 dark:hover:bg-white/5'
+                        )}
+                        onClick={() => {
+                          setModelMenuOpen(false);
+                          void handleModelChange(option.value);
+                        }}
+                      >
+                        <span className="truncate">{option.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-        <div className="mt-2.5 flex items-center justify-between gap-2 px-4 text-muted-foreground/58" style={{ fontSize: metaFontSize }}>
-          <div className="flex items-center gap-1.5">
-            <div className={cn("w-1.5 h-1.5 rounded-full", gatewayStatus.state === 'running' ? "bg-green-500/80" : "bg-red-500/80")} />
-            <span>
-              {t('composer.gatewayStatus', {
-                state: gatewayStatus.state === 'running'
-                  ? t('composer.gatewayConnected')
-                  : gatewayStatus.state,
-                port: gatewayStatus.port,
-                pid: gatewayStatus.pid ? `| pid: ${gatewayStatus.pid}` : '',
-              })}
-            </span>
-          </div>
-          {hasFailedAttachments && (
-            <Button
-              variant="link"
-              size="sm"
-              className="h-auto p-0 text-[11px]"
-              onClick={() => {
-                setAttachments((prev) => prev.filter((att) => att.status !== 'error'));
-                void pickFiles();
-              }}
-            >
-              {t('composer.retryFailedAttachments')}
-            </Button>
-          )}
-        </div>
+        {hasFailedAttachments && (
+          <Button
+            variant="link"
+            size="sm"
+            className="mt-2.5 h-auto px-4 py-0 text-[11px] text-muted-foreground/58"
+            onClick={() => {
+              setAttachments((prev) => prev.filter((att) => att.status !== 'error'));
+              void pickFiles();
+            }}
+          >
+            {t('composer.retryFailedAttachments')}
+          </Button>
+        )}
       </div>
     </div>
   );

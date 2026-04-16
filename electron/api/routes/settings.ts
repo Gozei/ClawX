@@ -5,7 +5,9 @@ import { createMenu } from '../../main/menu';
 import { refreshTray } from '../../main/tray';
 import { syncProxyConfigToOpenClaw } from '../../utils/openclaw-proxy';
 import { getAllSettings, getSetting, resetSettings, setSetting, type AppSettings } from '../../utils/store';
+import { applyRuntimeLoggingSettings, patchTouchesLoggingSettings } from '../../utils/logging-config';
 import type { HostApiContext } from '../context';
+import { emitMutationAudit } from '../audit-utils';
 import { parseJsonBody, sendJson } from '../route-utils';
 
 async function handleProxySettingsChange(ctx: HostApiContext): Promise<void> {
@@ -54,11 +56,15 @@ export async function handleSettingsRoutes(
   }
 
   if (url.pathname === '/api/settings' && req.method === 'PUT') {
+    const startedAt = Date.now();
     try {
       const patch = await parseJsonBody<Partial<AppSettings>>(req);
       const entries = Object.entries(patch) as Array<[keyof AppSettings, AppSettings[keyof AppSettings]]>;
       for (const [key, value] of entries) {
         await setSetting(key, value);
+      }
+      if (patchTouchesLoggingSettings(patch)) {
+        applyRuntimeLoggingSettings(patch);
       }
       if (patchTouchesProxy(patch)) {
         await handleProxySettingsChange(ctx);
@@ -69,8 +75,29 @@ export async function handleSettingsRoutes(
       if (patchTouchesNativeMenus(patch)) {
         await refreshNativeMenus(ctx);
       }
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'settings.update',
+        resourceType: 'settings',
+        resourceId: 'application',
+        result: Object.keys(patch).length === 0 ? 'noop' : 'success',
+        changedKeys: Object.keys(patch),
+        metadata: {
+          scope: 'bulk',
+          changedSettingCount: Object.keys(patch).length,
+        },
+        force: patchTouchesLoggingSettings(patch),
+      });
       sendJson(res, 200, { success: true });
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'settings.update',
+        resourceType: 'settings',
+        resourceId: 'application',
+        result: 'failure',
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
@@ -88,9 +115,20 @@ export async function handleSettingsRoutes(
 
   if (url.pathname.startsWith('/api/settings/') && req.method === 'PUT') {
     const key = url.pathname.slice('/api/settings/'.length) as keyof AppSettings;
+    const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ value: AppSettings[keyof AppSettings] }>(req);
       await setSetting(key, body.value);
+      if (
+        key === 'logLevel'
+        || key === 'auditEnabled'
+        || key === 'auditMode'
+        || key === 'appLogRetentionDays'
+        || key === 'auditLogRetentionDays'
+        || key === 'logFileMaxSizeMb'
+      ) {
+        applyRuntimeLoggingSettings({ [key]: body.value } as Partial<AppSettings>);
+      }
       if (
         key === 'proxyEnabled' ||
         key === 'proxyServer' ||
@@ -107,21 +145,78 @@ export async function handleSettingsRoutes(
       if (key === 'language' || key === 'brandingOverrides') {
         await refreshNativeMenus(ctx);
       }
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'settings.update',
+        resourceType: 'settings',
+        resourceId: String(key),
+        result: 'success',
+        changedKeys: [String(key)],
+        metadata: {
+          scope: 'single',
+        },
+        force: key === 'logLevel'
+          || key === 'auditEnabled'
+          || key === 'auditMode'
+          || key === 'appLogRetentionDays'
+          || key === 'auditLogRetentionDays'
+          || key === 'logFileMaxSizeMb',
+      });
       sendJson(res, 200, { success: true });
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'settings.update',
+        resourceType: 'settings',
+        resourceId: String(key),
+        result: 'failure',
+        changedKeys: [String(key)],
+        error,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;
   }
 
   if (url.pathname === '/api/settings/reset' && req.method === 'POST') {
+    const startedAt = Date.now();
     try {
       await resetSettings();
+      const settings = await getAllSettings();
+      applyRuntimeLoggingSettings({
+        logLevel: settings.logLevel,
+        auditEnabled: settings.auditEnabled,
+        auditMode: settings.auditMode,
+        appLogRetentionDays: settings.appLogRetentionDays,
+        auditLogRetentionDays: settings.auditLogRetentionDays,
+        logFileMaxSizeMb: settings.logFileMaxSizeMb,
+      });
       await handleProxySettingsChange(ctx);
       await syncLaunchAtStartupSettingFromStore();
       await refreshNativeMenus(ctx);
-      sendJson(res, 200, { success: true, settings: await getAllSettings() });
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'settings.reset',
+        resourceType: 'settings',
+        resourceId: 'application',
+        result: 'success',
+        changedKeys: ['*'],
+        metadata: {
+          scope: 'reset',
+        },
+        force: true,
+      });
+      sendJson(res, 200, { success: true, settings });
     } catch (error) {
+      emitMutationAudit(req, ctx, {
+        startedAt,
+        action: 'settings.reset',
+        resourceType: 'settings',
+        resourceId: 'application',
+        result: 'failure',
+        error,
+        force: true,
+      });
       sendJson(res, 500, { success: false, error: String(error) });
     }
     return true;

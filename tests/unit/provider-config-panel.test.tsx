@@ -26,6 +26,14 @@ const providerStore = {
   setDefaultAccount: vi.fn(async () => {}),
 };
 
+const agentsStore = {
+  fetchAgents: vi.fn(async () => {}),
+};
+
+vi.mock('@/stores/agents', () => ({
+  useAgentsStore: (selector: (state: typeof agentsStore) => unknown) => selector(agentsStore),
+}));
+
 vi.mock('@/stores/providers', () => ({
   useProviderStore: () => providerStore,
 }));
@@ -47,6 +55,8 @@ describe('ProviderConfigPanel', () => {
     providerStore.accounts = [];
     providerStore.statuses = [];
     providerStore.defaultAccountId = null;
+    agentsStore.fetchAgents.mockReset();
+    agentsStore.fetchAgents.mockResolvedValue(undefined);
   });
 
   it('shows the empty state when there are no model configurations', () => {
@@ -218,6 +228,7 @@ describe('ProviderConfigPanel', () => {
     render(<ProviderConfigPanel />);
 
     expect(screen.getByText('全局默认')).toBeInTheDocument();
+    expect(screen.queryByText(/^默认$/)).not.toBeInTheDocument();
     const globalDefaultButtons = screen.getAllByRole('button', { name: '设为全局默认' });
     expect(globalDefaultButtons).toHaveLength(1);
 
@@ -228,7 +239,9 @@ describe('ProviderConfigPanel', () => {
         model: 'gpt-5.4-mini',
       }));
     });
+    expect(hostApiFetchMock).not.toHaveBeenCalled();
     expect(providerStore.setDefaultAccount).not.toHaveBeenCalled();
-    expect(toastSuccessMock).toHaveBeenCalledWith('已设为默认模型');
+    expect(agentsStore.fetchAgents).toHaveBeenCalledTimes(1);
+    expect(toastSuccessMock).toHaveBeenCalledWith('已设为全局默认模型');
   });
 });

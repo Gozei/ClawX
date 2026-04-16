@@ -98,6 +98,82 @@ describe('handleSessionRoutes', () => {
     );
   });
 
+  it('persists an auto-generated session label when one is missing', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      JSON.stringify({
+        sessions: [
+          { key: 'agent:main:session-1', updatedAt: 1 },
+        ],
+      }, null, 2),
+      'utf8',
+    );
+    parseJsonBodyMock.mockResolvedValueOnce({
+      sessionKey: 'agent:main:session-1',
+      label: 'Auto generated title',
+    });
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    const handled = await handleSessionRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/auto-label'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
+      success: true,
+      label: 'Auto generated title',
+      persisted: true,
+    });
+
+    const stored = JSON.parse(await readFile(join(sessionsDir, 'sessions.json'), 'utf8')) as {
+      sessions: Array<{ key: string; label?: string }>;
+    };
+    expect(stored.sessions[0]?.label).toBe('Auto generated title');
+  });
+
+  it('does not overwrite an existing persisted session label during auto-label sync', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      JSON.stringify({
+        sessions: [
+          { key: 'agent:main:session-1', label: 'Pinned title', updatedAt: 1 },
+        ],
+      }, null, 2),
+      'utf8',
+    );
+    parseJsonBodyMock.mockResolvedValueOnce({
+      sessionKey: 'agent:main:session-1',
+      label: 'Auto generated title',
+    });
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    const handled = await handleSessionRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/auto-label'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
+      success: true,
+      label: 'Pinned title',
+      persisted: false,
+    });
+
+    const stored = JSON.parse(await readFile(join(sessionsDir, 'sessions.json'), 'utf8')) as {
+      sessions: Array<{ key: string; label?: string }>;
+    };
+    expect(stored.sessions[0]?.label).toBe('Pinned title');
+  });
+
   it('persists pin and unpin metadata in sessions.json', async () => {
     const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
     await mkdir(sessionsDir, { recursive: true });
@@ -161,6 +237,310 @@ describe('handleSessionRoutes', () => {
     };
     expect(stored.sessions[0]?.pinned).toBeUndefined();
     expect(stored.sessions[0]?.pinOrder).toBeUndefined();
+  });
+
+  it('returns first-user previews without reading full chat history through the gateway', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      JSON.stringify({
+        sessions: [
+          {
+            key: 'agent:main:session-preview',
+            file: 'session-preview.jsonl',
+            updatedAt: 1,
+          },
+        ],
+      }, null, 2),
+      'utf8',
+    );
+    await writeFile(
+      join(sessionsDir, 'session-preview.jsonl'),
+      [
+        JSON.stringify({
+          message: {
+            role: 'assistant',
+            content: 'Previous reply',
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: 'user',
+            content: [{
+              type: 'text',
+              text: [
+                'Pre-compaction memory flush. Store durable memories only in memory/2026-04-15.md (create memory/ if needed).',
+                'Treat workspace bootstrap/reference files such as MEMORY.md, SOUL.md, TOOLS.md, and AGENTS.md as read-only during this flush; never overwrite, replace, or edit them.',
+                'If memory/2026-04-15.md already exists, APPEND new content only and do not overwrite existing entries.',
+                'Do NOT create timestamped variant files (e.g., 2026-04-15-HHMM.md); always use the canonical 2026-04-15.md filename.',
+                'If nothing to store, reply with NO_REPLY.',
+              ].join('\n'),
+            }],
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: 'user',
+            content: [{
+              type: 'text',
+              text: 'Sender (untrusted metadata):\n```json\n{"label":"ClawX"}\n```\n\n[Fri 2026-04-03 14:35 GMT+8] Preview me please',
+            }],
+          },
+        }),
+      ].join('\n'),
+      'utf8',
+    );
+    parseJsonBodyMock.mockResolvedValueOnce({
+      sessionKeys: ['agent:main:session-preview'],
+    });
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    const handled = await handleSessionRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/previews'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
+      success: true,
+      previews: {
+        'agent:main:session-preview': {
+          firstUserMessage: 'Preview me please',
+        },
+      },
+    });
+  });
+
+  it('lists recoverable sessions even when sessions.json contains a malformed entry', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      `{
+  "agent:main:session-old": {
+    "sessionId": "session-old",
+    "file": "session-old.jsonl",
+    "label": "Older session",
+    "updatedAt": 1000
+  },
+  "agent:main:broken": {
+    "sessionId": "broken",
+    "file": "broken.jsonl",
+    "toolSnapshot": {
+      "source": "oops",
+      invalid
+    }
+  },
+  "agent:main:session-new": {
+    "sessionId": "session-new",
+    "file": "session-new.jsonl",
+    "updatedAt": 2000
+  }
+}`,
+      'utf8',
+    );
+    await writeFile(join(sessionsDir, 'session-old.jsonl'), '', 'utf8');
+    await writeFile(join(sessionsDir, 'session-new.jsonl'), '', 'utf8');
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    const handled = await handleSessionRoutes(
+      { method: 'GET' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/list'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
+      success: true,
+      sessions: [
+        {
+          key: 'agent:main:session-new',
+          updatedAt: 2000,
+          pinned: undefined,
+          pinOrder: undefined,
+        },
+        {
+          key: 'agent:main:session-old',
+          label: 'Older session',
+          updatedAt: 1000,
+          pinned: undefined,
+          pinOrder: undefined,
+        },
+      ],
+    });
+
+    const repaired = JSON.parse(await readFile(join(sessionsDir, 'sessions.json'), 'utf8')) as Record<string, {
+      sessionId?: string;
+      file?: string;
+      label?: string;
+      updatedAt?: number;
+    }>;
+    expect(Object.keys(repaired)).toEqual([
+      'agent:main:session-old',
+      'agent:main:session-new',
+    ]);
+    expect(repaired['agent:main:session-old']).toMatchObject({
+      sessionId: 'session-old',
+      file: 'session-old.jsonl',
+      label: 'Older session',
+      updatedAt: 1000,
+    });
+    expect(repaired['agent:main:session-new']).toMatchObject({
+      sessionId: 'session-new',
+      file: 'session-new.jsonl',
+      updatedAt: 2000,
+    });
+    await expect(readFile(join(sessionsDir, 'sessions.json.malformed.bak'), 'utf8')).resolves.toContain('"agent:main:broken"');
+  });
+
+  it('repairs a malformed session store before persisting an auto-generated label', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      `{
+  "agent:main:session-1": {
+    "sessionId": "session-1",
+    "file": "session-1.jsonl",
+    "updatedAt": 1,
+    "skillsSnapshot": {
+      "source": "broken"
+    }
+  },
+  "agent:main:broken": {
+    "sessionId": "broken",
+    "file": "broken.jsonl",
+    "skillsSnapshot": {
+      "source": "oops",
+      invalid
+    }
+  }
+}`,
+      'utf8',
+    );
+    parseJsonBodyMock.mockResolvedValueOnce({
+      sessionKey: 'agent:main:session-1',
+      label: 'Recovered title',
+    });
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    const handled = await handleSessionRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/auto-label'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
+      success: true,
+      label: 'Recovered title',
+      persisted: true,
+    });
+
+    const stored = JSON.parse(await readFile(join(sessionsDir, 'sessions.json'), 'utf8')) as Record<string, {
+      label?: string;
+    }>;
+    expect(stored['agent:main:session-1']?.label).toBe('Recovered title');
+    expect(stored['agent:main:broken']).toBeUndefined();
+  });
+
+  it('returns recent transcript messages from the local session history route', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      JSON.stringify({
+        'agent:main:session-history': {
+          sessionId: 'session-history',
+          sessionFile: join(sessionsDir, 'session-history.jsonl'),
+        },
+      }, null, 2),
+      'utf8',
+    );
+    await writeFile(
+      join(sessionsDir, 'session-history.jsonl'),
+      [
+        JSON.stringify({ type: 'session', id: 'session-start' }),
+        JSON.stringify({ type: 'thinking_level_change', id: 'thinking-1', thinkingLevel: 'high' }),
+        JSON.stringify({
+          type: 'message',
+          id: 'assistant-old',
+          timestamp: '2026-04-03T06:35:41.310Z',
+          message: {
+            role: 'assistant',
+            content: 'Earlier reply',
+          },
+        }),
+        JSON.stringify({
+          type: 'message',
+          id: 'user-latest',
+          timestamp: '2026-04-03T06:36:16.874Z',
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: 'Latest question' }],
+          },
+        }),
+        JSON.stringify({
+          type: 'compaction',
+          id: 'compaction-1',
+          timestamp: '2026-04-03T06:36:20.000Z',
+        }),
+        JSON.stringify({
+          type: 'message',
+          id: 'assistant-latest',
+          timestamp: '2026-04-03T06:36:32.349Z',
+          message: {
+            role: 'assistant',
+            content: 'Latest reply',
+          },
+        }),
+      ].join('\n'),
+      'utf8',
+    );
+    parseJsonBodyMock.mockResolvedValueOnce({
+      sessionKey: 'agent:main:session-history',
+      limit: 3,
+    });
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    const handled = await handleSessionRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/history'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
+      success: true,
+      resolved: true,
+      thinkingLevel: 'high',
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: 'Latest question' }],
+          id: 'user-latest',
+          timestamp: Date.parse('2026-04-03T06:36:16.874Z'),
+        },
+        {
+          role: 'system',
+          content: [{ type: 'text', text: 'Compaction' }],
+          id: 'compaction-1',
+          timestamp: Date.parse('2026-04-03T06:36:20.000Z'),
+        },
+        {
+          role: 'assistant',
+          content: 'Latest reply',
+          id: 'assistant-latest',
+          timestamp: Date.parse('2026-04-03T06:36:32.349Z'),
+        },
+      ],
+    });
   });
 
   it('returns persisted session metadata for requested session keys', async () => {

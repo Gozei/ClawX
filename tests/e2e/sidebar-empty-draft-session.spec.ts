@@ -53,13 +53,15 @@ test.describe('Sidebar draft sessions', () => {
       await expect(sessionRow).toBeVisible({ timeout: 60_000 });
 
       await page.getByTestId('sidebar-new-chat').click();
+      await expect(page.getByTestId('sidebar')).toHaveCSS('width', '64px');
       const composerInput = page.getByTestId('chat-composer').getByRole('textbox');
       await composerInput.fill('draft that should stay with the current conversation');
       await page.getByTestId('sidebar').locator('button').first().click();
 
+      await expect(page.getByTestId('sidebar')).toHaveCSS('width', '256px');
       await expect(page.getByText(/agent:main:session-\d+/)).toHaveCount(0);
       await expect(page.getByTestId(`sidebar-session-${SESSION_KEY}`)).toBeVisible();
-      await expect(composerInput).toHaveValue('');
+      await expect(composerInput).toHaveValue('draft that should stay with the current conversation');
     } finally {
       await closeElectronApp(app);
     }

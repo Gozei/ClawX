@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   RefreshCw,
-  ExternalLink,
   Copy,
-  FileText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -16,6 +14,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useGatewayStore } from '@/stores/gateway';
 import { useUpdateStore } from '@/stores/update';
 import { UpdateSettings } from '@/components/settings/UpdateSettings';
+import { LogsPanel } from '@/components/settings/LogsPanel';
 import {
   getGatewayWsDiagnosticEnabled,
   invokeIpc,
@@ -103,8 +102,6 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
 
   const isWindows = window.electron.platform === 'win32';
   const showCliTools = true;
-  const [showLogs, setShowLogs] = useState(false);
-  const [logContent, setLogContent] = useState('');
   const [doctorRunningMode, setDoctorRunningMode] = useState<'diagnose' | 'fix' | null>(null);
   const [doctorResult, setDoctorResult] = useState<{
     mode: 'diagnose' | 'fix';
@@ -118,17 +115,6 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
     timedOut?: boolean;
     error?: string;
   } | null>(null);
-
-  const handleShowLogs = async () => {
-    try {
-      const logs = await hostApiFetch<{ content: string }>('/api/logs?tailLines=100');
-      setLogContent(logs.content);
-      setShowLogs(true);
-    } catch {
-      setLogContent('(Failed to load logs)');
-      setShowLogs(true);
-    }
-  };
 
   const handleOpenLogDir = async () => {
     try {
@@ -557,32 +543,10 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
                     <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
                     {t('common:actions.restart')}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={handleShowLogs} className="rounded-full h-8 px-4 border-black/10 dark:border-white/10 bg-transparent hover:bg-black/5 dark:hover:bg-white/5">
-                    <FileText className="h-3.5 w-3.5 mr-1.5" />
-                    {t('gateway.logs')}
-                  </Button>
                 </div>
               </div>
 
-              {showLogs && (
-                <div className="p-4 rounded-2xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="font-medium text-[14px]">{t('gateway.appLogs')}</p>
-                    <div className="flex gap-2">
-                      <Button variant="ghost" size="sm" className="h-7 text-[12px] rounded-full hover:bg-black/5 dark:hover:bg-white/10" onClick={handleOpenLogDir}>
-                        <ExternalLink className="h-3 w-3 mr-1.5" />
-                        {t('gateway.openFolder')}
-                      </Button>
-                      <Button variant="ghost" size="sm" className="h-7 text-[12px] rounded-full hover:bg-black/5 dark:hover:bg-white/10" onClick={() => setShowLogs(false)}>
-                        {t('common:actions.close')}
-                      </Button>
-                    </div>
-                  </div>
-                  <pre className="text-[12px] text-muted-foreground bg-white dark:bg-card p-4 rounded-xl max-h-60 overflow-auto whitespace-pre-wrap font-mono border border-black/5 dark:border-white/5 shadow-inner">
-                    {logContent || t('chat:noLogs')}
-                  </pre>
-                </div>
-              )}
+              <LogsPanel onOpenFolder={handleOpenLogDir} />
 
               <div className="flex items-center justify-between">
                 <div>

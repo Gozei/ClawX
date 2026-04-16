@@ -1,5 +1,14 @@
-import type { Page } from '@playwright/test';
-import { closeElectronApp, closeSettingsHub, expect, getStableWindow, openChannelsFromSettings, openModelsFromSettings, openSettingsHub, test } from './fixtures/electron';
+﻿import type { Page } from '@playwright/test';
+import {
+  closeElectronApp,
+  closeSettingsHub,
+  expect,
+  getStableWindow,
+  openChannelsFromSettings,
+  openModelsFromSettings,
+  openSettingsHub,
+  test,
+} from './fixtures/electron';
 
 async function ensureTheme(page: Awaited<ReturnType<typeof getStableWindow>>, theme: 'light' | 'dark') {
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -24,6 +33,67 @@ function getAgentCard(page: Page, name: string) {
 }
 
 test.describe('Deep AI Worker main navigation without setup flow', () => {
+  test('keeps the chat toolbar split into a left role label and three right-side action groups', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      const page = await getStableWindow(app);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      const newChatButton = page.getByTestId('sidebar-new-chat');
+      if (await newChatButton.count()) {
+        await newChatButton.click();
+      }
+
+      const sidebarHeader = page.getByTestId('sidebar-top-header');
+      const toolbarHeader = page.getByTestId('chat-toolbar-header');
+      const currentAgent = page.getByTestId('chat-toolbar-current-agent');
+      const currentAgentName = page.getByTestId('chat-toolbar-current-agent-name');
+      const toolbarControls = page.getByTestId('chat-toolbar-controls');
+      const refreshGroup = page.getByTestId('chat-toolbar-refresh-group');
+      const readingGroup = page.getByTestId('chat-toolbar-reading');
+      const dividerOne = page.getByTestId('chat-toolbar-divider-1');
+      const dividerTwo = page.getByTestId('chat-toolbar-divider-2');
+      const refreshButton = page.getByTestId('chat-refresh-button');
+      const thinkingLabel = page.getByTestId('chat-thinking-label');
+      const thinkingToggle = page.getByTestId('chat-thinking-toggle');
+
+      await expect(page.getByTestId('main-layout')).toBeVisible();
+      await expect(sidebarHeader).toBeVisible();
+      await expect(toolbarHeader).toBeVisible();
+      await expect(toolbarControls).toBeVisible();
+      await expect(currentAgent).toHaveText('Main Role');
+      await expect(refreshGroup).toBeVisible();
+      await expect(readingGroup).toBeVisible();
+      await expect(dividerOne).toBeVisible();
+      await expect(dividerTwo).toBeVisible();
+      await expect(refreshButton).toBeVisible();
+      await expect(thinkingLabel).toBeVisible();
+      await expect(page.getByTestId('chat-toolbar-reading-label')).toHaveCount(0);
+      await expect(sidebarHeader).toHaveCSS('height', '56px');
+      await expect(toolbarHeader).toHaveCSS('height', '56px');
+      await expect(currentAgentName).toHaveCSS('font-size', '13px');
+      await expect(thinkingLabel).toHaveCSS('font-size', '13px');
+
+      const [agentBox, refreshBox, readingBox, thinkingBox] = await Promise.all([
+        currentAgent.boundingBox(),
+        refreshGroup.boundingBox(),
+        readingGroup.boundingBox(),
+        thinkingToggle.boundingBox(),
+      ]);
+      expect(agentBox).not.toBeNull();
+      expect(refreshBox).not.toBeNull();
+      expect(readingBox).not.toBeNull();
+      expect(thinkingBox).not.toBeNull();
+      if (agentBox && refreshBox && readingBox && thinkingBox) {
+        expect(agentBox.x).toBeLessThan(refreshBox.x);
+        expect(refreshBox.x).toBeLessThan(readingBox.x);
+        expect(readingBox.x).toBeLessThan(thinkingBox.x);
+      }
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
   test('navigates between core pages with setup bypassed', async ({ launchElectronApp }) => {
     const app = await launchElectronApp({ skipSetup: true });
 
@@ -199,27 +269,27 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
       await page.getByTestId('settings-hub-menu-settings').click();
       await expect(page.getByTestId('settings-page')).toBeVisible();
 
-       await ensureTheme(page, 'dark');
-       await page.getByTestId('settings-hub-menu-settings').click();
-       await expect(page.locator('html')).toHaveClass(/dark/);
-       await expect(sidebarLogo).toHaveAttribute('src', /logo-whale-light/);
-       await expect(aboutLogo).toHaveAttribute('src', /logo-whale-light/);
-       await closeSettingsHub(page);
+      await ensureTheme(page, 'dark');
+      await page.getByTestId('settings-hub-menu-settings').click();
+      await expect(page.locator('html')).toHaveClass(/dark/);
+      await expect(sidebarLogo).toHaveAttribute('src', /logo-whale-light/);
+      await expect(aboutLogo).toHaveAttribute('src', /logo-whale-light/);
+      await closeSettingsHub(page);
 
-       await page.getByTestId('sidebar-nav-dashboard').click();
-       await expect(page.getByTestId('dashboard-page')).toBeVisible();
-       await expect(page.getByTestId('dashboard-refresh-button')).toHaveCSS('color', 'rgb(255, 255, 255)');
+      await page.getByTestId('sidebar-nav-dashboard').click();
+      await expect(page.getByTestId('dashboard-page')).toBeVisible();
+      await expect(page.getByTestId('dashboard-refresh-button')).toHaveCSS('color', 'rgb(255, 255, 255)');
 
-       await page.getByTestId('sidebar-nav-agents').click();
-       await expect(page.getByTestId('agents-page')).toBeVisible();
-       await expect(page.getByTestId('agents-refresh-button')).toHaveCSS('color', 'rgb(255, 255, 255)');
+      await page.getByTestId('sidebar-nav-agents').click();
+      await expect(page.getByTestId('agents-page')).toBeVisible();
+      await expect(page.getByTestId('agents-refresh-button')).toHaveCSS('color', 'rgb(255, 255, 255)');
 
-       await openChannelsFromSettings(page);
-       await expect(page.getByTestId('channels-refresh-button')).toHaveCSS('color', 'rgb(255, 255, 255)');
+      await openChannelsFromSettings(page);
+      await expect(page.getByTestId('channels-refresh-button')).toHaveCSS('color', 'rgb(255, 255, 255)');
 
-       await page.getByTestId('sidebar-nav-cron').click();
-       await expect(page.getByTestId('cron-page')).toBeVisible();
-       await expect(page.getByTestId('cron-refresh-button')).toHaveCSS('color', 'rgb(255, 255, 255)');
+      await page.getByTestId('sidebar-nav-cron').click();
+      await expect(page.getByTestId('cron-page')).toBeVisible();
+      await expect(page.getByTestId('cron-refresh-button')).toHaveCSS('color', 'rgb(255, 255, 255)');
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();

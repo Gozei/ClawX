@@ -136,6 +136,59 @@ describe('chat send error localization', () => {
     });
   });
 
+  it('uses a Chinese localized safety-timeout error in the session notice bar', async () => {
+    const { default: i18n } = await import('@/i18n');
+    const { useChatStore } = await import('@/stores/chat');
+    await i18n.changeLanguage('zh');
+
+    gatewayRpcMock.mockImplementation(async (method: string) => {
+      if (method === 'chat.history') {
+        return { messages: [] };
+      }
+      if (method === 'sessions.list') {
+        return { sessions: [] };
+      }
+      if (method === 'chat.abort') {
+        return { ok: true };
+      }
+      if (method === 'chat.send') {
+        return await new Promise(() => undefined);
+      }
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      sendStage: null,
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    void useChatStore.getState().sendMessage('在线吗');
+
+    await vi.advanceTimersByTimeAsync(95_000);
+    await Promise.resolve();
+
+    expect(useChatStore.getState().error).toBe(
+      '模型没有返回响应。提供商可能暂时不可用，或 API Key 配额不足。请检查你的提供商设置。',
+    );
+  });
+
   it('does not crash when fetchAgents is missing from the agents store', async () => {
     const { default: i18n } = await import('@/i18n');
     const { useChatStore } = await import('@/stores/chat');

@@ -21,6 +21,20 @@ function getGatewayFetchPreloadSource(requestTitle: string): string {
         : input && typeof input === 'object' && typeof input.url === 'string'
           ? input.url : '';
 
+    // The Gateway boot path warms a model-pricing cache from OpenRouter's
+    // public catalog. In this app's Windows dev environment that fetch can
+    // hang badly enough to delay or destabilize the local Gateway handshake.
+    // Returning an empty catalog keeps chat startup responsive; pricing can
+    // still fall back to local model metadata where available.
+    if (url.indexOf('openrouter.ai/api/v1/models') !== -1) {
+      if (typeof globalThis.Response === 'function') {
+        return Promise.resolve(new globalThis.Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      }
+    }
+
     if (url.indexOf('openrouter.ai') !== -1) {
       init = init ? Object.assign({}, init) : {};
       var prev = init.headers;
@@ -112,10 +126,11 @@ export async function launchGatewayProcess(options: {
     loadedProviderKeyCount,
     proxySummary,
     channelStartupSummary,
+    discoverySummary,
   } = options.launchContext;
 
   logger.info(
-    `Starting Gateway process (mode=${mode}, port=${options.port}, entry="${entryScript}", args="${options.sanitizeSpawnArgs(gatewayArgs).join(' ')}", cwd="${openclawDir}", bundledBin=${binPathExists ? 'yes' : 'no'}, providerKeys=${loadedProviderKeyCount}, channels=${channelStartupSummary}, proxy=${proxySummary})`,
+    `Starting Gateway process (mode=${mode}, port=${options.port}, entry="${entryScript}", args="${options.sanitizeSpawnArgs(gatewayArgs).join(' ')}", cwd="${openclawDir}", bundledBin=${binPathExists ? 'yes' : 'no'}, providerKeys=${loadedProviderKeyCount}, channels=${channelStartupSummary}, discovery=${discoverySummary}, proxy=${proxySummary})`,
   );
   const lastSpawnSummary = `mode=${mode}, entry="${entryScript}", args="${options.sanitizeSpawnArgs(gatewayArgs).join(' ')}", cwd="${openclawDir}"`;
 

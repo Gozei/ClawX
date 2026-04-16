@@ -46,6 +46,7 @@ import { whatsAppLoginManager } from '../utils/whatsapp-login';
 import { syncAllProviderAuthToRuntime } from '../services/providers/provider-runtime-sync';
 import { migrateLegacyUserDataIfNeeded } from '../utils/user-data-migration';
 import { auditAndRepairOpenClawRuntimeConfig } from '../utils/openclaw-runtime-audit';
+import { syncRuntimeLoggingSettingsFromStore } from '../utils/logging-config';
 
 const WINDOWS_APP_USER_MODEL_ID = 'app.clawx.desktop';
 const isE2EMode = process.env.CLAWX_E2E === '1';
@@ -316,6 +317,7 @@ async function initialize(): Promise<void> {
 
   // Initialize logger first
   logger.init();
+  await syncRuntimeLoggingSettingsFromStore();
   logger.info('=== Deep AI Worker Application Starting ===');
   logger.debug(
     `Runtime: platform=${process.platform}/${process.arch}, electron=${process.versions.electron}, node=${process.versions.node}, packaged=${app.isPackaged}, pid=${process.pid}, ppid=${process.ppid}`
