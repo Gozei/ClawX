@@ -143,4 +143,26 @@ describe('SkillDetailContent', () => {
     expect(await screen.findByText('Localized empty requirements')).toBeInTheDocument();
     expect(screen.queryByText('No specific runtime requirements.')).not.toBeInTheDocument();
   });
+
+  it('renders safely when status is missing from detail payload', async () => {
+    const detail = {
+      identity: {
+        id: 'self-improvement',
+        name: 'Self Improvement',
+        description: 'Captures learnings and errors.',
+      },
+      requirements: {
+        rawMarkdown: '# Self Improvement',
+      },
+      config: {
+        apiKey: '',
+        env: {},
+      },
+    } as SkillDetail;
+
+    render(<SkillDetailContent detail={detail} initialTab="config" />);
+
+    expect(await screen.findByText('Missing runtime requirements')).toBeInTheDocument();
+    expect(screen.getByText('Localized empty requirements')).toBeInTheDocument();
+  });
 });

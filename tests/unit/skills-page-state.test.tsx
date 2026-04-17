@@ -313,6 +313,31 @@ describe('Skills page route state', () => {
     expect(screen.getByTestId('skill-detail-content')).toBeInTheDocument();
   });
 
+  it('ignores transient undefined skill entries when rendering the skills page', async () => {
+    skillsState.skills = [
+      undefined as unknown as SkillSnapshot,
+      {
+        id: 'beta',
+        name: 'Beta Skill',
+        description: 'Market beta',
+        enabled: true,
+        ready: false,
+        sourceId: 'clawhub',
+      } as SkillSnapshot,
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/skills']}>
+        <Routes>
+          <Route path="/skills" element={<Skills />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('skills-page')).toBeInTheDocument());
+    expect(screen.getByTestId('skills-list-item-beta')).toBeInTheDocument();
+  });
+
   it('keeps the current query string on the detail page back link', () => {
     render(
       <MemoryRouter initialEntries={['/skills/beta?q=beta&status=enabled&missing=missing']}>

@@ -53,6 +53,32 @@ function buildSkillsSearchParams(options: {
   return params;
 }
 
+function normalizeSkillKey(value?: string): string {
+  return value?.trim().toLowerCase() ?? '';
+}
+
+function getPathLeaf(value?: string): string {
+  if (!value) return '';
+  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
+  const parts = normalized.split('/');
+  return normalizeSkillKey(parts[parts.length - 1]);
+}
+
+function resolveInstalledSkillId(slug: string, skills: SkillSnapshot[]): string {
+  const targetKey = normalizeSkillKey(slug);
+  if (!targetKey) return slug;
+
+  const matchedSkill = skills.find((skill) => {
+    if (!skill) return false;
+    return normalizeSkillKey(skill.id) === targetKey
+      || normalizeSkillKey(skill.slug) === targetKey
+      || getPathLeaf(skill.baseDir) === targetKey
+      || getPathLeaf(skill.filePath) === targetKey;
+  });
+
+  return matchedSkill?.id || slug;
+}
+
 export function Skills() {
   const { t } = useTranslation('skills');
   const navigate = useNavigate();
@@ -141,7 +167,7 @@ export function Skills() {
     void fetchSkills();
   }, [fetchSkills]);
 
-  const safeSkills = Array.isArray(skills) ? skills : [];
+  const safeSkills = Array.isArray(skills) ? skills.filter((skill): skill is SkillSnapshot => Boolean(skill)) : [];
 
   useEffect(() => {
     const previousGatewayState = previousGatewayStateRef.current;
@@ -235,7 +261,9 @@ export function Skills() {
     });
     try {
       await installSkill(slug, version, sourceId, force);
-      await enableSkill(slug);
+      const refreshedSkills = useSkillsStore.getState().skills ?? [];
+      const installedSkillId = resolveInstalledSkillId(slug, refreshedSkills);
+      await enableSkill(installedSkillId);
       setMarketplaceNotice({
         type: 'installed',
         slug,
@@ -248,7 +276,8 @@ export function Skills() {
   }, [enableSkill, installSkill, searchResults]);
 
   const onViewInstalledSkill = useCallback((slug: string) => {
-    navigate(`/skills/${encodeURIComponent(slug)}${listSearch || '?marketplace=1'}`);
+    const resolvedSkillId = resolveInstalledSkillId(slug, useSkillsStore.getState().skills ?? []);
+    navigate(`/skills/${encodeURIComponent(resolvedSkillId)}${listSearch || '?marketplace=1'}`);
   }, [listSearch, navigate]);
 
   const onMarketplaceUninstall = useCallback(async (slug: string, sourceId?: string) => {
@@ -384,7 +413,7 @@ export function SkillDetailPage() {
   const decodedSkillId = skillId ? decodeURIComponent(skillId) : '';
   const detail = decodedSkillId ? skillDetailsById[decodedSkillId] : undefined;
   const detailLoading = Boolean(decodedSkillId) && detailLoadingId === decodedSkillId && !detail;
-  const safeSkills = Array.isArray(skills) ? skills : [];
+  const safeSkills = Array.isArray(skills) ? skills.filter((skill): skill is SkillSnapshot => Boolean(skill)) : [];
   const summary = safeSkills.find((skill) => skill.id === decodedSkillId);
   const backToListHref = `/skills${location.search}`;
 

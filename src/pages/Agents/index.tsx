@@ -28,6 +28,12 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/layout/PageHeader';
+import {
+  pageDialogCardClasses,
+  pageFormInputClasses,
+  pageSectionCardClasses,
+  pageSectionCardInteractiveClasses,
+} from '@/components/layout/page-tokens';
 import telegramIcon from '@/assets/channels/telegram.svg';
 import discordIcon from '@/assets/channels/discord.svg';
 import whatsappIcon from '@/assets/channels/whatsapp.svg';
@@ -586,7 +592,7 @@ function AgentCard({
   );
 }
 
-const inputClasses = 'h-[44px] rounded-lg font-mono text-[13px] bg-background dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
+const inputClasses = cn(pageFormInputClasses, 'font-mono');
 const selectClasses = cn(selectBaseClasses, 'h-[44px] rounded-lg border-black/10 bg-background dark:bg-muted shadow-sm transition-all focus-visible:border-blue-500 focus-visible:ring-blue-500/50 dark:border-white/10');
 const workflowSelectClasses = cn(selectClasses, 'mt-2');
 const labelClasses = 'text-[14px] text-foreground/80 font-bold';
@@ -684,7 +690,7 @@ function AddAgentDialog({
     <div data-testid="add-agent-dialog" className={modalOverlayClasses}>
       <Card
         data-testid="add-agent-dialog-card"
-        className={cn(modalCardClasses, 'max-w-md rounded-3xl border-0 shadow-2xl bg-background dark:bg-card')}
+        className={cn(modalCardClasses, pageDialogCardClasses, 'max-w-md')}
       >
         <CardHeader className="pb-2 shrink-0">
           <CardTitle className="text-2xl font-serif font-normal tracking-tight">
@@ -1483,7 +1489,7 @@ function AgentSettingsModal({
                       </div>
                     ) : (
                       <>
-                        <div className="rounded-2xl border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                        <div className={cn(pageSectionCardClasses, 'p-4')}>
                           <Label htmlFor="agent-skill-search" className={labelClasses}>
                             {t('settingsDialog.skillsSearchLabel')}
                           </Label>
@@ -1498,7 +1504,7 @@ function AgentSettingsModal({
                         {filteredSkills.map((skill) => {
                           const selected = selectedSkillIds.includes(skill.id);
                           return (
-                            <label key={skill.id} className="flex items-start gap-3 rounded-2xl border border-black/5 bg-white/70 p-4 transition-colors hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]">
+                            <label key={skill.id} className={cn(pageSectionCardClasses, pageSectionCardInteractiveClasses, 'flex items-start gap-3 p-4')}>
                               <Switch checked={selected} onCheckedChange={() => handleToggleSkill(skill.id)} />
                               <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">

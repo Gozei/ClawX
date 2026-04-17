@@ -41,15 +41,19 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'docs' | 'config'>(initialTab);
 
-  const missingItems = flattenMissingRequirements(detail.status.missing);
+  const status = detail.status ?? { enabled: false, ready: false };
+  const requirements = detail.requirements ?? {};
+  const config = detail.config ?? {};
+
+  const missingItems = flattenMissingRequirements(status.missing);
   const hasMissing = missingItems.length > 0;
-  const isReady = detail.status.ready && !hasMissing;
+  const isReady = Boolean(status.ready) && !hasMissing;
 
   useEffect(() => {
-    setApiKey(detail.config.apiKey || '');
-    const primaryEnv = detail.requirements.primaryEnv;
-    const requiredKeys = new Set(detail.requirements.requires?.env || []);
-    const currentEnv = detail.config.env || {};
+    setApiKey(config.apiKey || '');
+    const primaryEnv = requirements.primaryEnv;
+    const requiredKeys = new Set(requirements.requires?.env || []);
+    const currentEnv = config.env || {};
     const rows: Array<{ key: string; value: string }> = [];
 
     requiredKeys.forEach((key) => {
@@ -65,7 +69,7 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
     });
 
     setEnvRows(rows);
-  }, [detail]);
+  }, [config.apiKey, config.env, requirements.primaryEnv, requirements.requires]);
 
   const onToggle = async (enabled: boolean) => {
     try {
@@ -160,9 +164,9 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
             <div className="flex shrink-0 items-center justify-center gap-3 self-center">
               <div className="flex h-11 items-center justify-center">
                 <Switch
-                  checked={detail.status.enabled}
+                  checked={Boolean(status.enabled)}
                   onCheckedChange={onToggle}
-                  aria-label={detail.status.enabled ? t('detail.disable') : t('detail.enable')}
+                  aria-label={status.enabled ? t('detail.disable') : t('detail.enable')}
                 />
               </div>
               <Button
@@ -224,15 +228,15 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
 
             <div className="p-6 sm:p-8">
               <TabsContent value="docs" data-testid="skills-detail-docs" className="mt-0">
-                {detail.requirements.parseError && (
+                {requirements.parseError && (
                   <div className="mb-6 flex items-start gap-3 rounded-2xl border border-destructive/20 bg-destructive/10 p-4 text-[13px] text-destructive">
                     <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                    <p>{t('detail.parseFailed', { error: detail.requirements.parseError })}</p>
+                    <p>{t('detail.parseFailed', { error: requirements.parseError })}</p>
                   </div>
                 )}
                 <div className="min-w-0 max-w-full overflow-x-hidden">
                   <div className="prose prose-slate prose-sm max-w-none break-words [overflow-wrap:anywhere] prose-headings:font-semibold dark:prose-invert dark:prose-p:text-white/70 [&_img]:max-w-full [&_img]:h-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_pre]:break-words [&_pre]:overflow-x-hidden [&_code]:break-all [&_table]:w-full [&_table]:table-fixed [&_table]:overflow-x-hidden [&_td]:break-words [&_th]:break-words">
-                    <MarkdownRenderer content={detail.requirements.rawMarkdown || '*No documentation available.*'} />
+                    <MarkdownRenderer content={requirements.rawMarkdown || '*No documentation available.*'} />
                   </div>
                 </div>
               </TabsContent>
@@ -265,25 +269,25 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
                   )}
 
                   <div className="flex flex-wrap gap-x-8 gap-y-3 rounded-xl bg-slate-50/50 p-4 text-[13px] dark:bg-white/[0.02]">
-                    {detail.requirements.requires?.bins && detail.requirements.requires.bins.length > 0 && (
+                    {requirements.requires?.bins && requirements.requires.bins.length > 0 && (
                       <div>
                         <span className="block text-[12px] font-medium text-slate-400 dark:text-white/50">{t('detail.requiredBins')}</span>
-                        <span className="mt-0.5 block text-slate-700 dark:text-white/80">{detail.requirements.requires.bins.join(', ')}</span>
+                        <span className="mt-0.5 block text-slate-700 dark:text-white/80">{requirements.requires.bins.join(', ')}</span>
                       </div>
                     )}
-                    {detail.requirements.requires?.env && detail.requirements.requires.env.length > 0 && (
+                    {requirements.requires?.env && requirements.requires.env.length > 0 && (
                       <div>
                         <span className="block text-[12px] font-medium text-slate-400 dark:text-white/50">{t('detail.requiredEnv')}</span>
-                        <span className="mt-0.5 block text-slate-700 dark:text-white/80">{detail.requirements.requires.env.join(', ')}</span>
+                        <span className="mt-0.5 block text-slate-700 dark:text-white/80">{requirements.requires.env.join(', ')}</span>
                       </div>
                     )}
-                    {detail.requirements.requires?.anyBins && detail.requirements.requires.anyBins.length > 0 && (
+                    {requirements.requires?.anyBins && requirements.requires.anyBins.length > 0 && (
                       <div>
                         <span className="block text-[12px] font-medium text-slate-400 dark:text-white/50">{t('detail.anyBins')}</span>
-                        <span className="mt-0.5 block text-slate-700 dark:text-white/80">{detail.requirements.requires.anyBins.join(', ')}</span>
+                        <span className="mt-0.5 block text-slate-700 dark:text-white/80">{requirements.requires.anyBins.join(', ')}</span>
                       </div>
                     )}
-                    {!(detail.requirements.requires?.bins?.length) && !(detail.requirements.requires?.env?.length) && (
+                    {!(requirements.requires?.bins?.length) && !(requirements.requires?.env?.length) && !(requirements.requires?.anyBins?.length) && (
                       <span className="text-slate-400 dark:text-white/40">{t('detail.noSpecificRuntimeRequirements')}</span>
                     )}
                   </div>
@@ -301,10 +305,10 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
                     </p>
                   </div>
 
-                  {detail.requirements.primaryEnv && (
+                  {requirements.primaryEnv && (
                     <div className="max-w-md">
                       <label className="mb-2 block text-[13px] font-medium text-slate-700 dark:text-white/70">
-                        {t('detail.primaryCredential', { env: detail.requirements.primaryEnv })}
+                        {t('detail.primaryCredential', { env: requirements.primaryEnv })}
                       </label>
                       <Input
                         data-testid="skills-detail-primary-env-input"

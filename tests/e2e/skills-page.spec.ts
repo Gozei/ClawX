@@ -44,7 +44,9 @@ test.describe('Deep AI Worker skills page flows', () => {
       await expect(page.getByTestId('skills-filter-menu')).toBeHidden();
       await page.getByTestId('skills-discover-button').click();
       await expect(page.getByTestId('skills-marketplace-modal')).toBeVisible();
+      await expect(page.getByTestId('skills-marketplace-modal')).toHaveClass(/rounded-3xl/);
       await expect(page.getByTestId('skills-marketplace-search-input')).toBeVisible();
+      await expect(page.getByTestId('skills-marketplace-search-input')).toHaveClass(/rounded-lg/);
       await expect(page.getByTestId('skills-marketplace-source-chips')).toBeVisible();
       await expect(page.getByTestId('skills-marketplace-source-chips').locator('button[aria-pressed="true"]')).toHaveCount(1);
     } finally {

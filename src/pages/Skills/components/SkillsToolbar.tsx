@@ -129,7 +129,7 @@ export function SkillsToolbar({
                 <span
                   className={cn(
                     'text-[11px] font-semibold leading-none',
-                    sourceCategory === option.id ? 'text-[#0f172a]/56 dark:text-white/60' : 'text-[#607089] dark:text-white/44'
+                    sourceCategory === option.id ? 'text-primary/70 dark:text-primary-foreground/72' : 'text-[#607089] dark:text-white/44'
                   )}
                 >
                   {option.count}
@@ -138,7 +138,7 @@ export function SkillsToolbar({
               <span
                 className={cn(
                   'absolute bottom-0 left-1/2 h-[2px] -translate-x-1/2 rounded-full transition-all',
-                  sourceCategory === option.id ? 'w-[64px] bg-[#0f172a] dark:bg-white' : 'w-0 bg-transparent'
+                  sourceCategory === option.id ? 'w-[64px] bg-primary' : 'w-0 bg-transparent'
                 )}
               />
             </button>

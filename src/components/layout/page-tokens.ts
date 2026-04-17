@@ -1,5 +1,9 @@
 export const pageSurfaceCardClasses = 'rounded-[24px] bg-white shadow-[0_4px_24px_rgb(0,0,0,0.03)] dark:bg-card';
 export const pageInputSurfaceClasses = 'rounded-xl border-black/10 bg-white text-foreground shadow-none dark:border-white/10 dark:bg-card';
+export const pageSectionCardClasses = 'rounded-2xl border border-black/5 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]';
+export const pageSectionCardInteractiveClasses = 'transition-colors hover:bg-white dark:hover:bg-white/[0.06]';
+export const pageFormInputClasses = 'h-[44px] rounded-lg border-black/10 bg-background text-[13px] shadow-sm transition-all text-foreground placeholder:text-foreground/40 focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/10 dark:bg-muted';
+export const pageDialogCardClasses = 'rounded-3xl border-0 bg-background shadow-2xl dark:bg-card';
 
 export const pagePrimaryControlClasses = 'h-10 rounded-full px-4 text-[13px] font-medium shadow-none';
 export const pageCompactControlClasses = 'h-9 rounded-full px-4 text-[13px] font-medium shadow-none';
