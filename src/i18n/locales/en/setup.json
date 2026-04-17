@@ -23,6 +23,10 @@
         "complete": {
             "title": "All Set!",
             "description": "The app is ready to use"
+        },
+        "skills": {
+            "title": "Preinstalled Skills",
+            "description": "See what is already ready to use"
         }
     },
     "welcome": {
@@ -121,6 +125,19 @@
         "gateway": "Gateway",
         "running": "Running",
         "footer": "You can customize skills and connect channels in Settings"
+    },
+    "skillsGuide": {
+        "title": "These preinstalled skills are already available",
+        "subtitle": "This build comes with {{categoryCount}} categories and {{totalSkills}} skills preloaded, so you can start using them right away.",
+        "tipTitle": "How to make use of them",
+        "tipBody": "Describe the task naturally, like reviewing a contract, writing a weekly report, extracting tables from PDF, or generating tests, and ClawX can route the work through the matching preinstalled skills.",
+        "categoryCount": "{{count}} skills",
+        "moreSkills": "{{count}} more",
+        "stats": {
+            "categories": "Categories",
+            "skills": "Preinstalled Skills",
+            "coverage": "Coverage"
+        }
     },
     "nav": {
         "next": "Next",

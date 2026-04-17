@@ -5,6 +5,7 @@
         "onlyBuiltDependencies": [
             "@discordjs/opus",
             "@whiskeysockets/baileys",
+            "openclaw",
             "electron",
             "esbuild",
             "koffi",
@@ -45,6 +46,7 @@
         "test": "vitest run",
         "test:e2e": "pnpm run build:vite && playwright test",
         "test:e2e:headed": "pnpm run build:vite && playwright test --headed",
+        "test:e2e:setup-preview": "pnpm run build:vite && CLAWX_E2E_HOLD_MS=60000 playwright test tests/e2e/setup-preinstalled-skills-last-step.spec.ts --headed --workers=1",
         "comms:replay": "node scripts/comms/replay.mjs",
         "comms:baseline": "node scripts/comms/baseline.mjs",
         "comms:compare": "node scripts/comms/compare.mjs",
