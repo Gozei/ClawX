@@ -190,6 +190,7 @@ const lock = {
 const generatedManifest = {
   skills: [],
 };
+const remoteFailures = [];
 
 if (skipRemoteDownloads) {
   echo`⏭  SKIP_PREINSTALLED_SKILLS_DOWNLOAD=1 set, skipping remote skill downloads.`;
@@ -199,9 +200,21 @@ if (skipRemoteDownloads) {
     const repoDir = join(TMP_ROOT, createRepoDirName(group.repo, group.ref));
     const sparsePaths = [...new Set(group.entries.map((entry) => entry.repoPath))];
 
-    echo`Fetching ${group.repo} @ ${group.ref}`;
-    const commit = await fetchSparseRepo(group.repo, group.ref, sparsePaths, repoDir);
-    echo`   commit ${commit}`;
+    let commit = '';
+    try {
+      echo`Fetching ${group.repo} @ ${group.ref}`;
+      commit = await fetchSparseRepo(group.repo, group.ref, sparsePaths, repoDir);
+      echo`   commit ${commit}`;
+    } catch (error) {
+      const message = error?.message || String(error);
+      remoteFailures.push({
+        repo: group.repo,
+        ref: group.ref,
+        message,
+      });
+      echo`⚠️  Skipping ${group.repo} @ ${group.ref}: ${message}`;
+      continue;
+    }
 
     for (const entry of group.entries) {
       const sourceDir = join(repoDir, entry.repoPath);
@@ -252,4 +265,9 @@ for (const entry of localSkills) {
 writeFileSync(join(OUTPUT_ROOT, '.preinstalled-lock.json'), `${JSON.stringify(lock, null, 2)}\n`, 'utf8');
 writeFileSync(join(OUTPUT_ROOT, GENERATED_MANIFEST_NAME), `${JSON.stringify(generatedManifest, null, 2)}\n`, 'utf8');
 rmSync(TMP_ROOT, { recursive: true, force: true });
+
+if (remoteFailures.length > 0) {
+  echo`Preinstalled skills completed with ${remoteFailures.length} remote source warning(s).`;
+}
+
 echo`Preinstalled skills ready: ${OUTPUT_ROOT}`;
