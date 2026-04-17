@@ -86,6 +86,28 @@ test.describe('Deep AI Worker skills page flows', () => {
     }
   });
 
+  test('opens a new chat with the create-skill prompt prefilled', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      const page = await getStableWindow(app);
+
+      await expect(page.getByTestId('main-layout')).toBeVisible();
+
+      await page.getByTestId('sidebar-nav-skills').click();
+      await expect(page.getByTestId('skills-page')).toBeVisible();
+
+      await page.getByTestId('skills-create-button').click();
+
+      const composerInput = page.getByTestId('chat-composer').getByRole('textbox');
+      await expect(composerInput).toHaveValue(
+        '请帮我创建一个新的 skill，优先使用内置的 skill 创建能力。我的要求是：',
+      );
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
   test('does not re-surface the gateway restart hint after opening the skills page', async ({ launchElectronApp }) => {
     const app = await launchElectronApp({ skipSetup: true });
 

@@ -6,6 +6,7 @@
  */
 import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ChevronDown, ChevronRight, Loader2, Sparkles } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useChatStore, type RawMessage, type ToolStatus } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
@@ -35,9 +36,12 @@ import { groupMessagesForDisplay, splitFinalMessageForTurnDisplay } from './hist
 import { getProcessActivityLabel, getProcessEventItems, ProcessEventMessage, ProcessFinalDivider } from './process-events-next';
 
 const EMPTY_MESSAGES: RawMessage[] = [];
+const CHAT_COMPOSER_PREFILL_STATE_KEY = 'composerPrefillText';
 
 export function Chat() {
   const { t, i18n } = useTranslation('chat');
+  const location = useLocation();
+  const navigate = useNavigate();
   const gatewayStatus = useGatewayStore((s) => s.status);
   const isGatewayRunning = gatewayStatus.state === 'running';
 
@@ -76,6 +80,7 @@ export function Chat() {
   const autoFlushAttemptedQueuedIdRef = useRef<string | null>(null);
   const activeTurnViewportAnchorRef = useRef<HTMLDivElement | null>(null);
   const lastAutoAlignedTurnRef = useRef<string | null>(null);
+  const lastConsumedLocationKeyRef = useRef<string | null>(null);
 
   const safeMessages = Array.isArray(messages) ? messages : EMPTY_MESSAGES;
   const sending = useMemo(() => (
@@ -107,6 +112,35 @@ export function Chat() {
   useEffect(() => {
     void fetchAgents();
   }, [fetchAgents]);
+
+  useEffect(() => {
+    const routeState = location.state && typeof location.state === 'object'
+      ? location.state as Record<string, unknown>
+      : null;
+    const prefillText = typeof routeState?.[CHAT_COMPOSER_PREFILL_STATE_KEY] === 'string'
+      ? routeState[CHAT_COMPOSER_PREFILL_STATE_KEY]
+      : '';
+
+    if (!prefillText || lastConsumedLocationKeyRef.current === location.key) {
+      return;
+    }
+
+    lastConsumedLocationKeyRef.current = location.key;
+    setComposerPrefill({ text: prefillText, nonce: Date.now() });
+
+    const { [CHAT_COMPOSER_PREFILL_STATE_KEY]: _ignored, ...restState } = routeState;
+    navigate(
+      {
+        pathname: location.pathname,
+        search: location.search,
+        hash: location.hash,
+      },
+      {
+        replace: true,
+        state: Object.keys(restState).length > 0 ? restState : null,
+      },
+    );
+  }, [location.hash, location.key, location.pathname, location.search, location.state, navigate]);
 
   useEffect(() => {
     if (!isGatewayRunning || !queuedMessage) {

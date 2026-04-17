@@ -1,7 +1,7 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { SkillDetailPage, Skills } from '../../src/pages/Skills';
 import type { SkillDetail, SkillSnapshot, SkillSource } from '../../src/types/skill';
 
@@ -15,6 +15,7 @@ const uninstallSkillMock = vi.fn();
 const fetchSourcesMock = vi.fn();
 const fetchMarketInstalledSkillsMock = vi.fn();
 const loadMoreSearchResultsMock = vi.fn();
+const newSessionMock = vi.fn();
 
 const { gatewayState, skillsState, marketplaceSheetState, toastMocks } = vi.hoisted(() => ({
   gatewayState: {
@@ -44,6 +45,12 @@ const { gatewayState, skillsState, marketplaceSheetState, toastMocks } = vi.hois
 
 vi.mock('@/stores/gateway', () => ({
   useGatewayStore: (selector: (state: typeof gatewayState) => unknown) => selector(gatewayState),
+}));
+
+vi.mock('@/stores/chat', () => ({
+  useChatStore: (selector: (state: { newSession: typeof newSessionMock }) => unknown) => selector({
+    newSession: newSessionMock,
+  }),
 }));
 
 vi.mock('@/stores/skills', () => ({
@@ -120,9 +127,19 @@ vi.mock('../../src/pages/Skills/components/SkillDetailContent', () => ({
   SkillDetailContent: () => <div data-testid="skill-detail-content" />,
 }));
 
+function ChatPrefillStateProbe() {
+  const location = useLocation();
+  return (
+    <div data-testid="chat-prefill-state">
+      {JSON.stringify(location.state)}
+    </div>
+  );
+}
+
 describe('Skills page route state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    newSessionMock.mockReset();
     gatewayState.status.state = 'running';
     skillsState.skills = [
       {
@@ -198,6 +215,27 @@ describe('Skills page route state', () => {
     toastMocks.dismiss.mockReset();
     toastMocks.success.mockReturnValue('toast-id');
     marketplaceSheetState.latestProps = null;
+  });
+
+  it('starts a new chat and passes the skill creation prefill when create is clicked', async () => {
+    render(
+      <MemoryRouter initialEntries={['/skills']}>
+        <Routes>
+          <Route path="/skills" element={<Skills />} />
+          <Route path="/" element={<ChatPrefillStateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await act(async () => {
+      screen.getByTestId('skills-create-button').click();
+      await Promise.resolve();
+    });
+
+    expect(newSessionMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('chat-prefill-state')).toHaveTextContent(
+      '请帮我创建一个新的 skill，优先使用内置的 skill 创建能力。我的要求是：',
+    );
   });
 
   it('hydrates the list search and filters from the URL', () => {

@@ -52,6 +52,13 @@ vi.mock('react', async (importOriginal) => {
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => navigateMock,
+  useLocation: () => ({
+    state: null,
+    key: 'chat-active-turn-dedupe',
+    pathname: '/',
+    search: '',
+    hash: '',
+  }),
 }));
 
 vi.mock('react-i18next', async (importOriginal) => {

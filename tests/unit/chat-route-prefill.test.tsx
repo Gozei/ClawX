@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { Chat } from '@/pages/Chat';
-
-const navigateMock = vi.fn();
 
 const { agentsState, chatState, gatewayState, settingsState } = vi.hoisted(() => ({
   agentsState: {
@@ -12,15 +11,16 @@ const { agentsState, chatState, gatewayState, settingsState } = vi.hoisted(() =>
     messages: [] as Array<Record<string, unknown>>,
     currentSessionKey: 'agent:main:main',
     loading: false,
-    sending: true,
+    sending: false,
     sessionRunningState: {} as Record<string, boolean>,
     error: null as string | null,
     showThinking: true,
+    activeTurnBuffer: undefined,
     streamingMessage: null as unknown,
     streamingTools: [] as Array<Record<string, unknown>>,
     sendStage: null as string | null,
     pendingFinal: false,
-    lastUserMessageAt: 1000,
+    lastUserMessageAt: null as number | null,
     sendMessage: vi.fn(),
     queueOfflineMessage: vi.fn(),
     flushQueuedMessage: vi.fn(),
@@ -32,25 +32,13 @@ const { agentsState, chatState, gatewayState, settingsState } = vi.hoisted(() =>
   },
   gatewayState: {
     status: { state: 'running', port: 18789 },
-    start: vi.fn(async () => {}),
-    restart: vi.fn(async () => {}),
   },
   settingsState: {
     chatProcessDisplayMode: 'all',
+    hideInternalRoutineProcesses: false,
     chatFontScale: 100,
     assistantMessageStyle: 'bubble',
   },
-}));
-
-vi.mock('react-router-dom', () => ({
-  useNavigate: () => navigateMock,
-  useLocation: () => ({
-    state: null,
-    key: 'chat-stream-dedupe',
-    pathname: '/',
-    search: '',
-    hash: '',
-  }),
 }));
 
 vi.mock('react-i18next', async (importOriginal) => {
@@ -59,10 +47,10 @@ vi.mock('react-i18next', async (importOriginal) => {
     ...actual,
     useTranslation: () => ({
       i18n: {
-        resolvedLanguage: 'en',
-        language: 'en',
+        resolvedLanguage: 'zh',
+        language: 'zh',
       },
-      t: (key: string) => key,
+      t: (key: string, defaultValue?: string) => defaultValue ?? key,
     }),
   };
 });
@@ -105,68 +93,65 @@ vi.mock('@/components/common/LoadingSpinner', () => ({
   LoadingSpinner: () => <div data-testid="loading-spinner" />,
 }));
 
+vi.mock('@/components/branding/AppLogo', () => ({
+  AppLogo: () => <div data-testid="app-logo" />,
+}));
+
 vi.mock('@/pages/Chat/ChatInput', () => ({
-  ChatInput: () => <div data-testid="chat-input" />,
+  ChatInput: ({ prefillText, prefillNonce }: { prefillText?: string; prefillNonce?: number }) => (
+    <div
+      data-testid="chat-input"
+      data-prefill-text={prefillText ?? ''}
+      data-prefill-nonce={String(prefillNonce ?? 0)}
+    />
+  ),
 }));
 
 vi.mock('@/pages/Chat/ChatToolbarV2', () => ({
   ChatToolbarV2: () => <div data-testid="chat-toolbar" />,
 }));
 
-describe('Chat streaming dedupe', () => {
+describe('Chat route prefill', () => {
   beforeEach(() => {
-    navigateMock.mockReset();
     agentsState.fetchAgents.mockClear();
-    chatState.messages = [
-      {
-        id: 'user-1',
-        role: 'user',
-        content: 'Take a photo for me.',
-        timestamp: 1000,
-      },
-      {
-        id: 'assistant-1',
-        role: 'assistant',
-        content: [
-          { type: 'thinking', thinking: 'Checking the camera.' },
-          { type: 'text', text: 'Preparing the camera.' },
-        ],
-        timestamp: 1001,
-      },
-      {
-        id: 'assistant-2',
-        role: 'assistant',
-        content: [
-          { type: 'thinking', thinking: 'Confirm the final output one last time.' },
-          { type: 'text', text: 'Photo saved (60KB). You should be able to see it now.' },
-        ],
-        timestamp: 1002,
-      },
-    ];
+    chatState.messages = [];
     chatState.currentSessionKey = 'agent:main:main';
     chatState.loading = false;
-    chatState.sending = true;
-    chatState.sessionRunningState = { 'agent:main:main': true };
+    chatState.sending = false;
+    chatState.sessionRunningState = {};
     chatState.error = null;
     chatState.showThinking = true;
-    chatState.streamingMessage = {
-      role: 'assistant',
-      content: 'Photo saved (60KB). You should be able to see it now.',
-      timestamp: 1003,
-    };
+    chatState.activeTurnBuffer = undefined;
+    chatState.streamingMessage = null;
     chatState.streamingTools = [];
-    chatState.sendStage = 'running';
+    chatState.sendStage = null;
     chatState.pendingFinal = false;
-    chatState.lastUserMessageAt = 1000;
-    settingsState.chatProcessDisplayMode = 'all';
-    settingsState.chatFontScale = 100;
-    settingsState.assistantMessageStyle = 'bubble';
+    chatState.lastUserMessageAt = null;
+    chatState.queuedMessages = {};
   });
 
-  it('does not render a duplicate streaming bubble when the same assistant reply is already persisted', () => {
-    render(<Chat />);
+  it('hydrates the composer from route state when a prefill is provided', async () => {
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: '/',
+          state: {
+            composerPrefillText: '请帮我创建一个新的 skill，优先使用内置的 skill 创建能力。我的要求是：',
+          },
+        }]}
+      >
+        <Routes>
+          <Route path="/" element={<Chat />} />
+        </Routes>
+      </MemoryRouter>,
+    );
 
-    expect(screen.getByTestId('chat-process-header')).toBeInTheDocument();
-    expect(screen.getAllByText('Photo saved (60KB). You should be able to see it now.')).toHaveLength(1);
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-input')).toHaveAttribute(
+        'data-prefill-text',
+        '请帮我创建一个新的 skill，优先使用内置的 skill 创建能力。我的要求是：',
+      );
+    });
+    expect(screen.getByTestId('chat-input')).not.toHaveAttribute('data-prefill-nonce', '0');
   });
 });

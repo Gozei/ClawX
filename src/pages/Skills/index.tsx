@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useSkillsStore } from '@/stores/skills';
+import { useChatStore } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { toast } from 'sonner';
 import type { SkillSnapshot } from '@/types/skill';
@@ -21,6 +22,7 @@ const DEFAULT_QUERY = '';
 const DEFAULT_SOURCE_CATEGORY: SkillSourceCategory = 'all';
 const DEFAULT_STATUS_FILTER: StatusFilter = 'all';
 const DEFAULT_MISSING_FILTER: MissingFilter = 'all';
+const CREATE_SKILL_COMPOSER_PREFILL = '请帮我创建一个新的 skill，优先使用内置的 skill 创建能力。我的要求是：';
 
 type MarketplaceNotice =
   | { type: 'installing'; slug: string; name?: string }
@@ -82,6 +84,7 @@ function resolveInstalledSkillId(slug: string, skills: SkillSnapshot[]): string 
 export function Skills() {
   const { t } = useTranslation('skills');
   const navigate = useNavigate();
+  const newSession = useChatStore((state) => state.newSession);
   const [searchParams, setSearchParams] = useSearchParams();
   const {
     skills,
@@ -300,6 +303,15 @@ export function Skills() {
     }
   }, [searchResults, uninstallSkill]);
 
+  const onCreateSkill = useCallback(() => {
+    newSession();
+    navigate('/', {
+      state: {
+        composerPrefillText: CREATE_SKILL_COMPOSER_PREFILL,
+      },
+    });
+  }, [navigate, newSession]);
+
   if (loading) {
     return <div data-testid="skills-page" className="flex flex-col -m-6 dark:bg-background min-h-[calc(100vh-2.5rem)] items-center justify-center"><LoadingSpinner size="lg" /></div>;
   }
@@ -317,6 +329,7 @@ export function Skills() {
               <Button
                 data-testid="skills-create-button"
                 aria-label={t('actions.create')}
+                onClick={onCreateSkill}
                 variant="outline"
                 className="h-10 rounded-lg px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6"
               >
