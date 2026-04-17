@@ -44,6 +44,13 @@ const { agentsState, chatState, gatewayState, settingsState } = vi.hoisted(() =>
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => navigateMock,
+  useLocation: () => ({
+    state: null,
+    key: 'chat-stream-dedupe',
+    pathname: '/',
+    search: '',
+    hash: '',
+  }),
 }));
 
 vi.mock('react-i18next', async (importOriginal) => {

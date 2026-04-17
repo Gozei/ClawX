@@ -140,6 +140,12 @@ export interface MarketplaceSearchResponse {
   nextCursor?: string;
 }
 
+export interface MarketplaceSourceCount {
+  sourceId: string;
+  sourceLabel?: string;
+  total: number | null;
+}
+
 export interface MarketplaceInstalledSkill {
   slug: string;
   version?: string;

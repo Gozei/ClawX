@@ -131,6 +131,56 @@ Use the Notion API.
     expect(detail?.requirements.rawMarkdown).toContain('Use the Notion API.');
   });
 
+  it('resolves the marketplace install slug from metadata when runtime only exposes the skill key', async () => {
+    const skillDir = join(testRoot, 'self-improving-agent');
+    await mkdir(skillDir, { recursive: true });
+    const skillFile = join(skillDir, 'SKILL.md');
+    await writeFile(skillFile, `---
+name: self-improvement
+description: "Captures learnings and errors."
+---
+
+# Self Improvement
+`, 'utf8');
+    await writeFile(join(skillDir, '_meta.json'), JSON.stringify({
+      slug: 'self-improving-agent',
+      version: '3.0.13',
+    }), 'utf8');
+
+    getAllSkillConfigsMock.mockResolvedValue({});
+
+    const { getSkillDetail, listSkills } = await import('@electron/utils/skill-details');
+    const gatewayManager = {
+      rpc: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            skillKey: 'self-improvement',
+            name: 'Self Improvement',
+            description: 'Captures learnings and errors.',
+            disabled: false,
+            eligible: true,
+            missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
+            baseDir: skillDir,
+            filePath: skillFile,
+          },
+        ],
+      }),
+    };
+
+    const [detail, skills] = await Promise.all([
+      getSkillDetail(gatewayManager as never, 'self-improvement'),
+      listSkills(gatewayManager as never),
+    ]);
+
+    expect(detail?.identity.slug).toBe('self-improving-agent');
+    expect(skills).toEqual([
+      expect.objectContaining({
+        id: 'self-improvement',
+        slug: 'self-improving-agent',
+      }),
+    ]);
+  });
+
   it('deletes the resolved skill directory', async () => {
     const skillDir = join(testRoot, 'weather');
     await mkdir(skillDir, { recursive: true });

@@ -2,7 +2,15 @@ import { create } from 'zustand';
 import { hostApiFetch } from '@/lib/host-api';
 import { AppError, normalizeAppError } from '@/lib/error-model';
 import { useGatewayStore } from './gateway';
-import type { MarketplaceInstalledSkill, MarketplaceSearchResponse, MarketplaceSkill, SkillDetail, SkillSnapshot, SkillSource } from '../types/skill';
+import type {
+  MarketplaceInstalledSkill,
+  MarketplaceSearchResponse,
+  MarketplaceSkill,
+  MarketplaceSourceCount,
+  SkillDetail,
+  SkillSnapshot,
+  SkillSource,
+} from '../types/skill';
 
 const SKILL_TOGGLE_DEBOUNCE_MS = 500;
 
@@ -32,6 +40,7 @@ interface SkillsState {
   skillDetailsById: Record<string, SkillDetail>;
   searchResults: MarketplaceSkill[];
   marketInstalledSkills: MarketplaceInstalledSkill[];
+  marketplaceSourceCounts: Record<string, number | null>;
   sources: SkillSource[];
   searchNextCursor: string | null;
   searchingMore: boolean;
@@ -49,6 +58,7 @@ interface SkillsState {
 
   fetchSkills: (force?: boolean) => Promise<void>;
   fetchSources: () => Promise<SkillSource[]>;
+  fetchMarketplaceSourceCounts: (force?: boolean) => Promise<Record<string, number | null>>;
   fetchMarketInstalledSkills: () => Promise<MarketplaceInstalledSkill[]>;
   fetchSkillDetail: (skillId: string, force?: boolean) => Promise<SkillDetail>;
   saveSkillConfig: (skillId: string, input: { apiKey?: string; env?: Record<string, string> }) => Promise<void>;
@@ -67,6 +77,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   skillDetailsById: {},
   searchResults: [],
   marketInstalledSkills: [],
+  marketplaceSourceCounts: {},
   sources: [],
   searchNextCursor: null,
   searchingMore: false,
@@ -93,6 +104,22 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     return sources;
   },
 
+  fetchMarketplaceSourceCounts: async (force = false): Promise<Record<string, number | null>> => {
+    const sources = await get().fetchSources();
+    const existing = get().marketplaceSourceCounts;
+    if (!force && sources.length > 0 && sources.every((source) => Object.prototype.hasOwnProperty.call(existing, source.id))) {
+      return existing;
+    }
+
+    const result = await hostApiFetch<{ success: boolean; results?: MarketplaceSourceCount[]; error?: string }>('/api/clawhub/source-counts');
+    const counts = (result.success ? (result.results || []) : []).reduce<Record<string, number | null>>((acc, item) => {
+      acc[item.sourceId] = typeof item.total === 'number' ? item.total : null;
+      return acc;
+    }, {});
+    set({ marketplaceSourceCounts: counts });
+    return counts;
+  },
+
   fetchMarketInstalledSkills: async (): Promise<MarketplaceInstalledSkill[]> => {
     const result = await hostApiFetch<{ success: boolean; results?: MarketplaceInstalledSkill[]; error?: string }>('/api/clawhub/list');
     const installed = result.success ? (result.results || []) : [];
@@ -101,7 +128,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   },
 
   fetchSkills: async (force = false) => {
-    const existingSkills = get().skills;
+    const existingSkills = Array.isArray(get().skills) ? get().skills : [];
     const lastFetchedAt = get().lastFetchedAt;
     if (!force && existingSkills.length > 0 && lastFetchedAt && Date.now() - lastFetchedAt < 15_000) {
       return;
@@ -116,7 +143,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     try {
       const skills = await hostApiFetch<SkillSnapshot[]>('/api/skills');
       set({
-        skills,
+        skills: Array.isArray(skills) ? skills : [],
         loading: false,
         refreshing: false,
         lastFetchedAt: Date.now(),
@@ -284,7 +311,8 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   },
 
   enableSkill: async (skillId: string) => {
-    const previousSkill = get().skills.find((skill) => skill.id === skillId);
+    const currentSkills = Array.isArray(get().skills) ? get().skills : [];
+    const previousSkill = currentSkills.find((skill) => skill.id === skillId);
     const previousDetail = get().skillDetailsById[skillId];
 
     const applyOptimistic = (enabled: boolean) => {
@@ -379,7 +407,8 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   },
 
   disableSkill: async (skillId: string) => {
-    const previousSkill = get().skills.find((skill) => skill.id === skillId);
+    const currentSkills = Array.isArray(get().skills) ? get().skills : [];
+    const previousSkill = currentSkills.find((skill) => skill.id === skillId);
     const previousDetail = get().skillDetailsById[skillId];
 
     const applyOptimistic = (enabled: boolean) => {

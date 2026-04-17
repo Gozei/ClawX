@@ -23,6 +23,10 @@
         "complete": {
             "title": "准备就绪！",
             "description": "应用已准备好使用"
+        },
+        "skills": {
+            "title": "预装技能已就绪",
+            "description": "开箱即可调用的 Skills 清单"
         }
     },
     "welcome": {
@@ -121,6 +125,19 @@
         "gateway": "网关",
         "running": "运行中",
         "footer": "您可以在设置中自定义技能并连接通道"
+    },
+    "skillsGuide": {
+        "title": "这些预装 Skills 已经为你准备好了",
+        "subtitle": "当前版本已预装 {{categoryCount}} 个分类、共 {{totalSkills}} 个 Skills。你可以直接在任务里调用它们，无需再逐个安装。",
+        "tipTitle": "怎么用更自然",
+        "tipBody": "直接把业务目标说出来即可，例如“帮我审合同”“整理周报”“提取 PDF 表格”“生成测试用例”，ClawX 会优先利用这些预装技能来完成任务。",
+        "categoryCount": "{{count}} 个 Skills",
+        "moreSkills": "还有 {{count}} 个",
+        "stats": {
+            "categories": "分类",
+            "skills": "预装 Skills",
+            "coverage": "覆盖范围"
+        }
     },
     "nav": {
         "next": "下一步",

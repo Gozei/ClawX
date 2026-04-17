@@ -54,7 +54,7 @@ npmRebuild: false
 # Primary: Tencent COS bucket (used for auto-update)
 publish:
   - provider: generic
-    url: https://deep-ai-worker-1253696187.cos.ap-guangzhou.myqcloud.com/latest
+    url: https://deep-ai-worker-1253696187.cos.ap-guangzhou.myqcloud.com/deepclaw
     useMultipleRangeRequest: false
 
 # macOS Configuration

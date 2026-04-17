@@ -10,6 +10,14 @@ import {
   test,
 } from './fixtures/electron';
 
+async function dismissSkillsGuideIfVisible(page: Page) {
+  const guideSkipButton = page.getByTestId('app-guide-skip');
+  if (await guideSkipButton.isVisible().catch(() => false)) {
+    await guideSkipButton.click();
+    await expect(page.getByTestId('app-guide-overlay')).toHaveCount(0);
+  }
+}
+
 async function ensureTheme(page: Awaited<ReturnType<typeof getStableWindow>>, theme: 'light' | 'dark') {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const className = await page.locator('html').getAttribute('class');
@@ -129,8 +137,10 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
+      await dismissSkillsGuideIfVisible(page);
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
       await expect(page.getByTestId('skills-page-title')).toBeVisible();
+      await expect(page.getByTestId('skills-create-button')).toBeVisible();
 
       await page.getByTestId('skills-discover-button').click();
       await expect(page.getByTestId('skills-marketplace-modal')).toBeVisible();
@@ -263,7 +273,9 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
+      await dismissSkillsGuideIfVisible(page);
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
+      await expect(page.getByTestId('skills-create-button')).toBeVisible();
       await expect(page.getByTestId('skills-discover-button')).toBeVisible();
       await openSettingsHub(page);
       await page.getByTestId('settings-hub-menu-settings').click();
@@ -293,7 +305,9 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
+      await dismissSkillsGuideIfVisible(page);
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
+      await expect(page.getByTestId('skills-create-button')).toBeVisible();
       await expect(page.getByTestId('skills-discover-button')).toBeVisible();
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
     } finally {

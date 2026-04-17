@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifySkillSource } from '../../src/pages/Skills/filters';
+import { classifySkillSource, hasMissingRequirements } from '../../src/pages/Skills/filters';
 import type { SkillSnapshot, SkillSource } from '../../src/types/skill';
 
 function makeSkill(overrides: Partial<SkillSnapshot> = {}): SkillSnapshot {
@@ -52,5 +52,9 @@ describe('skills source classification', () => {
       sourceLabel: 'ClawHub',
       source: 'clawhub',
     }), sources)).toBe('other');
+  });
+
+  it('treats missing requirements as absent when skill data is undefined', () => {
+    expect(hasMissingRequirements(undefined)).toBe(false);
   });
 });

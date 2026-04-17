@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 
 type PageHeaderProps = {
   eyebrow?: string;
+  navigation?: ReactNode;
   title: string;
   subtitle?: string;
   subtitleTestId?: string;
@@ -13,6 +14,7 @@ type PageHeaderProps = {
 
 export function PageHeader({
   eyebrow,
+  navigation,
   title,
   subtitle,
   subtitleTestId,
@@ -27,6 +29,11 @@ export function PageHeader({
     <div className={`mb-6 shrink-0 border-b border-[#e7edf5] pb-5 dark:border-white/10 ${className}`}>
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">
+          {navigation ? (
+            <div className="mb-4">
+              {navigation}
+            </div>
+          ) : null}
           {eyebrow && (
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#94a0b2] dark:text-white/42">
               {eyebrow}
