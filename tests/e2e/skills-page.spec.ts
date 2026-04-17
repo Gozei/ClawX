@@ -16,6 +16,8 @@ test.describe('Deep AI Worker skills page flows', () => {
       await expect(page.getByTestId('skills-refresh-button')).toHaveCount(0);
       await expect(page.getByTestId('skills-source-tabs')).toBeVisible();
       await expect(page.getByTestId('skills-filter-button')).toBeVisible();
+      await expect(page.getByTestId('skills-create-button')).toBeVisible();
+      await expect(page.getByTestId('skills-discover-button')).toBeVisible();
 
       await page.getByTestId('skills-search-input').fill('demo');
       await expect(page.getByTestId('skills-search-input')).toHaveValue('demo');
@@ -77,4 +79,26 @@ test.describe('Deep AI Worker skills page flows', () => {
       await closeElectronApp(app);
     }
   });
+
+  test('does not re-surface the gateway restart hint after opening the skills page', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      const page = await getStableWindow(app);
+
+      await expect(page.getByTestId('main-layout')).toBeVisible();
+
+      const gatewayRestartHint = page.getByTestId('sidebar-gateway-restarting-hint');
+      await expect(gatewayRestartHint).toHaveCount(0, { timeout: 60_000 });
+
+      await page.getByTestId('sidebar-nav-skills').click();
+      await expect(page.getByTestId('skills-page')).toBeVisible();
+
+      await page.waitForTimeout(2_000);
+      await expect(gatewayRestartHint).toHaveCount(0);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
 });

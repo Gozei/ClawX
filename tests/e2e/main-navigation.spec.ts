@@ -131,6 +131,7 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
       await expect(page.getByTestId('skills-page')).toBeVisible();
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
       await expect(page.getByTestId('skills-page-title')).toBeVisible();
+      await expect(page.getByTestId('skills-create-button')).toBeVisible();
 
       await page.getByTestId('skills-discover-button').click();
       await expect(page.getByTestId('skills-marketplace-modal')).toBeVisible();
@@ -264,6 +265,7 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
+      await expect(page.getByTestId('skills-create-button')).toBeVisible();
       await expect(page.getByTestId('skills-discover-button')).toBeVisible();
       await openSettingsHub(page);
       await page.getByTestId('settings-hub-menu-settings').click();
@@ -294,6 +296,7 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
+      await expect(page.getByTestId('skills-create-button')).toBeVisible();
       await expect(page.getByTestId('skills-discover-button')).toBeVisible();
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
     } finally {

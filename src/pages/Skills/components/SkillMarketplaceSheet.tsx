@@ -1,15 +1,16 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useMemo, useRef } from 'react';
-import { AlertCircle, Download, LoaderCircle, Package, PackageMinus, RefreshCw, Search, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Download, LoaderCircle, Package, PackageMinus, RefreshCw, Search, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { pageCompactControlClasses, pageInputSurfaceClasses, pagePrimaryInputClasses } from '@/components/layout/page-tokens';
 import { modalCardClasses, modalOverlayClasses } from '@/components/ui/modal';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { cn } from '@/lib/utils';
 import type { MarketplaceInstalledSkill, MarketplaceSkill, SkillSource } from '@/types/skill';
-import { skillCardClasses, skillCompactControlClasses, skillInputClasses, skillPrimaryInputClasses } from './constants';
+import { skillCardClasses } from './constants';
 
 type SkillMarketplaceSheetProps = {
   open: boolean;
@@ -25,9 +26,11 @@ type SkillMarketplaceSheetProps = {
   searchResults: MarketplaceSkill[];
   installedSkills: MarketplaceInstalledSkill[];
   installing: Record<string, boolean>;
+  marketplaceNotice: { type: 'installing' | 'installed' | 'uninstalling' | 'uninstalled'; slug: string; name?: string } | null;
   onLoadMore: () => void;
   onInstall: (slug: string, version?: string, sourceId?: string, force?: boolean) => void;
   onUninstall: (slug: string, sourceId?: string) => void;
+  onViewInstalledSkill: (slug: string) => void;
 };
 
 export function SkillMarketplaceSheet({
@@ -44,9 +47,11 @@ export function SkillMarketplaceSheet({
   searchResults,
   installedSkills,
   installing,
+  marketplaceNotice,
   onLoadMore,
   onInstall,
   onUninstall,
+  onViewInstalledSkill,
 }: SkillMarketplaceSheetProps) {
   const { t } = useTranslation('skills');
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -120,26 +125,67 @@ export function SkillMarketplaceSheet({
             'fixed left-1/2 top-1/2 z-50 h-[min(780px,calc(100dvh-2rem))] w-[min(1120px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-[30px] border border-[#d7deea] bg-[#f8fafc] shadow-[0_18px_48px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-[#0f131b]'
           )}
         >
-          <div className="flex items-start justify-between gap-6 border-b border-black/6 px-7 pb-5 pt-7 dark:border-white/10">
-            <div className="min-w-0">
-              <Dialog.Title className="text-[28px] font-semibold tracking-tight text-foreground">
-                {t('marketplace.title')}
-              </Dialog.Title>
-              <Dialog.Description className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                {t('marketplace.subtitle')}
-              </Dialog.Description>
-            </div>
-            <Dialog.Close asChild>
+          <div className="pointer-events-none absolute left-1/2 top-7 z-10 -translate-x-1/2">
+            {marketplaceNotice && (
+              <div
+                data-testid="skills-marketplace-success-banner"
+                className="pointer-events-auto flex max-w-[min(760px,calc(100vw-6rem))] items-center justify-center gap-2.5 rounded-full bg-white/96 px-5 py-2.5 text-center text-[15px] font-medium text-[#4d7fff] shadow-[0_8px_28px_rgba(77,127,255,0.16)] ring-1 ring-[#4d7fff]/14 backdrop-blur dark:bg-[#171c26]/96 dark:text-[#4d7fff] dark:ring-[#4d7fff]/18"
+              >
+                {marketplaceNotice.type === 'installed' || marketplaceNotice.type === 'uninstalled' ? (
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+                ) : (
+                  <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" />
+                )}
+                <span className="truncate">
+                  {marketplaceNotice.type === 'installed'
+                    ? t('marketplace.installSuccessDescription', {
+                      skill: marketplaceNotice.name || marketplaceNotice.slug,
+                    })
+                    : marketplaceNotice.type === 'uninstalled'
+                      ? t('marketplace.uninstallSuccessDescription', {
+                        skill: marketplaceNotice.name || marketplaceNotice.slug,
+                      })
+                      : marketplaceNotice.type === 'uninstalling'
+                        ? t('marketplace.uninstallingDescription', {
+                          skill: marketplaceNotice.name || marketplaceNotice.slug,
+                        })
+                        : t('marketplace.installingDescription', {
+                      skill: marketplaceNotice.name || marketplaceNotice.slug,
+                    })}
+                </span>
+                {marketplaceNotice.type === 'installed' && (
+                  <button
+                    type="button"
+                    onClick={() => onViewInstalledSkill(marketplaceNotice.slug)}
+                    className="shrink-0 font-medium text-[#4d7fff] underline decoration-[#4d7fff]/45 underline-offset-4 transition-opacity hover:opacity-85 dark:text-[#4d7fff] dark:decoration-[#4d7fff]/45"
+                  >
+                    {t('marketplace.viewInstalledSkill')}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="px-7 pb-5 pt-7">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-6">
+              <div className="min-w-0">
+                <Dialog.Title className="text-[28px] font-semibold tracking-tight text-foreground">
+                  {t('marketplace.title')}
+                </Dialog.Title>
+                <Dialog.Description className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                  {t('marketplace.subtitle')}
+                </Dialog.Description>
+              </div>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
+                onClick={() => onOpenChange(false)}
                 className="h-11 w-11 shrink-0 rounded-full border border-black/8 bg-white text-foreground/70 hover:bg-slate-50 dark:border-white/10 dark:bg-[#171c26] dark:text-white/72 dark:hover:bg-[#1c2230]"
                 aria-label={t('marketplace.close')}
               >
                 <X className="h-4 w-4" />
               </Button>
-            </Dialog.Close>
+            </div>
           </div>
 
           <div className="grid gap-4 border-b border-black/6 px-7 py-5 dark:border-white/10">
@@ -151,8 +197,8 @@ export function SkillMarketplaceSheet({
                 onChange={(event) => onInstallQueryChange(event.target.value)}
                 placeholder={t('searchMarketplace')}
                 className={cn(
-                  skillPrimaryInputClasses,
-                  skillInputClasses,
+                  pagePrimaryInputClasses,
+                  pageInputSurfaceClasses,
                   'h-11 rounded-full border-[#d7dfeb] bg-white pl-11 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:border-white/12 dark:bg-white/[0.04]'
                 )}
               />
@@ -168,7 +214,7 @@ export function SkillMarketplaceSheet({
                   aria-pressed={installSourceId === source.id}
                   data-testid={`skills-marketplace-source-chip-${source.id}`}
                   className={cn(
-                    skillCompactControlClasses,
+                    pageCompactControlClasses,
                     'rounded-full border px-4',
                     installSourceId === source.id
                       ? 'border-transparent bg-foreground text-background hover:bg-foreground/90'
