@@ -269,29 +269,55 @@ export function Chat() {
 
     const scrollElement = scrollRef.current;
     const anchorElement = activeTurnViewportAnchorRef.current;
-    if (!scrollElement || !anchorElement) return;
+    const contentElement = contentRef.current;
+    if (!scrollElement || !anchorElement || !contentElement) return;
 
     let frame2 = 0;
-    stopScroll();
-    const frame1 = requestAnimationFrame(() => {
-      frame2 = requestAnimationFrame(() => {
-        const scrollRect = scrollElement.getBoundingClientRect();
-        const anchorRect = anchorElement.getBoundingClientRect();
-        const nextScrollTop = scrollElement.scrollTop + (anchorRect.top - scrollRect.top);
+    let frame1 = 0;
+    let releasedByUser = false;
+    const alignActiveTurnToTop = () => {
+      cancelAnimationFrame(frame1);
+      cancelAnimationFrame(frame2);
+      stopScroll();
+      frame1 = requestAnimationFrame(() => {
+        frame2 = requestAnimationFrame(() => {
+          if (releasedByUser) return;
 
-        scrollElement.scrollTop = Math.max(0, nextScrollTop);
-        stopScroll();
-        lastAutoAlignedTurnRef.current = activeTurnScrollKey;
+          const scrollRect = scrollElement.getBoundingClientRect();
+          const anchorRect = anchorElement.getBoundingClientRect();
+          const nextScrollTop = scrollElement.scrollTop + (anchorRect.top - scrollRect.top);
+
+          scrollElement.scrollTop = Math.max(0, nextScrollTop);
+          stopScroll();
+          lastAutoAlignedTurnRef.current = activeTurnScrollKey;
+        });
       });
-    });
+    };
+    const releaseTopLock = () => {
+      releasedByUser = true;
+      resizeObserver?.disconnect();
+      cancelAnimationFrame(frame1);
+      cancelAnimationFrame(frame2);
+    };
+    const resizeObserver = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => {
+          if (!releasedByUser) {
+            alignActiveTurnToTop();
+          }
+        })
+      : null;
+
+    scrollElement.addEventListener('wheel', releaseTopLock, { passive: true });
+    resizeObserver?.observe(contentElement);
+    alignActiveTurnToTop();
 
     return () => {
+      resizeObserver?.disconnect();
+      scrollElement.removeEventListener('wheel', releaseTopLock);
       cancelAnimationFrame(frame1);
-      if (frame2) {
-        cancelAnimationFrame(frame2);
-      }
+      cancelAnimationFrame(frame2);
     };
-  }, [activeTurnScrollKey, scrollRef, sending, stopScroll]);
+  }, [activeTurnScrollKey, contentRef, scrollRef, sending, stopScroll]);
 
   const handleEditQueuedDraft = (queuedId: string, text: string) => {
     setComposerPrefill({ text, nonce: Date.now() });
