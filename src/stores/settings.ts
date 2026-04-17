@@ -24,6 +24,7 @@ type Theme = 'light' | 'dark' | 'system';
 type UpdateChannel = 'stable' | 'beta' | 'dev';
 export type ChatProcessDisplayMode = 'all' | 'files' | 'hidden';
 export type AssistantMessageStyle = 'bubble' | 'stream';
+export type GuideSeenVersions = Record<string, number>;
 
 interface SettingsState {
   // General
@@ -63,6 +64,7 @@ interface SettingsState {
   sidebarCollapsed: boolean;
   sidebarWidth: number;
   devModeUnlocked: boolean;
+  guideSeenVersions: GuideSeenVersions;
 
   // Setup
   setupComplete: boolean;
@@ -100,6 +102,7 @@ interface SettingsState {
   setSidebarCollapsed: (value: boolean) => void;
   setSidebarWidth: (value: number) => void;
   setDevModeUnlocked: (value: boolean) => void;
+  markGuideSeen: (guideId: string, version: number) => void;
   markSetupComplete: () => void;
   resetSettings: () => void;
 }
@@ -135,6 +138,7 @@ const defaultSettings = {
   sidebarCollapsed: false,
   sidebarWidth: 256,
   devModeUnlocked: false,
+  guideSeenVersions: {} as GuideSeenVersions,
   setupComplete: false,
 };
 
@@ -298,6 +302,19 @@ export const useSettingsStore = create<SettingsState>()(
           method: 'PUT',
           body: JSON.stringify({ value: devModeUnlocked }),
         }).catch(() => { });
+      },
+      markGuideSeen: (guideId, version) => {
+        const normalizedGuideId = guideId.trim();
+        const normalizedVersion = Number.isFinite(version) ? Math.max(0, Math.floor(version)) : 0;
+        if (!normalizedGuideId || normalizedVersion <= 0) {
+          return;
+        }
+        set((state) => ({
+          guideSeenVersions: {
+            ...state.guideSeenVersions,
+            [normalizedGuideId]: normalizedVersion,
+          },
+        }));
       },
       markSetupComplete: () => set({ setupComplete: true }),
       resetSettings: () => set(defaultSettings),

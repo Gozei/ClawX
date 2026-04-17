@@ -210,15 +210,19 @@ function createWindow(): BrowserWindow {
     if (shouldSkipSetupForE2E) {
       rendererUrl.searchParams.set('e2eSkipSetup', '1');
     }
+    if (process.env.CLAWX_E2E_SETUP_STEP) {
+      rendererUrl.searchParams.set('e2eSetupStep', process.env.CLAWX_E2E_SETUP_STEP);
+    }
     win.loadURL(rendererUrl.toString());
     if (!isE2EMode) {
       win.webContents.openDevTools();
     }
   } else {
     win.loadFile(join(__dirname, '../../dist/index.html'), {
-      query: shouldSkipSetupForE2E
-        ? { e2eSkipSetup: '1' }
-        : undefined,
+      query: {
+        ...(shouldSkipSetupForE2E ? { e2eSkipSetup: '1' } : {}),
+        ...(process.env.CLAWX_E2E_SETUP_STEP ? { e2eSetupStep: process.env.CLAWX_E2E_SETUP_STEP } : {}),
+      },
     });
   }
 

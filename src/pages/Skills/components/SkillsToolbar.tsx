@@ -3,8 +3,8 @@ import { ChevronDown, Search, SlidersHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { pageCompactControlClasses, pagePrimaryControlClasses, pagePrimaryInputClasses } from '@/components/layout/page-tokens';
 import { cn } from '@/lib/utils';
-import { skillCompactControlClasses, skillPrimaryControlClasses, skillPrimaryInputClasses } from './constants';
 import {
   buildFilterButtonClass,
   type MissingFilter,
@@ -47,6 +47,8 @@ export function SkillsToolbar({
 }: SkillsToolbarProps) {
   const { t } = useTranslation('skills');
   const [filterOpen, setFilterOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const isComposingRef = useRef(false);
   const closeTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -56,6 +58,12 @@ export function SkillsToolbar({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!isComposingRef.current && inputRef.current && inputRef.current.value !== query) {
+      inputRef.current.value = query;
+    }
+  }, [query]);
 
   const scheduleClose = () => {
     if (closeTimerRef.current !== null) {
@@ -79,10 +87,25 @@ export function SkillsToolbar({
       <div className="relative min-w-0">
         <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
+          ref={inputRef}
           data-testid="skills-search-input"
-          value={query}
-          onChange={(e) => onQueryChange(e.target.value)}
-          className={cn(skillPrimaryInputClasses, 'border-[#d6deea] bg-white pl-10 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:border-white/12 dark:bg-transparent')}
+          data-guide-id="skills-search"
+          defaultValue={query}
+          onChange={(e) => {
+            const nextValue = e.target.value;
+            if (!isComposingRef.current) {
+              onQueryChange(nextValue);
+            }
+          }}
+          onCompositionStart={() => {
+            isComposingRef.current = true;
+          }}
+          onCompositionEnd={(e) => {
+            isComposingRef.current = false;
+            const nextValue = e.currentTarget.value;
+            onQueryChange(nextValue);
+          }}
+          className={cn(pagePrimaryInputClasses, 'border-[#d6deea] bg-white pl-10 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:border-white/12 dark:bg-transparent')}
           placeholder={t('search')}
         />
       </div>
@@ -107,7 +130,7 @@ export function SkillsToolbar({
                 <span
                   className={cn(
                     'text-[11px] font-semibold leading-none',
-                    sourceCategory === option.id ? 'text-[#0f172a]/56 dark:text-white/60' : 'text-[#607089] dark:text-white/44'
+                    sourceCategory === option.id ? 'text-primary/70 dark:text-primary-foreground/72' : 'text-[#607089] dark:text-white/44'
                   )}
                 >
                   {option.count}
@@ -116,7 +139,7 @@ export function SkillsToolbar({
               <span
                 className={cn(
                   'absolute bottom-0 left-1/2 h-[2px] -translate-x-1/2 rounded-full transition-all',
-                  sourceCategory === option.id ? 'w-[64px] bg-[#0f172a] dark:bg-white' : 'w-0 bg-transparent'
+                  sourceCategory === option.id ? 'w-[64px] bg-primary' : 'w-0 bg-transparent'
                 )}
               />
             </button>
@@ -136,7 +159,7 @@ export function SkillsToolbar({
           type="button"
           variant="outline"
           onClick={() => setFilterOpen((open) => !open)}
-          className={cn(skillPrimaryControlClasses, 'border-black/10 bg-transparent text-foreground/80 hover:bg-black/5 dark:border-white/10 dark:text-white/80 dark:hover:bg-white/5')}
+          className={cn(pagePrimaryControlClasses, 'border-black/10 bg-transparent text-foreground/80 hover:bg-black/5 dark:border-white/10 dark:text-white/80 dark:hover:bg-white/5')}
           data-testid="skills-filter-button"
           aria-haspopup="menu"
           aria-expanded={filterOpen}
@@ -161,7 +184,7 @@ export function SkillsToolbar({
               <Button
                 type="button"
                 variant="ghost"
-                className={cn(skillCompactControlClasses, 'px-3 text-foreground/70 hover:bg-black/5 dark:hover:bg-white/10')}
+                className={cn(pageCompactControlClasses, 'px-3 text-foreground/70 hover:bg-black/5 dark:hover:bg-white/10')}
                 onClick={onResetFilters}
                 data-testid="skills-filter-reset"
               >
@@ -180,7 +203,7 @@ export function SkillsToolbar({
                       aria-pressed={sourceCategory === option.id}
                       onClick={() => onSourceCategoryChange(option.id)}
                       className={cn(
-                        skillCompactControlClasses,
+                        pageCompactControlClasses,
                         'justify-start rounded-xl border px-3',
                         buildFilterButtonClass(sourceCategory === option.id)
                       )}
@@ -208,7 +231,7 @@ export function SkillsToolbar({
                       type="button"
                       aria-pressed={statusFilter === value}
                       onClick={() => onStatusFilterChange(value)}
-                      className={cn(skillCompactControlClasses, 'justify-center rounded-xl border px-3', buildFilterButtonClass(statusFilter === value))}
+                      className={cn(pageCompactControlClasses, 'justify-center rounded-xl border px-3', buildFilterButtonClass(statusFilter === value))}
                       data-testid={`skills-filter-status-${value}`}
                     >
                       {label}
@@ -230,7 +253,7 @@ export function SkillsToolbar({
                       type="button"
                       aria-pressed={missingFilter === value}
                       onClick={() => onMissingFilterChange(value)}
-                      className={cn(skillCompactControlClasses, 'justify-center rounded-xl border px-3', buildFilterButtonClass(missingFilter === value))}
+                      className={cn(pageCompactControlClasses, 'justify-center rounded-xl border px-3', buildFilterButtonClass(missingFilter === value))}
                       data-testid={`skills-filter-missing-${value}`}
                     >
                       {label}

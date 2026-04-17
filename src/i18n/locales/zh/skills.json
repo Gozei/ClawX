@@ -67,9 +67,32 @@
     },
     "actions": {
         "discover": "发现技能",
+        "create": "创建技能",
+        "marketplace": "技能市场",
         "enableVisible": "批量启用可见项",
         "disableVisible": "批量禁用可见项",
         "installSkill": "安装技能"
+    },
+    "guide": {
+        "title": "技能页引导",
+        "launch": "查看引导",
+        "progress": "第 {{current}} / {{total}} 步",
+        "finish": "完成",
+        "createPrompt": "请帮我创建一个新的 skill，优先使用内置的 skill 创建能力。我的要求是：",
+        "steps": {
+            "search": {
+                "title": "先筛出你要处理的技能",
+                "description": "用搜索框和上方来源标签快速定位已安装技能。需要进一步排查状态时，再打开右侧筛选。"
+            },
+            "create": {
+                "title": "需要新技能时，从这里开始",
+                "description": "点击“创建技能”会新建一个对话，并预填 skill 创建请求，让 AI 帮你生成结构和文档骨架。"
+            },
+            "marketplace": {
+                "title": "现成能力从技能市场安装",
+                "description": "点击“技能市场”搜索和安装现成 skill。安装完成后可以直接进入详情页查看配置和依赖。"
+            }
+        }
     },
     "noSkills": "未找到技能",
     "noSkillsSearch": "尝试不同的搜索词",
@@ -82,6 +105,11 @@
         "docsTab": "说明文档",
         "configTab": "设置与配置",
         "requirementsTab": "环境与依赖",
+        "runtimeRequirementsDescription": "展示此技能运行所需的依赖项和环境条件。",
+        "requiredBins": "必需二进制",
+        "requiredEnv": "必需环境变量",
+        "anyBins": "任一可用二进制",
+        "noSpecificRuntimeRequirements": "没有特定的运行时依赖要求。",
         "dangerZone": "危险操作",
         "primaryCredential": "主凭证 · {{env}}",
         "keyPlaceholder": "键名",
@@ -104,6 +132,7 @@
         "deleteSkill": "删除技能",
         "deleteConfirmTitle": "删除技能目录？",
         "deleteConfirmMessage": "这会从磁盘删除本地技能目录。",
+        "deleted": "已删除 {{name}}",
         "info": "信息",
         "config": "配置",
         "description": "描述",
@@ -159,6 +188,8 @@
         "enabled": "技能已启用",
         "disabled": "技能已禁用",
         "installed": "技能已安装并启用",
+        "installedNavigateHint": "点击“查看详情”即可打开刚下载的技能页面。",
+        "viewInstalledSkill": "查看详情",
         "uninstalled": "技能已成功卸载",
         "openedEditor": "已在编辑器中打开",
         "failedEditor": "无法打开编辑器",
@@ -199,6 +230,12 @@
         "updateAvailableState": "可更新",
         "updateVersionLabel": "v{{current}} -> v{{latest}}",
         "occupiedDetail": "已由 {{source}} 提供",
+        "installSuccessTitle": "技能已安装并启用",
+        "installingDescription": "正在下载 {{skill}}",
+        "installSuccessDescription": "已将 {{skill}} 安装到当前技能列表中，现在可直接查看详情。",
+        "uninstallingDescription": "正在卸载 {{skill}}",
+        "uninstallSuccessDescription": "已卸载 {{skill}}",
+        "viewInstalledSkill": "查看详情",
         "installDialogTitle": "安装技能",
         "installDialogSubtitle": "默认展示 Explore，输入关键词后执行搜索。",
         "sourceLabel": "来源",

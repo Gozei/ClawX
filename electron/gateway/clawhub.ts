@@ -46,6 +46,12 @@ export interface ClawHubSearchResponse {
     nextCursor?: string;
 }
 
+export interface ClawHubSourceCountResult {
+    sourceId: string;
+    sourceLabel?: string;
+    total: number | null;
+}
+
 interface PublicSkillsApiItem {
     skill?: {
         slug?: string;
@@ -227,6 +233,58 @@ export class ClawHubService {
             })).filter((item) => item.slug),
             nextCursor: data?.value?.nextCursor,
         };
+    }
+
+    private async fetchPublicSkillCount(source: SkillSourceConfig): Promise<number | null> {
+        if (!source.apiQueryEndpoint) {
+            return null;
+        }
+
+        try {
+            const response = await fetch(source.apiQueryEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    path: 'skills:countPublicSkills',
+                    format: 'convex_encoded_json',
+                    args: [{}],
+                }),
+            } as RequestInit);
+
+            if (!response.ok) {
+                throw new Error(`Failed to count public skills from ${source.id}: ${response.status} ${response.statusText}`);
+            }
+
+            const data = await response.json() as { status?: string; value?: unknown };
+            if (typeof data?.value === 'number' && Number.isFinite(data.value)) {
+                return Math.max(0, Math.trunc(data.value));
+            }
+        } catch (error) {
+            console.warn(`Direct HTTP count failed for ${source.id}, falling back to paginated counting:`, error);
+        }
+
+        try {
+            let total = 0;
+            let cursor: string | undefined;
+            let safety = 0;
+
+            while (safety < 200) {
+                safety += 1;
+                const page = await this.fetchPublicSkills(source, 250, cursor);
+                total += page.results.length;
+
+                if (!page.nextCursor || page.results.length === 0) {
+                    break;
+                }
+
+                cursor = page.nextCursor;
+            }
+
+            return total;
+        } catch (error) {
+            console.error(`Fallback paginated count failed for ${source.id}:`, error);
+            return null;
+        }
     }
 
     /**
@@ -527,6 +585,28 @@ export class ClawHubService {
             console.error('ClawHub list error:', error);
             return [];
         }
+    }
+
+    async listSourceCounts(): Promise<ClawHubSourceCountResult[]> {
+        const sources = (await listSkillSources()).filter((source) => source.enabled);
+        const results = await Promise.allSettled(sources.map(async (source) => ({
+            sourceId: source.id,
+            sourceLabel: source.label,
+            total: await this.fetchPublicSkillCount(source),
+        })));
+
+        return results.map((result, index) => {
+            if (result.status === 'fulfilled') {
+                return result.value;
+            }
+
+            const source = sources[index];
+            return {
+                sourceId: source?.id || `source-${index}`,
+                sourceLabel: source?.label,
+                total: null,
+            } satisfies ClawHubSourceCountResult;
+        });
     }
 
     private async resolveSkillDir(skillKeyOrSlug: string, fallbackSlug?: string, preferredBaseDir?: string): Promise<string | null> {

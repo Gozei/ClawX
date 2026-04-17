@@ -1,4 +1,4 @@
-import { dirname, join } from 'path';
+import { basename, dirname, join } from 'path';
 import { access, readFile, rm } from 'fs/promises';
 import { constants } from 'fs';
 import type { GatewayManager } from '../gateway/manager';
@@ -37,6 +37,10 @@ type GatewaySkillsStatusResult = {
 type SkillConfigEntry = {
   apiKey?: string;
   env?: Record<string, string>;
+};
+
+type SkillInstallMetadata = {
+  slug?: string;
 };
 
 export type SkillListItem = {
@@ -247,6 +251,52 @@ async function readSkillSpec(filePath: string | undefined, baseDir: string | und
   }
 }
 
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function getSkillDirectoryLeaf(baseDir: string | undefined, filePath: string | undefined): string | undefined {
+  const normalizedBaseDir = normalizeOptionalString(baseDir);
+  if (normalizedBaseDir) {
+    return normalizeOptionalString(basename(normalizedBaseDir.replace(/[\\/]+$/, '')));
+  }
+
+  const normalizedFilePath = normalizeOptionalString(filePath);
+  if (!normalizedFilePath) return undefined;
+  return normalizeOptionalString(basename(dirname(normalizedFilePath)));
+}
+
+async function readSkillInstallMetadata(baseDir: string | undefined): Promise<SkillInstallMetadata> {
+  const normalizedBaseDir = normalizeOptionalString(baseDir);
+  if (!normalizedBaseDir) return {};
+
+  try {
+    const raw = await readFile(join(normalizedBaseDir, '_meta.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { slug?: unknown };
+    return {
+      slug: normalizeOptionalString(parsed.slug),
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function resolveInstalledSkillSlug(skill: GatewaySkillStatus): Promise<string> {
+  const runtimeSlug = normalizeOptionalString(skill.slug);
+  if (runtimeSlug) {
+    return runtimeSlug;
+  }
+
+  const installMetadata = await readSkillInstallMetadata(skill.baseDir);
+  if (installMetadata.slug) {
+    return installMetadata.slug;
+  }
+
+  return getSkillDirectoryLeaf(skill.baseDir, skill.filePath) || skill.skillKey;
+}
+
 async function findSkillById(gatewayManager: GatewayManager, skillId: string): Promise<GatewaySkillStatus | null> {
   const skills = await getRuntimeSkills(gatewayManager);
   const match = skills.find((skill) => skill.skillKey === skillId || skill.slug === skillId);
@@ -256,29 +306,35 @@ async function findSkillById(gatewayManager: GatewayManager, skillId: string): P
 export async function listSkills(gatewayManager: GatewayManager): Promise<SkillListItem[]> {
   const skills = await getRuntimeSkills(gatewayManager);
   const sources = await listSkillSources();
-  return skills.map((skill) => {
+  return await Promise.all(skills.map(async (skill) => {
+    const resolvedSlug = await resolveInstalledSkillSlug(skill);
     const mapped = mapSkillStatus(skill);
     const inferredSource = inferSkillSourceFromBaseDir(skill.baseDir, sources);
     return {
       ...mapped,
+      slug: resolvedSlug,
       sourceId: inferredSource?.id,
       sourceLabel: inferredSource?.label,
     };
-  });
+  }));
 }
 
 export async function getSkillDetail(gatewayManager: GatewayManager, skillId: string): Promise<SkillDetail | null> {
   const skill = await findSkillById(gatewayManager, skillId);
   if (!skill) return null;
 
+  const resolvedSlug = await resolveInstalledSkillSlug(skill);
   const configs = await getAllSkillConfigs();
-  const config = configs[skill.skillKey] || (skill.slug ? configs[skill.slug] : undefined) || {};
+  const config = configs[skill.skillKey]
+    || (skill.slug ? configs[skill.slug] : undefined)
+    || (resolvedSlug !== skill.slug ? configs[resolvedSlug] : undefined)
+    || {};
   const spec = await readSkillSpec(skill.filePath, skill.baseDir);
 
   return {
     identity: {
       id: skill.skillKey,
-      slug: skill.slug || skill.skillKey,
+      slug: resolvedSlug,
       name: skill.name || spec.name || skill.skillKey,
       description: skill.description || spec.description || '',
       icon: skill.emoji || '📦',

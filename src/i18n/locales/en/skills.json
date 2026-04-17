@@ -68,9 +68,32 @@
     },
     "actions": {
         "discover": "Discover Skills",
+        "create": "Create Skill",
+        "marketplace": "Skill Marketplace",
         "enableVisible": "Enable Visible",
         "disableVisible": "Disable Visible",
         "installSkill": "Install Skills"
+    },
+    "guide": {
+        "title": "Skills Guide",
+        "launch": "View Guide",
+        "progress": "Step {{current}} / {{total}}",
+        "finish": "Finish",
+        "createPrompt": "Please help me create a new skill, and prefer the built-in skill creation capability. My requirements are:",
+        "steps": {
+            "search": {
+                "title": "Filter to the skills you need first",
+                "description": "Use the search box and source tabs to narrow installed skills quickly. Open the filter menu when you need to inspect runtime state more closely."
+            },
+            "create": {
+                "title": "Start here when you need a new skill",
+                "description": "Create Skill opens a fresh chat and prefills a skill-creation request so the AI can scaffold the structure and documentation for you."
+            },
+            "marketplace": {
+                "title": "Install ready-made capabilities from the marketplace",
+                "description": "Use Skill Marketplace to search and install existing skills. After installation, you can jump straight into the detail page to review config and dependencies."
+            }
+        }
     },
     "noSkills": "No skills found",
     "noSkillsSearch": "Try a different search term",
@@ -83,6 +106,11 @@
         "docsTab": "Documentation",
         "configTab": "Setup & Config",
         "requirementsTab": "Environment & Dependencies",
+        "runtimeRequirementsDescription": "Dependencies and environments required for this skill to operate.",
+        "requiredBins": "Required Bins",
+        "requiredEnv": "Required Env",
+        "anyBins": "Any Bins",
+        "noSpecificRuntimeRequirements": "No specific runtime requirements.",
         "dangerZone": "Danger Zone",
         "primaryCredential": "Primary credential · {{env}}",
         "keyPlaceholder": "Key",
@@ -105,6 +133,7 @@
         "deleteSkill": "Delete Skill",
         "deleteConfirmTitle": "Delete skill directory?",
         "deleteConfirmMessage": "This removes the local skill directory from disk.",
+        "deleted": "Deleted {{name}}",
         "info": "Information",
         "config": "Configuration",
         "description": "Description",
@@ -160,6 +189,8 @@
         "enabled": "Skill enabled",
         "disabled": "Skill disabled",
         "installed": "Skill installed and enabled",
+        "installedNavigateHint": "Click \"View details\" to open the newly downloaded skill page.",
+        "viewInstalledSkill": "View details",
         "uninstalled": "Skill uninstalled successfully",
         "openedEditor": "Opened in editor",
         "failedEditor": "Failed to open editor",
@@ -200,6 +231,12 @@
         "updateAvailableState": "Update available",
         "updateVersionLabel": "v{{current}} -> v{{latest}}",
         "occupiedDetail": "Provided by {{source}}",
+        "installSuccessTitle": "Skill installed and enabled",
+        "installingDescription": "Downloading {{skill}}",
+        "installSuccessDescription": "{{skill}} is now in your installed skills list and ready to open.",
+        "uninstallingDescription": "Uninstalling {{skill}}",
+        "uninstallSuccessDescription": "{{skill}} has been uninstalled.",
+        "viewInstalledSkill": "View details",
         "installDialogTitle": "Install Skills",
         "installDialogSubtitle": "Browse Explore by default, or enter keywords to search.",
         "sourceLabel": "Source",
