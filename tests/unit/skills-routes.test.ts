@@ -113,4 +113,38 @@ describe('skill routes', () => {
     expect(deleteSkillDirectoryMock).toHaveBeenCalledWith({}, 'weather');
     expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, { success: true });
   });
+
+  it('uninstalls a marketplace skill through the detail endpoint when its source is inferred', async () => {
+    const { handleSkillRoutes } = await import('@electron/api/routes/skills');
+    getSkillDetailMock.mockResolvedValue({
+      identity: {
+        slug: 'self-improving-agent',
+        baseDir: 'C:/Users/test/.openclaw/skill-sources/deepaiworker/skills/self-improving-agent',
+      },
+    });
+    listSourcesMock.mockResolvedValue([{ id: 'deepaiworker' }]);
+    inferSourceFromBaseDirMock.mockReturnValue({ id: 'deepaiworker' });
+    uninstallMock.mockResolvedValue(undefined);
+
+    await handleSkillRoutes(
+      { method: 'DELETE' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://localhost/api/skills/self-improvement'),
+      {
+        gatewayManager: {},
+        clawHubService: {
+          listSources: (...args: unknown[]) => listSourcesMock(...args),
+          inferSourceFromBaseDir: (...args: unknown[]) => inferSourceFromBaseDirMock(...args),
+          uninstall: (...args: unknown[]) => uninstallMock(...args),
+        },
+      } as never,
+    );
+
+    expect(uninstallMock).toHaveBeenCalledWith({
+      slug: 'self-improving-agent',
+      sourceId: 'deepaiworker',
+    });
+    expect(deleteSkillDirectoryMock).not.toHaveBeenCalled();
+    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, { success: true });
+  });
 });

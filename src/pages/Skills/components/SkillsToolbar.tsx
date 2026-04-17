@@ -89,6 +89,7 @@ export function SkillsToolbar({
         <Input
           ref={inputRef}
           data-testid="skills-search-input"
+          data-guide-id="skills-search"
           defaultValue={query}
           onChange={(e) => {
             const nextValue = e.target.value;

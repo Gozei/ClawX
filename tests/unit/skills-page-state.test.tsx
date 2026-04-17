@@ -5,6 +5,9 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { SkillDetailPage, Skills } from '../../src/pages/Skills';
 import type { SkillDetail, SkillSnapshot, SkillSource } from '../../src/types/skill';
 
+const TEST_SKILLS_GUIDE_ID = 'skills-page-basics';
+const TEST_SKILLS_GUIDE_VERSION = 1;
+
 const fetchSkillsMock = vi.fn();
 const fetchSkillDetailMock = vi.fn();
 const enableSkillMock = vi.fn();
@@ -16,10 +19,17 @@ const fetchSourcesMock = vi.fn();
 const fetchMarketInstalledSkillsMock = vi.fn();
 const loadMoreSearchResultsMock = vi.fn();
 const newSessionMock = vi.fn();
+const startGuideMock = vi.fn();
 
-const { gatewayState, skillsState, marketplaceSheetState, toastMocks } = vi.hoisted(() => ({
+const { gatewayState, guideState, settingsState, skillsState, marketplaceSheetState, toastMocks } = vi.hoisted(() => ({
   gatewayState: {
     status: { state: 'running' as const },
+  },
+  guideState: {
+    activeGuideId: null as string | null,
+  },
+  settingsState: {
+    guideSeenVersions: { 'skills-page-basics': 1 } as Record<string, number>,
   },
   skillsState: {
     skills: [] as SkillSnapshot[],
@@ -51,6 +61,17 @@ vi.mock('@/stores/chat', () => ({
   useChatStore: (selector: (state: { newSession: typeof newSessionMock }) => unknown) => selector({
     newSession: newSessionMock,
   }),
+}));
+
+vi.mock('@/stores/guide', () => ({
+  useGuideStore: (selector: (state: { activeGuideId: string | null; startGuide: typeof startGuideMock }) => unknown) => selector({
+    activeGuideId: guideState.activeGuideId,
+    startGuide: startGuideMock,
+  }),
+}));
+
+vi.mock('@/stores/settings', () => ({
+  useSettingsStore: (selector: (state: { guideSeenVersions: Record<string, number> }) => unknown) => selector(settingsState),
 }));
 
 vi.mock('@/stores/skills', () => ({
@@ -103,6 +124,9 @@ vi.mock('react-i18next', () => ({
       if (key === 'toolbar.filtersWithCount') {
         return `filters ${options?.count ?? 0}`;
       }
+      if (key === 'guide.createPrompt') {
+        return 'localized create prompt';
+      }
       return options?.defaultValue ?? key;
     },
   }),
@@ -140,7 +164,10 @@ describe('Skills page route state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     newSessionMock.mockReset();
+    startGuideMock.mockReset();
     gatewayState.status.state = 'running';
+    guideState.activeGuideId = null;
+    settingsState.guideSeenVersions = { [TEST_SKILLS_GUIDE_ID]: TEST_SKILLS_GUIDE_VERSION };
     skillsState.skills = [
       {
         id: 'alpha',
@@ -217,6 +244,39 @@ describe('Skills page route state', () => {
     marketplaceSheetState.latestProps = null;
   });
 
+  it('auto-opens the skills guide when the user has not seen it yet', async () => {
+    settingsState.guideSeenVersions = {};
+
+    render(
+      <MemoryRouter initialEntries={['/skills']}>
+        <Routes>
+          <Route path="/skills" element={<Skills />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(startGuideMock).toHaveBeenCalledWith(TEST_SKILLS_GUIDE_ID);
+    });
+  });
+
+  it('restarts the skills guide when the guide button is clicked', async () => {
+    render(
+      <MemoryRouter initialEntries={['/skills']}>
+        <Routes>
+          <Route path="/skills" element={<Skills />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await act(async () => {
+      screen.getByTestId('skills-guide-button').click();
+      await Promise.resolve();
+    });
+
+    expect(startGuideMock).toHaveBeenCalledWith(TEST_SKILLS_GUIDE_ID);
+  });
+
   it('starts a new chat and passes the skill creation prefill when create is clicked', async () => {
     render(
       <MemoryRouter initialEntries={['/skills']}>
@@ -234,7 +294,7 @@ describe('Skills page route state', () => {
 
     expect(newSessionMock).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('chat-prefill-state')).toHaveTextContent(
-      '请帮我创建一个新的 skill，优先使用内置的 skill 创建能力。我的要求是：',
+      'localized create prompt',
     );
   });
 

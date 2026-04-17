@@ -103,6 +103,7 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
   const onDelete = async () => {
     await deleteSkill(detail.identity.id);
     setConfirmDelete(false);
+    toast.success(t('detail.deleted', { name: detail.identity.name }));
     onDeleted?.();
   };
 

@@ -74,6 +74,27 @@
         "disableVisible": "Disable Visible",
         "installSkill": "Install Skills"
     },
+    "guide": {
+        "title": "Skills Guide",
+        "launch": "View Guide",
+        "progress": "Step {{current}} / {{total}}",
+        "finish": "Finish",
+        "createPrompt": "Please help me create a new skill, and prefer the built-in skill creation capability. My requirements are:",
+        "steps": {
+            "search": {
+                "title": "Filter to the skills you need first",
+                "description": "Use the search box and source tabs to narrow installed skills quickly. Open the filter menu when you need to inspect runtime state more closely."
+            },
+            "create": {
+                "title": "Start here when you need a new skill",
+                "description": "Create Skill opens a fresh chat and prefills a skill-creation request so the AI can scaffold the structure and documentation for you."
+            },
+            "marketplace": {
+                "title": "Install ready-made capabilities from the marketplace",
+                "description": "Use Skill Marketplace to search and install existing skills. After installation, you can jump straight into the detail page to review config and dependencies."
+            }
+        }
+    },
     "noSkills": "No skills found",
     "noSkillsSearch": "Try a different search term",
     "noSkillsAvailable": "No skills available",
@@ -112,6 +133,7 @@
         "deleteSkill": "Delete Skill",
         "deleteConfirmTitle": "Delete skill directory?",
         "deleteConfirmMessage": "This removes the local skill directory from disk.",
+        "deleted": "Deleted {{name}}",
         "info": "Information",
         "config": "Configuration",
         "description": "Description",
