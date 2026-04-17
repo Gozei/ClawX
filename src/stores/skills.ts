@@ -101,7 +101,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   },
 
   fetchSkills: async (force = false) => {
-    const existingSkills = get().skills;
+    const existingSkills = Array.isArray(get().skills) ? get().skills : [];
     const lastFetchedAt = get().lastFetchedAt;
     if (!force && existingSkills.length > 0 && lastFetchedAt && Date.now() - lastFetchedAt < 15_000) {
       return;
@@ -116,7 +116,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     try {
       const skills = await hostApiFetch<SkillSnapshot[]>('/api/skills');
       set({
-        skills,
+        skills: Array.isArray(skills) ? skills : [],
         loading: false,
         refreshing: false,
         lastFetchedAt: Date.now(),
@@ -284,7 +284,8 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   },
 
   enableSkill: async (skillId: string) => {
-    const previousSkill = get().skills.find((skill) => skill.id === skillId);
+    const currentSkills = Array.isArray(get().skills) ? get().skills : [];
+    const previousSkill = currentSkills.find((skill) => skill.id === skillId);
     const previousDetail = get().skillDetailsById[skillId];
 
     const applyOptimistic = (enabled: boolean) => {
@@ -379,7 +380,8 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   },
 
   disableSkill: async (skillId: string) => {
-    const previousSkill = get().skills.find((skill) => skill.id === skillId);
+    const currentSkills = Array.isArray(get().skills) ? get().skills : [];
+    const previousSkill = currentSkills.find((skill) => skill.id === skillId);
     const previousDetail = get().skillDetailsById[skillId];
 
     const applyOptimistic = (enabled: boolean) => {

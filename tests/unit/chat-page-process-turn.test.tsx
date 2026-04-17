@@ -51,6 +51,13 @@ const { agentsState, chatState, gatewayState, settingsState, stickToBottomRefs }
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => navigateMock,
+  useLocation: () => ({
+    state: null,
+    key: 'chat-process-turn',
+    pathname: '/',
+    search: '',
+    hash: '',
+  }),
 }));
 
 vi.mock('react-i18next', async (importOriginal) => {

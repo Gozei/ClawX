@@ -13,7 +13,8 @@ function isWithinDirectory(candidate: string, directory: string): boolean {
   return candidate === directory || candidate.startsWith(`${directory}/`);
 }
 
-export function hasMissingRequirements(skill: SkillSnapshot): boolean {
+export function hasMissingRequirements(skill?: SkillSnapshot | null): boolean {
+  if (!skill) return false;
   const missing = skill.missing;
   if (!missing) return false;
   return (missing.bins?.length || 0) > 0
@@ -51,6 +52,6 @@ export function classifySkillSource(skill: SkillSnapshot, sources: SkillSource[]
 
 export function buildFilterButtonClass(active: boolean): string {
   return active
-    ? 'border-[#111827] bg-[#111827] text-white hover:bg-[#1f2937] dark:border-white dark:bg-white dark:text-black dark:hover:bg-white/90'
+    ? 'border-primary bg-primary text-primary-foreground hover:bg-primary/90'
     : 'border-black/10 bg-transparent text-foreground/75 hover:bg-black/5 dark:border-white/10 dark:text-white/72 dark:hover:bg-white/5';
 }

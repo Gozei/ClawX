@@ -5,6 +5,7 @@
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TitleBar } from './TitleBar';
+import { GuideOverlay } from '@/components/guides/GuideOverlay';
 
 export function MainLayout() {
   return (
@@ -22,6 +23,7 @@ export function MainLayout() {
           <Outlet />
         </main>
       </div>
+      <GuideOverlay />
     </div>
   );
 }

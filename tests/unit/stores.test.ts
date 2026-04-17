@@ -14,6 +14,7 @@ describe('Settings Store', () => {
       sidebarCollapsed: false,
       sidebarWidth: 256,
       devModeUnlocked: false,
+      guideSeenVersions: {},
       gatewayAutoStart: true,
       gatewayPort: 18789,
       autoCheckUpdate: true,
@@ -57,6 +58,14 @@ describe('Settings Store', () => {
     const { setSidebarWidth } = useSettingsStore.getState();
     setSidebarWidth(320);
     expect(useSettingsStore.getState().sidebarWidth).toBe(320);
+  });
+
+  it('should remember dismissed product guides locally', () => {
+    const { markGuideSeen } = useSettingsStore.getState();
+    markGuideSeen('skills-page-basics', 1);
+    expect(useSettingsStore.getState().guideSeenVersions).toEqual({
+      'skills-page-basics': 1,
+    });
   });
   
   it('should unlock dev mode', () => {

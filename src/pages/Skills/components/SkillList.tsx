@@ -4,7 +4,8 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import type { SkillSnapshot } from '@/types/skill';
 
-function hasMissingRequirements(skill: SkillSnapshot): boolean {
+function hasMissingRequirements(skill?: SkillSnapshot | null): boolean {
+  if (!skill) return false;
   const missing = skill.missing;
   if (!missing) return false;
   return (missing.bins?.length || 0) > 0
