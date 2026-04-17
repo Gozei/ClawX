@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, CircleHelp, SquarePen, Store, X } from 'lucide-react';
+import { ArrowLeft, SquarePen, Store, X } from 'lucide-react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -8,10 +8,7 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useSkillsStore } from '@/stores/skills';
 import { useChatStore } from '@/stores/chat';
-import { useGuideStore } from '@/stores/guide';
 import { useGatewayStore } from '@/stores/gateway';
-import { useSettingsStore } from '@/stores/settings';
-import { SKILLS_PAGE_GUIDE_ID, SKILLS_PAGE_GUIDE_VERSION } from '@/lib/guides';
 import { toast } from 'sonner';
 import type { SkillSnapshot } from '@/types/skill';
 import { SkillList } from './components/SkillList';
@@ -87,9 +84,6 @@ export function Skills() {
   const { t } = useTranslation('skills');
   const navigate = useNavigate();
   const newSession = useChatStore((state) => state.newSession);
-  const startGuide = useGuideStore((state) => state.startGuide);
-  const activeGuideId = useGuideStore((state) => state.activeGuideId);
-  const guideSeenVersions = useSettingsStore((state) => state.guideSeenVersions);
   const [searchParams, setSearchParams] = useSearchParams();
   const {
     skills,
@@ -113,7 +107,6 @@ export function Skills() {
     fetchMarketInstalledSkills,
   } = useSkillsStore();
   const gatewayStatus = useGatewayStore((state) => state.status);
-  const hasAutoOpenedGuideRef = useRef(false);
   const hasRequestedInitialSkillsRef = useRef(false);
   const previousGatewayStateRef = useRef(gatewayStatus.state);
   const shouldRetrySkillsWhenGatewayReadyRef = useRef(gatewayStatus.state !== 'running');
@@ -139,7 +132,6 @@ export function Skills() {
     ['all', 'missing', 'clean'] as const,
     DEFAULT_MISSING_FILTER,
   );
-  const hasSeenSkillsGuide = (guideSeenVersions[SKILLS_PAGE_GUIDE_ID] ?? 0) >= SKILLS_PAGE_GUIDE_VERSION;
   const createSkillComposerPrefill = t('guide.createPrompt');
 
   const updateListState = useCallback((updates: Partial<{
@@ -177,13 +169,6 @@ export function Skills() {
     hasRequestedInitialSkillsRef.current = true;
     void fetchSkills();
   }, [fetchSkills]);
-
-  useEffect(() => {
-    if (loading || hasSeenSkillsGuide || hasAutoOpenedGuideRef.current) return;
-    if (activeGuideId && activeGuideId !== SKILLS_PAGE_GUIDE_ID) return;
-    hasAutoOpenedGuideRef.current = true;
-    startGuide(SKILLS_PAGE_GUIDE_ID);
-  }, [activeGuideId, hasSeenSkillsGuide, loading, startGuide]);
 
   const safeSkills = Array.isArray(skills) ? skills.filter((skill): skill is SkillSnapshot => Boolean(skill)) : [];
 
@@ -327,10 +312,6 @@ export function Skills() {
     });
   }, [createSkillComposerPrefill, navigate, newSession]);
 
-  const onOpenGuide = useCallback(() => {
-    startGuide(SKILLS_PAGE_GUIDE_ID);
-  }, [startGuide]);
-
   if (loading) {
     return <div data-testid="skills-page" className="flex flex-col -m-6 dark:bg-background min-h-[calc(100vh-2.5rem)] items-center justify-center"><LoadingSpinner size="lg" /></div>;
   }
@@ -345,17 +326,6 @@ export function Skills() {
           subtitleTestId="skills-page-subtitle"
           actions={(
             <>
-              <Button
-                data-testid="skills-guide-button"
-                data-guide-id="skills-guide-launch"
-                aria-label={t('guide.launch')}
-                onClick={onOpenGuide}
-                variant="ghost"
-                className="h-10 rounded-lg px-3 text-[13px] font-medium text-[#536273] shadow-none hover:bg-[#eef3fb] hover:text-[#223047] dark:text-white/70 dark:hover:bg-white/6 dark:hover:text-white"
-              >
-                <CircleHelp className="mr-2 h-3.5 w-3.5" />
-                {t('guide.launch')}
-              </Button>
               <Button
                 data-testid="skills-create-button"
                 data-guide-id="skills-create"

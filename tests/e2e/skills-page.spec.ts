@@ -1,13 +1,4 @@
-import type { Page } from '@playwright/test';
 import { closeElectronApp, expect, getStableWindow, test } from './fixtures/electron';
-
-async function dismissSkillsGuideIfVisible(page: Page) {
-  const guideSkipButton = page.getByTestId('app-guide-skip');
-  if (await guideSkipButton.isVisible().catch(() => false)) {
-    await guideSkipButton.click();
-    await expect(page.getByTestId('app-guide-overlay')).toHaveCount(0);
-  }
-}
 
 test.describe('Deep AI Worker skills page flows', () => {
   test('keeps the empty state and marketplace modal usable without runtime skills', async ({ launchElectronApp }) => {
@@ -20,13 +11,13 @@ test.describe('Deep AI Worker skills page flows', () => {
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
-      await expect(page.getByTestId('app-guide-overlay')).toBeVisible();
-      await dismissSkillsGuideIfVisible(page);
+      await expect(page.getByTestId('app-guide-overlay')).toHaveCount(0);
       await expect(page.getByTestId('skills-page-title')).toBeVisible();
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
       await expect(page.getByTestId('skills-refresh-button')).toHaveCount(0);
       await expect(page.getByTestId('skills-source-tabs')).toBeVisible();
       await expect(page.getByTestId('skills-filter-button')).toBeVisible();
+      await expect(page.getByTestId('skills-guide-button')).toHaveCount(0);
       await expect(page.getByTestId('skills-create-button')).toBeVisible();
       await expect(page.getByTestId('skills-discover-button')).toBeVisible();
       await expect(page.getByTestId('skills-create-button')).toHaveClass(/rounded-lg/);
@@ -57,42 +48,9 @@ test.describe('Deep AI Worker skills page flows', () => {
       await expect(page.getByTestId('skills-marketplace-modal')).toBeVisible();
       await expect(page.getByTestId('skills-marketplace-modal')).toHaveClass(/rounded-3xl/);
       await expect(page.getByTestId('skills-marketplace-search-input')).toBeVisible();
-      await expect(page.getByTestId('skills-marketplace-search-input')).toHaveClass(/rounded-lg/);
+      await expect(page.getByTestId('skills-marketplace-search-input')).toHaveClass(/rounded-full/);
       await expect(page.getByTestId('skills-marketplace-source-chips')).toBeVisible();
       await expect(page.getByTestId('skills-marketplace-source-chips').locator('button[aria-pressed="true"]')).toHaveCount(1);
-    } finally {
-      await closeElectronApp(app);
-    }
-  });
-
-  test('can relaunch the skills guide after dismissing it', async ({ launchElectronApp }) => {
-    const app = await launchElectronApp({ skipSetup: true });
-
-    try {
-      const page = await getStableWindow(app);
-
-      await expect(page.getByTestId('main-layout')).toBeVisible();
-
-      await page.getByTestId('sidebar-nav-skills').click();
-      await expect(page.getByTestId('skills-page')).toBeVisible();
-      await expect(page.getByTestId('app-guide-overlay')).toBeVisible();
-      await expect(page.getByTestId('app-guide-title')).toContainText('先筛出你要处理的技能');
-      await expect(page.getByTestId('app-guide-highlight')).toBeVisible();
-      await expect(page.getByTestId('app-guide-anchor')).toBeVisible();
-      await expect(page.getByTestId('app-guide-arrow')).toBeVisible();
-      await expect(page.getByTestId('app-guide-card')).not.toHaveClass(/backdrop-blur/);
-
-      await page.getByTestId('app-guide-skip').click();
-      await expect(page.getByTestId('app-guide-overlay')).toHaveCount(0);
-
-      await page.getByTestId('skills-guide-button').click();
-      await expect(page.getByTestId('app-guide-overlay')).toBeVisible();
-      await expect(page.getByTestId('app-guide-progress')).toContainText('第 1 / 3 步');
-
-      await page.getByTestId('app-guide-next').click();
-      await expect(page.getByTestId('app-guide-title')).toContainText('需要新技能时，从这里开始');
-      await expect(page.getByTestId('app-guide-anchor')).toBeVisible();
-      await expect(page.getByTestId('app-guide-arrow')).toBeVisible();
     } finally {
       await closeElectronApp(app);
     }
@@ -108,7 +66,6 @@ test.describe('Deep AI Worker skills page flows', () => {
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
-      await dismissSkillsGuideIfVisible(page);
 
       await page.getByTestId('skills-search-input').fill('demo');
       await page.getByTestId('skills-filter-button').hover();
@@ -141,7 +98,6 @@ test.describe('Deep AI Worker skills page flows', () => {
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
-      await dismissSkillsGuideIfVisible(page);
 
       await page.getByTestId('skills-create-button').click();
 
@@ -281,7 +237,6 @@ test.describe('Deep AI Worker skills page flows', () => {
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
-      await dismissSkillsGuideIfVisible(page);
       await expect(page.getByTestId('skills-list-item-self-improvement')).toBeVisible();
 
       await page.getByTestId('skills-list-item-self-improvement').click();
@@ -317,7 +272,7 @@ test.describe('Deep AI Worker skills page flows', () => {
 
       await page.getByTestId('sidebar-nav-skills').click();
       await expect(page.getByTestId('skills-page')).toBeVisible();
-      await dismissSkillsGuideIfVisible(page);
+      await expect(page.getByTestId('app-guide-overlay')).toHaveCount(0);
 
       await page.waitForTimeout(2_000);
       await expect(gatewayRestartHint).toHaveCount(0);
