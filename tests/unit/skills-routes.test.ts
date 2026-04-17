@@ -10,6 +10,7 @@ const deleteSkillDirectoryMock = vi.fn();
 const getAllSkillConfigsMock = vi.fn();
 const updateSkillConfigMock = vi.fn();
 const listSourcesMock = vi.fn();
+const listSourceCountsMock = vi.fn();
 const inferSourceFromBaseDirMock = vi.fn();
 const uninstallMock = vi.fn();
 
@@ -34,6 +35,7 @@ describe('skill routes', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     listSourcesMock.mockResolvedValue([]);
+    listSourceCountsMock.mockResolvedValue([]);
     inferSourceFromBaseDirMock.mockReturnValue(null);
   });
 
@@ -146,5 +148,33 @@ describe('skill routes', () => {
     });
     expect(deleteSkillDirectoryMock).not.toHaveBeenCalled();
     expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, { success: true });
+  });
+
+  it('serves marketplace source counts', async () => {
+    const { handleSkillRoutes } = await import('@electron/api/routes/skills');
+    listSourceCountsMock.mockResolvedValue([
+      { sourceId: 'clawhub', sourceLabel: 'ClawHub', total: 55550 },
+      { sourceId: 'deepaiworker', sourceLabel: 'DeepSkillHub', total: 10638 },
+    ]);
+
+    await handleSkillRoutes(
+      { method: 'GET' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://localhost/api/clawhub/source-counts'),
+      {
+        gatewayManager: {},
+        clawHubService: {
+          listSourceCounts: (...args: unknown[]) => listSourceCountsMock(...args),
+        },
+      } as never,
+    );
+
+    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, {
+      success: true,
+      results: [
+        { sourceId: 'clawhub', sourceLabel: 'ClawHub', total: 55550 },
+        { sourceId: 'deepaiworker', sourceLabel: 'DeepSkillHub', total: 10638 },
+      ],
+    });
   });
 });
