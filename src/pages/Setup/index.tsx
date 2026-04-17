@@ -36,6 +36,7 @@ import { toast } from 'sonner';
 import { invokeIpc } from '@/lib/api-client';
 import { hostApiFetch } from '@/lib/host-api';
 import { subscribeHostEvent } from '@/lib/host-events';
+import { INSTALLED_SKILLS_CATALOG } from './installed-skills-catalog';
 interface SetupStep {
   id: string;
   title: string;
@@ -48,6 +49,7 @@ const STEP = {
   PROVIDER: 2,
   INSTALLING: 3,
   COMPLETE: 4,
+  SKILLS: 5,
 } as const;
 
 const getSteps = (t: TFunction): SetupStep[] => [
@@ -75,6 +77,11 @@ const getSteps = (t: TFunction): SetupStep[] => [
     id: 'complete',
     title: t('steps.complete.title'),
     description: t('steps.complete.description'),
+  },
+  {
+    id: 'skills',
+    title: t('steps.skills.title'),
+    description: t('steps.skills.description'),
   },
 ];
 
@@ -140,6 +147,31 @@ function getProtocolBaseUrlPlaceholder(
   return 'https://api.example.com/v1';
 }
 
+function getE2ESetupStepOverride(): number | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const step = new URLSearchParams(window.location.search).get('e2eSetupStep');
+
+  switch (step) {
+    case 'welcome':
+      return STEP.WELCOME;
+    case 'runtime':
+      return STEP.RUNTIME;
+    case 'provider':
+      return STEP.PROVIDER;
+    case 'installing':
+      return STEP.INSTALLING;
+    case 'complete':
+      return STEP.COMPLETE;
+    case 'skills':
+      return STEP.SKILLS;
+    default:
+      return null;
+  }
+}
+
 // NOTE: Channel types moved to Settings > Channels page
 // NOTE: Skill bundles moved to Settings > Skills page - auto-install essential skills during setup
 
@@ -147,16 +179,25 @@ export function Setup() {
   const { t } = useTranslation(['setup', 'channels']);
   const branding = useBranding();
   const navigate = useNavigate();
-  const [currentStep, setCurrentStep] = useState<number>(STEP.WELCOME);
+  const e2eSetupStepOverride = getE2ESetupStepOverride();
+  const [currentStep, setCurrentStep] = useState<number>(e2eSetupStepOverride ?? STEP.WELCOME);
 
   // Setup state
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
-  const [providerConfigured, setProviderConfigured] = useState(false);
+  const [providerConfigured, setProviderConfigured] = useState(
+    e2eSetupStepOverride !== null && e2eSetupStepOverride > STEP.PROVIDER
+  );
   const [apiKey, setApiKey] = useState('');
   // Installation state for the Installing step
-  const [installedSkills, setInstalledSkills] = useState<string[]>([]);
+  const [installedSkills, setInstalledSkills] = useState<string[]>(
+    e2eSetupStepOverride !== null && e2eSetupStepOverride >= STEP.COMPLETE
+      ? getDefaultSkills(t).map((skill) => skill.id)
+      : []
+  );
   // Runtime check status
-  const [runtimeChecksPassed, setRuntimeChecksPassed] = useState(false);
+  const [runtimeChecksPassed, setRuntimeChecksPassed] = useState(
+    e2eSetupStepOverride !== null && e2eSetupStepOverride > STEP.RUNTIME
+  );
 
   const steps = getSteps(t);
   const safeStepIndex = Number.isInteger(currentStep)
@@ -180,6 +221,7 @@ export function Setup() {
       case STEP.INSTALLING:
         return false; // Cannot manually proceed, auto-proceeds when done
       case STEP.COMPLETE:
+      case STEP.SKILLS:
         return true;
       default:
         return true;
@@ -219,7 +261,12 @@ export function Setup() {
   return (
     <div data-testid="setup-page" className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <TitleBar />
-      <div className="flex-1 overflow-auto">
+      <div
+        className={cn(
+          'flex-1 min-h-0',
+          safeStepIndex === STEP.SKILLS ? 'flex flex-col overflow-hidden' : 'overflow-auto'
+        )}
+      >
         {/* Progress Indicator */}
         <div className="flex justify-center pt-8">
           <div className="flex items-center gap-2">
@@ -261,7 +308,10 @@ export function Setup() {
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
-            className="mx-auto max-w-2xl p-8"
+            className={cn(
+              'mx-auto max-w-2xl p-8',
+              safeStepIndex === STEP.SKILLS && 'flex flex-1 min-h-0 flex-col'
+            )}
           >
             <div className="text-center mb-8">
               <h1 className="text-3xl font-bold mb-2">
@@ -279,7 +329,12 @@ export function Setup() {
             </div>
 
             {/* Step-specific content */}
-            <div className="rounded-xl bg-card text-card-foreground border shadow-sm p-8 mb-8">
+            <div
+              className={cn(
+                'rounded-xl bg-card text-card-foreground border shadow-sm p-8 mb-8',
+                safeStepIndex === STEP.SKILLS && 'flex-1 min-h-0 overflow-hidden'
+              )}
+            >
               {safeStepIndex === STEP.WELCOME && <WelcomeContent />}
               {safeStepIndex === STEP.RUNTIME && <RuntimeContent onStatusChange={setRuntimeChecksPassed} />}
               {safeStepIndex === STEP.PROVIDER && (
@@ -305,6 +360,7 @@ export function Setup() {
                   installedSkills={installedSkills}
                 />
               )}
+              {safeStepIndex === STEP.SKILLS && <PreinstalledSkillsContent />}
             </div>
 
             {/* Navigation - hidden during installation step */}
@@ -1912,6 +1968,198 @@ interface CompleteContentProps {
   installedSkills: string[];
 }
 
+interface CelebrationParticle {
+  id: string;
+  color: string;
+  delay: number;
+  duration: number;
+  size: number;
+  top: number;
+  x: number;
+  y: number;
+  rotate: number;
+}
+
+function createCelebrationParticles(side: 'left' | 'right'): CelebrationParticle[] {
+  const palette = ['#f97316', '#facc15', '#22c55e', '#38bdf8', '#fb7185', '#a78bfa'];
+
+  return Array.from({ length: 14 }, (_, index) => {
+    const direction = side === 'left' ? 1 : -1;
+    return {
+      id: `${side}-${index}`,
+      color: palette[index % palette.length],
+      delay: index * 0.08,
+      duration: 1.8 + (index % 4) * 0.18,
+      size: 8 + (index % 3) * 3,
+      top: 18 + (index % 6) * 6,
+      x: direction * (92 + (index % 5) * 18),
+      y: 68 + (index % 4) * 22,
+      rotate: direction * (95 + (index % 4) * 24),
+    };
+  });
+}
+
+function PreinstalledSkillsContent() {
+  const { t } = useTranslation('setup');
+  const leftParticles = useMemo(() => createCelebrationParticles('left'), []);
+  const rightParticles = useMemo(() => createCelebrationParticles('right'), []);
+
+  const totalSkills = INSTALLED_SKILLS_CATALOG.reduce((sum, category) => sum + category.skills.length, 0);
+  const categoryCount = INSTALLED_SKILLS_CATALOG.length;
+  const categoryHighlights = INSTALLED_SKILLS_CATALOG
+    .slice(0, 3)
+    .map((category) => category.title)
+    .join(' / ');
+
+  return (
+    <div data-testid="setup-preinstalled-skills-step" className="relative h-full overflow-y-auto pr-2">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-52 overflow-hidden">
+        <div data-testid="setup-celebration-left" className="absolute left-0 top-0 h-full w-36">
+          <div className="absolute left-2 top-16 h-3 w-8 rounded-full bg-gradient-to-r from-orange-400 via-amber-300 to-rose-400 opacity-90 shadow-[0_0_24px_rgba(251,146,60,0.35)]" />
+          {leftParticles.map((particle) => (
+            <motion.span
+              key={particle.id}
+              className="absolute left-6 rounded-[2px]"
+              style={{
+                top: `${particle.top}%`,
+                width: particle.size,
+                height: Math.max(6, particle.size * 0.55),
+                backgroundColor: particle.color,
+              }}
+              initial={{ x: 0, y: 0, rotate: 0, opacity: 0 }}
+              animate={{
+                x: [0, particle.x],
+                y: [0, -18, particle.y],
+                rotate: [0, particle.rotate],
+                opacity: [0, 1, 1, 0],
+              }}
+              transition={{
+                duration: particle.duration,
+                delay: particle.delay,
+                repeat: Infinity,
+                repeatDelay: 2.6,
+                ease: 'easeOut',
+              }}
+            />
+          ))}
+        </div>
+
+        <div data-testid="setup-celebration-right" className="absolute right-0 top-0 h-full w-36">
+          <div className="absolute right-2 top-16 h-3 w-8 rounded-full bg-gradient-to-l from-sky-400 via-cyan-300 to-violet-400 opacity-90 shadow-[0_0_24px_rgba(56,189,248,0.35)]" />
+          {rightParticles.map((particle) => (
+            <motion.span
+              key={particle.id}
+              className="absolute right-6 rounded-[2px]"
+              style={{
+                top: `${particle.top}%`,
+                width: particle.size,
+                height: Math.max(6, particle.size * 0.55),
+                backgroundColor: particle.color,
+              }}
+              initial={{ x: 0, y: 0, rotate: 0, opacity: 0 }}
+              animate={{
+                x: [0, particle.x],
+                y: [0, -18, particle.y],
+                rotate: [0, particle.rotate],
+                opacity: [0, 1, 1, 0],
+              }}
+              transition={{
+                duration: particle.duration,
+                delay: particle.delay,
+                repeat: Infinity,
+                repeatDelay: 2.6,
+                ease: 'easeOut',
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="relative z-10 space-y-6 pt-2">
+        <div className="text-center space-y-3">
+          <div className="text-5xl">🧰</div>
+          <h2 className="text-xl font-semibold">{t('skillsGuide.title')}</h2>
+          <p className="text-muted-foreground">
+            {t('skillsGuide.subtitle', {
+              totalSkills,
+              categoryCount,
+            })}
+          </p>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border bg-muted/35 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+              {t('skillsGuide.stats.categories')}
+            </p>
+            <p className="mt-2 text-3xl font-semibold">{categoryCount}</p>
+          </div>
+          <div className="rounded-xl border bg-muted/35 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+              {t('skillsGuide.stats.skills')}
+            </p>
+            <p className="mt-2 text-3xl font-semibold">{totalSkills}</p>
+          </div>
+          <div className="rounded-xl border bg-muted/35 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+              {t('skillsGuide.stats.coverage')}
+            </p>
+            <p className="mt-2 text-sm font-medium text-foreground/90">
+              {categoryHighlights}
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
+          <p className="text-sm font-medium text-foreground">{t('skillsGuide.tipTitle')}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t('skillsGuide.tipBody')}</p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          {INSTALLED_SKILLS_CATALOG.map((category) => {
+            const previewSkills = category.skills.slice(0, 6);
+            const remainingCount = category.skills.length - previewSkills.length;
+
+            return (
+              <div
+                key={category.id}
+                data-testid={`setup-preinstalled-category-${category.id}`}
+                className="rounded-2xl border bg-card/60 p-5 shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-semibold">{category.title}</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">{category.summary}</p>
+                  </div>
+                  <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">
+                    {t('skillsGuide.categoryCount', { count: category.skills.length })}
+                  </span>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {previewSkills.map((skill) => (
+                    <span
+                      key={skill.id}
+                      className="rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary-foreground"
+                    >
+                      {skill.id}
+                    </span>
+                  ))}
+                  {remainingCount > 0 && (
+                    <span className="rounded-full border border-dashed px-2.5 py-1 text-xs text-muted-foreground">
+                      {t('skillsGuide.moreSkills', { count: remainingCount })}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CompleteContent({ selectedProvider, installedSkills }: CompleteContentProps) {
   const { t } = useTranslation(['setup', 'settings']);
   const gatewayStatus = useGatewayStore((state) => state.status);
@@ -1923,7 +2171,7 @@ function CompleteContent({ selectedProvider, installedSkills }: CompleteContentP
     .join(', ');
 
   return (
-    <div className="text-center space-y-6">
+    <div data-testid="setup-complete-step" className="text-center space-y-6">
       <div className="text-6xl mb-4">🎉</div>
       <h2 className="text-xl font-semibold">{t('complete.title')}</h2>
       <p className="text-muted-foreground">

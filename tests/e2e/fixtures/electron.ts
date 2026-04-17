@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 
 type LaunchElectronOptions = {
   skipSetup?: boolean;
+  setupStep?: string;
 };
 
 type ElectronFixtures = {
@@ -25,6 +26,8 @@ type HostApiMockResponse = {
 
 type ElectronIpcMocks = {
   gatewayStatus?: Record<string, unknown>;
+  openclawStatus?: Record<string, unknown>;
+  uvInstallAll?: Record<string, unknown>;
   hostApi?: Record<string, HostApiMockResponse>;
 };
 
@@ -151,6 +154,7 @@ async function launchDeepAiWorkerElectron(
       CLAWX_E2E: '1',
       CLAWX_USER_DATA_DIR: userDataDir,
       ...(options.skipSetup ? { CLAWX_E2E_SKIP_SETUP: '1' } : {}),
+      ...(options.setupStep ? { CLAWX_E2E_SETUP_STEP: options.setupStep } : {}),
       CLAWX_PORT_CLAWX_HOST_API: String(hostApiPort),
     },
     timeout: 90_000,
@@ -251,6 +255,16 @@ export async function installIpcMocks(
     if (mockConfig?.gatewayStatus) {
       ipcMain.removeHandler('gateway:status');
       ipcMain.handle('gateway:status', async () => mockConfig.gatewayStatus);
+    }
+
+    if (mockConfig?.openclawStatus) {
+      ipcMain.removeHandler('openclaw:status');
+      ipcMain.handle('openclaw:status', async () => mockConfig.openclawStatus);
+    }
+
+    if (mockConfig?.uvInstallAll) {
+      ipcMain.removeHandler('uv:install-all');
+      ipcMain.handle('uv:install-all', async () => mockConfig.uvInstallAll);
     }
 
     if (mockConfig?.hostApi) {
