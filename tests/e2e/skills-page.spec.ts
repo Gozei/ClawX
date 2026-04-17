@@ -18,6 +18,10 @@ test.describe('Deep AI Worker skills page flows', () => {
       await expect(page.getByTestId('skills-filter-button')).toBeVisible();
       await expect(page.getByTestId('skills-create-button')).toBeVisible();
       await expect(page.getByTestId('skills-discover-button')).toBeVisible();
+      await expect(page.getByTestId('skills-create-button')).toHaveClass(/rounded-lg/);
+      await expect(page.getByTestId('skills-create-button')).toHaveClass(/px-4/);
+      await expect(page.getByTestId('skills-discover-button')).toHaveClass(/rounded-lg/);
+      await expect(page.getByTestId('skills-discover-button')).toHaveClass(/px-4/);
 
       await page.getByTestId('skills-search-input').fill('demo');
       await expect(page.getByTestId('skills-search-input')).toHaveValue('demo');

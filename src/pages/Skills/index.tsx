@@ -6,10 +6,8 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { pageHeroIconControlClasses } from '@/components/layout/page-tokens';
 import { useSkillsStore } from '@/stores/skills';
 import { useGatewayStore } from '@/stores/gateway';
-import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { SkillSnapshot } from '@/types/skill';
 import { SkillList } from './components/SkillList';
@@ -289,17 +287,15 @@ export function Skills() {
             <>
               <Button
                 data-testid="skills-create-button"
-                variant="ghost"
-                size="icon"
                 aria-label={t('actions.create')}
-                className={cn(pageHeroIconControlClasses, 'border-0 bg-transparent text-[#223047] hover:bg-transparent dark:text-white dark:hover:bg-transparent')}
+                variant="outline"
+                className="h-10 rounded-lg px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6"
               >
-                <SquarePen className="h-10 w-10" />
+                <SquarePen className="mr-2 h-3.5 w-3.5" />
+                {t('actions.create')}
               </Button>
               <Button
                 data-testid="skills-discover-button"
-                variant="ghost"
-                size="icon"
                 aria-label={t('actions.marketplace')}
                 onClick={() => {
                   if (!effectiveInstallSourceId && sources.length > 0) {
@@ -307,9 +303,10 @@ export function Skills() {
                   }
                   setMarketplaceOpen(true);
                 }}
-                className={cn(pageHeroIconControlClasses, 'border-0 bg-transparent text-[#223047] hover:bg-transparent dark:text-white dark:hover:bg-transparent')}
+                className="h-10 rounded-lg px-4 text-[13px] font-medium shadow-none"
               >
-                <Store className="h-10 w-10" />
+                <Store className="mr-2 h-3.5 w-3.5" />
+                {t('actions.marketplace')}
               </Button>
             </>
           )}
