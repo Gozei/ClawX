@@ -25,6 +25,7 @@ type SkillMarketplaceSheetProps = {
   installSourceId: string;
   onInstallSourceIdChange: (value: string) => void;
   sources: SkillSource[];
+  sourceCounts: Record<string, number | null>;
   searchError: string | null;
   searching: boolean;
   searchingMore: boolean;
@@ -46,6 +47,7 @@ export function SkillMarketplaceSheet({
   installSourceId,
   onInstallSourceIdChange,
   sources,
+  sourceCounts,
   searchError,
   searching,
   searchingMore,
@@ -82,6 +84,16 @@ export function SkillMarketplaceSheet({
     }
 
     return 0;
+  };
+
+  const formatSourceCount = (value: number | null | undefined) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value.toLocaleString();
+    }
+    if (value === null) {
+      return 'N/A';
+    }
+    return '...';
   };
 
   const sourcePriorityIndex = useMemo(() => {
@@ -230,7 +242,18 @@ export function SkillMarketplaceSheet({
                         : 'border-black/10 bg-background text-foreground/78 hover:bg-black/5 dark:border-white/10 dark:bg-muted dark:text-white/78 dark:hover:bg-white/5'
                     )}
                   >
-                    {source.label}
+                    <span className="truncate">{source.label}</span>
+                    <span
+                      data-testid={`skills-marketplace-source-count-${source.id}`}
+                      className={cn(
+                        'rounded-full px-2 py-0.5 text-[11px] font-semibold',
+                        installSourceId === source.id
+                          ? 'bg-primary-foreground/18 text-primary-foreground'
+                          : 'bg-black/5 text-foreground/62 dark:bg-white/10 dark:text-white/68'
+                      )}
+                    >
+                      {formatSourceCount(sourceCounts[source.id])}
+                    </span>
                   </Button>
                 ))}
               </div>

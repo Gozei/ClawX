@@ -57,9 +57,133 @@ test.describe('Deep AI Worker skills page flows', () => {
       await expect(page.getByTestId('skills-marketplace-modal')).toBeVisible();
       await expect(page.getByTestId('skills-marketplace-modal')).toHaveClass(/rounded-3xl/);
       await expect(page.getByTestId('skills-marketplace-search-input')).toBeVisible();
-      await expect(page.getByTestId('skills-marketplace-search-input')).toHaveClass(/rounded-lg/);
+      await expect(page.getByTestId('skills-marketplace-search-input')).toHaveClass(/rounded-full/);
       await expect(page.getByTestId('skills-marketplace-source-chips')).toBeVisible();
       await expect(page.getByTestId('skills-marketplace-source-chips').locator('button[aria-pressed="true"]')).toHaveCount(1);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
+  test('shows total skill counts for marketplace sources', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      const page = await getStableWindow(app);
+
+      await expect(page.getByTestId('main-layout')).toBeVisible();
+
+      await app.evaluate(({ ipcMain }) => {
+        ipcMain.removeHandler('hostapi:fetch');
+        ipcMain.handle('hostapi:fetch', async (_event, request: { path?: string; method?: string }) => {
+          const method = request?.method ?? 'GET';
+          const path = request?.path ?? '';
+
+          if (path === '/api/skills' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: [],
+              },
+            };
+          }
+
+          if (path === '/api/clawhub/sources' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: {
+                  success: true,
+                  results: [
+                    {
+                      id: 'clawhub',
+                      label: 'ClawHub',
+                      enabled: true,
+                      site: 'https://clawhub.ai',
+                      workdir: 'C:/Users/test/.openclaw/skill-sources/clawhub',
+                    },
+                    {
+                      id: 'deepaiworker',
+                      label: 'DeepSkillHub',
+                      enabled: true,
+                      site: 'http://124.71.100.127:4000',
+                      workdir: 'C:/Users/test/.openclaw/skill-sources/deepaiworker',
+                    },
+                  ],
+                },
+              },
+            };
+          }
+
+          if (path === '/api/clawhub/source-counts' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: {
+                  success: true,
+                  results: [
+                    { sourceId: 'clawhub', sourceLabel: 'ClawHub', total: 55550 },
+                    { sourceId: 'deepaiworker', sourceLabel: 'DeepSkillHub', total: 10638 },
+                  ],
+                },
+              },
+            };
+          }
+
+          if (path === '/api/clawhub/list' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: {
+                  success: true,
+                  results: [],
+                },
+              },
+            };
+          }
+
+          if (path === '/api/clawhub/search' && method === 'POST') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: {
+                  success: true,
+                  results: [],
+                  nextCursor: null,
+                },
+              },
+            };
+          }
+
+          return {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {},
+            },
+          };
+        });
+      });
+
+      await page.getByTestId('sidebar-nav-skills').click();
+      await expect(page.getByTestId('skills-page')).toBeVisible();
+      await dismissSkillsGuideIfVisible(page);
+
+      await page.getByTestId('skills-discover-button').click();
+      await expect(page.getByTestId('skills-marketplace-modal')).toBeVisible();
+      await expect(page.getByTestId('skills-marketplace-source-count-clawhub')).toHaveText('55,550');
+      await expect(page.getByTestId('skills-marketplace-source-count-deepaiworker')).toHaveText('10,638');
     } finally {
       await closeElectronApp(app);
     }

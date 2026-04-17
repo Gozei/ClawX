@@ -16,6 +16,7 @@ const searchSkillsMock = vi.fn();
 const installSkillMock = vi.fn();
 const uninstallSkillMock = vi.fn();
 const fetchSourcesMock = vi.fn();
+const fetchMarketplaceSourceCountsMock = vi.fn();
 const fetchMarketInstalledSkillsMock = vi.fn();
 const loadMoreSearchResultsMock = vi.fn();
 const newSessionMock = vi.fn();
@@ -40,6 +41,7 @@ const { gatewayState, guideState, settingsState, skillsState, marketplaceSheetSt
     searchError: null as string | null,
     installing: {} as Record<string, boolean>,
     sources: [] as SkillSource[],
+    marketplaceSourceCounts: {} as Record<string, number | null>,
     skillDetailsById: {} as Record<string, SkillDetail>,
     detailLoadingId: null as string | null,
   },
@@ -84,6 +86,7 @@ vi.mock('@/stores/skills', () => ({
     installSkill: typeof installSkillMock;
     uninstallSkill: typeof uninstallSkillMock;
     fetchSources: typeof fetchSourcesMock;
+    fetchMarketplaceSourceCounts: typeof fetchMarketplaceSourceCountsMock;
     fetchMarketInstalledSkills: typeof fetchMarketInstalledSkillsMock;
     loadMoreSearchResults: typeof loadMoreSearchResultsMock;
   }) => unknown) => {
@@ -97,6 +100,7 @@ vi.mock('@/stores/skills', () => ({
       installSkill: installSkillMock,
       uninstallSkill: uninstallSkillMock,
       fetchSources: fetchSourcesMock,
+      fetchMarketplaceSourceCounts: fetchMarketplaceSourceCountsMock,
       fetchMarketInstalledSkills: fetchMarketInstalledSkillsMock,
       loadMoreSearchResults: loadMoreSearchResultsMock,
     };
@@ -112,6 +116,7 @@ vi.mock('@/stores/skills', () => ({
       installSkill: installSkillMock,
       uninstallSkill: uninstallSkillMock,
       fetchSources: fetchSourcesMock,
+      fetchMarketplaceSourceCounts: fetchMarketplaceSourceCountsMock,
       fetchMarketInstalledSkills: fetchMarketInstalledSkillsMock,
       loadMoreSearchResults: loadMoreSearchResultsMock,
     }),
@@ -197,8 +202,12 @@ describe('Skills page route state', () => {
     ];
     skillsState.sources = [
       { id: 'clawhub', label: 'ClawHub', workdir: 'C:/Users/test/.codex/skills/clawhub' } as SkillSource,
-      { id: 'local', label: 'Local', workdir: 'C:/Users/test/.codex/skills/local' } as SkillSource,
+      { id: 'deepaiworker', label: 'DeepSkillHub', workdir: 'C:/Users/test/.codex/skills/deepaiworker' } as SkillSource,
     ];
+    skillsState.marketplaceSourceCounts = {
+      clawhub: 55550,
+      deepaiworker: 10638,
+    };
     skillsState.loading = false;
     skillsState.error = null;
     skillsState.skillDetailsById = {
@@ -234,7 +243,8 @@ describe('Skills page route state', () => {
     searchSkillsMock.mockResolvedValue(undefined);
     installSkillMock.mockResolvedValue(undefined);
     uninstallSkillMock.mockResolvedValue(undefined);
-    fetchSourcesMock.mockResolvedValue(undefined);
+    fetchSourcesMock.mockResolvedValue(skillsState.sources);
+    fetchMarketplaceSourceCountsMock.mockResolvedValue(skillsState.marketplaceSourceCounts);
     fetchMarketInstalledSkillsMock.mockResolvedValue(undefined);
     loadMoreSearchResultsMock.mockResolvedValue(undefined);
     toastMocks.success.mockReset();
@@ -257,6 +267,20 @@ describe('Skills page route state', () => {
 
     await waitFor(() => {
       expect(startGuideMock).toHaveBeenCalledWith(TEST_SKILLS_GUIDE_ID);
+    });
+  });
+
+  it('fetches marketplace source counts after loading skill sources', async () => {
+    render(
+      <MemoryRouter initialEntries={['/skills']}>
+        <Routes>
+          <Route path="/skills" element={<Skills />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(fetchMarketplaceSourceCountsMock).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -376,6 +400,11 @@ describe('Skills page route state', () => {
     });
 
     expect((marketplaceSheetState.latestProps as { open?: boolean } | null)?.open).toBe(true);
+
+    expect((marketplaceSheetState.latestProps as { sourceCounts?: Record<string, number | null> } | null)?.sourceCounts).toEqual({
+      clawhub: 55550,
+      deepaiworker: 10638,
+    });
 
     const marketplaceProps = marketplaceSheetState.latestProps as null | {
       onInstall?: (slug: string, version?: string, sourceId?: string, force?: boolean) => void;

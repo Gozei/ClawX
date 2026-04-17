@@ -109,6 +109,8 @@ export function Skills() {
     installing,
     sources,
     fetchSources,
+    marketplaceSourceCounts,
+    fetchMarketplaceSourceCounts,
     marketInstalledSkills,
     fetchMarketInstalledSkills,
   } = useSkillsStore();
@@ -214,8 +216,12 @@ export function Skills() {
   }, [fetchSkills, gatewayStatus.state, safeSkills.length]);
 
   useEffect(() => {
-    void fetchSources();
-  }, [fetchSources]);
+    void fetchSources().then((loadedSources) => {
+      if (loadedSources.length > 0) {
+        void fetchMarketplaceSourceCounts();
+      }
+    });
+  }, [fetchMarketplaceSourceCounts, fetchSources]);
 
   useEffect(() => {
     if (!installOpen) return;
@@ -437,6 +443,7 @@ export function Skills() {
         searching={searching}
         searchingMore={searchingMore}
         searchResults={searchResults}
+        sourceCounts={marketplaceSourceCounts}
         installedSkills={marketInstalledSkills}
         installing={installing}
         marketplaceNotice={marketplaceNotice}
