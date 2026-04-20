@@ -135,6 +135,93 @@ export interface MarketplaceSkill {
   sourceLabel?: string;
 }
 
+export interface MarketplaceSkillFile {
+  contentType?: string;
+  path: string;
+  sha256?: string;
+  size?: number;
+}
+
+export interface MarketplaceSkillLatestVersion {
+  _creationTime?: number;
+  _id?: string;
+  changelog?: string;
+  changelogSource?: string;
+  createdAt?: number;
+  createdBy?: string;
+  files?: MarketplaceSkillFile[];
+  fingerprint?: string;
+  rawMarkdown?: string;
+  parsed?: {
+    license?: string | null;
+    [key: string]: unknown;
+  };
+  skillId?: string;
+  staticScan?: {
+    checkedAt?: number;
+    engineVersion?: string;
+    findings?: unknown[];
+    reasonCodes?: unknown[];
+    status?: string;
+    summary?: string;
+    [key: string]: unknown;
+  };
+  version?: string;
+}
+
+export interface MarketplaceSkillOwner {
+  _creationTime?: number;
+  _id?: string;
+  displayName?: string;
+  handle?: string;
+  image?: string;
+  kind?: string;
+  linkedUserId?: string;
+}
+
+export interface MarketplaceSkillIdentity {
+  canonical?: string | null;
+  forkOf?: string | null;
+  requestedSlug?: string;
+  resolvedSlug?: string;
+  pendingReview?: boolean;
+}
+
+export interface MarketplaceSkillDetail {
+  canonical?: string | null;
+  forkOf?: string | null;
+  latestVersion?: MarketplaceSkillLatestVersion | null;
+  moderationInfo?: unknown;
+  owner?: MarketplaceSkillOwner | null;
+  pendingReview?: boolean;
+  requestedSlug?: string;
+  resolvedSlug?: string;
+  skill?: {
+    _creationTime?: number;
+    _id?: string;
+    badges?: Record<string, unknown>;
+    capabilityTags?: string[];
+    createdAt?: number;
+    displayName?: string;
+    latestVersionId?: string;
+    ownerPublisherId?: string;
+    ownerUserId?: string;
+    slug?: string;
+    stats?: {
+      comments?: number;
+      downloads?: number;
+      installsAllTime?: number;
+      installsCurrent?: number;
+      stars?: number;
+      versions?: number;
+    };
+    description?: string;
+    summary?: string;
+    tags?: Record<string, string | undefined>;
+    updatedAt?: number;
+  } | null;
+}
+
 export interface MarketplaceSearchResponse {
   results: MarketplaceSkill[];
   nextCursor?: string;

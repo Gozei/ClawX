@@ -166,6 +166,26 @@ export async function handleSkillRoutes(
     return true;
   }
 
+  if (url.pathname === '/api/clawhub/skill-detail' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{ slug?: string; sourceId?: string }>(req);
+      const slug = typeof body.slug === 'string' ? body.slug.trim() : '';
+      if (!slug) {
+        sendJson(res, 400, { success: false, error: 'Skill slug is required' });
+        return true;
+      }
+
+      const detail = await ctx.clawHubService.getPublicSkillBySlug({
+        slug,
+        sourceId: body.sourceId,
+      });
+      sendJson(res, 200, { success: true, detail });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
   if (url.pathname === '/api/clawhub/open-readme' && req.method === 'POST') {
     try {
       const body = await parseJsonBody<{ slug?: string; skillKey?: string; baseDir?: string }>(req);

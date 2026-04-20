@@ -4,6 +4,7 @@ import { AppError, normalizeAppError } from '@/lib/error-model';
 import { useGatewayStore } from './gateway';
 import type {
   MarketplaceInstalledSkill,
+  MarketplaceSkillDetail,
   MarketplaceSearchResponse,
   MarketplaceSkill,
   MarketplaceSourceCount,
@@ -54,6 +55,7 @@ interface SkillsState {
   searchResults: MarketplaceSkill[];
   marketInstalledSkills: MarketplaceInstalledSkill[];
   marketplaceSourceCounts: Record<string, number | null>;
+  marketplaceSkillDetailsByKey: Record<string, MarketplaceSkillDetail>;
   sources: SkillSource[];
   searchNextCursor: string | null;
   searchingMore: boolean;
@@ -61,6 +63,7 @@ interface SkillsState {
   refreshing: boolean;
   searching: boolean;
   detailLoadingId: string | null;
+  marketplaceDetailLoadingKey: string | null;
   searchError: string | null;
   installing: Record<string, boolean>;
   deleting: Record<string, boolean>;
@@ -73,6 +76,7 @@ interface SkillsState {
   fetchSources: () => Promise<SkillSource[]>;
   fetchMarketplaceSourceCounts: (force?: boolean) => Promise<Record<string, number | null>>;
   fetchMarketInstalledSkills: () => Promise<MarketplaceInstalledSkill[]>;
+  fetchMarketplaceSkillDetail: (slug: string, sourceId?: string, force?: boolean) => Promise<MarketplaceSkillDetail>;
   fetchSkillDetail: (skillId: string, force?: boolean) => Promise<SkillDetail>;
   saveSkillConfig: (skillId: string, input: { apiKey?: string; env?: Record<string, string> }) => Promise<void>;
   deleteSkill: (skillId: string) => Promise<void>;
@@ -91,6 +95,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   searchResults: [],
   marketInstalledSkills: [],
   marketplaceSourceCounts: {},
+  marketplaceSkillDetailsByKey: {},
   sources: [],
   searchNextCursor: null,
   searchingMore: false,
@@ -98,6 +103,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   refreshing: false,
   searching: false,
   detailLoadingId: null,
+  marketplaceDetailLoadingKey: null,
   searchError: null,
   installing: {},
   deleting: {},
@@ -138,6 +144,39 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     const installed = result.success ? (result.results || []) : [];
     set({ marketInstalledSkills: installed });
     return installed;
+  },
+
+  fetchMarketplaceSkillDetail: async (slug: string, sourceId?: string, force = false): Promise<MarketplaceSkillDetail> => {
+    const key = sourceId ? `${sourceId}:${slug}` : slug;
+    const cached = get().marketplaceSkillDetailsByKey[key];
+    if (cached && !force) {
+      return cached;
+    }
+
+    set({ marketplaceDetailLoadingKey: key });
+    try {
+      const result = await hostApiFetch<{ success: boolean; detail?: MarketplaceSkillDetail; error?: string }>('/api/clawhub/skill-detail', {
+        method: 'POST',
+        body: JSON.stringify({ slug, sourceId }),
+      });
+      if (!result.success || !result.detail) {
+        throw new Error(result.error || 'Failed to fetch marketplace skill detail');
+      }
+      const detail = result.detail;
+      set((state) => ({
+        marketplaceDetailLoadingKey: state.marketplaceDetailLoadingKey === key ? null : state.marketplaceDetailLoadingKey,
+        marketplaceSkillDetailsByKey: {
+          ...state.marketplaceSkillDetailsByKey,
+          [key]: detail,
+        },
+      }));
+      return detail;
+    } catch (error) {
+      set((state) => ({
+        marketplaceDetailLoadingKey: state.marketplaceDetailLoadingKey === key ? null : state.marketplaceDetailLoadingKey,
+      }));
+      throw error;
+    }
   },
 
   fetchSkills: async (force = false) => {

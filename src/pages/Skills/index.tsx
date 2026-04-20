@@ -108,6 +108,9 @@ export function Skills() {
     fetchMarketplaceSourceCounts,
     marketInstalledSkills,
     fetchMarketInstalledSkills,
+    marketplaceSkillDetailsByKey,
+    marketplaceDetailLoadingKey,
+    fetchMarketplaceSkillDetail,
   } = useSkillsStore();
   const gatewayStatus = useGatewayStore((state) => state.status);
   const hasRequestedInitialSkillsRef = useRef(false);
@@ -119,6 +122,7 @@ export function Skills() {
   const [installQuery, setInstallQuery] = useState('');
   const [installSourceId, setInstallSourceId] = useState('');
   const [marketplaceNotice, setMarketplaceNotice] = useState<MarketplaceNotice>(null);
+  const [selectedMarketplaceSkill, setSelectedMarketplaceSkill] = useState<{ slug: string; sourceId?: string } | null>(null);
   const effectiveInstallSourceId = installSourceId || sources[0]?.id || '';
   const sourceCategory = readEnumParam(
     searchParams.get('source'),
@@ -215,6 +219,20 @@ export function Skills() {
   }, [fetchMarketInstalledSkills, installOpen]);
 
   useEffect(() => {
+    if (!installOpen) {
+      setSelectedMarketplaceSkill(null);
+    }
+  }, [installOpen]);
+
+  useEffect(() => {
+    if (!installOpen || !selectedMarketplaceSkill) return;
+    void fetchMarketplaceSkillDetail(
+      selectedMarketplaceSkill.slug,
+      selectedMarketplaceSkill.sourceId,
+    ).catch((error) => toast.error(String(error)));
+  }, [fetchMarketplaceSkillDetail, installOpen, selectedMarketplaceSkill]);
+
+  useEffect(() => {
     if (!installOpen || !effectiveInstallSourceId) return;
     const normalizedQuery = installQuery.trim();
 
@@ -289,6 +307,21 @@ export function Skills() {
     const resolvedSkillId = resolveInstalledSkillId(slug, useSkillsStore.getState().skills ?? []);
     navigate(`/skills/${encodeURIComponent(resolvedSkillId)}${listSearch || '?marketplace=1'}`);
   }, [listSearch, navigate]);
+
+  const onSelectMarketplaceSkill = useCallback((slug: string, sourceId?: string) => {
+    setSelectedMarketplaceSkill({ slug, sourceId });
+  }, []);
+  const selectedMarketplaceSkillKey = selectedMarketplaceSkill
+    ? (selectedMarketplaceSkill.sourceId
+      ? `${selectedMarketplaceSkill.sourceId}:${selectedMarketplaceSkill.slug}`
+      : selectedMarketplaceSkill.slug)
+    : '';
+  const selectedMarketplaceSkillDetail = selectedMarketplaceSkillKey
+    ? marketplaceSkillDetailsByKey[selectedMarketplaceSkillKey] ?? null
+    : null;
+  const selectedMarketplaceSkillLoading = Boolean(selectedMarketplaceSkillKey)
+    && marketplaceDetailLoadingKey === selectedMarketplaceSkillKey
+    && !selectedMarketplaceSkillDetail;
 
   const onMarketplaceUninstall = useCallback(async (slug: string, sourceId?: string) => {
     const skillName = searchResults.find((skill) => skill.slug === slug && skill.sourceId === sourceId)?.name || slug;
@@ -432,10 +465,15 @@ export function Skills() {
         installedSkills={marketInstalledSkills}
         installing={installing}
         marketplaceNotice={marketplaceNotice}
+        selectedMarketplaceSkill={selectedMarketplaceSkill}
+        selectedMarketplaceSkillDetail={selectedMarketplaceSkillDetail}
+        selectedMarketplaceSkillLoading={selectedMarketplaceSkillLoading}
         onLoadMore={() => void loadMoreSearchResults(installQuery.trim(), effectiveInstallSourceId)}
         onInstall={(slug, version, sourceId, force) => void onInstall(slug, version, sourceId, force)}
         onUninstall={(slug, sourceId) => void onMarketplaceUninstall(slug, sourceId)}
         onViewInstalledSkill={onViewInstalledSkill}
+        onSelectMarketplaceSkill={onSelectMarketplaceSkill}
+        onClearMarketplaceSelection={() => setSelectedMarketplaceSkill(null)}
       />
     </div>
   );
