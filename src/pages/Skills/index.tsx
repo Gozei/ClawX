@@ -432,6 +432,7 @@ export function SkillDetailPage() {
   const location = useLocation();
   const { skillId } = useParams<{ skillId: string }>();
   const { fetchSkills, fetchSkillDetail, skillDetailsById, detailLoadingId, loading, skills } = useSkillsStore();
+  const isGatewayRunning = useGatewayStore((state) => state.status.state === 'running');
   const decodedSkillId = skillId ? decodeURIComponent(skillId) : '';
   const detail = decodedSkillId ? skillDetailsById[decodedSkillId] : undefined;
   const detailLoading = Boolean(decodedSkillId) && detailLoadingId === decodedSkillId && !detail;
@@ -440,13 +441,15 @@ export function SkillDetailPage() {
   const backToListHref = `/skills${location.search}`;
 
   useEffect(() => {
+    if (!isGatewayRunning) return;
     void fetchSkills();
-  }, [fetchSkills]);
+  }, [fetchSkills, isGatewayRunning]);
 
   useEffect(() => {
     if (!decodedSkillId) return;
+    if (!isGatewayRunning) return;
     void fetchSkillDetail(decodedSkillId, true).catch((error) => toast.error(String(error)));
-  }, [decodedSkillId, fetchSkillDetail]);
+  }, [decodedSkillId, fetchSkillDetail, isGatewayRunning]);
 
   if (loading || detailLoading) {
     return <div data-testid="skills-detail-page" className="flex flex-col -m-6 dark:bg-background min-h-[calc(100vh-2.5rem)] items-center justify-center"><LoadingSpinner size="lg" /></div>;

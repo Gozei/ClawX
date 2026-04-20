@@ -35,6 +35,19 @@ function mapErrorCodeToSkillErrorKey(
   return 'rateLimitError';
 }
 
+function isGatewayTransientError(error: AppError, gatewayState: 'stopped' | 'starting' | 'running' | 'error' | 'reconnecting'): boolean {
+  if (gatewayState === 'running') {
+    return false;
+  }
+  if (error.code === 'GATEWAY' || error.code === 'NETWORK') {
+    return true;
+  }
+  const message = error.message.toLowerCase();
+  return message.includes('gateway not connected')
+    || message.includes('gateway socket closed')
+    || message.includes('econnrefused');
+}
+
 interface SkillsState {
   skills: SkillSnapshot[];
   skillDetailsById: Record<string, SkillDetail>;
@@ -130,7 +143,11 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   fetchSkills: async (force = false) => {
     const existingSkills = Array.isArray(get().skills) ? get().skills : [];
     const lastFetchedAt = get().lastFetchedAt;
+    const gatewayState = useGatewayStore.getState().status.state;
     if (!force && existingSkills.length > 0 && lastFetchedAt && Date.now() - lastFetchedAt < 15_000) {
+      return;
+    }
+    if (!force && existingSkills.length === 0 && gatewayState !== 'running') {
       return;
     }
 
@@ -150,6 +167,10 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       });
     } catch (error) {
       const appError = normalizeAppError(error, { module: 'skills', operation: 'fetch' });
+      if (isGatewayTransientError(appError, gatewayState)) {
+        set({ loading: false, refreshing: false, error: null });
+        return;
+      }
       set({ loading: false, refreshing: false, error: mapErrorCodeToSkillErrorKey(appError.code, 'fetch') });
     }
   },
