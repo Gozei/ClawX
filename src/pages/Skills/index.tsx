@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, SquarePen, Store, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, SquarePen, Store, X } from 'lucide-react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -22,6 +22,7 @@ const DEFAULT_QUERY = '';
 const DEFAULT_SOURCE_CATEGORY: SkillSourceCategory = 'all';
 const DEFAULT_STATUS_FILTER: StatusFilter = 'all';
 const DEFAULT_MISSING_FILTER: MissingFilter = 'all';
+const SKILLS_TUTORIAL_URL = 'https://docs.qq.com/aio/p/scchzbdpjgz9ho4?p=UAoZoPrHjoUVZJKSBDhh62';
 
 type MarketplaceNotice =
   | { type: 'installing'; slug: string; name?: string }
@@ -318,6 +319,10 @@ export function Skills() {
     });
   }, [createSkillComposerPrefill, navigate, newSession]);
 
+  const onOpenTutorial = useCallback(() => {
+    void window.electron?.openExternal?.(SKILLS_TUTORIAL_URL);
+  }, []);
+
   if (loading) {
     return <div data-testid="skills-page" className="flex flex-col -m-6 dark:bg-background min-h-[calc(100vh-2.5rem)] items-center justify-center"><LoadingSpinner size="lg" /></div>;
   }
@@ -332,6 +337,16 @@ export function Skills() {
           subtitleTestId="skills-page-subtitle"
           actions={(
             <>
+              <Button
+                data-testid="skills-tutorial-button"
+                aria-label={t('actions.tutorial')}
+                onClick={onOpenTutorial}
+                variant="outline"
+                className="h-10 rounded-lg px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6"
+              >
+                <BookOpen className="mr-2 h-3.5 w-3.5" />
+                {t('actions.tutorial')}
+              </Button>
               <Button
                 data-testid="skills-create-button"
                 data-guide-id="skills-create"

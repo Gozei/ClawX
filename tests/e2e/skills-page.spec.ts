@@ -18,8 +18,11 @@ test.describe('Deep AI Worker skills page flows', () => {
       await expect(page.getByTestId('skills-source-tabs')).toBeVisible();
       await expect(page.getByTestId('skills-filter-button')).toBeVisible();
       await expect(page.getByTestId('skills-guide-button')).toHaveCount(0);
+      await expect(page.getByTestId('skills-tutorial-button')).toBeVisible();
       await expect(page.getByTestId('skills-create-button')).toBeVisible();
       await expect(page.getByTestId('skills-discover-button')).toBeVisible();
+      await expect(page.getByTestId('skills-tutorial-button')).toHaveClass(/rounded-lg/);
+      await expect(page.getByTestId('skills-tutorial-button')).toHaveClass(/px-4/);
       await expect(page.getByTestId('skills-create-button')).toHaveClass(/rounded-lg/);
       await expect(page.getByTestId('skills-create-button')).toHaveClass(/px-4/);
       await expect(page.getByTestId('skills-discover-button')).toHaveClass(/rounded-lg/);
@@ -228,6 +231,43 @@ test.describe('Deep AI Worker skills page flows', () => {
       await expect(composerInput).toHaveValue(
         '请帮我创建一个新的 skill，优先使用内置的 skill 创建能力。我的要求是：',
       );
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
+  test('opens the tutorial link from the skills page header', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      await app.evaluate(({ ipcMain }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (globalThis as any).__clawxE2eOpenExternalCalls = [];
+
+        ipcMain.removeHandler('shell:openExternal');
+        ipcMain.handle('shell:openExternal', async (_event, url: string) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (globalThis as any).__clawxE2eOpenExternalCalls.push(url);
+        });
+      });
+
+      const page = await getStableWindow(app);
+
+      await expect(page.getByTestId('main-layout')).toBeVisible();
+
+      await page.getByTestId('sidebar-nav-skills').click();
+      await expect(page.getByTestId('skills-page')).toBeVisible();
+
+      await page.getByTestId('skills-tutorial-button').click();
+
+      const openExternalCalls = await app.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (globalThis as any).__clawxE2eOpenExternalCalls ?? [];
+      });
+
+      expect(openExternalCalls).toEqual([
+        'https://docs.qq.com/aio/p/scchzbdpjgz9ho4?p=UAoZoPrHjoUVZJKSBDhh62',
+      ]);
     } finally {
       await closeElectronApp(app);
     }

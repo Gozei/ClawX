@@ -67,6 +67,7 @@
     },
     "actions": {
         "discover": "发现技能",
+        "tutorial": "教程",
         "create": "创建技能",
         "marketplace": "技能市场",
         "enableVisible": "批量启用可见项",

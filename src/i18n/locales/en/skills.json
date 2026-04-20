@@ -68,6 +68,7 @@
     },
     "actions": {
         "discover": "Discover Skills",
+        "tutorial": "Tutorial",
         "create": "Create Skill",
         "marketplace": "Skill Marketplace",
         "enableVisible": "Enable Visible",
