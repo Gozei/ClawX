@@ -702,6 +702,7 @@ export function Chat() {
     let readinessFrame = 0;
     let frame2 = 0;
     let frame1 = 0;
+    let spacerFrame = 0;
     let resizeObserver: ResizeObserver | null = null;
     let releasedByUser = false;
     let ignoreScrollEventsUntil = 0;
@@ -780,6 +781,14 @@ export function Chat() {
             activeTurnBottomSpacerKeyRef.current = activeTurnScrollKey;
             activeTurnBottomSpacerSessionKeyRef.current = currentSessionKey;
             setActiveTurnBottomSpacerHeight(requiredSpacerHeight);
+            if (autoScrollMode === 'top-align') {
+              cancelAnimationFrame(spacerFrame);
+              spacerFrame = requestAnimationFrame(() => {
+                if (!releasedByUser) {
+                  updateAutoScrollTarget(scrollElement, viewportAnchorElement, userMessageAnchorElement);
+                }
+              });
+            }
           }
 
           const clampedScrollTop = autoScrollMode === 'top-align'
@@ -801,6 +810,7 @@ export function Chat() {
       cancelAnimationFrame(readinessFrame);
       cancelAnimationFrame(frame1);
       cancelAnimationFrame(frame2);
+      cancelAnimationFrame(spacerFrame);
       handleActiveTurnUserInterrupt();
     };
     const handleKeyboardInterrupt = (event: KeyboardEvent) => {
@@ -854,6 +864,7 @@ export function Chat() {
       cancelAutoScrollFrame();
       cancelAnimationFrame(frame1);
       cancelAnimationFrame(frame2);
+      cancelAnimationFrame(spacerFrame);
     };
   }, [activeTurnScrollKey, activeTurnUserInterruptVersion, currentSessionKey, handleActiveTurnUserInterrupt, sending]);
 

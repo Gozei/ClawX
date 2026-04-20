@@ -338,9 +338,10 @@ test.describe('Chat active turn scroll', () => {
       const composer = page.getByTestId('chat-composer');
       const messageInput = composer.getByRole('textbox');
       const sendButton = composer.getByTestId('chat-send-button');
+      const modelSwitch = composer.getByTestId('chat-model-switch');
 
       await expect(scrollContainer).toBeVisible();
-      await expect(sendButton).toBeEnabled({ timeout: 20_000 });
+      await expect(modelSwitch).toContainText(`${DEFAULT_PROVIDER_LABEL} / model-scroll`, { timeout: 20_000 });
       await expect.poll(async () => (
         await sendButton.evaluate((node) => (
           !!node.querySelector('svg.lucide-send-horizontal')
@@ -351,6 +352,7 @@ test.describe('Chat active turn scroll', () => {
       ), { timeout: 20_000 }).toBeGreaterThan(0);
 
       await messageInput.fill('Please keep this active turn aligned to the top.');
+      await expect(sendButton).toBeEnabled({ timeout: 10_000 });
       await sendButton.click();
 
       await expect(page.getByTestId('chat-active-turn-anchor')).toBeVisible({ timeout: 20_000 });
