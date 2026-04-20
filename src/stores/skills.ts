@@ -4,6 +4,7 @@ import { AppError, normalizeAppError } from '@/lib/error-model';
 import { useGatewayStore } from './gateway';
 import type {
   MarketplaceInstalledSkill,
+  MarketplaceSkillDetail,
   MarketplaceSearchResponse,
   MarketplaceSkill,
   MarketplaceSourceCount,
@@ -35,12 +36,26 @@ function mapErrorCodeToSkillErrorKey(
   return 'rateLimitError';
 }
 
+function isGatewayTransientError(error: AppError, gatewayState: 'stopped' | 'starting' | 'running' | 'error' | 'reconnecting'): boolean {
+  if (gatewayState === 'running') {
+    return false;
+  }
+  if (error.code === 'GATEWAY' || error.code === 'NETWORK') {
+    return true;
+  }
+  const message = error.message.toLowerCase();
+  return message.includes('gateway not connected')
+    || message.includes('gateway socket closed')
+    || message.includes('econnrefused');
+}
+
 interface SkillsState {
   skills: SkillSnapshot[];
   skillDetailsById: Record<string, SkillDetail>;
   searchResults: MarketplaceSkill[];
   marketInstalledSkills: MarketplaceInstalledSkill[];
   marketplaceSourceCounts: Record<string, number | null>;
+  marketplaceSkillDetailsByKey: Record<string, MarketplaceSkillDetail>;
   sources: SkillSource[];
   searchNextCursor: string | null;
   searchingMore: boolean;
@@ -48,6 +63,7 @@ interface SkillsState {
   refreshing: boolean;
   searching: boolean;
   detailLoadingId: string | null;
+  marketplaceDetailLoadingKey: string | null;
   searchError: string | null;
   installing: Record<string, boolean>;
   deleting: Record<string, boolean>;
@@ -60,6 +76,7 @@ interface SkillsState {
   fetchSources: () => Promise<SkillSource[]>;
   fetchMarketplaceSourceCounts: (force?: boolean) => Promise<Record<string, number | null>>;
   fetchMarketInstalledSkills: () => Promise<MarketplaceInstalledSkill[]>;
+  fetchMarketplaceSkillDetail: (slug: string, sourceId?: string, force?: boolean) => Promise<MarketplaceSkillDetail>;
   fetchSkillDetail: (skillId: string, force?: boolean) => Promise<SkillDetail>;
   saveSkillConfig: (skillId: string, input: { apiKey?: string; env?: Record<string, string> }) => Promise<void>;
   deleteSkill: (skillId: string) => Promise<void>;
@@ -78,6 +95,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   searchResults: [],
   marketInstalledSkills: [],
   marketplaceSourceCounts: {},
+  marketplaceSkillDetailsByKey: {},
   sources: [],
   searchNextCursor: null,
   searchingMore: false,
@@ -85,6 +103,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   refreshing: false,
   searching: false,
   detailLoadingId: null,
+  marketplaceDetailLoadingKey: null,
   searchError: null,
   installing: {},
   deleting: {},
@@ -127,10 +146,47 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     return installed;
   },
 
+  fetchMarketplaceSkillDetail: async (slug: string, sourceId?: string, force = false): Promise<MarketplaceSkillDetail> => {
+    const key = sourceId ? `${sourceId}:${slug}` : slug;
+    const cached = get().marketplaceSkillDetailsByKey[key];
+    if (cached && !force) {
+      return cached;
+    }
+
+    set({ marketplaceDetailLoadingKey: key });
+    try {
+      const result = await hostApiFetch<{ success: boolean; detail?: MarketplaceSkillDetail; error?: string }>('/api/clawhub/skill-detail', {
+        method: 'POST',
+        body: JSON.stringify({ slug, sourceId }),
+      });
+      if (!result.success || !result.detail) {
+        throw new Error(result.error || 'Failed to fetch marketplace skill detail');
+      }
+      const detail = result.detail;
+      set((state) => ({
+        marketplaceDetailLoadingKey: state.marketplaceDetailLoadingKey === key ? null : state.marketplaceDetailLoadingKey,
+        marketplaceSkillDetailsByKey: {
+          ...state.marketplaceSkillDetailsByKey,
+          [key]: detail,
+        },
+      }));
+      return detail;
+    } catch (error) {
+      set((state) => ({
+        marketplaceDetailLoadingKey: state.marketplaceDetailLoadingKey === key ? null : state.marketplaceDetailLoadingKey,
+      }));
+      throw error;
+    }
+  },
+
   fetchSkills: async (force = false) => {
     const existingSkills = Array.isArray(get().skills) ? get().skills : [];
     const lastFetchedAt = get().lastFetchedAt;
+    const gatewayState = useGatewayStore.getState().status.state;
     if (!force && existingSkills.length > 0 && lastFetchedAt && Date.now() - lastFetchedAt < 15_000) {
+      return;
+    }
+    if (!force && existingSkills.length === 0 && gatewayState !== 'running') {
       return;
     }
 
@@ -150,6 +206,10 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       });
     } catch (error) {
       const appError = normalizeAppError(error, { module: 'skills', operation: 'fetch' });
+      if (isGatewayTransientError(appError, gatewayState)) {
+        set({ loading: false, refreshing: false, error: null });
+        return;
+      }
       set({ loading: false, refreshing: false, error: mapErrorCodeToSkillErrorKey(appError.code, 'fetch') });
     }
   },

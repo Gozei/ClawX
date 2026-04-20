@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { SkillDetailPage, Skills } from '../../src/pages/Skills';
-import type { SkillDetail, SkillSnapshot, SkillSource } from '../../src/types/skill';
+import type { MarketplaceSkillDetail, SkillDetail, SkillSnapshot, SkillSource } from '../../src/types/skill';
 
 const fetchSkillsMock = vi.fn();
 const fetchSkillDetailMock = vi.fn();
+const fetchMarketplaceSkillDetailMock = vi.fn();
 const enableSkillMock = vi.fn();
 const disableSkillMock = vi.fn();
 const searchSkillsMock = vi.fn();
@@ -32,6 +33,8 @@ const { gatewayState, skillsState, marketplaceSheetState, toastMocks } = vi.hois
     installing: {} as Record<string, boolean>,
     sources: [] as SkillSource[],
     marketplaceSourceCounts: {} as Record<string, number | null>,
+    marketplaceSkillDetailsByKey: {} as Record<string, MarketplaceSkillDetail>,
+    marketplaceDetailLoadingKey: null as string | null,
     skillDetailsById: {} as Record<string, SkillDetail>,
     detailLoadingId: null as string | null,
   },
@@ -59,6 +62,7 @@ vi.mock('@/stores/skills', () => ({
   useSkillsStore: Object.assign((selector?: (state: typeof skillsState & {
     fetchSkills: typeof fetchSkillsMock;
     fetchSkillDetail: typeof fetchSkillDetailMock;
+    fetchMarketplaceSkillDetail: typeof fetchMarketplaceSkillDetailMock;
     enableSkill: typeof enableSkillMock;
     disableSkill: typeof disableSkillMock;
     searchSkills: typeof searchSkillsMock;
@@ -73,6 +77,7 @@ vi.mock('@/stores/skills', () => ({
       ...skillsState,
       fetchSkills: fetchSkillsMock,
       fetchSkillDetail: fetchSkillDetailMock,
+      fetchMarketplaceSkillDetail: fetchMarketplaceSkillDetailMock,
       enableSkill: enableSkillMock,
       disableSkill: disableSkillMock,
       searchSkills: searchSkillsMock,
@@ -89,6 +94,7 @@ vi.mock('@/stores/skills', () => ({
       ...skillsState,
       fetchSkills: fetchSkillsMock,
       fetchSkillDetail: fetchSkillDetailMock,
+      fetchMarketplaceSkillDetail: fetchMarketplaceSkillDetailMock,
       enableSkill: enableSkillMock,
       disableSkill: disableSkillMock,
       searchSkills: searchSkillsMock,
@@ -214,6 +220,7 @@ describe('Skills page route state', () => {
     skillsState.detailLoadingId = null;
     fetchSkillsMock.mockResolvedValue(undefined);
     fetchSkillDetailMock.mockResolvedValue(undefined);
+    fetchMarketplaceSkillDetailMock.mockResolvedValue(undefined);
     enableSkillMock.mockResolvedValue(undefined);
     disableSkillMock.mockResolvedValue(undefined);
     searchSkillsMock.mockResolvedValue(undefined);
@@ -327,12 +334,11 @@ describe('Skills page route state', () => {
     await waitFor(() => expect(fetchSkillsMock).toHaveBeenCalledTimes(2));
   });
 
-  it('shows a marketplace success CTA that navigates to the installed skill detail page', async () => {
+  it('shows a marketplace success CTA and keeps detail inside the marketplace window', async () => {
     render(
       <MemoryRouter initialEntries={['/skills']}>
         <Routes>
           <Route path="/skills" element={<Skills />} />
-          <Route path="/skills/:skillId" element={<SkillDetailPage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -352,6 +358,7 @@ describe('Skills page route state', () => {
     const marketplaceProps = marketplaceSheetState.latestProps as null | {
       onInstall?: (slug: string, version?: string, sourceId?: string, force?: boolean) => void;
       onViewInstalledSkill?: (slug: string) => void;
+      onSelectMarketplaceSkill?: (slug: string, sourceId?: string) => void;
       marketplaceNotice?: { type: string; slug: string; name?: string } | null;
     };
 
@@ -367,20 +374,22 @@ describe('Skills page route state', () => {
 
     const updatedMarketplaceProps = marketplaceSheetState.latestProps as null | {
       onViewInstalledSkill?: (slug: string) => void;
+      onSelectMarketplaceSkill?: (slug: string, sourceId?: string) => void;
       marketplaceNotice?: { type: string; slug: string; name?: string } | null;
     };
     expect(updatedMarketplaceProps?.marketplaceNotice?.slug).toBe('beta');
     expect(updatedMarketplaceProps?.marketplaceNotice?.type).toBe('installed');
 
     await act(async () => {
-      updatedMarketplaceProps?.onViewInstalledSkill?.('beta');
+      updatedMarketplaceProps?.onSelectMarketplaceSkill?.('beta', 'clawhub');
       await Promise.resolve();
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('link', { name: 'detail.backToList' }).getAttribute('href')).toContain('marketplace=1');
+      expect(marketplaceSheetState.latestProps).toMatchObject({
+        selectedMarketplaceSkill: { slug: 'beta', sourceId: 'clawhub' },
+      });
     });
-    expect(screen.getByTestId('skill-detail-content')).toBeInTheDocument();
   });
 
   it('ignores transient undefined skill entries when rendering the skills page', async () => {
