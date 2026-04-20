@@ -1129,7 +1129,7 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
                   <Button
                     variant="link"
                     className="h-auto p-0 text-[14px] text-blue-500 hover:text-blue-600 font-medium"
-                    onClick={() => window.electron.openExternal('https://docs.qq.com/aio/p/scchzbdpjgz9ho4?p=RCREYa5p35U7ZfykDhxH6z')}
+                    onClick={() => window.electron.openExternal('https://docs.qq.com/aio/p/scchzbdpjgz9ho4?p=sGkmem2WlWWvi4rh4PDslN')}
                   >
                     {t('about.faq')}
                   </Button>
