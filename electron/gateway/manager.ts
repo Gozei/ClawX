@@ -65,6 +65,23 @@ export interface GatewayStatus {
   reconnectAttempts?: number;
 }
 
+function getExternalGatewayConfig(): { port: number; token?: string } | null {
+  const rawPort = process.env.CLAWX_EXTERNAL_GATEWAY_PORT?.trim();
+  if (!rawPort) return null;
+
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    logger.warn(`Ignoring invalid CLAWX_EXTERNAL_GATEWAY_PORT="${rawPort}"`);
+    return null;
+  }
+
+  const token = process.env.CLAWX_EXTERNAL_GATEWAY_TOKEN?.trim();
+  return {
+    port,
+    ...(token ? { token } : {}),
+  };
+}
+
 /**
  * Gateway Manager Events
  */
@@ -224,6 +241,54 @@ export class GatewayManager extends EventEmitter {
    * Start Gateway process
    */
   async start(): Promise<void> {
+    const externalGateway = getExternalGatewayConfig();
+    if (externalGateway) {
+      if (this.startLock) {
+        logger.debug('External Gateway connect ignored because a start flow is already in progress');
+        return;
+      }
+
+      if (this.status.state === 'running' && this.status.port === externalGateway.port) {
+        logger.debug('External Gateway already connected, skipping start');
+        return;
+      }
+
+      this.startLock = true;
+      this.shouldReconnect = true;
+      this.ownsProcess = false;
+      this.process = null;
+      this.connectionToken = externalGateway.token ?? null;
+
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+
+      this.setStatus({
+        state: 'starting',
+        port: externalGateway.port,
+        pid: undefined,
+        error: undefined,
+      });
+
+      try {
+        await this.initDeviceIdentity();
+        logger.info(`Connecting to external Gateway on port ${externalGateway.port}`);
+        await this.connect(externalGateway.port, externalGateway.token);
+        this.startHealthCheck();
+        logger.info('External Gateway connected successfully');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('External Gateway connect failed:', error);
+        this.setStatus({ state: 'error', error: message, pid: undefined });
+        this.emit('error', error instanceof Error ? error : new Error(message));
+        throw error;
+      } finally {
+        this.startLock = false;
+      }
+      return;
+    }
+
     if (this.startLock) {
       logger.debug('Gateway start ignored because a start flow is already in progress');
       return;
