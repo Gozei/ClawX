@@ -487,6 +487,42 @@ describe('sanitizeOpenClawConfig', () => {
     expect(dingtalk.clientId).toBe('dt-client-id');
     expect(dingtalk.clientSecret).toBe('dt-secret');
   });
+
+  it('keeps bundled enabledByDefault plugins like browser in plugins.allow when external plugins are enabled', async () => {
+    const bundledOpenClawDir = join(testUserData, 'bundled-openclaw');
+    const browserManifestDir = join(bundledOpenClawDir, 'dist', 'extensions', 'browser');
+    await mkdir(browserManifestDir, { recursive: true });
+    await writeFile(
+      join(browserManifestDir, 'openclaw.plugin.json'),
+      JSON.stringify({ id: 'browser', enabledByDefault: true }, null, 2),
+      'utf8',
+    );
+
+    vi.doMock('@electron/utils/paths', async () => {
+      const actual = await vi.importActual<typeof import('@electron/utils/paths')>('@electron/utils/paths');
+      return {
+        ...actual,
+        getOpenClawResolvedDir: () => bundledOpenClawDir,
+      };
+    });
+
+    await writeOpenClawJson({
+      plugins: {
+        allow: ['customPlugin', 'browser'],
+        entries: {
+          customPlugin: { enabled: true },
+        },
+      },
+    });
+
+    const { sanitizeOpenClawConfig } = await import('@electron/utils/openclaw-auth');
+    await sanitizeOpenClawConfig();
+
+    const result = await readOpenClawJson();
+    const plugins = result.plugins as Record<string, unknown>;
+    expect(plugins.allow).toEqual(expect.arrayContaining(['customPlugin', 'browser']));
+    expect((plugins.entries as Record<string, unknown>).customPlugin).toEqual({ enabled: true });
+  });
 });
 
 describe('syncProviderConfigToOpenClaw', () => {

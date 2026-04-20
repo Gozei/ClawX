@@ -22,6 +22,8 @@ const EXEC_SYSTEM_RE = /^Exec (?:completed|finished)\s*\(([^)]*)\)(?:\s*::\s*([\
 const SENDER_METADATA_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*```[a-z]*\s*[\s\S]*?```\s*/i;
 const SENDER_METADATA_JSON_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*\{[\s\S]*?\}\s*/i;
 const GATEWAY_TIMESTAMP_PREFIX_RE = /^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i;
+const HEARTBEAT_PROMPT_FALLBACK_RE =
+  /^(?:如果存在 HEARTBEAT\.md|读取 HEARTBEAT\.md 时|当前时间[:：]|Read HEARTBEAT\.md if it exists|When reading HEARTBEAT\.md|Current time:)/i;
 const HEARTBEAT_PROMPT_LINE_RE =
   /^(如果存在 HEARTBEAT\.md|Read HEARTBEAT\.md if it exists|读取 HEARTBEAT\.md 时|Current time:|当前时间：)/i;
 
@@ -46,7 +48,7 @@ function summarizeSystemHeartbeatNoise(text: string): string {
   let otherSystemLineCount = 0;
 
   for (const line of lines) {
-    if (HEARTBEAT_PROMPT_LINE_RE.test(line)) {
+    if (HEARTBEAT_PROMPT_LINE_RE.test(line) || HEARTBEAT_PROMPT_FALLBACK_RE.test(line)) {
       heartbeatLineCount += 1;
       continue;
     }
@@ -80,9 +82,9 @@ function summarizeSystemHeartbeatNoise(text: string): string {
     return text;
   }
 
-  // Hide heartbeat-only prompt injection from the visible chat transcript.
-  // It's internal workspace context, not user-authored content.
-  if (execCount === 0 && otherSystemLineCount === 0 && heartbeatLineCount > 0) {
+  // Hide heartbeat maintenance injections from the visible chat transcript.
+  // They are internal workspace/context plumbing, not user-authored content.
+  if (heartbeatLineCount > 0) {
     return '';
   }
 
@@ -104,6 +106,32 @@ function summarizeSystemHeartbeatNoise(text: string): string {
   }
 
   return summaryLines.join('\n');
+}
+
+function isHeartbeatMaintenanceOnlyText(text: string): boolean {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) return false;
+
+  let sawHeartbeatDirective = false;
+
+  for (const line of lines) {
+    if (HEARTBEAT_PROMPT_LINE_RE.test(line) || HEARTBEAT_PROMPT_FALLBACK_RE.test(line)) {
+      sawHeartbeatDirective = true;
+      continue;
+    }
+
+    if (SYSTEM_LINE_RE.test(line)) {
+      continue;
+    }
+
+    return false;
+  }
+
+  return sawHeartbeatDirective;
 }
 
 function stripLeadingInjectedSystemLines(text: string, allow: boolean): string {
@@ -213,7 +241,7 @@ export function isInternalMaintenanceTurnUserMessage(message: RawMessage | unkno
     .replace(GATEWAY_TIMESTAMP_PREFIX_RE, ''))
     .trim();
 
-  return isPreCompactionMemoryFlushPrompt(normalized);
+  return isPreCompactionMemoryFlushPrompt(normalized) || isHeartbeatMaintenanceOnlyText(normalized);
 }
 
 /**

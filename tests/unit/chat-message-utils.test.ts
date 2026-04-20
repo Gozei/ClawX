@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractText } from '@/pages/Chat/message-utils';
+import { extractText, isInternalMaintenanceTurnUserMessage } from '@/pages/Chat/message-utils';
 import type { RawMessage } from '@/stores/chat';
 
 describe('chat message utils', () => {
@@ -23,7 +23,7 @@ describe('chat message utils', () => {
     expect(extractText(message)).toBe('');
   });
 
-  it('compacts system exec and heartbeat noise in user messages', () => {
+  it.skip('hides system exec and heartbeat maintenance noise in user messages', () => {
     const message: RawMessage = {
       id: 'system-noise-1',
       role: 'user',
@@ -46,6 +46,30 @@ describe('chat message utils', () => {
     expect(extractText(message)).toBe(
       '系统事件：已记录 2 个后台执行结果，其中 1 个异常退出。\n心跳检查：已附带工作区 HEARTBEAT 提示。',
     );
+  });
+
+  it('hides system exec and heartbeat maintenance noise in user messages', () => {
+    const message: RawMessage = {
+      id: 'system-noise-1b',
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: [
+            'System (untrusted): [2026-04-13 12:02:30 GMT+8] Exec completed (tidy-lob, code 0) :: long output here',
+            'System (untrusted): [2026-04-13 12:03:01 GMT+8] Exec completed (nimble-d, code 1) :: stack trace here',
+            '',
+            'Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.',
+            'When reading HEARTBEAT.md, use workspace file /Users/example/.openclaw/workspace/HEARTBEAT.md (exact case). Do not read docs/heartbeat.md.',
+            'Current time: Monday, April 13th, 2026 - 12:04 (Asia/Shanghai)',
+          ].join('\n'),
+        },
+      ],
+      timestamp: 1713000000,
+    };
+
+    expect(extractText(message)).toBe('');
+    expect(isInternalMaintenanceTurnUserMessage(message)).toBe(true);
   });
 
   it('preserves normal user text that only happens to mention system wording', () => {
@@ -161,6 +185,28 @@ describe('chat message utils', () => {
     };
 
     expect(extractText(message)).toBe('你现在是什么模型');
+  });
+
+  it('treats localized heartbeat maintenance turns as internal', () => {
+    const message: RawMessage = {
+      id: 'heartbeat-zh-1',
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: [
+            'System: [2026-04-16 14:41:36 GMT+8] 网关检查：已完成（config.patch）',
+            '如果存在 HEARTBEAT.md（工作区上下文），请读取并严格遵循。不要根据过往对话臆测或重复旧任务。如果当前没有需要处理的事项，请回复 HEARTBEAT_OK。',
+            '读取 HEARTBEAT.md 时，请使用工作区文件 C:/Users/Administrator/.openclaw/workspace/HEARTBEAT.md（注意大小写完全一致）。不要读取 docs/heartbeat.md。',
+            '当前时间：Thursday, April 16th, 2026 - 16:14（Etc/GMT-8）',
+          ].join('\n'),
+        },
+      ],
+      timestamp: 1713000007,
+    };
+
+    expect(extractText(message)).toBe('');
+    expect(isInternalMaintenanceTurnUserMessage(message)).toBe(true);
   });
 
   it('hides pre-compaction memory flush prompts from user-visible text', () => {

@@ -1740,17 +1740,40 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
         modified = true;
       }
 
-      // Keep only true external plugin ids in plugins.allow.
-      // A config written by newer OpenClaw versions may contain bundled
-      // provider/plugin ids that older runtimes reject during validation.
+      // Keep only true external plugin ids in plugins.allow, then re-add
+      // configured built-in channels and bundled enabledByDefault plugins.
+      // This preserves OpenClaw's default bundled CLI/plugin surface (for
+      // example `openclaw browser`) whenever the user also has an explicit
+      // allowlist for third-party plugins or configured channels.
       const bundled = discoverBundledPlugins();
       const installedTopLevelPluginIds = discoverInstalledTopLevelPluginIds();
-      const nextAllow = allowArr2.filter((pluginId) => {
+      const externalPluginIds = allowArr2.filter((pluginId) => {
         if (BUILTIN_CHANNEL_IDS.has(pluginId)) return false;
         if (bundled.all.has(pluginId)) return false;
         if (pluginId === 'wecom-openclaw-plugin') return false;
         return installedTopLevelPluginIds.has(pluginId) || Boolean(pEntries[pluginId]);
       });
+      const nextAllow = [...externalPluginIds];
+
+      if (externalPluginIds.length > 0) {
+        const channels = config.channels;
+        if (channels && typeof channels === 'object' && !Array.isArray(channels)) {
+          for (const [channelId, section] of Object.entries(channels as Record<string, Record<string, unknown>>)) {
+            if (!BUILTIN_CHANNEL_IDS.has(channelId)) continue;
+            if (!section || section.enabled === false) continue;
+            if (Object.keys(section).length === 0) continue;
+            if (!nextAllow.includes(channelId)) {
+              nextAllow.push(channelId);
+            }
+          }
+        }
+
+        for (const pluginId of bundled.enabledByDefault) {
+          if (!nextAllow.includes(pluginId)) {
+            nextAllow.push(pluginId);
+          }
+        }
+      }
 
       if (JSON.stringify(nextAllow) !== JSON.stringify(allowArr2)) {
         if (nextAllow.length > 0) {

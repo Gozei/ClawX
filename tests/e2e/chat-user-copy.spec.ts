@@ -9,10 +9,10 @@ const SEEDED_USER_PROMPT = 'What can you do?';
 
 async function seedSession(homeDir: string): Promise<void> {
   const sessionsDir = join(homeDir, '.openclaw', 'agents', 'main', 'sessions');
-  const seededMessages = [
-    {
-      id: 'user-metadata-1',
-      role: 'user',
+    const seededMessages = [
+      {
+        id: 'user-metadata-1',
+        role: 'user',
       content: [
         'Sender (untrusted metadata):',
         '```json',
@@ -31,10 +31,41 @@ async function seedSession(homeDir: string): Promise<void> {
         '- If tools are unavailable, explain the block instead of fabricating.',
         '',
         SEEDED_USER_PROMPT,
-      ].join('\n'),
-      timestamp: Math.floor(Date.now() / 1000) - 2,
-    },
-  ];
+        ].join('\n'),
+        timestamp: Math.floor(Date.now() / 1000) - 2,
+        _attachedFiles: [
+          {
+            fileName: 'SKILL.md',
+            mimeType: 'text/markdown',
+            fileSize: 44984,
+            preview: null,
+            filePath: '/tmp/SKILL.md',
+          },
+          {
+            fileName: '方案skill.rar',
+            mimeType: 'application/x-rar-compressed',
+            fileSize: 35840,
+            preview: null,
+            filePath: '/tmp/plan-skill.rar',
+          },
+        ],
+      },
+      {
+        id: 'assistant-metadata-1',
+        role: 'assistant',
+        content: 'I can help analyze files, extract requirements, and turn them into a reusable skill.',
+        timestamp: Math.floor(Date.now() / 1000) - 1,
+        _attachedFiles: [
+          {
+            fileName: 'reply-notes.md',
+            mimeType: 'text/markdown',
+            fileSize: 1024,
+            preview: null,
+            filePath: '/tmp/reply-notes.md',
+          },
+        ],
+      },
+    ];
 
   await mkdir(sessionsDir, { recursive: true });
   await writeFile(
@@ -132,11 +163,70 @@ test.describe('Chat user message copy', () => {
       await expect(userBubble).not.toContainText('openclaw doctor --non-interactive');
       await expect(userBubble).not.toContainText('Execution playbook:');
       await expect(userBubble).not.toContainText('Conversation info (untrusted metadata):');
+      await expect(page.getByTestId('chat-assistant-brand-name').last()).toHaveText('Deep AI Worker');
+
+      const assistantAvatar = page.getByTestId('chat-assistant-avatar').last();
+      const assistantContent = page.getByTestId('chat-message-content-assistant').last();
+      const [assistantAvatarBox, assistantContentBox] = await Promise.all([
+        assistantAvatar.boundingBox(),
+        assistantContent.boundingBox(),
+      ]);
+
+      expect(assistantAvatarBox).not.toBeNull();
+      expect(assistantContentBox).not.toBeNull();
+
+      if (assistantAvatarBox && assistantContentBox) {
+        expect(Math.abs(assistantContentBox.x - assistantAvatarBox.x)).toBeLessThan(2);
+      }
 
       await userBubble.hover();
       await page.getByTestId('chat-message-copy-user').click();
 
       await expect.poll(async () => await app.evaluate(({ clipboard }) => clipboard.readText())).toBe(SEEDED_USER_PROMPT);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
+  test('keeps user file cards right-aligned and assistant file cards left-aligned', async ({ homeDir, launchElectronApp }) => {
+    await seedSession(homeDir);
+
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      const page = await getStableWindow(app);
+      await expect(page.getByTestId('main-layout')).toBeVisible({ timeout: 45_000 });
+      await ensureGatewayConnected(page);
+      await openSeededSession(page, SEEDED_SESSION_KEY);
+
+      const userContent = page.getByTestId('chat-message-content-user').first();
+      const assistantContent = page.getByTestId('chat-message-content-assistant').last();
+      const userAttachments = page.getByTestId('chat-user-attachments').first();
+      const assistantAttachments = page.getByTestId('chat-assistant-attachments').first();
+      const userFileCard = userAttachments.getByTestId('chat-file-card').last();
+      const assistantFileCard = assistantAttachments.getByTestId('chat-file-card').first();
+
+      await expect(userAttachments).toBeVisible();
+      await expect(assistantAttachments).toBeVisible();
+
+      const [userContentBox, assistantContentBox, userCardBox, assistantCardBox] = await Promise.all([
+        userContent.boundingBox(),
+        assistantContent.boundingBox(),
+        userFileCard.boundingBox(),
+        assistantFileCard.boundingBox(),
+      ]);
+
+      expect(userContentBox).not.toBeNull();
+      expect(assistantContentBox).not.toBeNull();
+      expect(userCardBox).not.toBeNull();
+      expect(assistantCardBox).not.toBeNull();
+
+      if (userContentBox && assistantContentBox && userCardBox && assistantCardBox) {
+        expect(Math.abs(
+          (userCardBox.x + userCardBox.width) - (userContentBox.x + userContentBox.width),
+        )).toBeLessThan(2);
+        expect(Math.abs(assistantCardBox.x - assistantContentBox.x)).toBeLessThan(2);
+      }
     } finally {
       await closeElectronApp(app);
     }

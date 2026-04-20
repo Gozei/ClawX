@@ -11,6 +11,7 @@ import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { invokeIpc } from '@/lib/api-client';
+import { useBranding } from '@/lib/branding';
 import type { RawMessage, AttachedFileMeta } from '@/stores/chat';
 import { useProviderStore } from '@/stores/providers';
 import { useSettingsStore, type AssistantMessageStyle } from '@/stores/settings';
@@ -201,7 +202,8 @@ export const ChatMessage = memo(function ChatMessage({
   ), [chatProcessDisplayMode, tools]);
   const bodyFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
   const metaFontSize = `${Math.round(12 * (chatFontScale / 100) * 10) / 10}px`;
-  const attachmentGridClassName = 'grid w-full max-w-[720px] grid-cols-3 gap-2';
+  const attachmentListClassName = 'flex max-w-[720px] flex-wrap gap-2';
+  const branding = useBranding();
   const providerItems = useMemo(
     () => buildProviderListItems(providerAccounts, providerStatuses, providerVendors, providerDefaultAccountId),
     [providerAccounts, providerDefaultAccountId, providerStatuses, providerVendors],
@@ -236,6 +238,134 @@ export const ChatMessage = memo(function ChatMessage({
 
   const hasStreamingToolStatus = isStreaming && chatProcessDisplayMode === 'all' && streamingTools.length > 0;
   if (!hasText && !visibleThinking && images.length === 0 && visibleTools.length === 0 && attachedFiles.length === 0 && !hasStreamingToolStatus) return null;
+  const showsAssistantBrandHeader = !isUser && !hideAvatar;
+
+  if (showsAssistantBrandHeader) {
+    return (
+      <div
+        data-testid="chat-assistant-message-shell"
+        className="group min-w-0 max-w-full space-y-3.5"
+        style={isStreaming ? undefined : { contentVisibility: 'auto', containIntrinsicSize: '160px' }}
+      >
+        <div
+          data-testid="chat-assistant-brand-header"
+          className="flex w-full min-w-0 items-center gap-3"
+        >
+          <div
+            data-testid="chat-assistant-avatar"
+            className={cn(
+              'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
+              isErrorMessage
+                ? 'bg-destructive/10 text-destructive'
+                : 'bg-black/5 dark:bg-white/5 text-foreground',
+            )}
+          >
+            {isErrorMessage ? <AlertCircle className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <span
+              data-testid="chat-assistant-brand-name"
+              className="block truncate text-[16px] font-semibold tracking-[0.12em] text-foreground/90 dark:text-foreground/92"
+            >
+              {branding.productName}
+            </span>
+          </div>
+        </div>
+
+        <div
+          data-testid="chat-message-content-assistant"
+          className={cn(
+            'flex w-full min-w-0 flex-col items-start space-y-2.5',
+            constrainWidth && !usesAssistantStreamStyle && 'max-w-[80%]',
+          )}
+        >
+          {isStreaming && streamingTools.length > 0 && (
+            <ToolStatusBar tools={streamingTools} />
+          )}
+
+          {visibleThinking && (
+            <ThinkingBlock content={visibleThinking} />
+          )}
+
+          {visibleTools.length > 0 && (
+            <div className="w-full space-y-1">
+              {visibleTools.map((tool, i) => (
+                <ToolCard key={tool.id || i} name={tool.name} input={tool.input} />
+              ))}
+            </div>
+          )}
+
+          {hasText && (
+            <MessageBubble
+              text={text}
+              isUser={false}
+              isError={isErrorMessage}
+              isStreaming={isStreaming}
+              fontSize={bodyFontSize}
+              assistantMessageStyle={assistantMessageStyle}
+            />
+          )}
+
+          {images.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {images.map((img, i) => {
+                const src = imageSrc(img);
+                if (!src) return null;
+                return (
+                  <ImagePreviewCard
+                    key={`content-${i}`}
+                    src={src}
+                    fileName="image"
+                    base64={img.data}
+                    mimeType={img.mimeType}
+                    onPreview={() => setLightboxImg({ src, fileName: 'image', base64: img.data, mimeType: img.mimeType })}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          {attachedFiles.length > 0 && (
+            <div
+              data-testid="chat-assistant-attachments"
+              className={cn(attachmentListClassName, 'self-start justify-start')}
+            >
+              {attachedFiles.map((file, i) => (
+                <FileCard
+                  key={`local-${i}`}
+                  file={file}
+                  onPreview={file.preview && file.mimeType.startsWith('image/')
+                    ? () => setLightboxImg({ src: file.preview!, fileName: file.fileName, filePath: file.filePath, mimeType: file.mimeType })
+                    : undefined}
+                />
+              ))}
+            </div>
+          )}
+
+          {hasText && (
+            <MessageHoverBar
+              text={text}
+              timestamp={message.timestamp}
+              metaFontSize={metaFontSize}
+              messageType="assistant"
+              modelLabel={currentModelLabel}
+            />
+          )}
+        </div>
+
+        {lightboxImg && (
+          <ImageLightbox
+            src={lightboxImg.src}
+            fileName={lightboxImg.fileName}
+            filePath={lightboxImg.filePath}
+            base64={lightboxImg.base64}
+            mimeType={lightboxImg.mimeType}
+            onClose={() => setLightboxImg(null)}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -267,11 +397,29 @@ export const ChatMessage = memo(function ChatMessage({
       <div
         data-testid={isUser ? 'chat-message-content-user' : 'chat-message-content-assistant'}
         className={cn(
-          'flex flex-col w-full min-w-0 space-y-2',
+          'flex flex-col w-full min-w-0',
+          !isUser && showsAssistantBrandHeader ? 'space-y-2.5' : 'space-y-2',
           constrainWidth && !usesAssistantStreamStyle && 'max-w-[80%]',
           isUser ? 'items-end' : 'items-start',
         )}
+        style={!isUser && showsAssistantBrandHeader
+          ? { marginLeft: '-44px', width: 'calc(100% + 44px)' }
+          : undefined}
       >
+        {showsAssistantBrandHeader && (
+          <div
+            data-testid="chat-assistant-brand-header"
+            className="ml-11 flex w-full min-w-0 items-center"
+          >
+            <span
+              data-testid="chat-assistant-brand-name"
+              className="truncate text-[16px] font-semibold tracking-[0.12em] text-foreground/90 dark:text-foreground/92"
+            >
+              {branding.productName}
+            </span>
+          </div>
+        )}
+
         {isStreaming && !isUser && streamingTools.length > 0 && (
           <ToolStatusBar tools={streamingTools} />
         )}
@@ -313,7 +461,10 @@ export const ChatMessage = memo(function ChatMessage({
 
         {/* File attachments */}
         {isUser && attachedFiles.length > 0 && (
-          <div className={attachmentGridClassName}>
+          <div
+            data-testid="chat-user-attachments"
+            className={cn(attachmentListClassName, 'self-end justify-end')}
+          >
             {attachedFiles.map((file, i) => (
               <FileCard
                 key={`local-${i}`}
@@ -360,7 +511,10 @@ export const ChatMessage = memo(function ChatMessage({
 
         {/* File attachments — assistant messages (below text) */}
         {!isUser && attachedFiles.length > 0 && (
-          <div className={attachmentGridClassName}>
+          <div
+            data-testid="chat-assistant-attachments"
+            className={cn(attachmentListClassName, 'self-start justify-start')}
+          >
             {attachedFiles.map((file, i) => (
               <FileCard
                 key={`local-${i}`}
@@ -682,7 +836,7 @@ function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () 
     <div
       data-testid="chat-file-card"
       className={cn(
-        "relative min-w-0 overflow-hidden rounded-xl border border-black/10 bg-white/80 shadow-[0_14px_34px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.06]",
+        "relative w-[224px] max-w-full min-w-0 overflow-hidden rounded-xl border border-black/10 bg-white/80 shadow-[0_14px_34px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.06]",
         (file.filePath || onPreview) && "cursor-pointer hover:border-black/15 hover:bg-white dark:hover:border-white/15 dark:hover:bg-white/[0.08] transition-colors"
       )}
       onClick={handleOpen}

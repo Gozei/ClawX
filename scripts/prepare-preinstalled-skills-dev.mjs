@@ -4,16 +4,18 @@ import './setup-zx-shell.mjs';
 import 'zx/globals';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { patchOpenClawPrompts } from './patch-openclaw-prompts.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
+const require = createRequire(import.meta.url);
 const lockPath = join(ROOT, 'build', 'preinstalled-skills', '.preinstalled-lock.json');
 const bundleScript = join(ROOT, 'scripts', 'bundle-preinstalled-skills.mjs');
 const openClawDir = join(ROOT, 'node_modules', 'openclaw');
-const zxCli = join(ROOT, 'node_modules', '.bin', process.platform === 'win32' ? 'zx.cmd' : 'zx');
+const zxCli = require.resolve('zx/cli');
 
 if (process.env.CLAWX_SKIP_PREINSTALLED_SKILLS_PREPARE === '1') {
   echo`Skipping preinstalled skills prepare (CLAWX_SKIP_PREINSTALLED_SKILLS_PREPARE=1).`;

@@ -8,6 +8,8 @@ const { settingsState, invokeIpcMock } = vi.hoisted(() => ({
     chatProcessDisplayMode: 'all',
     chatFontScale: 100,
     assistantMessageStyle: 'bubble',
+    language: 'zh-CN',
+    brandingOverrides: null,
   },
   invokeIpcMock: vi.fn(),
 }));
@@ -85,6 +87,8 @@ describe('ChatMessage', () => {
     settingsState.chatProcessDisplayMode = 'all';
     settingsState.chatFontScale = 100;
     settingsState.assistantMessageStyle = 'bubble';
+    settingsState.language = 'zh-CN';
+    settingsState.brandingOverrides = null;
     agentsState.defaultModelRef = 'openai/gpt-4.1';
     agentsState.agents[0].modelRef = 'custom-custombc/gpt-5.4';
     chatState.currentSessionKey = 'agent:main:main';
@@ -128,6 +132,26 @@ describe('ChatMessage', () => {
     render(<ChatMessage message={message} showThinking={false} />);
 
     expect(screen.getByTestId('chat-message-model-label')).toHaveTextContent('JD Provider / gpt-5.4');
+  });
+
+  it('shows the product name above ordinary assistant replies when the avatar is visible', () => {
+    const message: RawMessage = {
+      id: 'assistant-brand-1',
+      role: 'assistant',
+      content: 'Online and ready to help.',
+      timestamp: 1712123456,
+    };
+
+    render(<ChatMessage message={message} showThinking={false} />);
+
+    expect(screen.getByTestId('chat-assistant-message-shell')).toHaveClass('space-y-3.5');
+    expect(screen.getByTestId('chat-assistant-brand-name')).toHaveTextContent('Deep AI Worker');
+    expect(screen.getByTestId('chat-message-content-assistant')).toHaveClass('space-y-2.5');
+    expect(screen.getByTestId('chat-assistant-brand-header')).not.toHaveClass('ml-11');
+    expect(screen.getByTestId('chat-message-content-assistant')).not.toHaveStyle({
+      marginLeft: '-44px',
+      width: 'calc(100% + 44px)',
+    });
   });
 
   it('keeps the assistant message model label stable after the input model switches', () => {
@@ -269,10 +293,42 @@ describe('ChatMessage', () => {
 
     render(<ChatMessage message={message} showThinking={false} />);
 
+    expect(screen.getByTestId('chat-assistant-attachments')).toHaveClass('self-start');
+    expect(screen.getByTestId('chat-assistant-attachments')).toHaveClass('justify-start');
     expect(screen.getByTestId('chat-file-card')).toBeInTheDocument();
     expect(screen.getByText('HEARTBEAT.md')).toBeInTheDocument();
     expect(screen.getByTestId('chat-file-ext-badge')).toHaveTextContent('MD');
     expect(screen.getByText(/Markdown/)).toBeInTheDocument();
+  });
+
+  it('aligns user file attachments to the right edge of the message column', () => {
+    const message: RawMessage = {
+      id: 'user-file-1',
+      role: 'user',
+      content: 'Please review these files.',
+      _attachedFiles: [
+        {
+          fileName: 'SKILL.md',
+          fileSize: 44984,
+          mimeType: 'text/markdown',
+          filePath: '/tmp/SKILL.md',
+          preview: null,
+        },
+        {
+          fileName: '方案skill.rar',
+          fileSize: 35840,
+          mimeType: 'application/x-rar-compressed',
+          filePath: '/tmp/skill.rar',
+          preview: null,
+        },
+      ],
+    };
+
+    render(<ChatMessage message={message} showThinking={false} />);
+
+    expect(screen.getByTestId('chat-user-attachments')).toHaveClass('self-end');
+    expect(screen.getByTestId('chat-user-attachments')).toHaveClass('justify-end');
+    expect(screen.getAllByTestId('chat-file-card')).toHaveLength(2);
   });
 
   it('adds a copy button to the image lightbox', () => {
