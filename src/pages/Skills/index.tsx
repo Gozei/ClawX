@@ -22,7 +22,7 @@ const DEFAULT_QUERY = '';
 const DEFAULT_SOURCE_CATEGORY: SkillSourceCategory = 'all';
 const DEFAULT_STATUS_FILTER: StatusFilter = 'all';
 const DEFAULT_MISSING_FILTER: MissingFilter = 'all';
-const SKILLS_TUTORIAL_URL = 'https://docs.qq.com/aio/p/scchzbdpjgz9ho4?p=UAoZoPrHjoUVZJKSBDhh62';
+const SKILLS_TUTORIAL_URL = 'https://docs.qq.com/aio/p/scchzbdpjgz9ho4?p=sGkmem2WlWWvi4rh4PDslN';
 
 type MarketplaceNotice =
   | { type: 'installing'; slug: string; name?: string }
