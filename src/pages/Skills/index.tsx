@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, SquarePen, Store, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, SquarePen, Store, X } from 'lucide-react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -22,6 +22,7 @@ const DEFAULT_QUERY = '';
 const DEFAULT_SOURCE_CATEGORY: SkillSourceCategory = 'all';
 const DEFAULT_STATUS_FILTER: StatusFilter = 'all';
 const DEFAULT_MISSING_FILTER: MissingFilter = 'all';
+const SKILLS_TUTORIAL_URL = 'https://docs.qq.com/aio/p/scchzbdpjgz9ho4?p=UAoZoPrHjoUVZJKSBDhh62';
 
 type MarketplaceNotice =
   | { type: 'installing'; slug: string; name?: string }
@@ -107,6 +108,9 @@ export function Skills() {
     fetchMarketplaceSourceCounts,
     marketInstalledSkills,
     fetchMarketInstalledSkills,
+    marketplaceSkillDetailsByKey,
+    marketplaceDetailLoadingKey,
+    fetchMarketplaceSkillDetail,
   } = useSkillsStore();
   const gatewayStatus = useGatewayStore((state) => state.status);
   const hasRequestedInitialSkillsRef = useRef(false);
@@ -118,6 +122,7 @@ export function Skills() {
   const [installQuery, setInstallQuery] = useState('');
   const [installSourceId, setInstallSourceId] = useState('');
   const [marketplaceNotice, setMarketplaceNotice] = useState<MarketplaceNotice>(null);
+  const [selectedMarketplaceSkill, setSelectedMarketplaceSkill] = useState<{ slug: string; sourceId?: string } | null>(null);
   const effectiveInstallSourceId = installSourceId || sources[0]?.id || '';
   const sourceCategory = readEnumParam(
     searchParams.get('source'),
@@ -214,6 +219,20 @@ export function Skills() {
   }, [fetchMarketInstalledSkills, installOpen]);
 
   useEffect(() => {
+    if (!installOpen) {
+      setSelectedMarketplaceSkill(null);
+    }
+  }, [installOpen]);
+
+  useEffect(() => {
+    if (!installOpen || !selectedMarketplaceSkill) return;
+    void fetchMarketplaceSkillDetail(
+      selectedMarketplaceSkill.slug,
+      selectedMarketplaceSkill.sourceId,
+    ).catch((error) => toast.error(String(error)));
+  }, [fetchMarketplaceSkillDetail, installOpen, selectedMarketplaceSkill]);
+
+  useEffect(() => {
     if (!installOpen || !effectiveInstallSourceId) return;
     const normalizedQuery = installQuery.trim();
 
@@ -289,6 +308,21 @@ export function Skills() {
     navigate(`/skills/${encodeURIComponent(resolvedSkillId)}${listSearch || '?marketplace=1'}`);
   }, [listSearch, navigate]);
 
+  const onSelectMarketplaceSkill = useCallback((slug: string, sourceId?: string) => {
+    setSelectedMarketplaceSkill({ slug, sourceId });
+  }, []);
+  const selectedMarketplaceSkillKey = selectedMarketplaceSkill
+    ? (selectedMarketplaceSkill.sourceId
+      ? `${selectedMarketplaceSkill.sourceId}:${selectedMarketplaceSkill.slug}`
+      : selectedMarketplaceSkill.slug)
+    : '';
+  const selectedMarketplaceSkillDetail = selectedMarketplaceSkillKey
+    ? marketplaceSkillDetailsByKey[selectedMarketplaceSkillKey] ?? null
+    : null;
+  const selectedMarketplaceSkillLoading = Boolean(selectedMarketplaceSkillKey)
+    && marketplaceDetailLoadingKey === selectedMarketplaceSkillKey
+    && !selectedMarketplaceSkillDetail;
+
   const onMarketplaceUninstall = useCallback(async (slug: string, sourceId?: string) => {
     const skillName = searchResults.find((skill) => skill.slug === slug && skill.sourceId === sourceId)?.name || slug;
     setMarketplaceNotice({
@@ -318,6 +352,10 @@ export function Skills() {
     });
   }, [createSkillComposerPrefill, navigate, newSession]);
 
+  const onOpenTutorial = useCallback(() => {
+    void window.electron?.openExternal?.(SKILLS_TUTORIAL_URL);
+  }, []);
+
   if (loading) {
     return <div data-testid="skills-page" className="flex flex-col -m-6 dark:bg-background min-h-[calc(100vh-2.5rem)] items-center justify-center"><LoadingSpinner size="lg" /></div>;
   }
@@ -332,6 +370,16 @@ export function Skills() {
           subtitleTestId="skills-page-subtitle"
           actions={(
             <>
+              <Button
+                data-testid="skills-tutorial-button"
+                aria-label={t('actions.tutorial')}
+                onClick={onOpenTutorial}
+                variant="outline"
+                className="h-10 rounded-lg px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6"
+              >
+                <BookOpen className="mr-2 h-3.5 w-3.5" />
+                {t('actions.tutorial')}
+              </Button>
               <Button
                 data-testid="skills-create-button"
                 data-guide-id="skills-create"
@@ -417,10 +465,15 @@ export function Skills() {
         installedSkills={marketInstalledSkills}
         installing={installing}
         marketplaceNotice={marketplaceNotice}
+        selectedMarketplaceSkill={selectedMarketplaceSkill}
+        selectedMarketplaceSkillDetail={selectedMarketplaceSkillDetail}
+        selectedMarketplaceSkillLoading={selectedMarketplaceSkillLoading}
         onLoadMore={() => void loadMoreSearchResults(installQuery.trim(), effectiveInstallSourceId)}
         onInstall={(slug, version, sourceId, force) => void onInstall(slug, version, sourceId, force)}
         onUninstall={(slug, sourceId) => void onMarketplaceUninstall(slug, sourceId)}
         onViewInstalledSkill={onViewInstalledSkill}
+        onSelectMarketplaceSkill={onSelectMarketplaceSkill}
+        onClearMarketplaceSelection={() => setSelectedMarketplaceSkill(null)}
       />
     </div>
   );
@@ -432,6 +485,7 @@ export function SkillDetailPage() {
   const location = useLocation();
   const { skillId } = useParams<{ skillId: string }>();
   const { fetchSkills, fetchSkillDetail, skillDetailsById, detailLoadingId, loading, skills } = useSkillsStore();
+  const isGatewayRunning = useGatewayStore((state) => state.status.state === 'running');
   const decodedSkillId = skillId ? decodeURIComponent(skillId) : '';
   const detail = decodedSkillId ? skillDetailsById[decodedSkillId] : undefined;
   const detailLoading = Boolean(decodedSkillId) && detailLoadingId === decodedSkillId && !detail;
@@ -440,13 +494,15 @@ export function SkillDetailPage() {
   const backToListHref = `/skills${location.search}`;
 
   useEffect(() => {
+    if (!isGatewayRunning) return;
     void fetchSkills();
-  }, [fetchSkills]);
+  }, [fetchSkills, isGatewayRunning]);
 
   useEffect(() => {
     if (!decodedSkillId) return;
+    if (!isGatewayRunning) return;
     void fetchSkillDetail(decodedSkillId, true).catch((error) => toast.error(String(error)));
-  }, [decodedSkillId, fetchSkillDetail]);
+  }, [decodedSkillId, fetchSkillDetail, isGatewayRunning]);
 
   if (loading || detailLoading) {
     return <div data-testid="skills-detail-page" className="flex flex-col -m-6 dark:bg-background min-h-[calc(100vh-2.5rem)] items-center justify-center"><LoadingSpinner size="lg" /></div>;

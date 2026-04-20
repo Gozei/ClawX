@@ -15,7 +15,8 @@ import {
 import { modalCardClasses, modalOverlayClasses } from '@/components/ui/modal';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { cn } from '@/lib/utils';
-import type { MarketplaceInstalledSkill, MarketplaceSkill, SkillSource } from '@/types/skill';
+import type { MarketplaceInstalledSkill, MarketplaceSkill, MarketplaceSkillDetail, SkillSource } from '@/types/skill';
+import { SkillMarketplaceDetailContent } from './SkillMarketplaceDetailContent';
 
 type SkillMarketplaceSheetProps = {
   open: boolean;
@@ -33,10 +34,15 @@ type SkillMarketplaceSheetProps = {
   installedSkills: MarketplaceInstalledSkill[];
   installing: Record<string, boolean>;
   marketplaceNotice: { type: 'installing' | 'installed' | 'uninstalling' | 'uninstalled'; slug: string; name?: string } | null;
+  selectedMarketplaceSkill: { slug: string; sourceId?: string } | null;
+  selectedMarketplaceSkillDetail: MarketplaceSkillDetail | null;
+  selectedMarketplaceSkillLoading: boolean;
   onLoadMore: () => void;
   onInstall: (slug: string, version?: string, sourceId?: string, force?: boolean) => void;
   onUninstall: (slug: string, sourceId?: string) => void;
   onViewInstalledSkill: (slug: string) => void;
+  onSelectMarketplaceSkill: (slug: string, sourceId?: string) => void;
+  onClearMarketplaceSelection: () => void;
 };
 
 export function SkillMarketplaceSheet({
@@ -55,10 +61,15 @@ export function SkillMarketplaceSheet({
   installedSkills,
   installing,
   marketplaceNotice,
+  selectedMarketplaceSkill,
+  selectedMarketplaceSkillDetail,
+  selectedMarketplaceSkillLoading,
   onLoadMore,
   onInstall,
   onUninstall,
   onViewInstalledSkill,
+  onSelectMarketplaceSkill,
+  onClearMarketplaceSelection,
 }: SkillMarketplaceSheetProps) {
   const { t } = useTranslation('skills');
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -209,229 +220,271 @@ export function SkillMarketplaceSheet({
             </div>
           </div>
 
-          <div className="border-b border-black/6 px-7 pb-3 dark:border-white/10">
-            <div className="grid gap-3 bg-transparent px-4 pt-4 pb-2">
-              <div className="relative min-w-0">
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                data-testid="skills-marketplace-search-input"
-                value={installQuery}
-                onChange={(event) => onInstallQueryChange(event.target.value)}
-                placeholder={t('searchMarketplace')}
-                className={cn(
-                  pageFormInputClasses,
-                  'rounded-full border-2 border-black/8 bg-transparent pl-11 shadow-none focus-visible:border-black/8 focus-visible:ring-0 dark:border-white/10 dark:bg-transparent dark:focus-visible:border-white/10'
-                )}
-              />
-              </div>
-
-              <div data-testid="skills-marketplace-source-chips" className="flex flex-wrap gap-2">
-                {sources.map((source) => (
-                  <Button
-                    key={source.id}
-                    type="button"
-                    variant="outline"
-                    onClick={() => onInstallSourceIdChange(source.id)}
-                    aria-pressed={installSourceId === source.id}
-                    data-testid={`skills-marketplace-source-chip-${source.id}`}
+          {!selectedMarketplaceSkill && (
+            <div className="border-b border-black/6 px-7 pb-3 dark:border-white/10">
+              <div className="grid gap-3 bg-transparent px-4 pt-4 pb-2">
+                <div className="relative min-w-0">
+                  <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    data-testid="skills-marketplace-search-input"
+                    value={installQuery}
+                    onChange={(event) => onInstallQueryChange(event.target.value)}
+                    placeholder={t('searchMarketplace')}
                     className={cn(
-                      pageCompactControlClasses,
-                      'rounded-full border px-4',
-                      installSourceId === source.id
-                        ? 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90'
-                        : 'border-black/10 bg-background text-foreground/78 hover:bg-black/5 dark:border-white/10 dark:bg-muted dark:text-white/78 dark:hover:bg-white/5'
+                      pageFormInputClasses,
+                      'rounded-full border-2 border-black/8 bg-transparent pl-11 shadow-none focus-visible:border-black/8 focus-visible:ring-0 dark:border-white/10 dark:bg-transparent dark:focus-visible:border-white/10'
                     )}
-                  >
-                    <span className="truncate">{source.label}</span>
-                    <span
-                      data-testid={`skills-marketplace-source-count-${source.id}`}
+                  />
+                </div>
+
+                <div data-testid="skills-marketplace-source-chips" className="flex flex-wrap gap-2">
+                  {sources.map((source) => (
+                    <Button
+                      key={source.id}
+                      type="button"
+                      variant="outline"
+                      onClick={() => onInstallSourceIdChange(source.id)}
+                      aria-pressed={installSourceId === source.id}
+                      data-testid={`skills-marketplace-source-chip-${source.id}`}
                       className={cn(
-                        'rounded-full px-2 py-0.5 text-[11px] font-semibold',
+                        pageCompactControlClasses,
+                        'rounded-full border px-4',
                         installSourceId === source.id
-                          ? 'bg-primary-foreground/18 text-primary-foreground'
-                          : 'bg-black/5 text-foreground/62 dark:bg-white/10 dark:text-white/68'
+                          ? 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90'
+                          : 'border-black/10 bg-background text-foreground/78 hover:bg-black/5 dark:border-white/10 dark:bg-muted dark:text-white/78 dark:hover:bg-white/5'
                       )}
                     >
-                      {formatSourceCount(sourceCounts[source.id])}
-                    </span>
-                  </Button>
-                ))}
+                      <span className="truncate">{source.label}</span>
+                      <span
+                        data-testid={`skills-marketplace-source-count-${source.id}`}
+                        className={cn(
+                          'rounded-full px-2 py-0.5 text-[11px] font-semibold',
+                          installSourceId === source.id
+                            ? 'bg-primary-foreground/18 text-primary-foreground'
+                            : 'bg-black/5 text-foreground/62 dark:bg-white/10 dark:text-white/68'
+                        )}
+                      >
+                        {formatSourceCount(sourceCounts[source.id])}
+                      </span>
+                    </Button>
+                  ))}
+                </div>
               </div>
-            </div>
-          </div>
-
-          {searchError && (
-            <div className="mx-7 mt-5 flex items-center gap-2 rounded-2xl border border-destructive/50 bg-destructive/10 p-4 text-sm font-medium text-destructive">
-            <AlertCircle className="h-5 w-5 shrink-0" />
-            <span>{searchError}</span>
             </div>
           )}
 
-          {searching ? (
-            <div className="flex flex-1 items-center justify-center px-7 py-10"><LoadingSpinner size="lg" /></div>
-          ) : (
-            <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-7 pb-7 pt-5">
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {searchResults.map((skill) => {
-                  const effectiveInstalledSkill = findEffectiveInstalledSkill(skill);
-                  const installedOnCurrentSource = Boolean(
-                    effectiveInstalledSkill
-                    && effectiveInstalledSkill.sourceId === skill.sourceId
-                  );
-                  const occupiedByOtherSource = Boolean(
-                    effectiveInstalledSkill
-                    && effectiveInstalledSkill.sourceId
-                    && effectiveInstalledSkill.sourceId !== skill.sourceId
-                  );
-                  const hasUpdate = installedOnCurrentSource
-                    && compareVersions(skill.version, effectiveInstalledSkill?.version) > 0;
-                  const installKey = skill.sourceId ? `${skill.sourceId}:${skill.slug}` : skill.slug;
-                  const busy = Boolean(installing[installKey]);
-                  const primaryActionLabel = busy
-                    ? t('marketplace.working')
-                    : occupiedByOtherSource
-                      ? t('marketplace.occupiedAction')
-                    : installedOnCurrentSource
-                      ? t('marketplace.uninstallAction')
-                      : t('marketplace.installAction');
-                  const updateActionLabel = busy
-                    ? t('marketplace.working')
-                    : t('marketplace.updateAction');
+          {!selectedMarketplaceSkill && searchError && (
+            <div className="mx-7 mt-5 flex items-center gap-2 rounded-2xl border border-destructive/50 bg-destructive/10 p-4 text-sm font-medium text-destructive">
+              <AlertCircle className="h-5 w-5 shrink-0" />
+              <span>{searchError}</span>
+            </div>
+          )}
 
-                  return (
-                    <article
-                      key={`${skill.sourceId || 'default'}:${skill.slug}`}
-                      data-testid={`skills-marketplace-item-${skill.sourceId || 'default'}-${skill.slug}`}
-                      className={cn(
-                        pageSectionCardClasses,
-                        pageSectionCardInteractiveClasses,
-                        'group flex min-h-[236px] flex-col justify-between p-4'
-                      )}
-                    >
-                      <div>
-                        <div className="flex min-w-0 items-start gap-4">
-                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-black/5 text-[22px] font-semibold text-foreground/78 dark:bg-white/[0.08] dark:text-white/86">
-                            {skill.icon ? (
-                              <img
-                                src={skill.icon}
-                                alt=""
-                                className="h-7 w-7 rounded-lg object-cover"
-                              />
-                            ) : (
-                              <span>{(skill.name || skill.slug).slice(0, 1).toUpperCase()}</span>
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1 pt-1">
-                            <h3 className="truncate text-[16px] font-semibold tracking-tight text-foreground">{skill.name}</h3>
-                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                              <span className="truncate font-medium text-foreground/62">
-                                @{skill.author || 'community'}
-                              </span>
-                              <span className="rounded-full bg-black/5 px-3 py-1 font-mono dark:bg-white/[0.08]">
-                                {skill.slug}
-                              </span>
+          {!selectedMarketplaceSkill && searching ? (
+            <div className="flex flex-1 items-center justify-center px-7 py-10"><LoadingSpinner size="lg" /></div>
+          ) : selectedMarketplaceSkill ? (
+            <div className="flex flex-1 min-h-0 px-7 pb-7 pt-5">
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {selectedMarketplaceSkillLoading && !selectedMarketplaceSkillDetail ? (
+                  <div className="flex min-h-[420px] items-center justify-center py-16">
+                    <LoadingSpinner size="lg" />
+                  </div>
+                ) : selectedMarketplaceSkillDetail ? (
+                  <SkillMarketplaceDetailContent
+                    detail={selectedMarketplaceSkillDetail}
+                    installedSkills={installedSkills}
+                    sourceId={selectedMarketplaceSkill.sourceId}
+                    backLabel={t('marketplace.backToMarketplace')}
+                    onBack={onClearMarketplaceSelection}
+                  />
+                ) : (
+                  <div className="flex min-h-[420px] items-center justify-center py-16 text-center text-muted-foreground">
+                    <div>
+                      <Package className="mx-auto mb-4 h-10 w-10 opacity-50" />
+                      <p>{t('marketplace.detailUnavailable', { defaultValue: 'Detail unavailable.' })}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-1 min-h-0 flex-col px-7 pb-7 pt-5">
+              <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto pr-1">
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {searchResults.map((skill) => {
+                    const effectiveInstalledSkill = findEffectiveInstalledSkill(skill);
+                    const installedOnCurrentSource = Boolean(
+                      effectiveInstalledSkill
+                      && effectiveInstalledSkill.sourceId === skill.sourceId
+                    );
+                    const occupiedByOtherSource = Boolean(
+                      effectiveInstalledSkill
+                      && effectiveInstalledSkill.sourceId
+                      && effectiveInstalledSkill.sourceId !== skill.sourceId
+                    );
+                    const hasUpdate = installedOnCurrentSource
+                      && compareVersions(skill.version, effectiveInstalledSkill?.version) > 0;
+                    const installKey = skill.sourceId ? `${skill.sourceId}:${skill.slug}` : skill.slug;
+                    const busy = Boolean(installing[installKey]);
+                    const primaryActionLabel = busy
+                      ? t('marketplace.working')
+                      : occupiedByOtherSource
+                        ? t('marketplace.occupiedAction')
+                      : installedOnCurrentSource
+                        ? t('marketplace.uninstallAction')
+                        : t('marketplace.installAction');
+                    const updateActionLabel = busy
+                      ? t('marketplace.working')
+                      : t('marketplace.updateAction');
+
+                    return (
+                      <article
+                        key={`${skill.sourceId || 'default'}:${skill.slug}`}
+                        data-testid={`skills-marketplace-item-${skill.sourceId || 'default'}-${skill.slug}`}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => onSelectMarketplaceSkill(skill.slug, skill.sourceId)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            onSelectMarketplaceSkill(skill.slug, skill.sourceId);
+                          }
+                        }}
+                        className={cn(
+                          pageSectionCardClasses,
+                          pageSectionCardInteractiveClasses,
+                          'group flex min-h-[236px] cursor-pointer flex-col justify-between p-4 outline-none'
+                        )}
+                      >
+                        <div>
+                          <div className="flex min-w-0 items-start gap-4">
+                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-black/5 text-[22px] font-semibold text-foreground/78 dark:bg-white/[0.08] dark:text-white/86">
+                              {skill.icon ? (
+                                <img
+                                  src={skill.icon}
+                                  alt=""
+                                  className="h-7 w-7 rounded-lg object-cover"
+                                />
+                              ) : (
+                                <span>{(skill.name || skill.slug).slice(0, 1).toUpperCase()}</span>
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1 pt-1">
+                              <h3 className="truncate text-[16px] font-semibold tracking-tight text-foreground">{skill.name}</h3>
+                              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                <span className="truncate font-medium text-foreground/62">
+                                  @{skill.author || 'community'}
+                                </span>
+                                <span className="rounded-full bg-black/5 px-3 py-1 font-mono dark:bg-white/[0.08]">
+                                  {skill.slug}
+                                </span>
+                              </div>
                             </div>
                           </div>
+
+                          <p className="mt-5 line-clamp-4 text-[13px] leading-6 text-foreground/72">{skill.description}</p>
                         </div>
 
-                        <p className="mt-5 line-clamp-4 text-[13px] leading-6 text-foreground/72">{skill.description}</p>
-                      </div>
-
-                      <div className="mt-6 flex items-end justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className={cn(
-                              'text-[13px] font-medium text-foreground/82',
-                              hasUpdate && 'text-[#d65a00] dark:text-[#ffb14a]'
-                            )}>
-                              {`v${installedOnCurrentSource ? (effectiveInstalledSkill?.version || skill.version || '0.0.0') : (skill.version || '0.0.0')}`}
+                        <div className="mt-6 flex items-end justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className={cn(
+                                'text-[13px] font-medium text-foreground/82',
+                                hasUpdate && 'text-[#d65a00] dark:text-[#ffb14a]'
+                              )}>
+                                {`v${installedOnCurrentSource ? (effectiveInstalledSkill?.version || skill.version || '0.0.0') : (skill.version || '0.0.0')}`}
+                              </p>
+                            </div>
+                            <p className="mt-1 truncate text-xs text-muted-foreground">
+                              {occupiedByOtherSource
+                                ? t('marketplace.occupiedDetail', {
+                                  source: effectiveInstalledSkill?.sourceLabel || effectiveInstalledSkill?.sourceId || t('marketplace.unknownSource'),
+                                })
+                                : hasUpdate
+                                ? t('marketplace.updateVersionLabel', {
+                                  current: effectiveInstalledSkill?.version || '0.0.0',
+                                  latest: skill.version || '0.0.0',
+                                })
+                                : skill.sourceLabel || sources.find((source) => source.id === skill.sourceId)?.label || t('marketplace.unknownSource')}
                             </p>
                           </div>
-                          <p className="mt-1 truncate text-xs text-muted-foreground">
-                            {occupiedByOtherSource
-                              ? t('marketplace.occupiedDetail', {
-                                source: effectiveInstalledSkill?.sourceLabel || effectiveInstalledSkill?.sourceId || t('marketplace.unknownSource'),
-                              })
-                              : hasUpdate
-                              ? t('marketplace.updateVersionLabel', {
-                                current: effectiveInstalledSkill?.version || '0.0.0',
-                                latest: skill.version || '0.0.0',
-                              })
-                              : skill.sourceLabel || sources.find((source) => source.id === skill.sourceId)?.label || t('marketplace.unknownSource')}
-                          </p>
-                        </div>
 
-                        <div className="flex flex-wrap items-center justify-end gap-2">
-                          {hasUpdate && (
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            {hasUpdate && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onInstall(skill.slug, skill.version, skill.sourceId, true);
+                                }}
+                                disabled={busy}
+                                aria-label={updateActionLabel}
+                                className="h-9 rounded-full px-4 border-black/10 bg-transparent text-foreground/80 shadow-none hover:bg-black/5 hover:text-foreground dark:border-white/10 dark:hover:bg-white/5"
+                              >
+                                {busy ? (
+                                  <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="mr-2 h-4 w-4" />
+                                )}
+                                {updateActionLabel}
+                              </Button>
+                            )}
                             <Button
                               type="button"
-                              variant="outline"
-                              onClick={() => onInstall(skill.slug, skill.version, skill.sourceId, true)}
-                              disabled={busy}
-                              aria-label={updateActionLabel}
-                              className="h-9 rounded-full px-4 border-black/10 bg-transparent text-foreground/80 shadow-none hover:bg-black/5 hover:text-foreground dark:border-white/10 dark:hover:bg-white/5"
+                              variant={installedOnCurrentSource && !hasUpdate ? 'outline' : 'default'}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (occupiedByOtherSource) {
+                                  return;
+                                }
+                                if (hasUpdate || !installedOnCurrentSource) {
+                                  onInstall(skill.slug, skill.version, skill.sourceId, hasUpdate);
+                                  return;
+                                }
+                                onUninstall(skill.slug, skill.sourceId);
+                              }}
+                              disabled={busy || occupiedByOtherSource}
+                              aria-label={primaryActionLabel}
+                              className={cn(
+                                pageCompactControlClasses,
+                                'gap-2 rounded-full px-4',
+                                occupiedByOtherSource
+                                  ? 'border border-black/8 bg-black/5 text-foreground/35 hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/35 dark:hover:bg-white/[0.05]'
+                                  : installedOnCurrentSource
+                                    ? 'border border-black/10 bg-transparent text-foreground/80 hover:bg-black/5 hover:text-foreground dark:border-white/10 dark:text-white/80 dark:hover:bg-white/5'
+                                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                              )}
                             >
                               {busy ? (
-                                <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                                <LoaderCircle className="h-4 w-4 animate-spin" />
+                              ) : installedOnCurrentSource ? (
+                                <PackageMinus className="h-4 w-4" />
                               ) : (
-                                <RefreshCw className="mr-2 h-4 w-4" />
+                                <Download className="h-4 w-4" />
                               )}
-                              {updateActionLabel}
+                              <span>{primaryActionLabel}</span>
                             </Button>
-                          )}
-                          <Button
-                            type="button"
-                            variant={installedOnCurrentSource && !hasUpdate ? 'outline' : 'default'}
-                            onClick={() => {
-                              if (occupiedByOtherSource) {
-                                return;
-                              }
-                              if (hasUpdate || !installedOnCurrentSource) {
-                                onInstall(skill.slug, skill.version, skill.sourceId, hasUpdate);
-                                return;
-                              }
-                              onUninstall(skill.slug, skill.sourceId);
-                            }}
-                            disabled={busy || occupiedByOtherSource}
-                            aria-label={primaryActionLabel}
-                            className={cn(
-                              pageCompactControlClasses,
-                              'gap-2 rounded-full px-4',
-                              occupiedByOtherSource
-                                ? 'border border-black/8 bg-black/5 text-foreground/35 hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/35 dark:hover:bg-white/[0.05]'
-                                : installedOnCurrentSource
-                                  ? 'border border-black/10 bg-transparent text-foreground/80 hover:bg-black/5 hover:text-foreground dark:border-white/10 dark:text-white/80 dark:hover:bg-white/5'
-                                  : 'bg-primary text-primary-foreground hover:bg-primary/90'
-                            )}
-                          >
-                            {busy ? (
-                              <LoaderCircle className="h-4 w-4 animate-spin" />
-                            ) : installedOnCurrentSource ? (
-                              <PackageMinus className="h-4 w-4" />
-                            ) : (
-                              <Download className="h-4 w-4" />
-                            )}
-                            <span>{primaryActionLabel}</span>
-                          </Button>
+                          </div>
                         </div>
-                      </div>
-                    </article>
-                  );
-                })}
+                      </article>
+                    );
+                  })}
+                </div>
+
+                {!searchError && searchResults.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-24 text-center text-muted-foreground">
+                    <Package className="mb-4 h-10 w-10 opacity-50" />
+                    <p>{installQuery.trim() ? t('marketplace.noResults') : t('marketplace.emptyPrompt')}</p>
+                  </div>
+                )}
+
+                {searchingMore && (
+                  <div className="flex justify-center py-6">
+                    <LoadingSpinner size="md" />
+                  </div>
+                )}
               </div>
-
-              {!searchError && searchResults.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-24 text-center text-muted-foreground">
-                  <Package className="mb-4 h-10 w-10 opacity-50" />
-                  <p>{installQuery.trim() ? t('marketplace.noResults') : t('marketplace.emptyPrompt')}</p>
-                </div>
-              )}
-
-              {searchingMore && (
-                <div className="flex justify-center py-6">
-                  <LoadingSpinner size="md" />
-                </div>
-              )}
             </div>
           )}
         </Dialog.Content>

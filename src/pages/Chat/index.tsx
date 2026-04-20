@@ -294,8 +294,9 @@ export function Chat() {
     lastConsumedLocationKeyRef.current = location.key;
     setComposerPrefill({ text: prefillText, nonce: Date.now() });
 
-    const nextRouteState = routeState ?? {};
-    const { [CHAT_COMPOSER_PREFILL_STATE_KEY]: _ignored, ...restState } = nextRouteState;
+    const restState = routeState
+      ? (({ [CHAT_COMPOSER_PREFILL_STATE_KEY]: _ignored, ...rest }) => rest)(routeState)
+      : null;
     navigate(
       {
         pathname: location.pathname,
@@ -304,7 +305,7 @@ export function Chat() {
       },
       {
         replace: true,
-        state: Object.keys(restState).length > 0 ? restState : null,
+        state: restState && Object.keys(restState).length > 0 ? restState : null,
       },
     );
   }, [location.hash, location.key, location.pathname, location.search, location.state, navigate]);
