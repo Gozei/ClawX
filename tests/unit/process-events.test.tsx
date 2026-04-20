@@ -165,6 +165,14 @@ describe('ProcessEventMessage', () => {
         }}
         showThinking
         chatProcessDisplayMode="all"
+        streamingTools={[
+          {
+            id: 'browser-live-1',
+            toolCallId: 'browser-live-1',
+            name: 'browser',
+            status: 'running',
+          },
+        ]}
         expandAll
       />,
     );
@@ -173,6 +181,93 @@ describe('ProcessEventMessage', () => {
     expect(within(row).queryByTestId('chat-process-event-preview')).not.toBeInTheDocument();
     expect(within(row).getByText(/"enabled": true/)).toBeInTheDocument();
     expect(within(row).queryByTestId('chat-process-event-toggle-icon')).not.toBeInTheDocument();
+  });
+
+  it('auto-collapses a finished live event and expands the next running event', () => {
+    const { rerender } = render(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-live-transition',
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'shell-1',
+              name: 'shell_command',
+              input: {
+                command: 'dir',
+              },
+            },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="all"
+        streamingTools={[
+          {
+            id: 'shell-1',
+            toolCallId: 'shell-1',
+            name: 'shell_command',
+            status: 'running',
+          },
+        ]}
+        expandAll
+      />,
+    );
+
+    const initialRow = screen.getByTestId('chat-process-event-row');
+    expect(within(initialRow).getByTestId('chat-process-event-summary')).toHaveTextContent('Running command');
+    expect(within(initialRow).getByTestId('chat-process-event-detail-panel')).toBeInTheDocument();
+
+    rerender(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-live-transition',
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'shell-1',
+              name: 'shell_command',
+              input: {
+                command: 'dir',
+              },
+            },
+            {
+              type: 'tool_use',
+              id: 'browser-2',
+              name: 'browser',
+              input: {
+                action: 'open',
+                url: 'https://example.com',
+              },
+            },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="all"
+        streamingTools={[
+          {
+            id: 'shell-1',
+            toolCallId: 'shell-1',
+            name: 'shell_command',
+            status: 'completed',
+          },
+          {
+            id: 'browser-2',
+            toolCallId: 'browser-2',
+            name: 'browser',
+            status: 'running',
+          },
+        ]}
+        expandAll
+      />,
+    );
+
+    const rows = screen.getAllByTestId('chat-process-event-row');
+    expect(within(rows[0]).getByTestId('chat-process-event-summary')).toHaveTextContent('Command completed');
+    expect(within(rows[0]).queryByTestId('chat-process-event-detail-panel')).not.toBeInTheDocument();
+    expect(within(rows[1]).getByTestId('chat-process-event-summary')).toHaveTextContent('Opening page');
+    expect(within(rows[1]).getByTestId('chat-process-event-detail-panel')).toBeInTheDocument();
   });
 
   it('uses the simplified Chinese status grammar for running process labels', () => {

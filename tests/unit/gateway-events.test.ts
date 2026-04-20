@@ -15,6 +15,10 @@ describe('gateway store event wiring', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    vi.useRealTimers();
+    if (typeof window !== 'undefined') {
+      window.electron.ipcRenderer.invoke = vi.fn().mockResolvedValue({ state: 'running', port: 18789 });
+    }
   });
 
   it('subscribes to host events through subscribeHostEvent on init', async () => {
@@ -39,7 +43,7 @@ describe('gateway store event wiring', () => {
     expect(useGatewayStore.getState().status.state).toBe('stopped');
   });
 
-  it('keeps pending state on completed notifications until final history is reconciled', async () => {
+  it('finalizes the running state on completed notifications and refreshes history', async () => {
     hostApiFetchMock.mockResolvedValue({ state: 'running', port: 18789 });
 
     const handlers = new Map<string, (payload: unknown) => void>();
@@ -76,10 +80,10 @@ describe('gateway store event wiring', () => {
     await Promise.resolve();
     await Promise.resolve();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(useChatStore.getState().sending).toBe(true);
-    expect(useChatStore.getState().pendingFinal).toBe(true);
+    expect(useChatStore.getState().sending).toBe(false);
+    expect(useChatStore.getState().pendingFinal).toBe(false);
+    expect(useChatStore.getState().activeRunId).toBeNull();
     expect(useChatStore.getState().error).toBeNull();
   });
 

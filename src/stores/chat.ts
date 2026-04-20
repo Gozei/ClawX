@@ -82,7 +82,7 @@ let _historyPollTimer: ReturnType<typeof setTimeout> | null = null;
 let _errorRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 let _loadSessionsInFlight: Promise<void> | null = null;
 let _lastLoadSessionsAt = 0;
-const _historyLoadInFlight = new Map<string, Promise<void>>();
+const _historyLoadInFlight = new Map<string, { promise: Promise<void>; quiet: boolean }>();
 const _lastHistoryLoadAtBySession = new Map<string, number>();
 const SESSION_LOAD_MIN_INTERVAL_MS = 1_200;
 const HISTORY_LOAD_MIN_INTERVAL_MS = 800;
@@ -2874,8 +2874,10 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     const { currentSessionKey } = get();
     const existingLoad = _historyLoadInFlight.get(currentSessionKey);
     if (existingLoad) {
-      await existingLoad;
-      return;
+      await existingLoad.promise;
+      if (quiet || !existingLoad.quiet) {
+        return;
+      }
     }
 
     const lastLoadAt = _lastHistoryLoadAtBySession.get(currentSessionKey) || 0;
@@ -3256,8 +3258,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
 
       try {
         const shouldTryLocalSessionHistory = !isCronSessionKey(currentSessionKey)
-          && !get().sending
-          && !get().sessionRunningState?.[currentSessionKey];
+          && !get().sending;
         if (shouldTryLocalSessionHistory) {
           const localHistory = await loadLocalSessionHistory(currentSessionKey, 200);
           if (localHistory.resolved) {
@@ -3298,7 +3299,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       }
     })();
 
-    _historyLoadInFlight.set(currentSessionKey, loadPromise);
+    _historyLoadInFlight.set(currentSessionKey, { promise: loadPromise, quiet });
     try {
       await loadPromise;
     } finally {
@@ -3310,7 +3311,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       }
       
       const active = _historyLoadInFlight.get(currentSessionKey);
-      if (active === loadPromise) {
+      if (active?.promise === loadPromise) {
         _historyLoadInFlight.delete(currentSessionKey);
       }
     }
@@ -4029,8 +4030,10 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
   // ── Refresh: reload history + sessions ──
 
   refresh: async () => {
-    const { loadHistory, loadSessions } = get();
-    await Promise.all([loadHistory(), loadSessions()]);
+    const { currentSessionKey, loadHistory, loadSessions } = get();
+    clearHistoryIncompleteRetry(currentSessionKey);
+    await loadSessions();
+    await loadHistory();
   },
 
   clearError: () => set({ error: null }),

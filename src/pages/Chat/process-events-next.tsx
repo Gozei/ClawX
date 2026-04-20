@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -607,8 +607,28 @@ const ProcessEventRow = memo(function ProcessEventRow({
 }) {
   const canExpand = !!item.detail;
   const [expanded, setExpanded] = useState(() => expandedByDefault && canExpand);
+  const autoExpandedRef = useRef(expandedByDefault && canExpand);
   const durationLabel = formatDuration(item.durationMs);
   const summaryLabel = formatEventStatusLabel(item, language);
+
+  useEffect(() => {
+    if (!canExpand) {
+      autoExpandedRef.current = false;
+      setExpanded(false);
+      return;
+    }
+
+    if (expandedByDefault) {
+      autoExpandedRef.current = true;
+      setExpanded(true);
+      return;
+    }
+
+    if (autoExpandedRef.current) {
+      autoExpandedRef.current = false;
+      setExpanded(false);
+    }
+  }, [canExpand, expandedByDefault]);
 
   return (
     <div data-testid="chat-process-event-row" className="group py-0.5">
@@ -718,7 +738,7 @@ export const ProcessEventMessage = memo(function ProcessEventMessage({
             key={item.key}
             item={item}
             language={language}
-            expandedByDefault={expandAll}
+            expandedByDefault={expandAll && item.status === 'running'}
           />
         )
       ))}

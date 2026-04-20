@@ -703,6 +703,108 @@ describe('chat store session resume', () => {
     expect(useChatStore.getState().sessionLabels['agent:main:session-flush']).toBe('你是什么模型');
   });
 
+  it('reruns an explicit history reload after an in-flight quiet load finishes', async () => {
+    let historyCallCount = 0;
+    let resolveQuietHistory: ((value: {
+      success: true;
+      resolved: true;
+      messages: Array<{ id: string; role: string; content: string; timestamp: number }>;
+      thinkingLevel: null;
+    }) => void) | null = null;
+
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+    hostApiFetchMock.mockReset();
+    hostApiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/sessions/history') {
+        historyCallCount += 1;
+        if (historyCallCount === 1) {
+          return new Promise((resolve) => {
+            resolveQuietHistory = resolve as typeof resolveQuietHistory;
+          });
+        }
+        if (historyCallCount === 2) {
+          return Promise.resolve({
+            success: true,
+            resolved: true,
+            messages: [
+              {
+                id: 'user-1',
+                role: 'user',
+                content: 'Who are you?',
+                timestamp: userTimestampSeconds,
+              },
+              {
+                id: 'assistant-1',
+                role: 'assistant',
+                content: 'I am ClawX.',
+                timestamp: assistantTimestampSeconds,
+              },
+            ],
+            thinkingLevel: null,
+          });
+        }
+      }
+
+      return Promise.resolve({ success: true });
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionModels: {},
+      sessionRunningState: {},
+      messages: [],
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    const quietLoad = useChatStore.getState().loadHistory(true);
+    await Promise.resolve();
+
+    const explicitLoad = useChatStore.getState().loadHistory();
+    resolveQuietHistory?.({
+      success: true,
+      resolved: true,
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: 'Who are you?',
+          timestamp: userTimestampSeconds,
+        },
+      ],
+      thinkingLevel: null,
+    });
+
+    await quietLoad;
+    await explicitLoad;
+
+    expect(historyCallCount).toBe(2);
+    expect(useChatStore.getState().messages.map((message) => message.id)).toEqual([
+      'user-1',
+      'assistant-1',
+    ]);
+  });
+
   it('prefetches sidebar labels through the host preview route instead of gateway chat.history', async () => {
     gatewayRpcMock.mockReset();
     gatewayRpcMock.mockImplementation((method: string) => {

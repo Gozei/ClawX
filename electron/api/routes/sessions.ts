@@ -552,13 +552,27 @@ function normalizeTranscriptTimestamp(value: unknown, fallback: unknown): number
   return undefined;
 }
 
+function isDirectTranscriptMessage(parsed: Record<string, unknown>): boolean {
+  if (typeof parsed.role !== 'string') {
+    return false;
+  }
+
+  return 'content' in parsed
+    || 'tool_calls' in parsed
+    || 'toolCalls' in parsed
+    || 'details' in parsed;
+}
+
 function normalizeTranscriptMessage(parsed: Record<string, unknown>): Record<string, unknown> | null {
-  const message = parsed.message;
-  if (!message || typeof message !== 'object' || Array.isArray(message)) {
+  const nestedMessage = parsed.message;
+  const message = nestedMessage && typeof nestedMessage === 'object' && !Array.isArray(nestedMessage)
+    ? nestedMessage as Record<string, unknown>
+    : (isDirectTranscriptMessage(parsed) ? parsed : null);
+  if (!message) {
     return null;
   }
 
-  const record = { ...(message as Record<string, unknown>) };
+  const record = { ...message };
   if (typeof record.id !== 'string' && typeof parsed.id === 'string') {
     record.id = parsed.id;
   }

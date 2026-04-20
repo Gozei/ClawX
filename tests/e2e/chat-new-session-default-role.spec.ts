@@ -142,6 +142,22 @@ test.describe('Chat new session default role', () => {
 
       await page.getByTestId(`sidebar-session-${RESEARCH_SESSION_KEY}`).locator('button').first().click();
       await expect(page.getByTestId('chat-toolbar-current-agent-name')).toHaveText('Research Role');
+      await expect.poll(async () => {
+        return await page.evaluate(() => {
+          const scrollContainer = document.querySelector('[data-testid="chat-scroll-container"]') as HTMLElement | null;
+          return scrollContainer?.textContent?.includes('Research seed message') ?? false;
+        });
+      }, { timeout: 30_000 }).toBe(true);
+      await expect.poll(async () => {
+        return await page.evaluate(() => {
+          const scrollContainer = document.querySelector('[data-testid="chat-scroll-container"]') as HTMLElement | null;
+          if (!scrollContainer) {
+            return null;
+          }
+
+          return window.getComputedStyle(scrollContainer).overflowX;
+        });
+      }, { timeout: 10_000 }).toBe('hidden');
 
       await page.getByTestId('sidebar-new-chat').click();
       await expect(page.getByTestId('chat-toolbar-current-agent-name')).toHaveText('Main Role');

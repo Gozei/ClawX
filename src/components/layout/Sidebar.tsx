@@ -23,6 +23,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useChatStore } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
+import { useUpdateStore } from '@/stores/update';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -112,6 +113,45 @@ function formatGatewayRestartElapsed(seconds: number, isChinese: boolean): strin
     : `${minutes}m ${remainingSeconds}s`;
 }
 
+function formatSidebarVersion(version: string | null | undefined): string {
+  const trimmed = (version || '').trim();
+  if (!trimmed) return 'v0.0.0';
+  return trimmed.startsWith('v') ? trimmed : `v${trimmed}`;
+}
+
+function formatSidebarGatewayStateLabel(
+  state: 'stopped' | 'starting' | 'running' | 'error' | 'reconnecting',
+  isChinese: boolean,
+): string {
+  if (isChinese) {
+    switch (state) {
+      case 'running':
+        return '正常';
+      case 'starting':
+        return '启动中';
+      case 'reconnecting':
+        return '重连中';
+      case 'error':
+        return '异常';
+      default:
+        return '未启动';
+    }
+  }
+
+  switch (state) {
+    case 'running':
+      return 'healthy';
+    case 'starting':
+      return 'starting';
+    case 'reconnecting':
+      return 'reconnecting';
+    case 'error':
+      return 'error';
+    default:
+      return 'stopped';
+  }
+}
+
 export function Sidebar() {
   const branding = useBranding();
   const location = useLocation();
@@ -140,14 +180,15 @@ export function Sidebar() {
 
   const gatewayStatus = useGatewayStore((s) => s.status);
   const isGatewayRunning = gatewayStatus.state === 'running';
+  const currentVersion = useUpdateStore((s) => s.currentVersion);
 
   useEffect(() => {
     let cancelled = false;
     const hasExistingMessages = useChatStore.getState().messages.length > 0;
     (async () => {
       await loadSessions();
-      if (cancelled || !isGatewayRunning) return;
-      await loadHistory(hasExistingMessages);
+      if (cancelled) return;
+      await loadHistory(hasExistingMessages || !isGatewayRunning);
     })();
     return () => {
       cancelled = true;
@@ -278,6 +319,12 @@ export function Sidebar() {
   const sessionSectionLabel = isChinese ? '会话记录' : 'Session History';
   const gatewayRestartHintLabel = isChinese ? '网关启动中' : 'Gateway starting';
   const showGatewayRestartHint = gatewayStatus.state === 'starting' || gatewayStatus.state === 'reconnecting';
+  const sidebarVersionLabel = isChinese ? '版本' : 'Version';
+  const sidebarGatewayStateLabel = formatSidebarGatewayStateLabel(gatewayStatus.state, isChinese);
+  const sidebarSystemStatusLabel = isChinese
+    ? (isGatewayRunning ? '系统运行正常' : `系统状态异常：${sidebarGatewayStateLabel}`)
+    : (isGatewayRunning ? 'System healthy' : `System degraded: ${sidebarGatewayStateLabel}`);
+  const sidebarVersionValue = formatSidebarVersion(currentVersion);
   const gatewayRestartElapsedSeconds = gatewayHintStartAtRef.current == null
     ? 0
     : Math.floor((gatewayHintNow - gatewayHintStartAtRef.current) / 1000);
@@ -708,6 +755,34 @@ export function Sidebar() {
           </div>
           {!sidebarCollapsed && <span className="flex-1 text-left overflow-hidden text-ellipsis whitespace-nowrap">{t('sidebar.settings')}</span>}
         </Button>
+
+        {!sidebarCollapsed && (
+          <div
+            data-testid="sidebar-system-summary"
+            className="mt-2 flex items-center gap-3 rounded-[16px] border border-black/8 bg-transparent px-3.5 py-2.5 dark:border-white/10"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 text-[12px] font-medium text-foreground/72">
+                <span>{sidebarVersionLabel}</span>
+                <span
+                  data-testid="sidebar-system-version"
+                  className="min-w-0 truncate font-semibold text-foreground/92"
+                >
+                  {sidebarVersionValue}
+                </span>
+              </div>
+            </div>
+            <span
+              data-testid="sidebar-system-status"
+              aria-label={sidebarSystemStatusLabel}
+              title={sidebarSystemStatusLabel}
+              className={cn(
+                'h-3 w-3 shrink-0 rounded-full ring-4',
+                isGatewayRunning ? 'bg-green-500 ring-green-500/15' : 'bg-red-500 ring-red-500/15',
+              )}
+            />
+          </div>
+        )}
 
         {settingsHubOpen && (
           <div

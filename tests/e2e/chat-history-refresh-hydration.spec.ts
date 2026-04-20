@@ -83,6 +83,18 @@ test.describe('Chat history refresh hydration', () => {
 
       await expect(page.getByText(FINAL_TEXT, { exact: true })).toBeVisible({ timeout: 60_000 });
       await expect(userMessages).toHaveCount(1);
+      await expect(page.getByTestId('chat-active-turn-bottom-spacer')).toHaveCount(0);
+
+      const [finalMessageBox, composerBox] = await Promise.all([
+        page.getByTestId('chat-assistant-message-shell').last().boundingBox(),
+        page.getByTestId('chat-composer').boundingBox(),
+      ]);
+
+      if (finalMessageBox && composerBox) {
+        const gap = composerBox.y - (finalMessageBox.y + finalMessageBox.height);
+        expect(gap).toBeGreaterThan(36);
+        expect(gap).toBeLessThan(120);
+      }
     } finally {
       await closeElectronApp(app);
     }

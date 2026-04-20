@@ -95,6 +95,8 @@ test.describe.skip('Chat process stream style', () => {
       await expect(processContent.getByText('### Browser checklist')).toHaveCount(0);
       await expect(processContent.getByText('**Check the browser** before replying.')).toHaveCount(0);
       await expect(processContent.getByText('Browser opened')).toBeVisible();
+      await expect(processContent.getByTestId('chat-process-event-detail-panel')).toHaveCount(0);
+      await processContent.getByTestId('chat-process-event-toggle').click();
       await expect(processContent.getByText(/"action": "start"/)).toBeVisible();
       await expect(processContent.getByText('Thinking')).toHaveCount(0);
     } finally {

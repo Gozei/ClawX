@@ -246,7 +246,7 @@ function shouldDeferCompletedHistoryRefresh(state: {
   pendingFinal?: boolean;
   activeTurnBuffer?: { hasAnyStreamContent?: boolean } | null;
 }): boolean {
-  return !!state.sending || !!state.pendingFinal || !!state.activeTurnBuffer?.hasAnyStreamContent;
+  return !!state.activeTurnBuffer?.hasAnyStreamContent;
 }
 
 function handleGatewayNotification(notification: { method?: string; params?: Record<string, unknown> } | undefined): void {
@@ -352,14 +352,14 @@ function handleGatewayNotification(notification: { method?: string; params?: Rec
         const shouldDeferHistoryRefresh = shouldDeferCompletedHistoryRefresh(state);
 
         if (matchesCurrentSession || matchesActiveRun) {
-          if (!shouldDeferHistoryRefresh) {
-            scheduleLoadHistory(true, 700);
-          }
+          scheduleLoadHistory(true, shouldDeferHistoryRefresh ? 700 : 0);
         }
         if ((matchesCurrentSession || matchesActiveRun) && (state.sending || matchesActiveRun)) {
           useChatStore.setState({
-            sending: state.sending || matchesActiveRun,
-            pendingFinal: true,
+            sending: false,
+            activeRunId: null,
+            sendStage: null,
+            pendingFinal: false,
             error: null,
           });
         }

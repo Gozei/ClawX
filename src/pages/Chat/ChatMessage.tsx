@@ -369,6 +369,7 @@ export const ChatMessage = memo(function ChatMessage({
 
   return (
     <div
+      data-testid={isUser ? 'chat-message-row-user' : 'chat-message-row-assistant'}
       className={cn(
         'group flex min-w-0 max-w-full gap-3',
         isUser ? 'flex-row-reverse' : 'flex-row',

@@ -120,6 +120,17 @@ function buildBrowserFileAttachmentKey(file: Pick<File, 'name' | 'size' | 'type'
   return `file:${file.name.trim().toLowerCase()}|${file.size}|${(file.type || '').trim().toLowerCase()}|${file.lastModified}`;
 }
 
+function isDeferredSessionModelPersistenceError(error: unknown): boolean {
+  const message = typeof error === 'string'
+    ? error
+    : error instanceof Error
+      ? error.message
+      : '';
+  const normalized = message.trim().toLowerCase();
+  return normalized.startsWith('session not found:')
+    || normalized.startsWith('invalid sessionkey:');
+}
+
 /**
  * Read a browser File object as base64 string (without the data URL prefix).
  */
@@ -212,6 +223,7 @@ export function ChatInput({
     () => (sessions ?? []).find((session) => session.key === activeComposerSessionKey) ?? null,
     [activeComposerSessionKey, sessions],
   );
+  const allowLocalOnlyModelPersistence = !activeComposerSession;
   const showAgentPicker = mentionableAgents.length > 0;
   const inputFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
   const providerItems = useMemo(
@@ -750,6 +762,10 @@ export function ChatInput({
     const previousLabel = modelOptions.find((option) => option.value === previousModelValue)?.label
       || selectedModelLabel
       || t('composer.selectModel');
+    const applyLocalModelSelection = () => {
+      setSessionModel(normalizedNextModelRef || null);
+      toast.success(t('composer.modelSwitchSuccess', { model: nextLabel }));
+    };
 
     if (normalizedNextModelRef === previousModelValue) {
       return;
@@ -769,12 +785,19 @@ export function ChatInput({
       );
 
       if (!result?.success) {
+        if (allowLocalOnlyModelPersistence || isDeferredSessionModelPersistenceError(result?.error)) {
+          applyLocalModelSelection();
+          return;
+        }
         throw new Error(result?.error || 'Failed to persist session model');
       }
 
-      setSessionModel(normalizedNextModelRef || null);
-      toast.success(t('composer.modelSwitchSuccess', { model: nextLabel }));
+      applyLocalModelSelection();
     } catch (error) {
+      if (allowLocalOnlyModelPersistence || isDeferredSessionModelPersistenceError(error)) {
+        applyLocalModelSelection();
+        return;
+      }
       toast.error(t('composer.modelSwitchFailed', {
         model: previousLabel,
         error: error instanceof Error ? error.message : String(error),
@@ -782,16 +805,16 @@ export function ChatInput({
     } finally {
       setModelSwitchPending(false);
     }
-  }, [activeComposerSessionKey, modelOptions, selectedModelLabel, selectedModelValue, setSessionModel, t]);
+  }, [activeComposerSessionKey, allowLocalOnlyModelPersistence, modelOptions, selectedModelLabel, selectedModelValue, setSessionModel, t]);
 
   return (
-    <div
-      data-testid="chat-composer-shell"
-      className={cn(
+      <div
+        data-testid="chat-composer-shell"
+        className={cn(
         'w-full px-4 pt-0 pb-2 transition-all duration-300'
-      )}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
+        )}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       <div className={cn('mx-auto w-full', CHAT_SURFACE_MAX_WIDTH_CLASS)}>
