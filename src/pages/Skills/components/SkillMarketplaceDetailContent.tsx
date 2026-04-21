@@ -39,11 +39,18 @@ export function SkillMarketplaceDetailContent({
   sources,
   sourceId,
 }: SkillMarketplaceDetailContentProps) {
-  const { t } = useTranslation('skills');
+  const { t, i18n } = useTranslation('skills');
   const [installing, setInstalling] = useState(false);
   const [activeTab, setActiveTab] = useState<'docs' | 'details'>('docs');
   const installSkill = useSkillsStore((state) => state.installSkill);
   const enableSkill = useSkillsStore((state) => state.enableSkill);
+  const language = i18n?.resolvedLanguage || i18n?.language || 'en';
+
+  const formatInteger = (value: number) => new Intl.NumberFormat(language).format(value);
+  const formatDateTime = (value: number) => new Intl.DateTimeFormat(language, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value));
 
   const slug = detail.skill?.slug || detail.requestedSlug || detail.resolvedSlug || '';
   const title = detail.skill?.displayName || slug || t('marketplace.unknownSkill', { defaultValue: 'Unknown skill' });
@@ -68,11 +75,11 @@ export function SkillMarketplaceDetailContent({
   const stats = useMemo(() => {
     const skillStats = detail.skill?.stats;
     return [
-      typeof skillStats?.downloads === 'number' ? { label: t('marketplace.downloads', { defaultValue: 'Downloads' }), value: skillStats.downloads.toLocaleString() } : null,
-      typeof skillStats?.stars === 'number' ? { label: t('marketplace.stars', { defaultValue: 'Stars' }), value: skillStats.stars.toLocaleString() } : null,
-      typeof skillStats?.versions === 'number' ? { label: t('marketplace.versions', { defaultValue: 'Versions' }), value: skillStats.versions.toLocaleString() } : null,
+      typeof skillStats?.downloads === 'number' ? { label: t('marketplace.downloads'), value: formatInteger(skillStats.downloads) } : null,
+      typeof skillStats?.stars === 'number' ? { label: t('marketplace.stars'), value: formatInteger(skillStats.stars) } : null,
+      typeof skillStats?.versions === 'number' ? { label: t('marketplace.versions'), value: formatInteger(skillStats.versions) } : null,
     ].filter(Boolean) as Array<{ label: string; value: string }>;
-  }, [detail.skill?.stats, t]);
+  }, [detail.skill?.stats, formatInteger, t]);
 
   const onInstall = async () => {
     if (!slug) return;
@@ -169,12 +176,12 @@ export function SkillMarketplaceDetailContent({
               <span className="font-medium text-slate-500 dark:text-white/60">{t('marketplace.identityLabel', { defaultValue: 'Identity' })}:</span>
               <span className="font-mono text-slate-500 dark:text-white/60">
                 {detail.resolvedSlug || slug}
-                {detail.forkOf ? ` · forked from ${detail.forkOf}` : ''}
+                {detail.forkOf ? ` · ${t('marketplace.forkedFrom', { source: detail.forkOf })}` : ''}
               </span>
             </span>
             {detail.canonical && (
               <span className="flex items-center gap-1.5">
-                <span className="font-medium text-slate-500 dark:text-white/60">Canonical:</span>
+                <span className="font-medium text-slate-500 dark:text-white/60">{t('marketplace.canonicalLabel')}:</span>
                 {detail.canonical}
               </span>
             )}
@@ -241,7 +248,7 @@ export function SkillMarketplaceDetailContent({
                       <div className="font-medium text-slate-900 dark:text-white">{scan?.summary || t('marketplace.staticScanSummary', { defaultValue: 'No scan summary available.' })}</div>
                       <div className="text-slate-400 dark:text-white/52">
                         {scan?.engineVersion ? `${scan.engineVersion}` : ''}
-                        {scan?.checkedAt ? ` · ${new Date(scan.checkedAt).toLocaleString()}` : ''}
+                        {scan?.checkedAt ? ` · ${formatDateTime(scan.checkedAt)}` : ''}
                       </div>
                     </div>
                   </div>
@@ -258,7 +265,7 @@ export function SkillMarketplaceDetailContent({
                       <div className="font-medium text-slate-900 dark:text-white">{t('marketplace.identityLabel', { defaultValue: 'Identity' })}</div>
                       <div className="text-slate-400 dark:text-white/52">
                         {detail.resolvedSlug || slug}
-                        {detail.forkOf ? ` · forked from ${detail.forkOf}` : ''}
+                        {detail.forkOf ? ` · ${t('marketplace.forkedFrom', { source: detail.forkOf })}` : ''}
                       </div>
                     </div>
                   </div>
@@ -280,8 +287,8 @@ export function SkillMarketplaceDetailContent({
                         <div className="min-w-0">
                           <div className="truncate font-medium text-slate-900 dark:text-white">{file.path}</div>
                           <div className="mt-1 text-slate-400 dark:text-white/50">
-                            {file.contentType || 'unknown'}
-                            {typeof file.size === 'number' ? ` · ${file.size.toLocaleString()} bytes` : ''}
+                            {file.contentType || t('marketplace.unknownContentType')}
+                            {typeof file.size === 'number' ? ` · ${t('marketplace.fileSizeBytes', { size: formatInteger(file.size) })}` : ''}
                           </div>
                         </div>
                       </div>

@@ -303,6 +303,23 @@ describe('Skills page route state', () => {
     await waitFor(() => expect(fetchSkillsMock).toHaveBeenCalledTimes(2));
   });
 
+  it('shows a gateway warning instead of the empty state when no skills are loaded yet', async () => {
+    gatewayState.status.state = 'starting';
+    skillsState.skills = [];
+
+    render(
+      <MemoryRouter initialEntries={['/skills']}>
+        <Routes>
+          <Route path="/skills" element={<Skills />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(fetchSkillsMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('skills-gateway-warning')).toHaveTextContent('gatewayWarning');
+    expect(screen.queryByTestId('skills-empty-state')).not.toBeInTheDocument();
+  });
+
   it('shows a marketplace success CTA and opens the marketplace detail page in place', async () => {
     render(
       <MemoryRouter initialEntries={['/skills']}>

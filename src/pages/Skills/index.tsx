@@ -142,6 +142,7 @@ export function Skills() {
   }, [fetchSkills]);
 
   const safeSkills = Array.isArray(skills) ? skills.filter((skill): skill is SkillSnapshot => Boolean(skill)) : [];
+  const shouldShowGatewayWarning = gatewayStatus.state !== 'running';
 
   useEffect(() => {
     const previousGatewayState = previousGatewayStateRef.current;
@@ -220,6 +221,7 @@ export function Skills() {
     statusFilter,
     missingFilter,
   });
+  const shouldShowEmptySkillList = filteredSkills.length > 0 || !shouldShowGatewayWarning || safeSkills.length > 0;
   const sourceOptions: Array<{ id: SkillSourceCategory; label: string; count: number }> = [
     { id: 'all', label: t('toolbar.sources.all'), count: sourceCounts.all },
     { id: 'builtin', label: t('toolbar.sources.builtin'), count: sourceCounts.builtin },
@@ -498,6 +500,18 @@ export function Skills() {
             )
           ) : (
             <>
+              {shouldShowGatewayWarning && (
+                <div
+                  data-testid="skills-gateway-warning"
+                  className="mb-8 flex items-center gap-3 rounded-xl border border-yellow-500/50 bg-yellow-500/10 p-4"
+                >
+                  <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
+                  <span className="text-sm font-medium text-yellow-700 dark:text-yellow-400">
+                    {t('gatewayWarning')}
+                  </span>
+                </div>
+              )}
+
               {error && (
                 <div className="mt-6 flex items-center gap-2 rounded-xl border border-destructive/50 bg-destructive/10 p-4 text-sm font-medium text-destructive">
                   <AlertCircle className="h-5 w-5 shrink-0" />
@@ -506,11 +520,13 @@ export function Skills() {
               )}
 
               <section>
-                <SkillList
-                  skills={filteredSkills}
-                  onSelect={(skillId) => navigate(`/skills/${encodeURIComponent(skillId)}${listSearch}`)}
-                  onToggle={(skill, enabled) => void onToggle(skill, enabled)}
-                />
+                {shouldShowEmptySkillList ? (
+                  <SkillList
+                    skills={filteredSkills}
+                    onSelect={(skillId) => navigate(`/skills/${encodeURIComponent(skillId)}${listSearch}`)}
+                    onToggle={(skill, enabled) => void onToggle(skill, enabled)}
+                  />
+                ) : null}
               </section>
             </>
           )}

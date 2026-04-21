@@ -22,14 +22,17 @@ type SkillDetailContentProps = {
   initialTab?: 'docs' | 'config';
 };
 
-function flattenMissingRequirements(missing?: SkillMissingStatus): string[] {
+function flattenMissingRequirements(
+  missing: SkillMissingStatus | undefined,
+  t: (key: string) => string,
+): string[] {
   if (!missing) return [];
   return [
-    ...(missing.bins ?? []).map((item) => `bin: ${item}`),
-    ...(missing.anyBins ?? []).map((item) => `any bin: ${item}`),
-    ...(missing.env ?? []).map((item) => `env: ${item}`),
-    ...(missing.config ?? []).map((item) => `config: ${item}`),
-    ...(missing.os ?? []).map((item) => `os: ${item}`),
+    ...(missing.bins ?? []).map((item) => `${t('detail.missingLabel.bin')}: ${item}`),
+    ...(missing.anyBins ?? []).map((item) => `${t('detail.missingLabel.anyBin')}: ${item}`),
+    ...(missing.env ?? []).map((item) => `${t('detail.missingLabel.env')}: ${item}`),
+    ...(missing.config ?? []).map((item) => `${t('detail.missingLabel.config')}: ${item}`),
+    ...(missing.os ?? []).map((item) => `${t('detail.missingLabel.os')}: ${item}`),
   ];
 }
 
@@ -46,7 +49,7 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
   const requirements = detail.requirements ?? {};
   const config = detail.config ?? {};
 
-  const missingItems = flattenMissingRequirements(status.missing);
+  const missingItems = flattenMissingRequirements(status.missing, t);
   const hasMissing = missingItems.length > 0;
   const isReady = Boolean(status.ready) && !hasMissing;
 
