@@ -11,28 +11,28 @@ describe('skills store error mapping', () => {
     vi.clearAllMocks();
   });
 
-  it('maps fetchSkills rate-limit error by AppError code', async () => {
+  it('passes through fetchSkills errors', async () => {
     hostApiFetchMock.mockRejectedValueOnce(new Error('rate limit exceeded'));
 
     const { useSkillsStore } = await import('@/stores/skills');
-    await useSkillsStore.getState().fetchSkills();
+    await useSkillsStore.getState().fetchSkills(true);
 
-    expect(useSkillsStore.getState().error).toBe('fetchRateLimitError');
+    expect(useSkillsStore.getState().error).toBe('rate limit exceeded');
   });
 
-  it('maps searchSkills timeout error by AppError code', async () => {
+  it('passes through searchSkills errors', async () => {
     hostApiFetchMock.mockRejectedValueOnce(new Error('request timeout'));
 
     const { useSkillsStore } = await import('@/stores/skills');
     await useSkillsStore.getState().searchSkills('git');
 
-    expect(useSkillsStore.getState().searchError).toBe('searchTimeoutError');
+    expect(useSkillsStore.getState().searchError).toBe('request timeout');
   });
 
-  it('maps installSkill timeout result into installTimeoutError', async () => {
+  it('passes through installSkill errors', async () => {
     hostApiFetchMock.mockResolvedValueOnce({ success: false, error: 'request timeout' });
 
     const { useSkillsStore } = await import('@/stores/skills');
-    await expect(useSkillsStore.getState().installSkill('demo-skill')).rejects.toThrow('installTimeoutError');
+    await expect(useSkillsStore.getState().installSkill('demo-skill')).rejects.toThrow('request timeout');
   });
 });

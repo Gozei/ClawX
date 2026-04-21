@@ -140,13 +140,13 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
       await dismissSkillsGuideIfVisible(page);
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
       await expect(page.getByTestId('skills-page-title')).toBeVisible();
-      await expect(page.getByTestId('skills-create-button')).toBeVisible();
+      await expect(page.getByTestId('skills-create-button')).toHaveCount(0);
 
       await page.getByTestId('skills-discover-button').click();
-      await expect(page.getByTestId('skills-marketplace-modal')).toBeVisible();
+      await expect(page.getByTestId('skills-marketplace-panel')).toBeVisible();
       await expect(page.getByTestId('skills-marketplace-source-chips')).toBeVisible();
-      await page.keyboard.press('Escape');
-      await expect(page.getByTestId('skills-marketplace-modal')).toHaveCount(0);
+      await page.getByLabel(/Close skill marketplace|关闭技能市场/).click();
+      await expect(page.getByTestId('skills-marketplace-panel')).toHaveCount(0);
 
       const skillsTitleBox = await page.getByTestId('skills-page-title').boundingBox();
       expect(channelsTitleBox).not.toBeNull();
@@ -275,7 +275,7 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
       await expect(page.getByTestId('skills-page')).toBeVisible();
       await dismissSkillsGuideIfVisible(page);
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
-      await expect(page.getByTestId('skills-create-button')).toBeVisible();
+      await expect(page.getByTestId('skills-create-button')).toHaveCount(0);
       await expect(page.getByTestId('skills-discover-button')).toBeVisible();
       await openSettingsHub(page);
       await page.getByTestId('settings-hub-menu-settings').click();
@@ -307,7 +307,7 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
       await expect(page.getByTestId('skills-page')).toBeVisible();
       await dismissSkillsGuideIfVisible(page);
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
-      await expect(page.getByTestId('skills-create-button')).toBeVisible();
+      await expect(page.getByTestId('skills-create-button')).toHaveCount(0);
       await expect(page.getByTestId('skills-discover-button')).toBeVisible();
       await expect(page.getByTestId('skills-search-input')).toBeVisible();
     } finally {

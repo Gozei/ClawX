@@ -1,21 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, BookOpen, SquarePen, Store, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, Search, Store, X } from 'lucide-react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { pagePrimaryInputClasses } from '@/components/layout/page-tokens';
+import { cn } from '@/lib/utils';
 import { useSkillsStore } from '@/stores/skills';
-import { useChatStore } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { toast } from 'sonner';
 import type { SkillSnapshot } from '@/types/skill';
 import { SkillList } from './components/SkillList';
 import { SkillDetailContent } from './components/SkillDetailContent';
+import { SkillMarketplaceDetailContent } from './components/SkillMarketplaceDetailContent';
 import { SkillMarketplaceSheet } from './components/SkillMarketplaceSheet';
 import { SkillsToolbar } from './components/SkillsToolbar';
 import { useSkillFilters } from './hooks/useSkillFilters';
+import { resolveInstalledSkillId } from './marketplace-state';
 import { type MissingFilter, type SkillSourceCategory, type StatusFilter } from './filters';
 
 const DEFAULT_QUERY = '';
@@ -23,13 +27,6 @@ const DEFAULT_SOURCE_CATEGORY: SkillSourceCategory = 'all';
 const DEFAULT_STATUS_FILTER: StatusFilter = 'all';
 const DEFAULT_MISSING_FILTER: MissingFilter = 'all';
 const SKILLS_TUTORIAL_URL = 'https://docs.qq.com/aio/p/scchzbdpjgz9ho4?p=sGkmem2WlWWvi4rh4PDslN';
-
-type MarketplaceNotice =
-  | { type: 'installing'; slug: string; name?: string }
-  | { type: 'installed'; slug: string; name?: string }
-  | { type: 'uninstalling'; slug: string; name?: string }
-  | { type: 'uninstalled'; slug: string; name?: string }
-  | null;
 
 function readEnumParam<T extends string>(value: string | null, allowed: readonly T[], fallback: T): T {
   if (value && allowed.includes(value as T)) {
@@ -55,36 +52,9 @@ function buildSkillsSearchParams(options: {
   return params;
 }
 
-function normalizeSkillKey(value?: string): string {
-  return value?.trim().toLowerCase() ?? '';
-}
-
-function getPathLeaf(value?: string): string {
-  if (!value) return '';
-  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
-  const parts = normalized.split('/');
-  return normalizeSkillKey(parts[parts.length - 1]);
-}
-
-function resolveInstalledSkillId(slug: string, skills: SkillSnapshot[]): string {
-  const targetKey = normalizeSkillKey(slug);
-  if (!targetKey) return slug;
-
-  const matchedSkill = skills.find((skill) => {
-    if (!skill) return false;
-    return normalizeSkillKey(skill.id) === targetKey
-      || normalizeSkillKey(skill.slug) === targetKey
-      || getPathLeaf(skill.baseDir) === targetKey
-      || getPathLeaf(skill.filePath) === targetKey;
-  });
-
-  return matchedSkill?.id || slug;
-}
-
 export function Skills() {
   const { t } = useTranslation('skills');
   const navigate = useNavigate();
-  const newSession = useChatStore((state) => state.newSession);
   const [searchParams, setSearchParams] = useSearchParams();
   const {
     skills,
@@ -121,7 +91,6 @@ export function Skills() {
   const installOpen = searchParams.get('marketplace') === '1';
   const [installQuery, setInstallQuery] = useState('');
   const [installSourceId, setInstallSourceId] = useState('');
-  const [marketplaceNotice, setMarketplaceNotice] = useState<MarketplaceNotice>(null);
   const [selectedMarketplaceSkill, setSelectedMarketplaceSkill] = useState<{ slug: string; sourceId?: string } | null>(null);
   const effectiveInstallSourceId = installSourceId || sources[0]?.id || '';
   const sourceCategory = readEnumParam(
@@ -139,8 +108,6 @@ export function Skills() {
     ['all', 'missing', 'clean'] as const,
     DEFAULT_MISSING_FILTER,
   );
-  const createSkillComposerPrefill = t('guide.createPrompt');
-
   const updateListState = useCallback((updates: Partial<{
     query: string;
     sourceCategory: SkillSourceCategory;
@@ -158,9 +125,6 @@ export function Skills() {
   }, [installOpen, missingFilter, query, setSearchParams, sourceCategory, statusFilter]);
 
   const setMarketplaceOpen = useCallback((open: boolean) => {
-    if (!open) {
-      setMarketplaceNotice(null);
-    }
     const nextParams = buildSkillsSearchParams({
       query,
       sourceCategory,
@@ -178,6 +142,7 @@ export function Skills() {
   }, [fetchSkills]);
 
   const safeSkills = Array.isArray(skills) ? skills.filter((skill): skill is SkillSnapshot => Boolean(skill)) : [];
+  const shouldShowGatewayWarning = gatewayStatus.state !== 'running';
 
   useEffect(() => {
     const previousGatewayState = previousGatewayStateRef.current;
@@ -206,12 +171,13 @@ export function Skills() {
   }, [fetchSkills, gatewayStatus.state, safeSkills.length]);
 
   useEffect(() => {
-    void fetchSources().then((loadedSources) => {
-      if (loadedSources.length > 0) {
-        void fetchMarketplaceSourceCounts();
-      }
-    });
-  }, [fetchMarketplaceSourceCounts, fetchSources]);
+    void fetchSources();
+  }, [fetchSources]);
+
+  useEffect(() => {
+    if (!installOpen || sources.length === 0) return;
+    void fetchMarketplaceSourceCounts(true);
+  }, [fetchMarketplaceSourceCounts, installOpen, sources.length]);
 
   useEffect(() => {
     if (!installOpen) return;
@@ -255,12 +221,18 @@ export function Skills() {
     statusFilter,
     missingFilter,
   });
+  const shouldShowEmptySkillList = filteredSkills.length > 0 || !shouldShowGatewayWarning || safeSkills.length > 0;
   const sourceOptions: Array<{ id: SkillSourceCategory; label: string; count: number }> = [
     { id: 'all', label: t('toolbar.sources.all'), count: sourceCounts.all },
     { id: 'builtin', label: t('toolbar.sources.builtin'), count: sourceCounts.builtin },
     { id: 'market', label: t('toolbar.sources.market'), count: sourceCounts.market },
     { id: 'other', label: t('toolbar.sources.other'), count: sourceCounts.other },
   ];
+  const marketplaceSourceOptions = useMemo(() => sources.map((source) => ({
+    id: source.id,
+    label: source.label,
+    count: marketplaceSourceCounts[source.id] ?? null,
+  })), [marketplaceSourceCounts, sources]);
   const listSearch = useMemo(() => {
     const value = buildSkillsSearchParams({
       query,
@@ -282,31 +254,18 @@ export function Skills() {
 
   const onInstall = useCallback(async (slug: string, version?: string, sourceId?: string, force = false) => {
     const skillName = searchResults.find((skill) => skill.slug === slug && skill.sourceId === sourceId)?.name;
-    setMarketplaceNotice({
-      type: 'installing',
-      slug,
-      name: skillName,
-    });
     try {
       await installSkill(slug, version, sourceId, force);
       const refreshedSkills = useSkillsStore.getState().skills ?? [];
-      const installedSkillId = resolveInstalledSkillId(slug, refreshedSkills);
+      const installedSkillId = resolveInstalledSkillId(slug, refreshedSkills, sourceId);
       await enableSkill(installedSkillId);
-      setMarketplaceNotice({
-        type: 'installed',
-        slug,
-        name: skillName,
-      });
+      toast.success(t('marketplace.installSuccessDescription', {
+        skill: skillName || slug,
+      }));
     } catch (error) {
-      setMarketplaceNotice(null);
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [enableSkill, installSkill, searchResults]);
-
-  const onViewInstalledSkill = useCallback((slug: string) => {
-    const resolvedSkillId = resolveInstalledSkillId(slug, useSkillsStore.getState().skills ?? []);
-    navigate(`/skills/${encodeURIComponent(resolvedSkillId)}${listSearch || '?marketplace=1'}`);
-  }, [listSearch, navigate]);
+  }, [enableSkill, installSkill, searchResults, t]);
 
   const onSelectMarketplaceSkill = useCallback((slug: string, sourceId?: string) => {
     setSelectedMarketplaceSkill({ slug, sourceId });
@@ -322,35 +281,19 @@ export function Skills() {
   const selectedMarketplaceSkillLoading = Boolean(selectedMarketplaceSkillKey)
     && marketplaceDetailLoadingKey === selectedMarketplaceSkillKey
     && !selectedMarketplaceSkillDetail;
+  const marketplaceDetailOpen = installOpen && Boolean(selectedMarketplaceSkill);
 
   const onMarketplaceUninstall = useCallback(async (slug: string, sourceId?: string) => {
     const skillName = searchResults.find((skill) => skill.slug === slug && skill.sourceId === sourceId)?.name || slug;
-    setMarketplaceNotice({
-      type: 'uninstalling',
-      slug,
-      name: skillName,
-    });
     try {
       await uninstallSkill(slug, sourceId);
-      setMarketplaceNotice({
-        type: 'uninstalled',
-        slug,
-        name: skillName,
-      });
+      toast.success(t('marketplace.uninstallSuccessDescription', {
+        skill: skillName,
+      }));
     } catch (error) {
-      setMarketplaceNotice(null);
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [searchResults, uninstallSkill]);
-
-  const onCreateSkill = useCallback(() => {
-    newSession();
-    navigate('/', {
-      state: {
-        composerPrefillText: createSkillComposerPrefill,
-      },
-    });
-  }, [createSkillComposerPrefill, navigate, newSession]);
+  }, [searchResults, t, uninstallSkill]);
 
   const onOpenTutorial = useCallback(() => {
     void window.electron?.openExternal?.(SKILLS_TUTORIAL_URL);
@@ -361,120 +304,234 @@ export function Skills() {
   }
 
   return (
-    <div data-testid="skills-page" className="flex flex-col -m-6 dark:bg-background h-[calc(100vh-2.5rem)] overflow-hidden">
-      <div className="w-full max-w-5xl mx-auto flex flex-col h-full p-10 pt-16">
-        <PageHeader
-          title={t('title')}
-          subtitle={t('subtitle')}
-          titleTestId="skills-page-title"
-          subtitleTestId="skills-page-subtitle"
-          actions={(
+    <div
+      data-testid="skills-page"
+      className={cn(
+        'flex flex-col -m-6 h-[calc(100vh-2.5rem)] overflow-hidden dark:bg-background',
+        marketplaceDetailOpen && 'bg-[#f5f7fb] dark:bg-background',
+      )}
+    >
+      <div
+        className={cn(
+          'w-full mx-auto flex flex-col h-full',
+          marketplaceDetailOpen
+            ? 'max-w-6xl p-6 pt-4 pb-10'
+            : installOpen
+              ? 'max-w-[1320px] p-10 pt-16'
+              : 'max-w-5xl p-10 pt-16',
+        )}
+      >
+        {!marketplaceDetailOpen && (
+          <>
+            <PageHeader
+              title={installOpen ? t('marketplace.title') : t('title')}
+              subtitle={installOpen ? t('marketplace.subtitle') : t('subtitle')}
+              titleTestId="skills-page-title"
+              subtitleTestId="skills-page-subtitle"
+              actions={(
+                <>
+                  <Button
+                    data-testid="skills-tutorial-button"
+                    aria-label={t('actions.tutorial')}
+                    onClick={onOpenTutorial}
+                    variant="outline"
+                    className="h-10 rounded-lg px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6"
+                  >
+                    <BookOpen className="mr-2 h-3.5 w-3.5" />
+                    {t('actions.tutorial')}
+                  </Button>
+                  <Button
+                    data-testid="skills-discover-button"
+                    data-guide-id="skills-marketplace"
+                    aria-label={installOpen ? t('actions.backToSkills') : t('actions.marketplace')}
+                    onClick={() => {
+                      if (installOpen) {
+                        setMarketplaceOpen(false);
+                        return;
+                      }
+                      if (!effectiveInstallSourceId && sources.length > 0) {
+                        setInstallSourceId(sources[0]?.id || '');
+                      }
+                      setMarketplaceOpen(true);
+                    }}
+                    className={cn(
+                      'h-10 rounded-lg px-4 text-[13px] font-medium shadow-none',
+                      installOpen
+                        ? 'border border-primary/15 bg-primary/10 text-primary hover:bg-primary/14 dark:border-primary/20 dark:bg-primary/12'
+                        : ''
+                    )}
+                  >
+                    <Store className="mr-2 h-3.5 w-3.5" />
+                    {installOpen ? t('actions.backToSkills') : t('actions.marketplace')}
+                  </Button>
+                </>
+              )}
+            />
+
+            <section className="shrink-0 pb-6">
+              {installOpen ? (
+                <div data-testid="skills-marketplace-toolbar" className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-center">
+                  <div className="relative min-w-0">
+                    <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      data-testid="skills-marketplace-search-input"
+                      value={installQuery}
+                      onChange={(event) => setInstallQuery(event.target.value)}
+                      className={cn(pagePrimaryInputClasses, 'border-[#d6deea] bg-white pl-10 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:border-white/12 dark:bg-transparent')}
+                      placeholder={t('searchMarketplace')}
+                    />
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="grid min-w-0 auto-cols-fr grid-flow-col items-center gap-x-0.5" data-testid="skills-marketplace-source-tabs">
+                      {marketplaceSourceOptions.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => setInstallSourceId(option.id)}
+                          className={cn(
+                            'relative min-w-0 border-0 bg-transparent px-2 pb-3 pt-1 text-[14px] font-semibold leading-none shadow-none outline-none transition-colors',
+                            effectiveInstallSourceId === option.id
+                              ? 'text-[#0f172a] dark:text-white'
+                              : 'text-[#415168] hover:text-[#243247] dark:text-white/58 dark:hover:text-white/82'
+                          )}
+                          data-testid={`skills-marketplace-source-tab-${option.id}`}
+                        >
+                          <span className="flex items-center justify-center gap-1 whitespace-nowrap">
+                            <span className="truncate">{option.label}</span>
+                            <span
+                              className={cn(
+                                'text-[11px] font-semibold leading-none',
+                                effectiveInstallSourceId === option.id ? 'text-primary/70 dark:text-primary-foreground/72' : 'text-[#607089] dark:text-white/44'
+                              )}
+                            >
+                              {typeof option.count === 'number' ? option.count.toLocaleString() : '...'}
+                            </span>
+                          </span>
+                          <span
+                            className={cn(
+                              'absolute bottom-0 left-1/2 h-[2px] -translate-x-1/2 rounded-full transition-all',
+                              effectiveInstallSourceId === option.id ? 'w-[64px] bg-primary' : 'w-0 bg-transparent'
+                            )}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <SkillsToolbar
+                  query={query}
+                  onQueryChange={(value) => updateListState({ query: value })}
+                  sourceOptions={sourceOptions}
+                  sourceCategory={sourceCategory}
+                  onSourceCategoryChange={(value) => updateListState({ sourceCategory: value })}
+                  statusFilter={statusFilter}
+                  onStatusFilterChange={(value) => updateListState({ statusFilter: value })}
+                  missingFilter={missingFilter}
+                  onMissingFilterChange={(value) => updateListState({ missingFilter: value })}
+                  activeFilterCount={activeFilterCount}
+                  onResetFilters={() => updateListState({
+                    sourceCategory: DEFAULT_SOURCE_CATEGORY,
+                    statusFilter: DEFAULT_STATUS_FILTER,
+                    missingFilter: DEFAULT_MISSING_FILTER,
+                  })}
+                />
+              )}
+            </section>
+          </>
+        )}
+
+        <div className={cn('flex-1 min-h-0 overflow-y-auto', marketplaceDetailOpen ? '' : 'pb-10 pr-2 -mr-2')}>
+          {installOpen ? (
+            marketplaceDetailOpen && selectedMarketplaceSkill ? (
+              <div data-testid="skills-marketplace-detail-page" className="flex min-h-full flex-col">
+                <div className="mb-4 flex justify-end">
+                  <Button
+                    data-testid="skills-marketplace-detail-close"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setSelectedMarketplaceSkill(null)}
+                    className="h-10 w-10 rounded-full text-slate-500 hover:bg-white hover:text-slate-700 dark:text-white/60 dark:hover:bg-white/[0.05] dark:hover:text-white"
+                    aria-label={t('detail.backToList')}
+                  >
+                    <X className="h-5 w-5" />
+                  </Button>
+                </div>
+                {selectedMarketplaceSkillLoading && !selectedMarketplaceSkillDetail ? (
+                  <div className="flex flex-1 items-center justify-center">
+                    <LoadingSpinner size="lg" />
+                  </div>
+                ) : selectedMarketplaceSkillDetail ? (
+                  <SkillMarketplaceDetailContent
+                    detail={selectedMarketplaceSkillDetail}
+                    installedSkills={marketInstalledSkills}
+                    skills={safeSkills}
+                    sources={sources}
+                    sourceId={selectedMarketplaceSkill.sourceId}
+                  />
+                ) : (
+                  <div className="flex flex-1 items-center justify-center text-center text-muted-foreground">
+                    <div>
+                      <AlertCircle className="mx-auto mb-4 h-10 w-10 opacity-50" />
+                      <p>{t('marketplace.detailUnavailable', { defaultValue: 'Detail unavailable.' })}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <SkillMarketplaceSheet
+                open={installOpen}
+                installQuery={installQuery}
+                sources={sources}
+                skills={safeSkills}
+                searchError={searchError}
+                searching={searching}
+                searchingMore={searchingMore}
+                searchResults={searchResults}
+                installedSkills={marketInstalledSkills}
+                installing={installing}
+                selectedMarketplaceSkill={selectedMarketplaceSkill}
+                onLoadMore={() => void loadMoreSearchResults(installQuery.trim(), effectiveInstallSourceId)}
+                onInstall={(slug, version, sourceId, force) => void onInstall(slug, version, sourceId, force)}
+                onUninstall={(slug, sourceId) => void onMarketplaceUninstall(slug, sourceId)}
+                onSelectMarketplaceSkill={onSelectMarketplaceSkill}
+              />
+            )
+          ) : (
             <>
-              <Button
-                data-testid="skills-tutorial-button"
-                aria-label={t('actions.tutorial')}
-                onClick={onOpenTutorial}
-                variant="outline"
-                className="h-10 rounded-lg px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6"
-              >
-                <BookOpen className="mr-2 h-3.5 w-3.5" />
-                {t('actions.tutorial')}
-              </Button>
-              <Button
-                data-testid="skills-create-button"
-                data-guide-id="skills-create"
-                aria-label={t('actions.create')}
-                onClick={onCreateSkill}
-                variant="outline"
-                className="h-10 rounded-lg px-4 text-[13px] font-medium border-[#d4dceb] bg-white text-[#223047] shadow-none hover:bg-[#f3f6fb] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/6"
-              >
-                <SquarePen className="mr-2 h-3.5 w-3.5" />
-                {t('actions.create')}
-              </Button>
-              <Button
-                data-testid="skills-discover-button"
-                data-guide-id="skills-marketplace"
-                aria-label={t('actions.marketplace')}
-                onClick={() => {
-                  if (!effectiveInstallSourceId && sources.length > 0) {
-                    setInstallSourceId(sources[0]?.id || '');
-                  }
-                  setMarketplaceOpen(true);
-                }}
-                className="h-10 rounded-lg px-4 text-[13px] font-medium shadow-none"
-              >
-                <Store className="mr-2 h-3.5 w-3.5" />
-                {t('actions.marketplace')}
-              </Button>
+              {shouldShowGatewayWarning && (
+                <div
+                  data-testid="skills-gateway-warning"
+                  className="mb-8 flex items-center gap-3 rounded-xl border border-yellow-500/50 bg-yellow-500/10 p-4"
+                >
+                  <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
+                  <span className="text-sm font-medium text-yellow-700 dark:text-yellow-400">
+                    {t('gatewayWarning')}
+                  </span>
+                </div>
+              )}
+
+              {error && (
+                <div className="mt-6 flex items-center gap-2 rounded-xl border border-destructive/50 bg-destructive/10 p-4 text-sm font-medium text-destructive">
+                  <AlertCircle className="h-5 w-5 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <section>
+                {shouldShowEmptySkillList ? (
+                  <SkillList
+                    skills={filteredSkills}
+                    onSelect={(skillId) => navigate(`/skills/${encodeURIComponent(skillId)}${listSearch}`)}
+                    onToggle={(skill, enabled) => void onToggle(skill, enabled)}
+                  />
+                ) : null}
+              </section>
             </>
           )}
-        />
-
-        <section className="shrink-0 pb-6">
-          <SkillsToolbar
-            query={query}
-            onQueryChange={(value) => updateListState({ query: value })}
-            sourceOptions={sourceOptions}
-            sourceCategory={sourceCategory}
-            onSourceCategoryChange={(value) => updateListState({ sourceCategory: value })}
-            statusFilter={statusFilter}
-            onStatusFilterChange={(value) => updateListState({ statusFilter: value })}
-            missingFilter={missingFilter}
-            onMissingFilterChange={(value) => updateListState({ missingFilter: value })}
-            activeFilterCount={activeFilterCount}
-            onResetFilters={() => updateListState({
-              sourceCategory: DEFAULT_SOURCE_CATEGORY,
-              statusFilter: DEFAULT_STATUS_FILTER,
-              missingFilter: DEFAULT_MISSING_FILTER,
-            })}
-          />
-        </section>
-
-        <div className="flex-1 overflow-y-auto pr-2 pb-10 min-h-0 -mr-2">
-
-          {error && (
-            <div className="mt-6 flex items-center gap-2 rounded-xl border border-destructive/50 bg-destructive/10 p-4 text-sm font-medium text-destructive">
-              <AlertCircle className="h-5 w-5 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          <section>
-            <SkillList
-              skills={filteredSkills}
-              onSelect={(skillId) => navigate(`/skills/${encodeURIComponent(skillId)}${listSearch}`)}
-              onToggle={(skill, enabled) => void onToggle(skill, enabled)}
-            />
-          </section>
         </div>
       </div>
-
-      <SkillMarketplaceSheet
-        open={installOpen}
-        onOpenChange={setMarketplaceOpen}
-        installQuery={installQuery}
-        onInstallQueryChange={setInstallQuery}
-        installSourceId={effectiveInstallSourceId}
-        onInstallSourceIdChange={setInstallSourceId}
-        sources={sources}
-        searchError={searchError}
-        searching={searching}
-        searchingMore={searchingMore}
-        searchResults={searchResults}
-        sourceCounts={marketplaceSourceCounts}
-        installedSkills={marketInstalledSkills}
-        installing={installing}
-        marketplaceNotice={marketplaceNotice}
-        selectedMarketplaceSkill={selectedMarketplaceSkill}
-        selectedMarketplaceSkillDetail={selectedMarketplaceSkillDetail}
-        selectedMarketplaceSkillLoading={selectedMarketplaceSkillLoading}
-        onLoadMore={() => void loadMoreSearchResults(installQuery.trim(), effectiveInstallSourceId)}
-        onInstall={(slug, version, sourceId, force) => void onInstall(slug, version, sourceId, force)}
-        onUninstall={(slug, sourceId) => void onMarketplaceUninstall(slug, sourceId)}
-        onViewInstalledSkill={onViewInstalledSkill}
-        onSelectMarketplaceSkill={onSelectMarketplaceSkill}
-        onClearMarketplaceSelection={() => setSelectedMarketplaceSkill(null)}
-      />
     </div>
   );
 }
