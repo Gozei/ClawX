@@ -50,6 +50,24 @@ const isInternalMessage = vi.fn((msg: { role?: unknown; content?: unknown }) => 
   }
   return false;
 });
+const hasStoredSessionLabel = vi.fn((sessions: Array<{ key?: string; label?: string }>, sessionKey: string) => {
+  const session = sessions.find((entry) => entry.key === sessionKey);
+  return typeof session?.label === 'string' && session.label.trim().length > 0;
+});
+const isUnusedDraftSession = vi.fn((state: {
+  currentSessionKey: string;
+  messages: unknown[];
+  sessions: Array<{ key?: string; label?: string }>;
+  sessionLabels: Record<string, string>;
+  sessionLastActivity: Record<string, number>;
+}, sessionKey: string) => {
+  return !sessionKey.endsWith(':main')
+    && state.currentSessionKey === sessionKey
+    && state.messages.length === 0
+    && !state.sessionLastActivity[sessionKey]
+    && !state.sessionLabels[sessionKey]
+    && !hasStoredSessionLabel(state.sessions, sessionKey);
+});
 const loadMissingPreviews = vi.fn(async () => false);
 const toMs = vi.fn((ts: number) => ts < 1e12 ? ts * 1000 : ts);
 
@@ -74,8 +92,10 @@ vi.mock('@/stores/chat/helpers', () => ({
   getMessageText: (...args: unknown[]) => getMessageText(...args),
   hasNonToolAssistantContent: (...args: unknown[]) => hasNonToolAssistantContent(...args),
   hasAssistantFinalTextContent: (...args: unknown[]) => hasAssistantFinalTextContent(...args),
+  hasStoredSessionLabel: (...args: Parameters<typeof hasStoredSessionLabel>) => hasStoredSessionLabel(...args),
   isEmptyAssistantResponse: (...args: unknown[]) => isEmptyAssistantResponse(...args),
   isInternalMessage: (...args: unknown[]) => isInternalMessage(...args),
+  isUnusedDraftSession: (...args: Parameters<typeof isUnusedDraftSession>) => isUnusedDraftSession(...args),
   isToolResultRole: (...args: unknown[]) => isToolResultRole(...args),
   loadMissingPreviews: (...args: unknown[]) => loadMissingPreviews(...args),
   toMs: (...args: unknown[]) => toMs(...args as Parameters<typeof toMs>),
@@ -84,6 +104,7 @@ vi.mock('@/stores/chat/helpers', () => ({
 type ChatLikeState = {
   currentSessionKey: string;
   messages: Array<{ role: string; timestamp?: number; content?: unknown; _attachedFiles?: unknown[] }>;
+  sessions: Array<{ key: string; label?: string }>;
   loading: boolean;
   error: string | null;
   sending: boolean;
@@ -103,6 +124,7 @@ function makeHarness(initial?: Partial<ChatLikeState>) {
   let state: ChatLikeState = {
     currentSessionKey: 'agent:main:main',
     messages: [],
+    sessions: [],
     loading: false,
     error: null,
     sending: false,
@@ -180,6 +202,25 @@ describe('chat history actions', () => {
 
     await actions.loadHistory();
 
+    expect(hostApiFetchMock).not.toHaveBeenCalled();
+    expect(h.read().messages).toEqual([]);
+    expect(h.read().loading).toBe(false);
+  });
+
+  it('skips loading history for a new empty draft session', async () => {
+    const { createHistoryActions } = await import('@/stores/chat/history-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:main:session-draft',
+      sessions: [],
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+    });
+    const actions = createHistoryActions(h.set as never, h.get as never);
+
+    await actions.loadHistory();
+
+    expect(invokeIpcMock).not.toHaveBeenCalled();
     expect(hostApiFetchMock).not.toHaveBeenCalled();
     expect(h.read().messages).toEqual([]);
     expect(h.read().loading).toBe(false);

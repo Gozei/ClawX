@@ -51,6 +51,15 @@ const FLUSH_SIZE_THRESHOLD = 20;
 const LOGGER_FILE_PREFIX = 'clawx';
 const LOGGER_FILE_EXTENSION = '.log';
 
+function safeConsoleWrite(method: (...args: unknown[]) => void, ...args: unknown[]): void {
+  try {
+    method(...args);
+  } catch {
+    // Ignore console stream failures (for example EPIPE when a parent process
+    // already closed stdout/stderr) so logging never becomes a crash source.
+  }
+}
+
 function logLevelFromName(level: AppLogLevel): LogLevel {
   switch (normalizeAppLogLevel(level)) {
     case 'error':
@@ -263,7 +272,7 @@ export function initLogger(): void {
       appendSessionHeaderSync(initialPath);
     }
   } catch (error) {
-    console.error('Failed to initialize logger:', error);
+    safeConsoleWrite(console.error, 'Failed to initialize logger:', error);
   }
 }
 
@@ -328,7 +337,7 @@ function writeLog(formatted: string): void {
 export function debug(message: string, ...args: unknown[]): void {
   if (currentLevel <= LogLevel.DEBUG) {
     const formatted = formatMessage('DEBUG', message, ...args);
-    console.debug(formatted);
+    safeConsoleWrite(console.debug, formatted);
     writeLog(formatted);
   }
 }
@@ -336,7 +345,7 @@ export function debug(message: string, ...args: unknown[]): void {
 export function info(message: string, ...args: unknown[]): void {
   if (currentLevel <= LogLevel.INFO) {
     const formatted = formatMessage('INFO', message, ...args);
-    console.info(formatted);
+    safeConsoleWrite(console.info, formatted);
     writeLog(formatted);
   }
 }
@@ -344,7 +353,7 @@ export function info(message: string, ...args: unknown[]): void {
 export function warn(message: string, ...args: unknown[]): void {
   if (currentLevel <= LogLevel.WARN) {
     const formatted = formatMessage('WARN', message, ...args);
-    console.warn(formatted);
+    safeConsoleWrite(console.warn, formatted);
     writeLog(formatted);
   }
 }
@@ -352,7 +361,7 @@ export function warn(message: string, ...args: unknown[]): void {
 export function error(message: string, ...args: unknown[]): void {
   if (currentLevel <= LogLevel.ERROR) {
     const formatted = formatMessage('ERROR', message, ...args);
-    console.error(formatted);
+    safeConsoleWrite(console.error, formatted);
     writeLog(formatted);
   }
 }

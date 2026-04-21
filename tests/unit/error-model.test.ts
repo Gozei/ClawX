@@ -16,6 +16,11 @@ describe('error-model', () => {
     expect(error.code).toBe('CHANNEL_UNAVAILABLE');
   });
 
+  it('normalizes pairing-required gateway failures into GATEWAY', () => {
+    expect(normalizeAppError(new Error('pairing required')).code).toBe('GATEWAY');
+    expect(normalizeAppError(new Error('gateway closed (1008): pairing required')).code).toBe('GATEWAY');
+  });
+
   it('preserves AppError and merges details', () => {
     const base = new AppError('TIMEOUT', 'request timeout', undefined, { a: 1 });
     const normalized = normalizeAppError(base, { b: 2 });

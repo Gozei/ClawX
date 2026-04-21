@@ -4,9 +4,13 @@
  * Windows: drag region with custom minimize/maximize/close controls.
  * Linux: use native window chrome (no custom title bar).
  */
-import { useState, useEffect } from 'react';
-import { Minus, Square, X, Copy } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Copy, Minus, Square, X } from 'lucide-react';
 import { invokeIpc } from '@/lib/api-client';
+
+const windowControlButtonClass = 'flex h-full w-11 items-center justify-center text-[#5c6a7f] transition-colors hover:bg-[#ebf1fb] hover:text-[#1f2937] dark:text-[#c9d4e3] dark:hover:bg-white/[0.08] dark:hover:text-white';
+const windowCloseButtonClass = 'flex h-full w-11 items-center justify-center text-[#5c6a7f] transition-colors hover:bg-[#e81123] hover:text-white dark:text-[#c9d4e3] dark:hover:bg-[#e81123] dark:hover:text-white';
+const controlIconProps = { strokeWidth: 2.25 };
 
 export function TitleBar() {
   const platform = window.electron?.platform;
@@ -52,29 +56,34 @@ function WindowsTitleBar() {
 
   return (
     <div className="drag-region flex h-10 shrink-0 items-center justify-end border-b border-black/5 bg-[#f7f9fc]/95 backdrop-blur supports-[backdrop-filter]:bg-[#f7f9fc]/80 dark:bg-background">
-
       {/* Right: Window Controls */}
       <div className="no-drag flex h-full">
         <button
           onClick={handleMinimize}
-          className="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-white hover:text-foreground"
-          title="最小化"
+          className={windowControlButtonClass}
+          data-testid="titlebar-minimize-button"
+          aria-label="\u6700\u5c0f\u5316"
+          title="\u6700\u5c0f\u5316"
         >
-          <Minus className="h-4 w-4" />
+          <Minus className="h-4 w-4" {...controlIconProps} />
         </button>
         <button
           onClick={handleMaximize}
-          className="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-white hover:text-foreground"
-          title={maximized ? '还原' : '最大化'}
+          className={windowControlButtonClass}
+          data-testid="titlebar-maximize-button"
+          aria-label={maximized ? '\u8fd8\u539f' : '\u6700\u5927\u5316'}
+          title={maximized ? '\u8fd8\u539f' : '\u6700\u5927\u5316'}
         >
-          {maximized ? <Copy className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+          {maximized ? <Copy className="h-4 w-4" {...controlIconProps} /> : <Square className="h-4 w-4" {...controlIconProps} />}
         </button>
         <button
           onClick={handleClose}
-          className="flex h-full w-11 items-center justify-center text-muted-foreground hover:bg-red-500 hover:text-white transition-colors"
-          title="关闭"
+          className={windowCloseButtonClass}
+          data-testid="titlebar-close-button"
+          aria-label="\u5173\u95ed"
+          title="\u5173\u95ed"
         >
-          <X className="h-4 w-4" />
+          <X className="h-4 w-4" {...controlIconProps} />
         </button>
       </div>
     </div>

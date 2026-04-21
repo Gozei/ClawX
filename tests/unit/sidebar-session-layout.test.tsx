@@ -3,7 +3,7 @@ import { act, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { Sidebar } from '@/components/layout/Sidebar';
 
-const { settingsState, chatState, gatewayState, agentsState } = vi.hoisted(() => ({
+const { settingsState, chatState, gatewayState, agentsState, updateState } = vi.hoisted(() => ({
   settingsState: {
     sidebarCollapsed: false,
     sidebarWidth: 240,
@@ -56,6 +56,9 @@ const { settingsState, chatState, gatewayState, agentsState } = vi.hoisted(() =>
     ],
     fetchAgents: vi.fn(),
   },
+  updateState: {
+    currentVersion: '2026.4.9',
+  },
 }));
 
 vi.mock('@/stores/settings', () => ({
@@ -87,6 +90,10 @@ vi.mock('@/stores/agents', () => ({
       getState: () => agentsState,
     },
   ),
+}));
+
+vi.mock('@/stores/update', () => ({
+  useUpdateStore: (selector: (state: typeof updateState) => unknown) => selector(updateState),
 }));
 
 vi.mock('@/lib/host-api', () => ({
@@ -125,6 +132,7 @@ describe('Sidebar session layout', () => {
     chatState.streamingTools = [];
     chatState.sessionRunningState = {};
     gatewayState.status = { state: 'stopped' };
+    updateState.currentVersion = '2026.4.9';
   });
 
   it('renders fixed-width role badges and flexed title columns for session rows', () => {
@@ -169,6 +177,35 @@ describe('Sidebar session layout', () => {
     expect(secondaryRunningIndicator).toHaveClass('opacity-100', 'group-hover:opacity-0');
     expect(activeMenuTrigger).toHaveClass('opacity-0', 'group-hover:opacity-100');
     expect(backgroundMenuTrigger).toHaveClass('opacity-0', 'group-hover:opacity-100');
+  });
+
+  it('shows the version and a green status dot below settings when the system is healthy', () => {
+    gatewayState.status = { state: 'running', port: 18789 };
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId('sidebar-system-summary')).toHaveTextContent('Version');
+    expect(screen.getByTestId('sidebar-system-summary')).toHaveClass('bg-transparent');
+    expect(screen.getByTestId('sidebar-system-version')).toHaveTextContent('v2026.4.9');
+    expect(screen.getByTestId('sidebar-system-status')).toHaveClass('bg-green-500', 'ring-green-500/15');
+  });
+
+  it('shows a red status dot below settings when the system is degraded', () => {
+    gatewayState.status = { state: 'stopped', port: 18789 };
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId('sidebar-system-summary')).toHaveClass('bg-transparent');
+    expect(screen.getByTestId('sidebar-system-status')).toHaveClass('bg-red-500', 'ring-red-500/15');
+    expect(screen.getByTestId('sidebar-system-status')).toHaveAttribute('aria-label', 'System degraded: stopped');
   });
 
   it('shows a gateway restart hint above new chat with a ticking elapsed timer while the gateway is starting', () => {

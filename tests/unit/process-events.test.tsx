@@ -134,15 +134,15 @@ describe('ProcessEventMessage', () => {
     expect(within(row).getByTestId('chat-process-event-summary')).toHaveTextContent('Browser opened');
     expect(within(row).getByTestId('chat-process-event-preview')).toBeInTheDocument();
     expect(within(row).getByTestId('chat-process-event-preview')).toHaveClass('flex-1');
-    expect(within(row).getByTestId('chat-process-event-preview')).toHaveClass('text-foreground/50');
     expect(within(row).getByTestId('chat-process-event-toggle-icon')).toHaveClass('opacity-0');
 
     fireEvent.click(within(row).getByTestId('chat-process-event-toggle'));
 
     expect(within(row).queryByTestId('chat-process-event-preview')).not.toBeInTheDocument();
+    expect(within(row).queryByTestId('chat-process-surface-card')).not.toBeInTheDocument();
     expect(within(row).getByText(/"enabled": true/)).toBeInTheDocument();
     expect(within(row).getByTestId('chat-process-event-toggle-icon')).toHaveClass('opacity-100');
-    expect(within(row).getByText(/"enabled": true/).closest('pre')).toHaveClass('max-h-[24rem]');
+    expect(within(row).getByText(/"action": "start"/).closest('pre')).toHaveClass('max-h-[24rem]');
   });
 
   it('keeps live events expanded when requested', () => {
@@ -165,14 +165,150 @@ describe('ProcessEventMessage', () => {
         }}
         showThinking
         chatProcessDisplayMode="all"
+        streamingTools={[
+          {
+            id: 'browser-live-1',
+            toolCallId: 'browser-live-1',
+            name: 'browser',
+            status: 'running',
+          },
+        ]}
         expandAll
       />,
     );
 
     const row = screen.getByTestId('chat-process-event-row');
     expect(within(row).queryByTestId('chat-process-event-preview')).not.toBeInTheDocument();
+    expect(within(row).getByTestId('chat-process-surface-card')).toBeInTheDocument();
     expect(within(row).getByText(/"enabled": true/)).toBeInTheDocument();
     expect(within(row).queryByTestId('chat-process-event-toggle-icon')).not.toBeInTheDocument();
+  });
+
+  it('renders running shell steps in a simple detail block', () => {
+    render(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-shell-style',
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'shell-style-1',
+              name: 'shell_command',
+              input: {
+                command: 'pnpm exec vitest run tests/unit/process-events.test.tsx',
+                workdir: 'D:/AI/Deep AI Worker/ClawX',
+              },
+            },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="all"
+        streamingTools={[
+          {
+            id: 'shell-style-1',
+            toolCallId: 'shell-style-1',
+            name: 'shell_command',
+            status: 'running',
+          },
+        ]}
+        expandAll
+      />,
+    );
+
+    const row = screen.getByTestId('chat-process-event-row');
+    expect(within(row).getByTestId('chat-process-event-summary')).toHaveTextContent('Running command');
+    expect(within(row).getByTestId('chat-process-surface-card')).toBeInTheDocument();
+    expect(within(row).getByTestId('chat-process-surface-card')).toHaveTextContent('"command": "pnpm exec vitest run tests/unit/process-events.test.tsx"');
+    expect(within(row).getByTestId('chat-process-surface-card')).toHaveTextContent('"workdir": "D:/AI/Deep AI Worker/ClawX"');
+  });
+
+  it('auto-collapses a finished live event and expands the next running event', () => {
+    const { rerender } = render(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-live-transition',
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'shell-1',
+              name: 'shell_command',
+              input: {
+                command: 'dir',
+              },
+            },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="all"
+        streamingTools={[
+          {
+            id: 'shell-1',
+            toolCallId: 'shell-1',
+            name: 'shell_command',
+            status: 'running',
+          },
+        ]}
+        expandAll
+      />,
+    );
+
+    const initialRow = screen.getByTestId('chat-process-event-row');
+    expect(within(initialRow).getByTestId('chat-process-event-summary')).toHaveTextContent('Running command');
+    expect(within(initialRow).getByTestId('chat-process-event-detail-panel')).toBeInTheDocument();
+    expect(within(initialRow).getByTestId('chat-process-surface-card')).toHaveTextContent('"command": "dir"');
+
+    rerender(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-live-transition',
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'shell-1',
+              name: 'shell_command',
+              input: {
+                command: 'dir',
+              },
+            },
+            {
+              type: 'tool_use',
+              id: 'browser-2',
+              name: 'browser',
+              input: {
+                action: 'open',
+                url: 'https://example.com',
+              },
+            },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="all"
+        streamingTools={[
+          {
+            id: 'shell-1',
+            toolCallId: 'shell-1',
+            name: 'shell_command',
+            status: 'completed',
+          },
+          {
+            id: 'browser-2',
+            toolCallId: 'browser-2',
+            name: 'browser',
+            status: 'running',
+          },
+        ]}
+        expandAll
+      />,
+    );
+
+    const rows = screen.getAllByTestId('chat-process-event-row');
+    expect(within(rows[0]).getByTestId('chat-process-event-summary')).toHaveTextContent('Command completed');
+    expect(within(rows[0]).queryByTestId('chat-process-event-detail-panel')).not.toBeInTheDocument();
+    expect(within(rows[1]).getByTestId('chat-process-event-summary')).toHaveTextContent('Opening page');
+    expect(within(rows[1]).getByTestId('chat-process-event-detail-panel')).toBeInTheDocument();
   });
 
   it('uses the simplified Chinese status grammar for running process labels', () => {
@@ -234,6 +370,114 @@ describe('ProcessEventMessage', () => {
     );
 
     expect(screen.getByTestId('chat-process-event-summary')).toHaveTextContent('Action completed');
+  });
+
+  it('shows a retrying label after a failed browser action starts retrying', () => {
+    render(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-retry-browser',
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'browser-retry-1',
+              name: 'browser',
+              input: {
+                action: 'start',
+                enabled: true,
+              },
+            },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="all"
+        streamingTools={[
+          {
+            id: 'browser-retry-1',
+            toolCallId: 'browser-retry-1',
+            name: 'browser',
+            status: 'retrying',
+            failureMessage: 'Browser launch timeout',
+            retries: 1,
+            updatedAt: Date.now(),
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('chat-process-event-summary')).toHaveTextContent('Failed to open browser, retrying (attempt 1)');
+    expect(screen.getByTestId('chat-process-event-preview')).toHaveTextContent('Browser launch timeout');
+  });
+
+  it('shows a calmer final failure label when a browser action stops retrying', () => {
+    render(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-browser-error',
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'browser-error-1',
+              name: 'browser',
+              input: {
+                action: 'start',
+                enabled: true,
+              },
+            },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="all"
+        streamingTools={[
+          {
+            id: 'browser-error-1',
+            toolCallId: 'browser-error-1',
+            name: 'browser',
+            status: 'error',
+            failureMessage: 'Browser executable not found',
+            retries: 2,
+            updatedAt: Date.now(),
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('chat-process-event-summary')).toHaveTextContent('Failed to open browser after 2 retries, please try again later');
+    expect(screen.getByTestId('chat-process-event-preview')).toHaveTextContent('Browser executable not found');
+  });
+
+  it('shows a fallback preview when a running step has no extra output yet', () => {
+    render(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-running-preview',
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'read-preview-1',
+              name: 'read_file',
+              input: {},
+            },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="all"
+        streamingTools={[
+          {
+            id: 'read-preview-1',
+            toolCallId: 'read-preview-1',
+            name: 'read_file',
+            status: 'running',
+            updatedAt: Date.now(),
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('chat-process-event-preview')).toHaveTextContent('Working on it, no new output yet');
   });
 
   it('summarizes multiple running read/search actions with concrete counts', () => {

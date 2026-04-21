@@ -598,6 +598,58 @@ describe('ChatInput agent targeting', () => {
     });
   });
 
+  it('keeps model switching locally responsive for a new draft session before it exists on disk', async () => {
+    providerState.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI',
+        authMode: 'api_key',
+        model: 'gpt-5.4',
+        metadata: { customModels: ['gpt-5.4-mini'] },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [
+      { id: 'openai', hasKey: true, model: 'gpt-5.4' },
+    ];
+    providerState.vendors = [
+      { id: 'openai', name: 'OpenAI' },
+    ];
+    providerState.defaultAccountId = 'openai';
+    chatState.currentSessionKey = 'agent:main:session-123';
+    chatState.sessions = [];
+    chatState.sessionModels = {
+      'agent:main:session-123': 'openai/gpt-5.4',
+    };
+
+    render(<ChatInput onSend={vi.fn()} onQueueOfflineMessage={vi.fn()} disabled />);
+
+    hostApiFetchMock.mockResolvedValueOnce({
+      success: false,
+      error: 'ENOENT: no such file or directory, open sessions.json',
+    });
+    fireEvent.click(getModelSwitch());
+    fireEvent.click(screen.getByRole('button', { name: 'OpenAI / gpt-5.4-mini' }));
+
+    await waitFor(() => {
+      expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/model', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionKey: 'agent:main:session-123',
+          modelRef: 'openai/gpt-5.4-mini',
+        }),
+      });
+      expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('OpenAI / gpt-5.4-mini');
+      expect(chatState.sessionModels['agent:main:session-123']).toBe('openai/gpt-5.4-mini');
+      expect(toastSuccessMock).toHaveBeenCalledWith('Switched to OpenAI / gpt-5.4-mini');
+      expect(toastErrorMock).not.toHaveBeenCalled();
+    });
+  });
+
   it('shows model options in provider order and persists the current session model selection', async () => {
     agentsState.agents = [
       {
@@ -805,7 +857,7 @@ describe('ChatInput agent targeting', () => {
     chatState.sessionModels = {
       'agent:main:main': 'openai/gpt-5.4',
     };
-    hostApiFetchMock.mockResolvedValueOnce({ success: false, error: 'Session not found: agent:main:main' });
+    hostApiFetchMock.mockResolvedValueOnce({ success: false, error: 'Failed to persist session model' });
 
     render(<ChatInput onSend={vi.fn()} />);
 
@@ -814,7 +866,7 @@ describe('ChatInput agent targeting', () => {
 
     await waitFor(() => {
       expect(toastErrorMock).toHaveBeenCalledWith(
-        'Failed to switch model. Still using OpenAI / gpt-5.4: Session not found: agent:main:main',
+        'Failed to switch model. Still using OpenAI / gpt-5.4: Failed to persist session model',
       );
     });
     expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('OpenAI / gpt-5.4');

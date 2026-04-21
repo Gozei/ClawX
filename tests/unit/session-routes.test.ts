@@ -592,6 +592,72 @@ describe('handleSessionRoutes', () => {
     });
   });
 
+  it('returns recent transcript messages when the transcript stores direct message rows', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      JSON.stringify({
+        'agent:main:raw-session-history': {
+          sessionId: 'raw-session-history',
+          file: 'raw-session-history.jsonl',
+        },
+      }, null, 2),
+      'utf8',
+    );
+    await writeFile(
+      join(sessionsDir, 'raw-session-history.jsonl'),
+      [
+        JSON.stringify({
+          id: 'user-1',
+          role: 'user',
+          content: 'Who are you?',
+          timestamp: 1_712_000_000,
+        }),
+        JSON.stringify({
+          id: 'assistant-1',
+          role: 'assistant',
+          content: 'I am ClawX.',
+          timestamp: 1_712_000_001,
+        }),
+      ].join('\n'),
+      'utf8',
+    );
+    parseJsonBodyMock.mockResolvedValueOnce({
+      sessionKey: 'agent:main:raw-session-history',
+      limit: 10,
+    });
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    const handled = await handleSessionRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/history'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
+      success: true,
+      resolved: true,
+      thinkingLevel: null,
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: 'Who are you?',
+          timestamp: 1_712_000_000,
+        },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: 'I am ClawX.',
+          timestamp: 1_712_000_001,
+        },
+      ],
+    });
+  });
+
   it('returns persisted session metadata for requested session keys', async () => {
     const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
     await mkdir(sessionsDir, { recursive: true });

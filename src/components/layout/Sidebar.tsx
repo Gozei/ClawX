@@ -3,8 +3,9 @@
  * Navigation sidebar with menu items.
  * No longer fixed - sits inside the flex layout below the title bar.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import {
   LayoutDashboard,
   Bot,
@@ -23,6 +24,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useChatStore } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
+import { useUpdateStore } from '@/stores/update';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -119,6 +121,45 @@ function formatGatewayRestartElapsed(seconds: number, isChinese: boolean): strin
     : `${minutes}m ${remainingSeconds}s`;
 }
 
+function formatSidebarVersion(version: string | null | undefined): string {
+  const trimmed = (version || '').trim();
+  if (!trimmed) return 'v0.0.0';
+  return trimmed.startsWith('v') ? trimmed : `v${trimmed}`;
+}
+
+function formatSidebarGatewayStateLabel(
+  state: 'stopped' | 'starting' | 'running' | 'error' | 'reconnecting',
+  isChinese: boolean,
+): string {
+  if (isChinese) {
+    switch (state) {
+      case 'running':
+        return '正常';
+      case 'starting':
+        return '启动中';
+      case 'reconnecting':
+        return '重连中';
+      case 'error':
+        return '异常';
+      default:
+        return '未启动';
+    }
+  }
+
+  switch (state) {
+    case 'running':
+      return 'healthy';
+    case 'starting':
+      return 'starting';
+    case 'reconnecting':
+      return 'reconnecting';
+    case 'error':
+      return 'error';
+    default:
+      return 'stopped';
+  }
+}
+
 export function Sidebar() {
   const branding = useBranding();
   const location = useLocation();
@@ -147,14 +188,15 @@ export function Sidebar() {
 
   const gatewayStatus = useGatewayStore((s) => s.status);
   const isGatewayRunning = gatewayStatus.state === 'running';
+  const currentVersion = useUpdateStore((s) => s.currentVersion);
 
   useEffect(() => {
     let cancelled = false;
     const hasExistingMessages = useChatStore.getState().messages.length > 0;
     (async () => {
       await loadSessions();
-      if (cancelled || !isGatewayRunning) return;
-      await loadHistory(hasExistingMessages);
+      if (cancelled) return;
+      await loadHistory(hasExistingMessages || !isGatewayRunning);
     })();
     return () => {
       cancelled = true;
@@ -186,11 +228,13 @@ export function Sidebar() {
   const [settingsHubOpen, setSettingsHubOpen] = useState(false);
   const [gatewayHintNow, setGatewayHintNow] = useState(() => Date.now());
   const renameInputRef = useRef<HTMLInputElement | null>(null);
-  const sessionMenuRef = useRef<HTMLDivElement | null>(null);
+  const sessionMenuPanelRef = useRef<HTMLDivElement | null>(null);
+  const sessionMenuAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const isSubmittingRenameRef = useRef(false);
   const resizeStartXRef = useRef<number | null>(null);
   const resizeStartWidthRef = useRef(sidebarWidth);
   const gatewayHintStartAtRef = useRef<number | null>(null);
+  const [sessionMenuPosition, setSessionMenuPosition] = useState<{ right: number; top: number; transform: string } | null>(null);
 
   useEffect(() => {
     void fetchAgents();
@@ -202,11 +246,39 @@ export function Sidebar() {
     renameInputRef.current.select();
   }, [editingSessionKey]);
 
-  useEffect(() => {
+  const resolveSessionMenuPosition = useCallback((sessionKey: string) => {
+    const anchor = sessionMenuAnchorRefs.current[sessionKey];
+    if (!anchor) {
+      return null;
+    }
+
+    const rect = anchor.getBoundingClientRect();
+    const viewportPadding = 12;
+    const estimatedMenuHeight = 112;
+    const right = Math.max(window.innerWidth - rect.right, viewportPadding);
+    const canOpenBelow = rect.bottom + 6 + estimatedMenuHeight <= window.innerHeight - viewportPadding;
+
+    return canOpenBelow
+      ? { right, top: rect.bottom + 6, transform: 'translateY(0)' }
+      : { right, top: rect.top - 6, transform: 'translateY(-100%)' };
+  }, []);
+
+  const updateSessionMenuPosition = useCallback(() => {
+    if (!openSessionMenuKey) {
+      setSessionMenuPosition(null);
+      return;
+    }
+
+    setSessionMenuPosition(resolveSessionMenuPosition(openSessionMenuKey));
+  }, [openSessionMenuKey, resolveSessionMenuPosition]);
+
+  useLayoutEffect(() => {
     if (!openSessionMenuKey) return;
 
     const handlePointerDown = (event: MouseEvent) => {
-      if (sessionMenuRef.current && !sessionMenuRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const anchor = sessionMenuAnchorRefs.current[openSessionMenuKey];
+      if (!sessionMenuPanelRef.current?.contains(target) && !anchor?.contains(target)) {
         setOpenSessionMenuKey(null);
       }
     };
@@ -216,14 +288,20 @@ export function Sidebar() {
         setOpenSessionMenuKey(null);
       }
     };
+    const handleViewportChange = () => updateSessionMenuPosition();
 
+    updateSessionMenuPosition();
     document.addEventListener('mousedown', handlePointerDown);
     document.addEventListener('keydown', handleEscape);
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('scroll', handleViewportChange, true);
     return () => {
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleEscape);
+      window.removeEventListener('resize', handleViewportChange);
+      window.removeEventListener('scroll', handleViewportChange, true);
     };
-  }, [openSessionMenuKey]);
+  }, [openSessionMenuKey, updateSessionMenuPosition]);
 
   useEffect(() => {
     if (!settingsHubOpen) return;
@@ -286,6 +364,12 @@ export function Sidebar() {
   const sessionSectionLabel = isChinese ? '会话记录' : 'Session History';
   const gatewayRestartHintLabel = isChinese ? '网关启动中' : 'Gateway starting';
   const showGatewayRestartHint = gatewayStatus.state === 'starting' || gatewayStatus.state === 'reconnecting';
+  const sidebarVersionLabel = isChinese ? '版本' : 'Version';
+  const sidebarGatewayStateLabel = formatSidebarGatewayStateLabel(gatewayStatus.state, isChinese);
+  const sidebarSystemStatusLabel = isChinese
+    ? (isGatewayRunning ? '系统运行正常' : `系统状态异常：${sidebarGatewayStateLabel}`)
+    : (isGatewayRunning ? 'System healthy' : `System degraded: ${sidebarGatewayStateLabel}`);
+  const sidebarVersionValue = formatSidebarVersion(currentVersion);
   const gatewayRestartElapsedSeconds = gatewayHintStartAtRef.current == null
     ? 0
     : Math.floor((gatewayHintNow - gatewayHintStartAtRef.current) / 1000);
@@ -453,7 +537,9 @@ export function Sidebar() {
         )}
         {!isEditing && (
           <div
-            ref={isMenuOpen ? sessionMenuRef : null}
+            ref={(node) => {
+              sessionMenuAnchorRefs.current[s.key] = node;
+            }}
             className="absolute right-1 flex items-center"
             data-testid={`sidebar-session-menu-root-${s.key}`}
           >
@@ -486,7 +572,15 @@ export function Sidebar() {
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                setOpenSessionMenuKey((currentKey) => currentKey === s.key ? null : s.key);
+                setOpenSessionMenuKey((currentKey) => {
+                  if (currentKey === s.key) {
+                    setSessionMenuPosition(null);
+                    return null;
+                  }
+
+                  setSessionMenuPosition(resolveSessionMenuPosition(s.key));
+                  return s.key;
+                });
               }}
               className={cn(
                 'flex h-7 w-7 items-center justify-center rounded-md transition-all',
@@ -498,52 +592,6 @@ export function Sidebar() {
               <MoreHorizontal className="h-4 w-4" />
             </button>
 
-            {isMenuOpen && (
-              <div className="absolute right-0 top-8 z-20 min-w-[120px] overflow-hidden rounded-lg border border-black/8 bg-white py-1 shadow-[0_12px_28px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-[#12161f]">
-                <button
-                  type="button"
-                  data-testid={`sidebar-session-menu-rename-${s.key}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setOpenSessionMenuKey(null);
-                    startRenamingSession(s.key, sessionLabel);
-                  }}
-                  className="flex w-full items-center px-3 py-2 text-left text-[13px] text-foreground/85 transition-colors hover:bg-[#eef3fb] dark:hover:bg-white/5"
-                >
-                  {sessionMenuLabels.rename}
-                </button>
-                <button
-                  type="button"
-                  data-testid={`sidebar-session-menu-pin-${s.key}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setOpenSessionMenuKey(null);
-                    void toggleSessionPin(s.key);
-                  }}
-                  className="flex w-full items-center px-3 py-2 text-left text-[13px] text-foreground/85 transition-colors hover:bg-[#eef3fb] dark:hover:bg-white/5"
-                >
-                  {s.pinned ? sessionMenuLabels.unpin : sessionMenuLabels.pin}
-                </button>
-                <button
-                  type="button"
-                  data-testid={`sidebar-session-menu-delete-${s.key}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setOpenSessionMenuKey(null);
-                    setSessionToDelete({
-                      key: s.key,
-                      label: sessionLabel,
-                    });
-                  }}
-                  className="flex w-full items-center px-3 py-2 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
-                >
-                  {t('common:actions.delete')}
-                </button>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -563,6 +611,12 @@ export function Sidebar() {
     .sort((a, b) => (sessionLastActivity[b.key] ?? 0) - (sessionLastActivity[a.key] ?? 0));
 
   const renderedSidebarWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : sidebarWidth;
+  const activeSessionMenuSession = openSessionMenuKey
+    ? sessions.find((session) => session.key === openSessionMenuKey) ?? null
+    : null;
+  const activeSessionMenuLabel = activeSessionMenuSession
+    ? getSessionLabel(activeSessionMenuSession.key, activeSessionMenuSession.displayName, activeSessionMenuSession.label)
+    : '';
 
   const navItems = [
     { to: '/dashboard', icon: <LayoutDashboard className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.dashboard'), testId: 'sidebar-nav-dashboard' },
@@ -699,6 +753,63 @@ export function Sidebar() {
         </div>
       )}
 
+      {openSessionMenuKey && activeSessionMenuSession && sessionMenuPosition && createPortal(
+        <div
+          ref={sessionMenuPanelRef}
+          data-testid={`sidebar-session-menu-panel-${openSessionMenuKey}`}
+          className="fixed z-[180] min-w-[120px] overflow-hidden rounded-lg border border-black/8 bg-white py-1 shadow-[0_12px_28px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-[#12161f]"
+          style={{
+            right: `${sessionMenuPosition.right}px`,
+            top: `${sessionMenuPosition.top}px`,
+            transform: sessionMenuPosition.transform,
+          }}
+        >
+          <button
+            type="button"
+            data-testid={`sidebar-session-menu-rename-${openSessionMenuKey}`}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setOpenSessionMenuKey(null);
+              startRenamingSession(openSessionMenuKey, activeSessionMenuLabel);
+            }}
+            className="flex w-full items-center px-3 py-2 text-left text-[13px] text-foreground/85 transition-colors hover:bg-[#eef3fb] dark:hover:bg-white/5"
+          >
+            {sessionMenuLabels.rename}
+          </button>
+          <button
+            type="button"
+            data-testid={`sidebar-session-menu-pin-${openSessionMenuKey}`}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setOpenSessionMenuKey(null);
+              void toggleSessionPin(openSessionMenuKey);
+            }}
+            className="flex w-full items-center px-3 py-2 text-left text-[13px] text-foreground/85 transition-colors hover:bg-[#eef3fb] dark:hover:bg-white/5"
+          >
+            {activeSessionMenuSession.pinned ? sessionMenuLabels.unpin : sessionMenuLabels.pin}
+          </button>
+          <button
+            type="button"
+            data-testid={`sidebar-session-menu-delete-${openSessionMenuKey}`}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setOpenSessionMenuKey(null);
+              setSessionToDelete({
+                key: openSessionMenuKey,
+                label: activeSessionMenuLabel,
+              });
+            }}
+            className="flex w-full items-center px-3 py-2 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
+          >
+            {t('common:actions.delete')}
+          </button>
+        </div>,
+        document.body,
+      )}
+
       {/* Footer */}
       <div className="relative mt-auto border-t border-black/5 p-2.5">
         <Button
@@ -716,6 +827,34 @@ export function Sidebar() {
           </div>
           {!sidebarCollapsed && <span className="flex-1 text-left overflow-hidden text-ellipsis whitespace-nowrap">{t('sidebar.settings')}</span>}
         </Button>
+
+        {!sidebarCollapsed && (
+          <div
+            data-testid="sidebar-system-summary"
+            className="mt-2 flex items-center gap-3 rounded-[16px] border border-black/8 bg-transparent px-3.5 py-2.5 dark:border-white/10"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 text-[12px] font-medium text-foreground/72">
+                <span>{sidebarVersionLabel}</span>
+                <span
+                  data-testid="sidebar-system-version"
+                  className="min-w-0 truncate font-semibold text-foreground/92"
+                >
+                  {sidebarVersionValue}
+                </span>
+              </div>
+            </div>
+            <span
+              data-testid="sidebar-system-status"
+              aria-label={sidebarSystemStatusLabel}
+              title={sidebarSystemStatusLabel}
+              className={cn(
+                'h-3 w-3 shrink-0 rounded-full ring-4',
+                isGatewayRunning ? 'bg-green-500 ring-green-500/15' : 'bg-red-500 ring-red-500/15',
+              )}
+            />
+          </div>
+        )}
 
         {settingsHubOpen && (
           <div

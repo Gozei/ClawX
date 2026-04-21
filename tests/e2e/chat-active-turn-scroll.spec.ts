@@ -12,6 +12,7 @@ const DEFAULT_ACCOUNT_ID = 'active-turn-scroll-e2e';
 const DEFAULT_PROVIDER_LABEL = 'Active Turn Scroll E2E';
 const DEFAULT_API_KEY = 'sk-test';
 const GATEWAY_START_TIMEOUT_MS = 180_000;
+const GATEWAY_STABLE_MS = 9_000;
 
 async function hostApiJson<T>(
   page: Page,
@@ -195,6 +196,29 @@ async function waitForGatewayRunning(page: Page, timeoutMs = GATEWAY_START_TIMEO
   throw new Error('Gateway did not become ready in time');
 }
 
+async function waitForGatewayStable(page: Page, minConnectedAgeMs = GATEWAY_STABLE_MS): Promise<void> {
+  const deadline = Date.now() + minConnectedAgeMs + GATEWAY_START_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    const status = await page.evaluate(async () => (
+      await window.electron.ipcRenderer.invoke('gateway:status')
+    ) as { state?: string; pid?: number; connectedAt?: number | null });
+
+    if (
+      status?.state === 'running'
+      && Boolean(status.pid)
+      && typeof status.connectedAt === 'number'
+      && Date.now() - status.connectedAt >= minConnectedAgeMs
+    ) {
+      return;
+    }
+
+    await page.waitForTimeout(500);
+  }
+
+  throw new Error('Gateway did not become stable in time');
+}
+
 async function startGateway(page: Page): Promise<void> {
   const result = await page.evaluate(async () => (
     await window.electron.ipcRenderer.invoke('gateway:start')
@@ -252,28 +276,26 @@ async function openSeededSession(page: Page): Promise<void> {
   await sessionRow.click();
 }
 
-async function measureActiveTurnAlignment(page: Page): Promise<{ delta: number; scrollTop: number } | null> {
+async function measureScrollTop(page: Page): Promise<number> {
   return await page.evaluate(() => {
     const scrollContainer = document.querySelector('[data-testid="chat-scroll-container"]') as HTMLElement | null;
-    const anchor = document.querySelector('[data-testid="chat-active-turn-anchor"]') as HTMLElement | null;
+    return scrollContainer?.scrollTop ?? 0;
+  });
+}
 
-    if (!scrollContainer || !anchor) {
+async function measureDistanceFromBottom(page: Page): Promise<number | null> {
+  return await page.evaluate(() => {
+    const scrollContainer = document.querySelector('[data-testid="chat-scroll-container"]') as HTMLElement | null;
+    if (!scrollContainer) {
       return null;
     }
 
-    const scrollRect = scrollContainer.getBoundingClientRect();
-    const anchorRect = anchor.getBoundingClientRect();
-
-    return {
-      delta: Number((anchorRect.top - scrollRect.top).toFixed(2)),
-      scrollTop: scrollContainer.scrollTop,
-    };
+    return scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop;
   });
 }
 
 test.describe('Chat active turn scroll', () => {
-  test('keeps a newly sent turn pinned to the top of the chat viewport', async ({ homeDir, launchElectronApp }) => {
-    test.fixme(process.platform === 'win32', 'Seeded-session sidebar hydration is currently flaky in Electron E2E on Windows.');
+  test('keeps a newly sent turn pinned near the bottom of the chat viewport', async ({ homeDir, launchElectronApp }) => {
     test.setTimeout(240_000);
 
     await seedSession(homeDir);
@@ -290,30 +312,68 @@ test.describe('Chat active turn scroll', () => {
 
       await configureIsolatedGatewayPort(page);
       await startGateway(page);
+      await waitForGatewayStable(page);
       await openSeededSession(page);
 
       const scrollContainer = page.getByTestId('chat-scroll-container');
       const composer = page.getByTestId('chat-composer');
       const messageInput = composer.getByRole('textbox');
       const sendButton = composer.getByTestId('chat-send-button');
+      const modelSwitch = composer.getByTestId('chat-model-switch');
 
       await expect(scrollContainer).toBeVisible();
+      await expect(modelSwitch).toContainText(`${DEFAULT_PROVIDER_LABEL} / model-scroll`, { timeout: 20_000 });
+      await expect.poll(async () => (
+        await sendButton.evaluate((node) => (
+          !!node.querySelector('svg.lucide-send-horizontal')
+        ))
+      ), { timeout: 20_000 }).toBe(true);
       await expect.poll(async () => (
         await scrollContainer.evaluate((node) => (node as HTMLElement).scrollTop)
       ), { timeout: 20_000 }).toBeGreaterThan(0);
 
       await messageInput.fill('Please keep this active turn aligned to the top.');
+      await expect(sendButton).toBeEnabled({ timeout: 10_000 });
       await sendButton.click();
 
       await expect(page.getByTestId('chat-active-turn-anchor')).toBeVisible({ timeout: 20_000 });
 
-      let alignment: { delta: number; scrollTop: number } | null = null;
       await expect.poll(async () => {
-        alignment = await measureActiveTurnAlignment(page);
-        return alignment ? Math.abs(alignment.delta) <= 2 : false;
+        const distanceFromBottom = await measureDistanceFromBottom(page);
+        return distanceFromBottom != null ? Math.abs(distanceFromBottom) <= 2 : false;
       }, { timeout: 10_000 }).toBe(true);
 
-      expect(alignment?.scrollTop ?? 0).toBeGreaterThan(0);
+      await expect.poll(async () => (
+        await page.evaluate(() => document.body.innerText.includes('reply:model-scroll'))
+      ), { timeout: 20_000 }).toBe(true);
+
+      await expect.poll(async () => {
+        const distanceFromBottom = await measureDistanceFromBottom(page);
+        return distanceFromBottom != null ? Math.abs(distanceFromBottom) <= 18 : false;
+      }, { timeout: 10_000 }).toBe(true);
+
+      const beforeManualScrollTop = await measureScrollTop(page);
+      await scrollContainer.hover();
+      await page.mouse.wheel(0, -160);
+
+      await expect.poll(async () => (
+        await measureScrollTop(page)
+      ), { timeout: 5_000 }).toBeLessThan(beforeManualScrollTop);
+      const afterManualScrollTop = await measureScrollTop(page);
+
+      await page.waitForTimeout(750);
+      await expect.poll(async () => (
+        await measureScrollTop(page)
+      ), { timeout: 5_000 }).toBeLessThanOrEqual(afterManualScrollTop + 2);
+
+      await page.getByTestId('sidebar-new-chat').click();
+      await expect(page.getByTestId('chat-composer')).toBeVisible({ timeout: 10_000 });
+
+      await openSeededSession(page);
+      await expect.poll(async () => {
+        const distanceFromBottom = await measureDistanceFromBottom(page);
+        return distanceFromBottom != null ? Math.abs(distanceFromBottom) <= 2 : false;
+      }, { timeout: 10_000 }).toBe(true);
     } finally {
       try {
         const page = await getStableWindow(app);

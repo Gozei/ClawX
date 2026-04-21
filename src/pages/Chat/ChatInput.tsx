@@ -7,6 +7,7 @@
  * are sent with the message (no base64 over WebSocket).
  */
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { SendHorizontal, Square, X, Paperclip, Loader2, AtSign, ChevronDown, Cpu } from 'lucide-react';
 import { FileTypeIcon } from './file-icon';
 import { Button } from '@/components/ui/button';
@@ -53,6 +54,8 @@ interface ChatInputProps {
   isEmpty?: boolean;
   prefillText?: string;
   prefillNonce?: number;
+  shellPaddingLeftPx?: number;
+  shellPaddingRightPx?: number;
 }
 
 type ModelOption = {
@@ -120,6 +123,17 @@ function buildBrowserFileAttachmentKey(file: Pick<File, 'name' | 'size' | 'type'
   return `file:${file.name.trim().toLowerCase()}|${file.size}|${(file.type || '').trim().toLowerCase()}|${file.lastModified}`;
 }
 
+function isDeferredSessionModelPersistenceError(error: unknown): boolean {
+  const message = typeof error === 'string'
+    ? error
+    : error instanceof Error
+      ? error.message
+      : '';
+  const normalized = message.trim().toLowerCase();
+  return normalized.startsWith('session not found:')
+    || normalized.startsWith('invalid sessionkey:');
+}
+
 /**
  * Read a browser File object as base64 string (without the data URL prefix).
  */
@@ -154,6 +168,8 @@ export function ChatInput({
   sending = false,
   prefillText,
   prefillNonce = 0,
+  shellPaddingLeftPx,
+  shellPaddingRightPx,
 }: ChatInputProps) {
   const { t, i18n } = useTranslation('chat');
   const [input, setInput] = useState('');
@@ -167,8 +183,12 @@ export function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
+  const pickerPanelRef = useRef<HTMLDivElement>(null);
+  const modelMenuPanelRef = useRef<HTMLDivElement>(null);
   const modelLabelMeasureRef = useRef<HTMLSpanElement>(null);
   const isComposingRef = useRef(false);
+  const [pickerMenuStyle, setPickerMenuStyle] = useState<{ left: number; bottom: number; width: number } | null>(null);
+  const [modelMenuStyle, setModelMenuStyle] = useState<{ left: number; bottom: number; width: number } | null>(null);
   const agents = useAgentsStore((s) => s.agents);
   const defaultModelRef = useAgentsStore((s) => s.defaultModelRef);
   const fetchAgents = useAgentsStore((s) => s.fetchAgents);
@@ -212,6 +232,7 @@ export function ChatInput({
     () => (sessions ?? []).find((session) => session.key === activeComposerSessionKey) ?? null,
     [activeComposerSessionKey, sessions],
   );
+  const allowLocalOnlyModelPersistence = !activeComposerSession;
   const showAgentPicker = mentionableAgents.length > 0;
   const inputFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
   const providerItems = useMemo(
@@ -263,6 +284,52 @@ export function ChatInput({
     setModelSwitchWidth(`${nextWidthPx}px`);
   }, [selectedModelLabel]);
 
+  const updatePickerMenuPosition = useCallback(() => {
+    const anchor = pickerRef.current;
+    if (!anchor) {
+      setPickerMenuStyle(null);
+      return;
+    }
+    const rect = anchor.getBoundingClientRect();
+    const viewportPadding = 12;
+    const width = Math.min(288, Math.max(window.innerWidth - viewportPadding * 2, 200));
+    const left = Math.min(
+      Math.max(rect.left, viewportPadding),
+      Math.max(viewportPadding, window.innerWidth - width - viewportPadding),
+    );
+
+    setPickerMenuStyle({
+      left,
+      bottom: Math.max(window.innerHeight - rect.top + 8, viewportPadding),
+      width,
+    });
+  }, []);
+
+  const updateModelMenuPosition = useCallback(() => {
+    const anchor = modelMenuRef.current;
+    if (!anchor) {
+      setModelMenuStyle(null);
+      return;
+    }
+    const rect = anchor.getBoundingClientRect();
+    const viewportPadding = 12;
+    const width = Math.min(
+      Math.max(Math.ceil(rect.width), 180),
+      Math.max(window.innerWidth - viewportPadding * 2, 220),
+      360,
+    );
+    const left = Math.min(
+      Math.max(rect.left, viewportPadding),
+      Math.max(viewportPadding, window.innerWidth - width - viewportPadding),
+    );
+
+    setModelMenuStyle({
+      left,
+      bottom: Math.max(window.innerHeight - rect.top + 8, viewportPadding),
+      width,
+    });
+  }, []);
+
   useLayoutEffect(() => {
     activeSessionKeyRef.current = currentSessionKey;
     if (previousSessionKeyRef.current === currentSessionKey) {
@@ -310,29 +377,47 @@ export function ChatInput({
 
   useEffect(() => {
     if (!pickerOpen) return;
+    updatePickerMenuPosition();
+
     const handlePointerDown = (event: MouseEvent) => {
-      if (!pickerRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (!pickerRef.current?.contains(target) && !pickerPanelRef.current?.contains(target)) {
         setPickerOpen(false);
       }
     };
+    const handleViewportChange = () => updatePickerMenuPosition();
+
     document.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('scroll', handleViewportChange, true);
     return () => {
       document.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('resize', handleViewportChange);
+      window.removeEventListener('scroll', handleViewportChange, true);
     };
-  }, [pickerOpen]);
+  }, [pickerOpen, updatePickerMenuPosition]);
 
   useEffect(() => {
     if (!modelMenuOpen) return;
+    updateModelMenuPosition();
+
     const handlePointerDown = (event: MouseEvent) => {
-      if (!modelMenuRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (!modelMenuRef.current?.contains(target) && !modelMenuPanelRef.current?.contains(target)) {
         setModelMenuOpen(false);
       }
     };
+    const handleViewportChange = () => updateModelMenuPosition();
+
     document.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('scroll', handleViewportChange, true);
     return () => {
       document.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('resize', handleViewportChange);
+      window.removeEventListener('scroll', handleViewportChange, true);
     };
-  }, [modelMenuOpen]);
+  }, [modelMenuOpen, updateModelMenuPosition]);
 
   useEffect(() => {
     if (providerAccounts.length > 0 || providerStatuses.length > 0 || providerVendors.length > 0) return;
@@ -750,6 +835,10 @@ export function ChatInput({
     const previousLabel = modelOptions.find((option) => option.value === previousModelValue)?.label
       || selectedModelLabel
       || t('composer.selectModel');
+    const applyLocalModelSelection = () => {
+      setSessionModel(normalizedNextModelRef || null);
+      toast.success(t('composer.modelSwitchSuccess', { model: nextLabel }));
+    };
 
     if (normalizedNextModelRef === previousModelValue) {
       return;
@@ -769,12 +858,19 @@ export function ChatInput({
       );
 
       if (!result?.success) {
+        if (allowLocalOnlyModelPersistence || isDeferredSessionModelPersistenceError(result?.error)) {
+          applyLocalModelSelection();
+          return;
+        }
         throw new Error(result?.error || 'Failed to persist session model');
       }
 
-      setSessionModel(normalizedNextModelRef || null);
-      toast.success(t('composer.modelSwitchSuccess', { model: nextLabel }));
+      applyLocalModelSelection();
     } catch (error) {
+      if (allowLocalOnlyModelPersistence || isDeferredSessionModelPersistenceError(error)) {
+        applyLocalModelSelection();
+        return;
+      }
       toast.error(t('composer.modelSwitchFailed', {
         model: previousLabel,
         error: error instanceof Error ? error.message : String(error),
@@ -782,16 +878,21 @@ export function ChatInput({
     } finally {
       setModelSwitchPending(false);
     }
-  }, [activeComposerSessionKey, modelOptions, selectedModelLabel, selectedModelValue, setSessionModel, t]);
+  }, [activeComposerSessionKey, allowLocalOnlyModelPersistence, modelOptions, selectedModelLabel, selectedModelValue, setSessionModel, t]);
 
   return (
-    <div
-      data-testid="chat-composer-shell"
-      className={cn(
-        'w-full px-4 pt-0 pb-2 transition-all duration-300'
-      )}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
+      <div
+        data-testid="chat-composer-shell"
+        className={cn(
+          'relative w-full pt-0 pb-2 transition-all duration-300',
+          (pickerOpen || modelMenuOpen) && 'z-[140]',
+        )}
+        style={{
+          paddingLeft: shellPaddingLeftPx != null ? `${shellPaddingLeftPx}px` : '1rem',
+          paddingRight: shellPaddingRightPx != null ? `${shellPaddingRightPx}px` : '1rem',
+        }}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       <div className={cn('mx-auto w-full', CHAT_SURFACE_MAX_WIDTH_CLASS)}>
@@ -917,27 +1018,6 @@ export function ChatInput({
                     </span>
                   )}
                 </button>
-                {pickerOpen && (
-                  <div className="absolute left-0 bottom-full z-20 mb-2 w-72 overflow-hidden rounded-xl border border-black/10 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-card">
-                    <div className="px-3 py-2 text-[11px] font-medium text-muted-foreground/80">
-                      {t('composer.agentPickerTitle', { currentAgent: currentAgentName })}
-                    </div>
-                    <div className="max-h-64 overflow-y-auto">
-                      {mentionableAgents.map((agent) => (
-                        <AgentPickerItem
-                          key={agent.id}
-                          agent={agent}
-                          selected={agent.id === targetAgentId}
-                          onSelect={() => {
-                            setTargetAgentId((current) => (current === agent.id ? null : agent.id));
-                            setPickerOpen(false);
-                            textareaRef.current?.focus();
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
 
@@ -992,30 +1072,6 @@ export function ChatInput({
                   )}
                 </span>
               </button>
-              {modelMenuOpen && !isModelSwitchDisabled && (
-                <div className="absolute bottom-full left-0 z-20 mb-2 w-[max-content] min-w-full max-w-[360px] overflow-hidden rounded-xl border border-black/10 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-card">
-                  <div className="max-h-64 overflow-y-auto">
-                    {modelOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={cn(
-                          'flex w-full items-center rounded-[10px] px-3 py-2 text-left text-[13px] font-medium transition-colors',
-                          option.value === activeModelValue
-                            ? 'bg-primary text-primary-foreground'
-                            : 'text-foreground/82 hover:bg-black/5 dark:hover:bg-white/5'
-                        )}
-                        onClick={() => {
-                          setModelMenuOpen(false);
-                          void handleModelChange(option.value);
-                        }}
-                      >
-                        <span className="truncate">{option.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
 
             </div>
@@ -1060,6 +1116,71 @@ export function ChatInput({
         >
           {t('composer.disclaimer')}
         </p>
+        {pickerOpen && pickerMenuStyle && createPortal(
+          <div
+            ref={pickerPanelRef}
+            data-testid="chat-agent-picker-menu"
+            className="fixed z-[180] overflow-hidden rounded-xl border border-black/10 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-card"
+            style={{
+              left: `${pickerMenuStyle.left}px`,
+              bottom: `${pickerMenuStyle.bottom}px`,
+              width: `${pickerMenuStyle.width}px`,
+            }}
+          >
+            <div className="px-3 py-2 text-[11px] font-medium text-muted-foreground/80">
+              {t('composer.agentPickerTitle', { currentAgent: currentAgentName })}
+            </div>
+            <div className="max-h-64 overflow-y-auto">
+              {mentionableAgents.map((agent) => (
+                <AgentPickerItem
+                  key={agent.id}
+                  agent={agent}
+                  selected={agent.id === targetAgentId}
+                  onSelect={() => {
+                    setTargetAgentId((current) => (current === agent.id ? null : agent.id));
+                    setPickerOpen(false);
+                    textareaRef.current?.focus();
+                  }}
+                />
+              ))}
+            </div>
+          </div>,
+          document.body,
+        )}
+        {modelMenuOpen && !isModelSwitchDisabled && modelMenuStyle && createPortal(
+          <div
+            ref={modelMenuPanelRef}
+            data-testid="chat-model-switch-menu"
+            className="fixed z-[180] overflow-hidden rounded-xl border border-black/10 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-card"
+            style={{
+              left: `${modelMenuStyle.left}px`,
+              bottom: `${modelMenuStyle.bottom}px`,
+              width: `${modelMenuStyle.width}px`,
+            }}
+          >
+            <div className="max-h-64 overflow-y-auto">
+              {modelOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={cn(
+                    'flex w-full items-center rounded-[10px] px-3 py-2 text-left text-[13px] font-medium transition-colors',
+                    option.value === activeModelValue
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-foreground/82 hover:bg-black/5 dark:hover:bg-white/5'
+                  )}
+                  onClick={() => {
+                    setModelMenuOpen(false);
+                    void handleModelChange(option.value);
+                  }}
+                >
+                  <span className="truncate">{option.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>,
+          document.body,
+        )}
       </div>
     </div>
   );

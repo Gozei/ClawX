@@ -99,6 +99,59 @@ describe('chat send error localization', () => {
     });
   });
 
+  it('localizes pairing-required gateway failures as a restartable gateway error', async () => {
+    const { default: i18n } = await import('@/i18n');
+    const { useChatStore } = await import('@/stores/chat');
+    await i18n.changeLanguage('en');
+
+    gatewayRpcMock.mockImplementation(async (method: string) => {
+      if (method === 'chat.history') {
+        return { messages: [] };
+      }
+      if (method === 'sessions.list') {
+        return { sessions: [] };
+      }
+      if (method === 'chat.abort') {
+        return { ok: true };
+      }
+      if (method === 'chat.send') {
+        throw new Error('gateway closed (1008): pairing required');
+      }
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      sendStage: null,
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().sendMessage('hello again');
+
+    expect(useChatStore.getState().error).toBeNull();
+    expect(useChatStore.getState().messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      isError: true,
+      content: 'Failed to send message: Gateway error. Please restart the gateway and try again.',
+    });
+  });
+
   it('appends a Chinese assistant error reply for send failures', async () => {
     const { default: i18n } = await import('@/i18n');
     const { useChatStore } = await import('@/stores/chat');

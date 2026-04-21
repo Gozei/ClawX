@@ -76,7 +76,7 @@
         "network": "Network error. Please verify connectivity and try again.",
         "config": "Configuration is invalid. Please review your settings and try again.",
         "gatewayNotConnected": "Gateway not connected.",
-        "gatewayUnavailable": "Gateway is unavailable. Start or restart the gateway and try again."
+        "gatewayUnavailable": "Gateway error. Please restart the gateway and try again."
     },
     "sessionWarnings": {
         "finalReplyMissing": "The final reply did not arrive, but you can continue the conversation.",

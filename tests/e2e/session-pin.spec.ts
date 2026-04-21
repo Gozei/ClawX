@@ -70,6 +70,21 @@ test.describe('Session pin', () => {
       await expect(bravoRow).toBeVisible({ timeout: 60_000 });
       await bravoRow.hover();
       await page.getByTestId(`sidebar-session-menu-trigger-${SESSION_B_KEY}`).click();
+      await expect(page.getByTestId(`sidebar-session-menu-panel-${SESSION_B_KEY}`)).toBeVisible();
+      const topmostIsSidebarMenu = await page.evaluate((sessionKey) => {
+        const menu = document.querySelector(`[data-testid="sidebar-session-menu-panel-${sessionKey}"]`);
+        if (!(menu instanceof HTMLElement)) {
+          return false;
+        }
+
+        const rect = menu.getBoundingClientRect();
+        const x = rect.left + Math.min(rect.width / 2, Math.max(rect.width - 16, 16));
+        const y = rect.top + Math.min(rect.height / 2, Math.max(rect.height - 16, 16));
+        const topElement = document.elementFromPoint(x, y);
+
+        return !!topElement?.closest(`[data-testid="sidebar-session-menu-panel-${sessionKey}"]`);
+      }, SESSION_B_KEY);
+      expect(topmostIsSidebarMenu).toBe(true);
       await expect(page.getByTestId(`sidebar-session-menu-pin-${SESSION_B_KEY}`)).toBeVisible();
       await page.getByTestId(`sidebar-session-menu-pin-${SESSION_B_KEY}`).click();
 
