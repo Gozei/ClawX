@@ -193,7 +193,7 @@ function resolveCardPosition(
     }
   }
 
-  const fallbackPlacement = placement === 'center' ? 'bottom' : placement;
+  const fallbackPlacement = placement;
   const fallback = getCandidateCardPosition(targetRect, fallbackPlacement, cardWidth, cardHeight);
   return {
     top: clamp(fallback.top, VIEWPORT_MARGIN, Math.max(VIEWPORT_MARGIN, viewportHeight - cardHeight - VIEWPORT_MARGIN)),

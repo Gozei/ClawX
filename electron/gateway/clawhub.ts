@@ -71,6 +71,18 @@ interface PublicSkillsApiItem {
     };
 }
 
+interface PublicSkillsQueryResponse<T> {
+  status?: string;
+  value?: T;
+}
+
+interface PublicSkillsFileTextResponse {
+    path?: string;
+    sha256?: string;
+    size?: number;
+    text?: string;
+}
+
 export interface ClawHubInstalledSkillResult {
     slug: string;
     version: string;
@@ -195,28 +207,14 @@ export class ClawHubService {
             return { results: [] };
         }
 
-        const response = await fetch(source.apiQueryEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                path: 'skills:listPublicPageV4',
-                format: 'convex_encoded_json',
-                args: [{
-                    dir: 'desc',
-                    highlightedOnly: false,
-                    nonSuspiciousOnly: false,
-                    numItems: limit,
-                    sort: 'downloads',
-                    ...(cursor ? { cursor } : {}),
-                }],
-            }),
-        } as RequestInit);
-
-        if (!response.ok) {
-            throw new Error(`Failed to fetch public skills from ${source.id}: ${response.status} ${response.statusText}`);
-        }
-
-        const data = await response.json() as { status?: string; value?: { page?: PublicSkillsApiItem[]; nextCursor?: string } };
+        const data = await this.queryPublicSkills<{ page?: PublicSkillsApiItem[]; nextCursor?: string }>(source, 'skills:listPublicPageV4', [{
+            dir: 'desc',
+            highlightedOnly: false,
+            nonSuspiciousOnly: false,
+            numItems: limit,
+            sort: 'downloads',
+            ...(cursor ? { cursor } : {}),
+        }]);
         const items = Array.isArray(data?.value?.page) ? data.value.page : [];
 
         return {
@@ -233,6 +231,44 @@ export class ClawHubService {
             })).filter((item) => item.slug),
             nextCursor: data?.value?.nextCursor,
         };
+    }
+
+    private async queryPublicSkills<T>(source: SkillSourceConfig, pathName: string, args: unknown[], endpoint: 'query' | 'action' = 'query'): Promise<PublicSkillsQueryResponse<T>> {
+        if (!source.apiQueryEndpoint) {
+            throw new Error(`Source ${source.id} does not expose an API query endpoint`);
+        }
+
+        const response = await fetch(source.apiQueryEndpoint.replace(/\/api\/query$/, `/api/${endpoint}`), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                path: pathName,
+                format: 'convex_encoded_json',
+                args,
+            }),
+        } as RequestInit);
+
+        if (!response.ok) {
+            throw new Error(`Failed to query public skills from ${source.id}: ${response.status} ${response.statusText}`);
+        }
+
+        return await response.json() as PublicSkillsQueryResponse<T>;
+    }
+
+    private resolveMarketplaceMarkdownPath(files?: Array<{ path?: string }>): string | null {
+        if (!Array.isArray(files) || files.length === 0) {
+            return null;
+        }
+
+        const normalizedLeaf = (filePath?: string): string => filePath?.replace(/\\/g, '/').split('/').pop()?.toLowerCase() || '';
+        const orderedTargets = ['skill.md', 'skills.md', 'readme.md'];
+        for (const target of orderedTargets) {
+            const match = files.find((file) => normalizedLeaf(file.path) === target);
+            if (match?.path) {
+                return match.path;
+            }
+        }
+        return null;
     }
 
     private async fetchPublicSkillCount(source: SkillSourceConfig): Promise<number | null> {
@@ -489,6 +525,42 @@ export class ClawHubService {
             console.error('ClawHub explore error:', error);
             return { results: [] };
         }
+    }
+
+    async getPublicSkillBySlug(params: { slug: string; sourceId?: string }): Promise<unknown> {
+        const source = await this.resolveSource(params.sourceId);
+        const data = await this.queryPublicSkills<unknown>(source, 'skills:getBySlug', [{ slug: params.slug }]);
+        const detailValue = data?.value;
+        if (!detailValue || typeof detailValue !== 'object') {
+            return null;
+        }
+
+        const detail = detailValue as {
+            latestVersion?: { _id?: string; files?: Array<{ path?: string }>; rawMarkdown?: string };
+        };
+        const latestVersionId = detail?.latestVersion?._id;
+        const markdownPath = this.resolveMarketplaceMarkdownPath(detail?.latestVersion?.files);
+
+        if (detail && latestVersionId && markdownPath) {
+            try {
+                const markdown = await this.queryPublicSkills<PublicSkillsFileTextResponse>(
+                    source,
+                    'skills:getFileText',
+                    [{ versionId: latestVersionId, path: markdownPath }],
+                    'action',
+                );
+                if (markdown?.value?.text !== undefined) {
+                    detail.latestVersion = {
+                        ...detail.latestVersion,
+                        rawMarkdown: markdown.value.text,
+                    };
+                }
+            } catch (error) {
+                console.warn(`Failed to load marketplace markdown for ${params.slug} from ${source.id}:`, error);
+            }
+        }
+
+        return detail;
     }
 
     /**
