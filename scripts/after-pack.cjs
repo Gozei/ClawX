@@ -251,6 +251,37 @@ function materializeSymlinks(rootDir) {
   return { materialized, removed };
 }
 
+function removeStaleTlonSignatures(nodeModulesDir, platform) {
+  if (platform !== 'darwin') return 0;
+
+  const tlonScopeDir = join(nodeModulesDir, '@tloncorp');
+  if (!existsSync(tlonScopeDir)) return 0;
+
+  let removed = 0;
+  let entries;
+  try { entries = readdirSync(tlonScopeDir, { withFileTypes: true }); } catch { return 0; }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('tlon-skill-darwin-')) continue;
+
+    const tlonBinary = join(tlonScopeDir, entry.name, 'tlon');
+    if (!existsSync(tlonBinary)) continue;
+
+    try {
+      // Some tlon native binaries ship with an LC_CODE_SIGNATURE load command
+      // that `codesign` reports as unsigned/unsupported. Removing it lets
+      // electron-builder apply the real Developer ID signature later.
+      execFileSync('codesign', ['--remove-signature', tlonBinary], { stdio: 'ignore' });
+      removed++;
+    } catch {
+      // If the binary has no removable signature, let electron-builder's
+      // normal signing step handle it and surface any real failure.
+    }
+  }
+
+  return removed;
+}
+
 // ── Broken module patcher ─────────────────────────────────────────────────────
 // Some bundled packages have transpiled CJS that sets `module.exports = exports.default`
 // without ever assigning `exports.default`, leaving module.exports === undefined.
@@ -630,6 +661,11 @@ exports.default = async function afterPack(context) {
   const topLevelSymlinks = materializeSymlinks(dest);
   if (topLevelSymlinks.materialized > 0 || topLevelSymlinks.removed > 0) {
     console.log(`[after-pack] 🔗 Materialized ${topLevelSymlinks.materialized} symlink(s), removed ${topLevelSymlinks.removed} broken symlink(s) in openclaw/node_modules.`);
+  }
+
+  const staleTlonSignatures = removeStaleTlonSignatures(dest, platform);
+  if (staleTlonSignatures > 0) {
+    console.log(`[after-pack] 🧽 Removed stale tlon code signature(s): ${staleTlonSignatures}.`);
   }
 
   // Patch broken modules whose CJS transpiled output sets module.exports = undefined,
