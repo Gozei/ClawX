@@ -3,8 +3,9 @@
  * Navigation sidebar with menu items.
  * No longer fixed - sits inside the flex layout below the title bar.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import {
   LayoutDashboard,
   Bot,
@@ -219,11 +220,13 @@ export function Sidebar() {
   const [settingsHubOpen, setSettingsHubOpen] = useState(false);
   const [gatewayHintNow, setGatewayHintNow] = useState(() => Date.now());
   const renameInputRef = useRef<HTMLInputElement | null>(null);
-  const sessionMenuRef = useRef<HTMLDivElement | null>(null);
+  const sessionMenuPanelRef = useRef<HTMLDivElement | null>(null);
+  const sessionMenuAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const isSubmittingRenameRef = useRef(false);
   const resizeStartXRef = useRef<number | null>(null);
   const resizeStartWidthRef = useRef(sidebarWidth);
   const gatewayHintStartAtRef = useRef<number | null>(null);
+  const [sessionMenuPosition, setSessionMenuPosition] = useState<{ right: number; top: number; transform: string } | null>(null);
 
   useEffect(() => {
     void fetchAgents();
@@ -235,11 +238,39 @@ export function Sidebar() {
     renameInputRef.current.select();
   }, [editingSessionKey]);
 
-  useEffect(() => {
+  const resolveSessionMenuPosition = useCallback((sessionKey: string) => {
+    const anchor = sessionMenuAnchorRefs.current[sessionKey];
+    if (!anchor) {
+      return null;
+    }
+
+    const rect = anchor.getBoundingClientRect();
+    const viewportPadding = 12;
+    const estimatedMenuHeight = 112;
+    const right = Math.max(window.innerWidth - rect.right, viewportPadding);
+    const canOpenBelow = rect.bottom + 6 + estimatedMenuHeight <= window.innerHeight - viewportPadding;
+
+    return canOpenBelow
+      ? { right, top: rect.bottom + 6, transform: 'translateY(0)' }
+      : { right, top: rect.top - 6, transform: 'translateY(-100%)' };
+  }, []);
+
+  const updateSessionMenuPosition = useCallback(() => {
+    if (!openSessionMenuKey) {
+      setSessionMenuPosition(null);
+      return;
+    }
+
+    setSessionMenuPosition(resolveSessionMenuPosition(openSessionMenuKey));
+  }, [openSessionMenuKey, resolveSessionMenuPosition]);
+
+  useLayoutEffect(() => {
     if (!openSessionMenuKey) return;
 
     const handlePointerDown = (event: MouseEvent) => {
-      if (sessionMenuRef.current && !sessionMenuRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const anchor = sessionMenuAnchorRefs.current[openSessionMenuKey];
+      if (!sessionMenuPanelRef.current?.contains(target) && !anchor?.contains(target)) {
         setOpenSessionMenuKey(null);
       }
     };
@@ -249,14 +280,20 @@ export function Sidebar() {
         setOpenSessionMenuKey(null);
       }
     };
+    const handleViewportChange = () => updateSessionMenuPosition();
 
+    updateSessionMenuPosition();
     document.addEventListener('mousedown', handlePointerDown);
     document.addEventListener('keydown', handleEscape);
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('scroll', handleViewportChange, true);
     return () => {
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleEscape);
+      window.removeEventListener('resize', handleViewportChange);
+      window.removeEventListener('scroll', handleViewportChange, true);
     };
-  }, [openSessionMenuKey]);
+  }, [openSessionMenuKey, updateSessionMenuPosition]);
 
   useEffect(() => {
     if (!settingsHubOpen) return;
@@ -492,7 +529,9 @@ export function Sidebar() {
         )}
         {!isEditing && (
           <div
-            ref={isMenuOpen ? sessionMenuRef : null}
+            ref={(node) => {
+              sessionMenuAnchorRefs.current[s.key] = node;
+            }}
             className="absolute right-1 flex items-center"
             data-testid={`sidebar-session-menu-root-${s.key}`}
           >
@@ -525,7 +564,15 @@ export function Sidebar() {
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                setOpenSessionMenuKey((currentKey) => currentKey === s.key ? null : s.key);
+                setOpenSessionMenuKey((currentKey) => {
+                  if (currentKey === s.key) {
+                    setSessionMenuPosition(null);
+                    return null;
+                  }
+
+                  setSessionMenuPosition(resolveSessionMenuPosition(s.key));
+                  return s.key;
+                });
               }}
               className={cn(
                 'flex h-7 w-7 items-center justify-center rounded-md transition-all',
@@ -537,52 +584,6 @@ export function Sidebar() {
               <MoreHorizontal className="h-4 w-4" />
             </button>
 
-            {isMenuOpen && (
-              <div className="absolute right-0 top-8 z-20 min-w-[120px] overflow-hidden rounded-lg border border-black/8 bg-white py-1 shadow-[0_12px_28px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-[#12161f]">
-                <button
-                  type="button"
-                  data-testid={`sidebar-session-menu-rename-${s.key}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setOpenSessionMenuKey(null);
-                    startRenamingSession(s.key, sessionLabel);
-                  }}
-                  className="flex w-full items-center px-3 py-2 text-left text-[13px] text-foreground/85 transition-colors hover:bg-[#eef3fb] dark:hover:bg-white/5"
-                >
-                  {sessionMenuLabels.rename}
-                </button>
-                <button
-                  type="button"
-                  data-testid={`sidebar-session-menu-pin-${s.key}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setOpenSessionMenuKey(null);
-                    void toggleSessionPin(s.key);
-                  }}
-                  className="flex w-full items-center px-3 py-2 text-left text-[13px] text-foreground/85 transition-colors hover:bg-[#eef3fb] dark:hover:bg-white/5"
-                >
-                  {s.pinned ? sessionMenuLabels.unpin : sessionMenuLabels.pin}
-                </button>
-                <button
-                  type="button"
-                  data-testid={`sidebar-session-menu-delete-${s.key}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setOpenSessionMenuKey(null);
-                    setSessionToDelete({
-                      key: s.key,
-                      label: sessionLabel,
-                    });
-                  }}
-                  className="flex w-full items-center px-3 py-2 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
-                >
-                  {t('common:actions.delete')}
-                </button>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -602,6 +603,12 @@ export function Sidebar() {
     .sort((a, b) => (sessionLastActivity[b.key] ?? 0) - (sessionLastActivity[a.key] ?? 0));
 
   const renderedSidebarWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : sidebarWidth;
+  const activeSessionMenuSession = openSessionMenuKey
+    ? sessions.find((session) => session.key === openSessionMenuKey) ?? null
+    : null;
+  const activeSessionMenuLabel = activeSessionMenuSession
+    ? getSessionLabel(activeSessionMenuSession.key, activeSessionMenuSession.displayName, activeSessionMenuSession.label)
+    : '';
 
   const navItems = [
     { to: '/dashboard', icon: <LayoutDashboard className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.dashboard'), testId: 'sidebar-nav-dashboard' },
@@ -736,6 +743,63 @@ export function Sidebar() {
             {unpinnedSessions.map(renderSessionRow)}
           </div>
         </div>
+      )}
+
+      {openSessionMenuKey && activeSessionMenuSession && sessionMenuPosition && createPortal(
+        <div
+          ref={sessionMenuPanelRef}
+          data-testid={`sidebar-session-menu-panel-${openSessionMenuKey}`}
+          className="fixed z-[180] min-w-[120px] overflow-hidden rounded-lg border border-black/8 bg-white py-1 shadow-[0_12px_28px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-[#12161f]"
+          style={{
+            right: `${sessionMenuPosition.right}px`,
+            top: `${sessionMenuPosition.top}px`,
+            transform: sessionMenuPosition.transform,
+          }}
+        >
+          <button
+            type="button"
+            data-testid={`sidebar-session-menu-rename-${openSessionMenuKey}`}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setOpenSessionMenuKey(null);
+              startRenamingSession(openSessionMenuKey, activeSessionMenuLabel);
+            }}
+            className="flex w-full items-center px-3 py-2 text-left text-[13px] text-foreground/85 transition-colors hover:bg-[#eef3fb] dark:hover:bg-white/5"
+          >
+            {sessionMenuLabels.rename}
+          </button>
+          <button
+            type="button"
+            data-testid={`sidebar-session-menu-pin-${openSessionMenuKey}`}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setOpenSessionMenuKey(null);
+              void toggleSessionPin(openSessionMenuKey);
+            }}
+            className="flex w-full items-center px-3 py-2 text-left text-[13px] text-foreground/85 transition-colors hover:bg-[#eef3fb] dark:hover:bg-white/5"
+          >
+            {activeSessionMenuSession.pinned ? sessionMenuLabels.unpin : sessionMenuLabels.pin}
+          </button>
+          <button
+            type="button"
+            data-testid={`sidebar-session-menu-delete-${openSessionMenuKey}`}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setOpenSessionMenuKey(null);
+              setSessionToDelete({
+                key: openSessionMenuKey,
+                label: activeSessionMenuLabel,
+              });
+            }}
+            className="flex w-full items-center px-3 py-2 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
+          >
+            {t('common:actions.delete')}
+          </button>
+        </div>,
+        document.body,
       )}
 
       {/* Footer */}

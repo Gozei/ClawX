@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   RefreshCw,
   Copy,
@@ -47,6 +48,7 @@ type AppSettingsContentProps = {
 
 export function AppSettingsContent({ embedded = false }: AppSettingsContentProps) {
   const { t } = useTranslation('settings');
+  const location = useLocation();
   const branding = useBranding();
   const {
     launchAtStartup,
@@ -468,6 +470,17 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
     setAutoDownloadUpdate(enabled);
     void updateSetAutoDownload(enabled).catch(() => {});
   };
+
+  useEffect(() => {
+    if (location.hash !== '#updates') return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById('settings-updates-section')?.scrollIntoView({
+        block: 'start',
+        behavior: 'smooth',
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.hash]);
 
   return (
     <div
@@ -1058,7 +1071,7 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
 
           <Separator className="bg-black/5 dark:bg-white/5" />
 
-          <div data-testid="settings-updates-section">
+          <div id="settings-updates-section" data-testid="settings-updates-section">
             <h2 className="text-3xl font-serif text-foreground mb-6 font-normal tracking-tight" style={{ fontFamily: 'Georgia, Cambria, "Times New Roman", Times, serif' }}>
               {t('updates.title')}
             </h2>

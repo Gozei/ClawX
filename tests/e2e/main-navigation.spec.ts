@@ -314,4 +314,33 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
       await closeElectronApp(app);
     }
   });
+
+  test('keeps the Windows title bar maximize control readable in both themes', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      const page = await getStableWindow(app);
+      const platform = await page.evaluate(() => window.electron?.platform ?? null);
+      test.skip(platform !== 'win32', 'Custom title bar controls only render on Windows');
+
+      const maximizeButton = page.getByTestId('titlebar-maximize-button');
+
+      await expect(page.getByTestId('main-layout')).toBeVisible();
+      await expect(maximizeButton).toBeVisible();
+      await expect(maximizeButton).toHaveClass(/hover:bg-\[#ebf1fb\]/);
+      await expect(maximizeButton).toHaveClass(/dark:hover:bg-white\/\[0\.08\]/);
+
+      await openSettingsHub(page);
+      await ensureTheme(page, 'light');
+      await closeSettingsHub(page);
+      await expect(maximizeButton).toHaveCSS('color', 'rgb(92, 106, 127)');
+
+      await openSettingsHub(page);
+      await ensureTheme(page, 'dark');
+      await closeSettingsHub(page);
+      await expect(maximizeButton).toHaveCSS('color', 'rgb(201, 212, 227)');
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
 });

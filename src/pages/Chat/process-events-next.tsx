@@ -25,12 +25,37 @@ export type ProcessEventItem = {
   durationMs?: number;
   toolCallId?: string;
   toolName?: string;
+  failureMessage?: string;
+  retries?: number;
 };
 
 function formatDuration(durationMs?: number): string | null {
   if (!durationMs || !Number.isFinite(durationMs)) return null;
   if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
   return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+function formatRetryAttemptCount(
+  retries: number | undefined,
+  language: string | undefined,
+): string | null {
+  if (!retries || !Number.isFinite(retries) || retries <= 0) return null;
+  return normalizeLocale(language) === 'zh'
+    ? `第${retries}次`
+    : `attempt ${retries}`;
+}
+
+function formatRetryExhaustedCount(
+  retries: number | undefined,
+  language: string | undefined,
+): string | null {
+  if (!retries || !Number.isFinite(retries) || retries <= 0) return null;
+  if (normalizeLocale(language) === 'zh') {
+    return `已重试${retries}次`;
+  }
+  return retries === 1
+    ? 'after 1 retry'
+    : `after ${retries} retries`;
 }
 
 function truncate(text: string, maxLength = 96): string {
@@ -204,6 +229,9 @@ function getToolPreview(payload: unknown): string | undefined {
   }
 
   const record = payload as Record<string, unknown>;
+  if (Object.keys(record).length === 0) {
+    return undefined;
+  }
   const command = record.command ?? record.cmd ?? record.script;
   if (typeof command === 'string' && command.trim()) {
     return truncate(command, 88);
@@ -249,12 +277,14 @@ function createToolCallItem(
     action,
     title,
     label: toolName,
-    preview: status?.summary || getToolPreview(block.input ?? block.arguments),
+    preview: status?.failureMessage || status?.summary || getToolPreview(block.input ?? block.arguments),
     detail: detail || undefined,
     status: status?.status ?? 'completed',
     durationMs: status?.durationMs,
     toolCallId: block.id,
     toolName,
+    failureMessage: status?.failureMessage,
+    retries: status?.retries,
   };
 }
 
@@ -267,7 +297,7 @@ function createToolResultItem(
   const key = block.id || toolName;
   const status = statusMap.get(key) || statusMap.get(toolName);
   const detail = formatUnknownContent(block.content ?? block.text ?? '');
-  const preview = status?.summary || truncate(detail, 88);
+  const preview = status?.failureMessage || status?.summary || truncate(detail, 88);
 
   return {
     key: `tool-result-${key}`,
@@ -282,6 +312,8 @@ function createToolResultItem(
     durationMs: status?.durationMs ?? block.durationMs,
     toolCallId: block.id,
     toolName,
+    failureMessage: status?.failureMessage,
+    retries: status?.retries,
   };
 }
 
@@ -309,12 +341,14 @@ function createUnmatchedStatusItems(
         action,
         title,
         label: normalizeToolName(tool.name),
-        preview: tool.summary,
-        detail: tool.summary,
+        preview: tool.failureMessage || tool.summary,
+        detail: tool.failureMessage || tool.summary,
         status: tool.status,
         durationMs: tool.durationMs,
         toolCallId: tool.toolCallId,
         toolName: tool.name,
+        failureMessage: tool.failureMessage,
+        retries: tool.retries,
       };
     });
 }
@@ -415,87 +449,165 @@ function isDirectContent(item: ProcessEventItem): boolean {
   return item.kind === 'note' || item.kind === 'thinking';
 }
 
+function isActiveProcessItem(item: ProcessEventItem): boolean {
+  return item.status === 'running' || item.status === 'retrying';
+}
+
 function formatEventStatusLabel(item: ProcessEventItem, language: string | undefined): string {
   const locale = normalizeLocale(language);
-  const status = item.status === 'running'
-    ? 'running'
-    : item.status === 'error'
-      ? 'error'
-      : 'completed';
+  const retryAttemptLabel = formatRetryAttemptCount(item.retries, language);
+  const retryExhaustedLabel = formatRetryExhaustedCount(item.retries, language);
+  const status = item.status === 'retrying'
+    ? 'retrying'
+    : item.status === 'running'
+      ? 'running'
+      : item.status === 'error'
+        ? 'error'
+        : 'completed';
 
   const labels = locale === 'zh'
     ? {
         generic: {
           running: '\u6b63\u5728\u6267\u884c\u64cd\u4f5c',
           completed: '\u5df2\u6267\u884c\u64cd\u4f5c',
-          error: '\u6267\u884c\u64cd\u4f5c\u5931\u8d25',
+          retrying: retryAttemptLabel
+            ? `\u64cd\u4f5c\u5931\u8d25\uff0c\u6b63\u5728${retryAttemptLabel}\u91cd\u8bd5`
+            : '\u64cd\u4f5c\u5931\u8d25\uff0c\u6b63\u5728\u91cd\u8bd5',
+          error: retryExhaustedLabel
+            ? `\u64cd\u4f5c\u5931\u8d25\uff0c${retryExhaustedLabel}\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5`
+            : '\u64cd\u4f5c\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5',
         },
         browser_start: {
           running: '\u6b63\u5728\u6253\u5f00\u6d4f\u89c8\u5668',
           completed: '\u5df2\u6253\u5f00\u6d4f\u89c8\u5668',
-          error: '\u6253\u5f00\u6d4f\u89c8\u5668\u5931\u8d25',
+          retrying: retryAttemptLabel
+            ? `\u6253\u5f00\u6d4f\u89c8\u5668\u5931\u8d25\uff0c\u6b63\u5728${retryAttemptLabel}\u91cd\u8bd5`
+            : '\u6253\u5f00\u6d4f\u89c8\u5668\u5931\u8d25\uff0c\u6b63\u5728\u91cd\u8bd5',
+          error: retryExhaustedLabel
+            ? `\u6253\u5f00\u6d4f\u89c8\u5668\u5931\u8d25\uff0c${retryExhaustedLabel}\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5`
+            : '\u6253\u5f00\u6d4f\u89c8\u5668\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5',
         },
         browser_page: {
           running: '\u6b63\u5728\u6253\u5f00\u9875\u9762',
           completed: '\u5df2\u6253\u5f00\u9875\u9762',
-          error: '\u6253\u5f00\u9875\u9762\u5931\u8d25',
+          retrying: retryAttemptLabel
+            ? `\u6253\u5f00\u9875\u9762\u5931\u8d25\uff0c\u6b63\u5728${retryAttemptLabel}\u91cd\u8bd5`
+            : '\u6253\u5f00\u9875\u9762\u5931\u8d25\uff0c\u6b63\u5728\u91cd\u8bd5',
+          error: retryExhaustedLabel
+            ? `\u6253\u5f00\u9875\u9762\u5931\u8d25\uff0c${retryExhaustedLabel}\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5`
+            : '\u6253\u5f00\u9875\u9762\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5',
         },
         browser: {
           running: '\u6b63\u5728\u64cd\u4f5c\u6d4f\u89c8\u5668',
           completed: '\u5df2\u64cd\u4f5c\u6d4f\u89c8\u5668',
-          error: '\u6d4f\u89c8\u5668\u64cd\u4f5c\u5931\u8d25',
+          retrying: retryAttemptLabel
+            ? `\u6d4f\u89c8\u5668\u64cd\u4f5c\u5931\u8d25\uff0c\u6b63\u5728${retryAttemptLabel}\u91cd\u8bd5`
+            : '\u6d4f\u89c8\u5668\u64cd\u4f5c\u5931\u8d25\uff0c\u6b63\u5728\u91cd\u8bd5',
+          error: retryExhaustedLabel
+            ? `\u6d4f\u89c8\u5668\u64cd\u4f5c\u5931\u8d25\uff0c${retryExhaustedLabel}\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5`
+            : '\u6d4f\u89c8\u5668\u64cd\u4f5c\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5',
         },
         shell: {
           running: '\u6b63\u5728\u6267\u884c\u547d\u4ee4',
           completed: '\u5df2\u6267\u884c\u547d\u4ee4',
-          error: '\u6267\u884c\u547d\u4ee4\u5931\u8d25',
+          retrying: retryAttemptLabel
+            ? `\u6267\u884c\u547d\u4ee4\u5931\u8d25\uff0c\u6b63\u5728${retryAttemptLabel}\u91cd\u8bd5`
+            : '\u6267\u884c\u547d\u4ee4\u5931\u8d25\uff0c\u6b63\u5728\u91cd\u8bd5',
+          error: retryExhaustedLabel
+            ? `\u6267\u884c\u547d\u4ee4\u5931\u8d25\uff0c${retryExhaustedLabel}\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5`
+            : '\u6267\u884c\u547d\u4ee4\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5',
         },
         code: {
           running: '\u6b63\u5728\u4fee\u6539\u4ee3\u7801',
           completed: '\u5df2\u4fee\u6539\u4ee3\u7801',
-          error: '\u4ee3\u7801\u4fee\u6539\u5931\u8d25',
+          retrying: retryAttemptLabel
+            ? `\u4ee3\u7801\u4fee\u6539\u5931\u8d25\uff0c\u6b63\u5728${retryAttemptLabel}\u91cd\u8bd5`
+            : '\u4ee3\u7801\u4fee\u6539\u5931\u8d25\uff0c\u6b63\u5728\u91cd\u8bd5',
+          error: retryExhaustedLabel
+            ? `\u4ee3\u7801\u4fee\u6539\u5931\u8d25\uff0c${retryExhaustedLabel}\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5`
+            : '\u4ee3\u7801\u4fee\u6539\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5',
         },
         read: {
           running: '\u6b63\u5728\u8bfb\u53d6\u5185\u5bb9',
           completed: '\u5df2\u8bfb\u53d6\u5185\u5bb9',
-          error: '\u8bfb\u53d6\u5185\u5bb9\u5931\u8d25',
+          retrying: retryAttemptLabel
+            ? `\u8bfb\u53d6\u5185\u5bb9\u5931\u8d25\uff0c\u6b63\u5728${retryAttemptLabel}\u91cd\u8bd5`
+            : '\u8bfb\u53d6\u5185\u5bb9\u5931\u8d25\uff0c\u6b63\u5728\u91cd\u8bd5',
+          error: retryExhaustedLabel
+            ? `\u8bfb\u53d6\u5185\u5bb9\u5931\u8d25\uff0c${retryExhaustedLabel}\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5`
+            : '\u8bfb\u53d6\u5185\u5bb9\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5',
         },
       }
     : {
         generic: {
           running: 'Running action',
           completed: 'Action completed',
-          error: 'Action failed',
+          retrying: retryAttemptLabel
+            ? `Action failed, retrying (${retryAttemptLabel})`
+            : 'Action failed, retrying',
+          error: retryExhaustedLabel
+            ? `Action failed ${retryExhaustedLabel}, please try again later`
+            : 'Action failed, please try again later',
         },
         browser_start: {
           running: 'Opening browser',
           completed: 'Browser opened',
-          error: 'Failed to open browser',
+          retrying: retryAttemptLabel
+            ? `Failed to open browser, retrying (${retryAttemptLabel})`
+            : 'Failed to open browser, retrying',
+          error: retryExhaustedLabel
+            ? `Failed to open browser ${retryExhaustedLabel}, please try again later`
+            : 'Failed to open browser, please try again later',
         },
         browser_page: {
           running: 'Opening page',
           completed: 'Page opened',
-          error: 'Failed to open page',
+          retrying: retryAttemptLabel
+            ? `Failed to open page, retrying (${retryAttemptLabel})`
+            : 'Failed to open page, retrying',
+          error: retryExhaustedLabel
+            ? `Failed to open page ${retryExhaustedLabel}, please try again later`
+            : 'Failed to open page, please try again later',
         },
         browser: {
           running: 'Running browser action',
           completed: 'Browser action completed',
-          error: 'Browser action failed',
+          retrying: retryAttemptLabel
+            ? `Browser action failed, retrying (${retryAttemptLabel})`
+            : 'Browser action failed, retrying',
+          error: retryExhaustedLabel
+            ? `Browser action failed ${retryExhaustedLabel}, please try again later`
+            : 'Browser action failed, please try again later',
         },
         shell: {
           running: 'Running command',
           completed: 'Command completed',
-          error: 'Command failed',
+          retrying: retryAttemptLabel
+            ? `Command failed, retrying (${retryAttemptLabel})`
+            : 'Command failed, retrying',
+          error: retryExhaustedLabel
+            ? `Command failed ${retryExhaustedLabel}, please try again later`
+            : 'Command failed, please try again later',
         },
         code: {
           running: 'Editing code',
           completed: 'Code edit completed',
-          error: 'Code edit failed',
+          retrying: retryAttemptLabel
+            ? `Code edit failed, retrying (${retryAttemptLabel})`
+            : 'Code edit failed, retrying',
+          error: retryExhaustedLabel
+            ? `Code edit failed ${retryExhaustedLabel}, please try again later`
+            : 'Code edit failed, please try again later',
         },
         read: {
           running: 'Reading content',
           completed: 'Content read',
-          error: 'Read failed',
+          retrying: retryAttemptLabel
+            ? `Read failed, retrying (${retryAttemptLabel})`
+            : 'Read failed, retrying',
+          error: retryExhaustedLabel
+            ? `Read failed ${retryExhaustedLabel}, please try again later`
+            : 'Read failed, please try again later',
         },
       };
 
@@ -504,6 +616,34 @@ function formatEventStatusLabel(item: ProcessEventItem, language: string | undef
 
 function formatThinkingStatusLabel(language: string | undefined): string {
   return normalizeLocale(language) === 'zh' ? '\u6b63\u5728\u601d\u8003' : 'Thinking';
+}
+
+function formatEventPreviewLabel(item: ProcessEventItem, language: string | undefined): string | undefined {
+  const explicitPreview = item.failureMessage || item.preview;
+  if (explicitPreview) return explicitPreview;
+
+  const locale = normalizeLocale(language);
+  if (item.status === 'retrying') {
+    const retryAttemptLabel = formatRetryAttemptCount(item.retries, language);
+    return locale === 'zh'
+      ? (retryAttemptLabel
+          ? `\u6b63\u5728${retryAttemptLabel}\u91cd\u8bd5\uff0c\u7b49\u5f85\u65b0\u7684\u7ed3\u679c`
+          : '\u6b63\u5728\u91cd\u8bd5\uff0c\u7b49\u5f85\u65b0\u7684\u7ed3\u679c')
+      : (retryAttemptLabel
+          ? `Retrying (${retryAttemptLabel}) and waiting for the next result`
+          : 'Retrying and waiting for the next result');
+  }
+  if (item.status === 'running') {
+    return locale === 'zh'
+      ? '\u6b63\u5728\u5904\u7406\uff0c\u6682\u672a\u8fd4\u56de\u65b0\u7684\u8f93\u51fa'
+      : 'Working on it, no new output yet';
+  }
+  if (item.status === 'error') {
+    return locale === 'zh'
+      ? '\u5f53\u524d\u6b65\u9aa4\u672a\u6210\u529f\u5b8c\u6210'
+      : 'This step did not complete successfully';
+  }
+  return undefined;
 }
 
 export function getProcessActivityLabel(
@@ -523,9 +663,9 @@ export function getProcessActivityLabel(
     hideInternalRoutineProcesses,
     streamingTools,
   );
-  const runningEvent = [...items].reverse().find((item) => !isDirectContent(item) && item.status === 'running');
-  if (runningEvent) {
-    return formatEventStatusLabel(runningEvent, language);
+  const activeEvent = [...items].reverse().find((item) => !isDirectContent(item) && (item.status === 'retrying' || item.status === 'running'));
+  if (activeEvent) {
+    return formatEventStatusLabel(activeEvent, language);
   }
 
   const hasThinking = items.some((item) => item.kind === 'thinking');
@@ -547,10 +687,12 @@ function formatFinalResultLabel(language: string | undefined): string {
 function ProcessEventDetail({
   item,
   preferPlainText,
+  useActiveSurfaceStyle = false,
 }: {
   item: ProcessEventItem;
   /** 流式高频更新时跳过 Markdown 解析，减轻主线程卡顿 */
   preferPlainText?: boolean;
+  useActiveSurfaceStyle?: boolean;
 }) {
   if (!item.detail) return null;
 
@@ -569,15 +711,43 @@ function ProcessEventDetail({
     );
   }
 
+  if (!useActiveSurfaceStyle) {
+    return (
+      <div className="min-w-0 space-y-2">
+        {item.failureMessage && item.failureMessage !== item.detail && (
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-[12px] leading-6 text-amber-800 dark:text-amber-200">
+            {item.failureMessage}
+          </div>
+        )}
+        <pre className="max-h-[24rem] max-w-full overflow-auto rounded-xl border border-black/6 bg-black/[0.03] px-3 py-2.5 text-[12px] leading-6 text-foreground/80 dark:border-white/8 dark:bg-white/[0.03]">
+          {item.detail}
+        </pre>
+      </div>
+    );
+  }
+
   return (
-    <pre className="max-h-[24rem] max-w-full overflow-auto rounded-xl border border-black/6 bg-black/[0.03] px-3 py-2.5 text-[12px] leading-6 text-foreground/80 dark:border-white/8 dark:bg-white/[0.03]">
-      {item.detail}
-    </pre>
+    <div className="min-w-0 space-y-2">
+      {item.failureMessage && item.failureMessage !== item.detail && (
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-[12px] leading-6 text-amber-800 dark:text-amber-200">
+          {item.failureMessage}
+        </div>
+      )}
+      <pre
+        data-testid="chat-process-surface-card"
+        className="max-h-[24rem] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-[18px] border border-black/[0.06] bg-[#f5f5f6] px-4 py-3.5 text-[12.5px] leading-7 text-foreground/80 dark:border-white/[0.08] dark:bg-white/[0.045] dark:text-foreground/78"
+      >
+        {item.detail}
+      </pre>
+    </div>
   );
 }
 
 const PROCESS_EVENT_TEXT_CLASS = 'text-foreground/50 transition-colors group-hover:text-foreground';
 const PROCESS_EVENT_SUBTEXT_CLASS = 'text-foreground/42 transition-colors group-hover:text-foreground/75';
+const ACTIVE_PROCESS_EVENT_TEXT_CLASS = 'text-foreground/60 transition-colors group-hover:text-foreground/82';
+const ACTIVE_PROCESS_EVENT_SUBTEXT_CLASS = 'text-foreground/40 transition-colors group-hover:text-foreground/58';
+const ACTIVE_PROCESS_EVENT_PREVIEW_CLASS = 'text-foreground/52 transition-colors group-hover:text-foreground/72';
 
 function ProcessDirectContent({
   item,
@@ -610,6 +780,8 @@ const ProcessEventRow = memo(function ProcessEventRow({
   const autoExpandedRef = useRef(expandedByDefault && canExpand);
   const durationLabel = formatDuration(item.durationMs);
   const summaryLabel = formatEventStatusLabel(item, language);
+  const previewLabel = formatEventPreviewLabel(item, language);
+  const isActive = isActiveProcessItem(item);
 
   useEffect(() => {
     if (!canExpand) {
@@ -635,32 +807,59 @@ const ProcessEventRow = memo(function ProcessEventRow({
       <button
         type="button"
         data-testid="chat-process-event-toggle"
-        className="flex w-full items-start gap-3 px-1.5 py-1 text-left"
+        className={cn(
+          'flex w-full items-start gap-3 text-left',
+          isActive ? 'rounded-xl px-1.5 py-1.5' : 'px-1.5 py-1',
+        )}
         onClick={() => {
           if (!canExpand || expandedByDefault) return;
           setExpanded((current) => !current);
         }}
       >
-        <div className="min-w-0 flex-1 pt-[1px]">
-          <div className="flex min-w-0 items-center gap-2">
-            <span data-testid="chat-process-event-summary" className={cn('shrink-0 text-[13px] font-medium', PROCESS_EVENT_TEXT_CLASS)}>
+        {isActive ? (
+          <div className="min-w-0 flex flex-1 items-center gap-1.5 pt-[1px]">
+            <span
+              data-testid="chat-process-event-summary"
+              className={cn('shrink-0 text-[13px] font-medium', ACTIVE_PROCESS_EVENT_TEXT_CLASS)}
+            >
               {summaryLabel}
             </span>
             {durationLabel && (
-              <span className={cn('shrink-0 text-[11px]', PROCESS_EVENT_SUBTEXT_CLASS)}>
-                {durationLabel}
+              <span className={cn('shrink-0 text-[12px]', ACTIVE_PROCESS_EVENT_SUBTEXT_CLASS)}>
+                ({durationLabel})
               </span>
             )}
-            {!expanded && item.preview && (
+            {!expanded && previewLabel && (
               <span
                 data-testid="chat-process-event-preview"
-                className={cn('min-w-0 flex-1 truncate pr-2 text-[12px] leading-5', PROCESS_EVENT_TEXT_CLASS)}
+                className={cn('min-w-0 flex-1 truncate pr-2 text-[13px] leading-6', ACTIVE_PROCESS_EVENT_PREVIEW_CLASS)}
               >
-                {item.preview}
+                {previewLabel}
               </span>
             )}
           </div>
-        </div>
+        ) : (
+          <div className="min-w-0 flex-1 pt-[1px]">
+            <div className="flex min-w-0 items-center gap-2">
+              <span data-testid="chat-process-event-summary" className={cn('shrink-0 text-[13px] font-medium', PROCESS_EVENT_TEXT_CLASS)}>
+                {summaryLabel}
+              </span>
+              {durationLabel && (
+                <span className={cn('shrink-0 text-[11px]', PROCESS_EVENT_SUBTEXT_CLASS)}>
+                  {durationLabel}
+                </span>
+              )}
+              {!expanded && previewLabel && (
+                <span
+                  data-testid="chat-process-event-preview"
+                  className={cn('min-w-0 flex-1 truncate pr-2 text-[12px] leading-5', PROCESS_EVENT_TEXT_CLASS)}
+                >
+                  {previewLabel}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
         {canExpand && !expandedByDefault && (
           expanded ? (
             <ChevronDown
@@ -682,9 +881,9 @@ const ProcessEventRow = memo(function ProcessEventRow({
       {canExpand && expanded && (
         <div
           data-testid="chat-process-event-detail-panel"
-          className="mt-1 min-w-0 pl-1.5"
+          className={cn('min-w-0 pl-1.5', isActive ? 'mt-1.5' : 'mt-1')}
         >
-          <ProcessEventDetail item={item} />
+          <ProcessEventDetail item={item} useActiveSurfaceStyle={isActive} />
         </div>
       )}
     </div>
@@ -738,7 +937,7 @@ export const ProcessEventMessage = memo(function ProcessEventMessage({
             key={item.key}
             item={item}
             language={language}
-            expandedByDefault={expandAll && item.status === 'running'}
+            expandedByDefault={expandAll && isActiveProcessItem(item)}
           />
         )
       ))}

@@ -1,7 +1,15 @@
 import { invokeIpc } from '@/lib/api-client';
 import { hostApiFetch } from '@/lib/host-api';
 import { useAgentsStore } from '@/stores/agents';
-import { CHAT_HISTORY_LABEL_PREFETCH_LIMIT, CHAT_HISTORY_RPC_TIMEOUT_MS, getCanonicalPrefixFromSessions, getMessageText, toMs } from './helpers';
+import {
+  CHAT_HISTORY_LABEL_PREFETCH_LIMIT,
+  CHAT_HISTORY_RPC_TIMEOUT_MS,
+  getCanonicalPrefixFromSessions,
+  getMessageText,
+  hasStoredSessionLabel,
+  isUnusedDraftSession,
+  toMs,
+} from './helpers';
 import { DEFAULT_CANONICAL_PREFIX, DEFAULT_SESSION_KEY, type ChatSession, type RawMessage } from './types';
 import type { ChatGet, ChatSet, SessionHistoryActions } from './store-api';
 
@@ -57,23 +65,6 @@ function normalizeSessionModelRef(model: unknown, modelProvider: unknown): strin
     return normalizedModel;
   }
   return `${normalizedProvider}/${normalizedModel}`;
-}
-
-function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boolean {
-  const session = sessions.find((entry) => entry.key === sessionKey);
-  return typeof session?.label === 'string' && session.label.trim().length > 0;
-}
-
-function isUnusedDraftSession(
-  state: Pick<ReturnType<ChatGet>, 'currentSessionKey' | 'messages' | 'sessions' | 'sessionLabels' | 'sessionLastActivity'>,
-  sessionKey: string,
-): boolean {
-  return !sessionKey.endsWith(':main')
-    && state.currentSessionKey === sessionKey
-    && state.messages.length === 0
-    && !state.sessionLastActivity[sessionKey]
-    && !state.sessionLabels[sessionKey]
-    && !hasStoredSessionLabel(state.sessions, sessionKey);
 }
 
 export function createSessionActions(

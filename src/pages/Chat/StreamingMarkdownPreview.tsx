@@ -208,7 +208,7 @@ function renderInlineContent(text: string, trailingCursor = false): ReactNode[] 
     const key = `${token.kind}-${index}`;
     const isLast = index === tokens.length - 1;
     const cursor = trailingCursor && isLast
-      ? <span className="ml-0.5 inline-block h-4 w-2 animate-pulse rounded-sm bg-foreground/45 align-[-2px]" />
+      ? <span data-testid="chat-streaming-cursor" className="ml-0.5 inline-block h-4 w-2 animate-pulse rounded-sm bg-foreground/45 align-[-2px]" />
       : null;
 
     if (token.kind === 'strong') {
@@ -299,7 +299,7 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
               className="max-w-full overflow-x-auto rounded-2xl border border-black/5 bg-black/[0.025] px-3.5 py-3 text-[12px] leading-6 text-foreground/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] dark:border-white/7 dark:bg-white/[0.025]"
             >
               {block.text}
-              {showCursor ? <span className="ml-0.5 inline-block h-4 w-2 animate-pulse rounded-sm bg-foreground/45 align-[-2px]" /> : null}
+              {showCursor ? <span data-testid="chat-streaming-cursor" className="ml-0.5 inline-block h-4 w-2 animate-pulse rounded-sm bg-foreground/45 align-[-2px]" /> : null}
             </pre>
           );
         }

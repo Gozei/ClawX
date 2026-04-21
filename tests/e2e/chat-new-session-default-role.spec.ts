@@ -161,6 +161,7 @@ test.describe('Chat new session default role', () => {
 
       await page.getByTestId('sidebar-new-chat').click();
       await expect(page.getByTestId('chat-toolbar-current-agent-name')).toHaveText('Main Role');
+      await expect(page.getByTestId('chat-welcome-title')).toBeVisible({ timeout: 5_000 });
     } finally {
       try {
         const page = await getStableWindow(app);

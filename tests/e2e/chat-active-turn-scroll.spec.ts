@@ -276,25 +276,6 @@ async function openSeededSession(page: Page): Promise<void> {
   await sessionRow.click();
 }
 
-async function measureActiveTurnAlignment(page: Page): Promise<{ delta: number; scrollTop: number } | null> {
-  return await page.evaluate(() => {
-    const scrollContainer = document.querySelector('[data-testid="chat-scroll-container"]') as HTMLElement | null;
-    const anchor = document.querySelector('[data-testid="chat-active-turn-anchor"]') as HTMLElement | null;
-
-    if (!scrollContainer || !anchor) {
-      return null;
-    }
-
-    const scrollRect = scrollContainer.getBoundingClientRect();
-    const anchorRect = anchor.getBoundingClientRect();
-
-    return {
-      delta: Number((anchorRect.top - scrollRect.top).toFixed(2)),
-      scrollTop: scrollContainer.scrollTop,
-    };
-  });
-}
-
 async function measureScrollTop(page: Page): Promise<number> {
   return await page.evaluate(() => {
     const scrollContainer = document.querySelector('[data-testid="chat-scroll-container"]') as HTMLElement | null;
@@ -314,7 +295,7 @@ async function measureDistanceFromBottom(page: Page): Promise<number | null> {
 }
 
 test.describe('Chat active turn scroll', () => {
-  test('keeps a newly sent turn pinned to the top of the chat viewport', async ({ homeDir, launchElectronApp }) => {
+  test('keeps a newly sent turn pinned near the bottom of the chat viewport', async ({ homeDir, launchElectronApp }) => {
     test.setTimeout(240_000);
 
     await seedSession(homeDir);
@@ -357,13 +338,19 @@ test.describe('Chat active turn scroll', () => {
 
       await expect(page.getByTestId('chat-active-turn-anchor')).toBeVisible({ timeout: 20_000 });
 
-      let alignment: { delta: number; scrollTop: number } | null = null;
       await expect.poll(async () => {
-        alignment = await measureActiveTurnAlignment(page);
-        return alignment ? Math.abs(alignment.delta) <= 2 : false;
+        const distanceFromBottom = await measureDistanceFromBottom(page);
+        return distanceFromBottom != null ? Math.abs(distanceFromBottom) <= 2 : false;
       }, { timeout: 10_000 }).toBe(true);
 
-      expect(alignment?.scrollTop ?? 0).toBeGreaterThan(0);
+      await expect.poll(async () => (
+        await page.evaluate(() => document.body.innerText.includes('reply:model-scroll'))
+      ), { timeout: 20_000 }).toBe(true);
+
+      await expect.poll(async () => {
+        const distanceFromBottom = await measureDistanceFromBottom(page);
+        return distanceFromBottom != null ? Math.abs(distanceFromBottom) <= 18 : false;
+      }, { timeout: 10_000 }).toBe(true);
 
       const beforeManualScrollTop = await measureScrollTop(page);
       await scrollContainer.hover();

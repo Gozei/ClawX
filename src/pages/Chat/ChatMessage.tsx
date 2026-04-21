@@ -3,7 +3,7 @@
  * Renders user / assistant / system / toolresult messages
  * with markdown, thinking sections, images, and tool cards.
  */
-import { useState, useCallback, useEffect, useMemo, memo, lazy, Suspense } from 'react';
+import { useState, useCallback, useEffect, useMemo, memo } from 'react';
 import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { FileTypeIcon } from './file-icon';
 import { getFileVisual } from './file-visual';
@@ -12,13 +12,14 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { invokeIpc } from '@/lib/api-client';
 import { useBranding } from '@/lib/branding';
-import type { RawMessage, AttachedFileMeta } from '@/stores/chat';
+import { useChatStore, type RawMessage, type AttachedFileMeta } from '@/stores/chat';
 import { useProviderStore } from '@/stores/providers';
 import { useSettingsStore, type AssistantMessageStyle } from '@/stores/settings';
 import type { ProviderAccount } from '@/lib/providers';
 import { buildProviderListItems } from '@/lib/provider-accounts';
 import { extractText, extractThinking, extractImages, extractToolUse, formatTimestamp } from './message-utils';
 import { StreamingMarkdownPreview } from './StreamingMarkdownPreview';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface ChatMessageProps {
   message: RawMessage;
@@ -31,9 +32,10 @@ interface ChatMessageProps {
     id?: string;
     toolCallId?: string;
     name: string;
-    status: 'running' | 'completed' | 'error';
+    status: 'running' | 'retrying' | 'completed' | 'error';
     durationMs?: number;
     summary?: string;
+    failureMessage?: string;
   }>;
 }
 
@@ -64,8 +66,6 @@ function getRuntimeProviderKey(account: ProviderAccount): string {
 }
 
 const messageSignatureCache = new WeakMap<RawMessage, string>();
-const MarkdownRenderer = lazy(() => import('./MarkdownRenderer').then((module) => ({ default: module.MarkdownRenderer })));
-
 function buildMessageSignature(message: RawMessage): string {
   const cached = messageSignatureCache.get(message);
   if (cached) return cached;
@@ -109,6 +109,7 @@ function areStreamingToolsEqual(
       || prev?.status !== next?.status
       || prev?.durationMs !== next?.durationMs
       || prev?.summary !== next?.summary
+      || prev?.failureMessage !== next?.failureMessage
     ) {
       return false;
     }
@@ -195,6 +196,9 @@ export const ChatMessage = memo(function ChatMessage({
   const providerStatuses = useProviderStore((state) => state.statuses);
   const providerVendors = useProviderStore((state) => state.vendors);
   const providerDefaultAccountId = useProviderStore((state) => state.defaultAccountId);
+  const currentSessionKey = useChatStore((state) => state.currentSessionKey);
+  const sessionModels = useChatStore((state) => state.sessionModels);
+  const sessions = useChatStore((state) => state.sessions);
   const usesAssistantStreamStyle = !isUser && assistantMessageStyle === 'stream';
   const visibleThinking = showThinking ? thinking : null;
   const visibleTools = useMemo(() => (
@@ -225,9 +229,19 @@ export const ChatMessage = memo(function ChatMessage({
     () => getMessageModelRef(message),
     [message],
   );
+  const fallbackSessionModelRef = useMemo(() => {
+    if (isUser || !currentSessionKey) return '';
+    const sessionModelRef = sessionModels?.[currentSessionKey]?.trim();
+    if (sessionModelRef) {
+      return sessionModelRef;
+    }
+    const matchedSessionModel = sessions?.find((session) => session.key === currentSessionKey)?.model?.trim();
+    return matchedSessionModel || '';
+  }, [currentSessionKey, isUser, sessionModels, sessions]);
+  const effectiveModelRef = messageModelRef || fallbackSessionModelRef;
   const currentModelLabel = useMemo(
-    () => modelOptions.find((option) => option.value === messageModelRef)?.label || messageModelRef,
-    [messageModelRef, modelOptions],
+    () => modelOptions.find((option) => option.value === effectiveModelRef)?.label || effectiveModelRef,
+    [effectiveModelRef, modelOptions],
   );
 
   const attachedFiles = useMemo(() => message._attachedFiles || [], [message._attachedFiles]);
@@ -236,8 +250,11 @@ export const ChatMessage = memo(function ChatMessage({
   // Never render tool result messages in chat UI
   if (isToolResult) return null;
 
-  const hasStreamingToolStatus = isStreaming && chatProcessDisplayMode === 'all' && streamingTools.length > 0;
-  if (!hasText && !visibleThinking && images.length === 0 && visibleTools.length === 0 && attachedFiles.length === 0 && !hasStreamingToolStatus) return null;
+  const shouldShowStreamingToolStatus = isStreaming
+    && chatProcessDisplayMode === 'all'
+    && assistantMessageStyle === 'bubble'
+    && streamingTools.length > 0;
+  if (!hasText && !visibleThinking && images.length === 0 && visibleTools.length === 0 && attachedFiles.length === 0 && !shouldShowStreamingToolStatus) return null;
   const showsAssistantBrandHeader = !isUser && !hideAvatar;
 
   if (showsAssistantBrandHeader) {
@@ -245,7 +262,6 @@ export const ChatMessage = memo(function ChatMessage({
       <div
         data-testid="chat-assistant-message-shell"
         className="group min-w-0 max-w-full space-y-3.5"
-        style={isStreaming ? undefined : { contentVisibility: 'auto', containIntrinsicSize: '160px' }}
       >
         <div
           data-testid="chat-assistant-brand-header"
@@ -279,7 +295,7 @@ export const ChatMessage = memo(function ChatMessage({
             constrainWidth && !usesAssistantStreamStyle && 'max-w-[80%]',
           )}
         >
-          {isStreaming && streamingTools.length > 0 && (
+          {shouldShowStreamingToolStatus && (
             <ToolStatusBar tools={streamingTools} />
           )}
 
@@ -374,7 +390,6 @@ export const ChatMessage = memo(function ChatMessage({
         'group flex min-w-0 max-w-full gap-3',
         isUser ? 'flex-row-reverse' : 'flex-row',
       )}
-      style={isStreaming ? undefined : { contentVisibility: 'auto', containIntrinsicSize: '160px' }}
     >
       {/* Avatar */}
       {!isUser && (!hideAvatar || reserveAvatarSpace) && (
@@ -421,7 +436,7 @@ export const ChatMessage = memo(function ChatMessage({
           </div>
         )}
 
-        {isStreaming && !isUser && streamingTools.length > 0 && (
+        {shouldShowStreamingToolStatus && !isUser && (
           <ToolStatusBar tools={streamingTools} />
         )}
 
@@ -568,35 +583,40 @@ const ToolStatusBar = memo(function ToolStatusBar({
     id?: string;
     toolCallId?: string;
     name: string;
-    status: 'running' | 'completed' | 'error';
+    status: 'running' | 'retrying' | 'completed' | 'error';
     durationMs?: number;
     summary?: string;
+    failureMessage?: string;
   }>;
 }) {
   return (
-    <div className="w-full space-y-1">
+    <div data-testid="chat-tool-status-bar" className="w-full space-y-1">
       {tools.map((tool) => {
         const duration = formatDuration(tool.durationMs);
         const isRunning = tool.status === 'running';
+        const isRetrying = tool.status === 'retrying';
         const isError = tool.status === 'error';
         return (
           <div
             key={tool.toolCallId || tool.id || tool.name}
+            data-testid="chat-tool-status-pill"
             className={cn(
               'flex items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors',
               isRunning && 'border-primary/30 bg-primary/5 text-foreground',
-              !isRunning && !isError && 'border-border/50 bg-muted/20 text-muted-foreground',
+              isRetrying && 'border-amber-500/30 bg-amber-500/8 text-amber-700 dark:text-amber-300',
+              !isRunning && !isRetrying && !isError && 'border-border/50 bg-muted/20 text-muted-foreground',
               isError && 'border-destructive/30 bg-destructive/5 text-destructive',
             )}
           >
             {isRunning && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />}
-            {!isRunning && !isError && <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />}
+            {isRetrying && <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600 dark:text-amber-300 shrink-0" />}
+            {!isRunning && !isRetrying && !isError && <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />}
             {isError && <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0" />}
             <Wrench className="h-3 w-3 shrink-0 opacity-60" />
             <span className="font-mono text-[12px] font-medium">{tool.name}</span>
             {duration && <span className="text-[11px] opacity-60">{tool.summary ? `(${duration})` : duration}</span>}
-            {tool.summary && (
-              <span className="truncate text-[11px] opacity-70">{tool.summary}</span>
+            {(tool.failureMessage || tool.summary) && (
+              <span className="truncate text-[11px] opacity-70">{tool.failureMessage || tool.summary}</span>
             )}
           </div>
         );
@@ -632,7 +652,7 @@ const MessageHoverBar = memo(function MessageHoverBar({
   return (
     <div
       className={cn(
-        'flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 select-none text-muted-foreground',
+        'invisible pointer-events-none flex items-center gap-2 select-none text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:visible group-hover:pointer-events-auto group-hover:opacity-100',
         isAssistant ? 'self-start' : 'self-end',
       )}
     >
@@ -703,11 +723,6 @@ const MessageBubble = memo(function MessageBubble({
   assistantMessageStyle: AssistantMessageStyle;
 }) {
   const usesAssistantStreamStyle = !isUser && assistantMessageStyle === 'stream';
-  const markdownFallback = (
-    <p className="min-w-0 whitespace-pre-wrap break-words leading-[1.82] [overflow-wrap:anywhere]" style={{ fontSize }}>
-      {text}
-    </p>
-  );
 
   return (
     <div
@@ -741,38 +756,36 @@ const MessageBubble = memo(function MessageBubble({
         </div>
       ) : (
         <div className={cn('chat-markdown prose prose-sm dark:prose-invert min-w-0 max-w-none break-words leading-[1.82]', usesAssistantStreamStyle && '[&>*]:my-3 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0')} style={{ fontSize }}>
-          <Suspense fallback={markdownFallback}>
-            <MarkdownRenderer
-              content={text}
-              components={{
-                code({ className, children, ...props }) {
-                  const match = /language-(\w+)/.exec(className || '');
-                  const isInline = !match && !className;
-                  if (isInline) {
-                    return (
-                      <code className="rounded bg-background/50 px-1.5 py-0.5 text-sm font-mono break-words [overflow-wrap:anywhere]" {...props}>
-                        {children}
-                      </code>
-                    );
-                  }
+          <MarkdownRenderer
+            content={text}
+            components={{
+              code({ className, children, ...props }) {
+                const match = /language-(\w+)/.exec(className || '');
+                const isInline = !match && !className;
+                if (isInline) {
                   return (
-                    <pre className="max-w-full overflow-x-auto rounded-lg bg-background/50 p-4">
-                      <code className={cn('text-sm font-mono', className)} {...props}>
-                        {children}
-                      </code>
-                    </pre>
-                  );
-                },
-                a({ href, children }) {
-                  return (
-                    <a href={href} target="_blank" rel="noopener noreferrer" className="break-words text-primary hover:underline [overflow-wrap:anywhere]">
+                    <code className="rounded bg-background/50 px-1.5 py-0.5 text-sm font-mono break-words [overflow-wrap:anywhere]" {...props}>
                       {children}
-                    </a>
+                    </code>
                   );
-                },
-              }}
-            />
-          </Suspense>
+                }
+                return (
+                  <pre className="max-w-full overflow-x-auto rounded-lg bg-background/50 p-4">
+                    <code className={cn('text-sm font-mono', className)} {...props}>
+                      {children}
+                    </code>
+                  </pre>
+                );
+              },
+              a({ href, children }) {
+                return (
+                  <a href={href} target="_blank" rel="noopener noreferrer" className="break-words text-primary hover:underline [overflow-wrap:anywhere]">
+                    {children}
+                  </a>
+                );
+              },
+            }}
+          />
         </div>
       )}
 
@@ -802,9 +815,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ content }: { content: string
       {expanded && (
         <div className="min-w-0 px-3 pb-3 text-muted-foreground">
           <div className="chat-markdown prose prose-sm dark:prose-invert min-w-0 max-w-none opacity-75">
-            <Suspense fallback={<p className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{content}</p>}>
-              <MarkdownRenderer content={content} />
-            </Suspense>
+            <MarkdownRenderer content={content} />
           </div>
         </div>
       )}

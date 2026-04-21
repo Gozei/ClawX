@@ -134,6 +134,37 @@ describe('ChatMessage', () => {
     expect(screen.getByTestId('chat-message-model-label')).toHaveTextContent('JD Provider / gpt-5.4');
   });
 
+  it('falls back to the current session model label when the assistant message lacks model metadata', () => {
+    const message: RawMessage = {
+      id: 'assistant-model-fallback-1',
+      role: 'assistant',
+      content: 'Recent completed reply without explicit provider metadata.',
+      timestamp: 1712123456,
+    };
+
+    render(<ChatMessage message={message} showThinking={false} />);
+
+    expect(screen.getByTestId('chat-message-model-label')).toHaveTextContent('JD Provider / gpt-5.4');
+  });
+
+  it('keeps the hover metadata row non-interactive until the message is hovered', () => {
+    const message: RawMessage = {
+      id: 'user-hover-1',
+      role: 'user',
+      content: 'Hover row should not intercept scrolling while hidden.',
+      timestamp: 1712123456,
+    };
+
+    render(<ChatMessage message={message} showThinking={false} />);
+
+    const copyButton = screen.getByTestId('chat-message-copy-user');
+    const hoverRow = copyButton.parentElement;
+
+    expect(hoverRow).toHaveClass('invisible');
+    expect(hoverRow).toHaveClass('pointer-events-none');
+    expect(hoverRow).toHaveClass('group-hover:pointer-events-auto');
+  });
+
   it('shows the product name above ordinary assistant replies when the avatar is visible', () => {
     const message: RawMessage = {
       id: 'assistant-brand-1',
@@ -145,6 +176,10 @@ describe('ChatMessage', () => {
     render(<ChatMessage message={message} showThinking={false} />);
 
     expect(screen.getByTestId('chat-assistant-message-shell')).toHaveClass('space-y-3.5');
+    expect(screen.getByTestId('chat-assistant-message-shell')).not.toHaveStyle({
+      contentVisibility: 'auto',
+      containIntrinsicSize: '160px',
+    });
     expect(screen.getByTestId('chat-assistant-brand-name')).toHaveTextContent('Deep AI Worker');
     expect(screen.getByTestId('chat-message-content-assistant')).toHaveClass('space-y-2.5');
     expect(screen.getByTestId('chat-assistant-brand-header')).not.toHaveClass('ml-11');
@@ -221,6 +256,36 @@ describe('ChatMessage', () => {
     expect(screen.getByTestId('chat-message-content-assistant')).not.toHaveClass('max-w-[80%]');
   });
 
+  it('does not render the legacy tool status pills in stream mode', () => {
+    settingsState.assistantMessageStyle = 'stream';
+
+    const message: RawMessage = {
+      id: 'assistant-stream-tools-1',
+      role: 'assistant',
+      content: 'Searching flights now...',
+    };
+
+    render(
+      <ChatMessage
+        message={message}
+        showThinking={false}
+        isStreaming
+        streamingTools={[
+          {
+            id: 'browser-stream-pill-1',
+            toolCallId: 'browser-stream-pill-1',
+            name: 'browser',
+            status: 'running',
+            summary: 'Opening Ctrip homepage',
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByTestId('chat-tool-status-bar')).not.toBeInTheDocument();
+    expect(screen.getByText('Searching flights now...')).toBeInTheDocument();
+  });
+
   it('lightly formats markdown markers while the assistant reply is still streaming', () => {
     settingsState.assistantMessageStyle = 'stream';
 
@@ -235,6 +300,7 @@ describe('ChatMessage', () => {
     expect(screen.getByText('Section')).toBeInTheDocument();
     expect(screen.getByText('1.')).toBeInTheDocument();
     expect(screen.getByText('AI and Models')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-streaming-cursor')).toBeInTheDocument();
     expect(screen.queryByText('### Section')).not.toBeInTheDocument();
     expect(screen.queryByText('**AI and Models**')).not.toBeInTheDocument();
   });

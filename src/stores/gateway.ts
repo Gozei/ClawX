@@ -249,6 +249,257 @@ function shouldDeferCompletedHistoryRefresh(state: {
   return !!state.activeTurnBuffer?.hasAnyStreamContent;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function parseFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function stringifyGatewayPayload(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((entry) => stringifyGatewayPayload(entry))
+      .filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+    return parts.length > 0 ? parts.join('\n') : undefined;
+  }
+
+  const record = asRecord(value);
+  if (record) {
+    for (const key of ['text', 'summary', 'progressText', 'output', 'content', 'message', 'title', 'error']) {
+      const nested = stringifyGatewayPayload(record[key]);
+      if (nested) return nested;
+    }
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+
+  if (value == null) return undefined;
+  return String(value);
+}
+
+function buildPatchSummaryText(data: Record<string, unknown>): string | undefined {
+  const added = Array.isArray(data.added)
+    ? data.added.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+  const modified = Array.isArray(data.modified)
+    ? data.modified.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+  const deleted = Array.isArray(data.deleted)
+    ? data.deleted.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+
+  const parts: string[] = [];
+  if (added.length > 0) parts.push(`${added.length} added`);
+  if (modified.length > 0) parts.push(`${modified.length} modified`);
+  if (deleted.length > 0) parts.push(`${deleted.length} deleted`);
+  return parts.length > 0 ? parts.join(', ') : undefined;
+}
+
+function resolveAgentStreamToolStatus(stream: string | undefined, data: Record<string, unknown>): string | undefined {
+  const directStatus = readNonEmptyString(data.status);
+  if (directStatus) return directStatus;
+
+  const phase = readNonEmptyString(data.phase)?.toLowerCase();
+  if (phase === 'end' || phase === 'done' || phase === 'completed') {
+    return 'completed';
+  }
+  if (phase === 'error' || phase === 'failed') {
+    return 'error';
+  }
+  if (phase === 'start' || phase === 'update' || phase === 'delta') {
+    return 'running';
+  }
+
+  if (stream === 'command_output') return 'running';
+  return undefined;
+}
+
+function resolveAgentStreamToolName(stream: string | undefined, data: Record<string, unknown>): string | undefined {
+  const explicitName = readNonEmptyString(data.name);
+  const kind = readNonEmptyString(data.kind)?.toLowerCase();
+
+  if (stream === 'command_output') return 'command';
+  if (stream === 'patch') return 'apply_patch';
+  if (kind === 'command') return 'command';
+  if (kind === 'patch') return 'apply_patch';
+  if (kind === 'tool') return explicitName ?? 'tool';
+  if (explicitName) return explicitName;
+  return kind;
+}
+
+function resolveAgentStreamToolSummary(stream: string | undefined, data: Record<string, unknown>): string | undefined {
+  const patchSummary = stream === 'patch' ? buildPatchSummaryText(data) : undefined;
+  const candidates = [
+    patchSummary,
+    stringifyGatewayPayload(data.progressText),
+    stringifyGatewayPayload(data.summary),
+    stringifyGatewayPayload(data.output),
+    stringifyGatewayPayload(data.title),
+    stringifyGatewayPayload(data.error),
+    stringifyGatewayPayload(data.partialResult),
+    stringifyGatewayPayload(data.result),
+    stringifyGatewayPayload(data.message),
+  ];
+  return candidates.find((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+}
+
+function resolveAgentStreamToolDurationMs(data: Record<string, unknown>): number | undefined {
+  const direct = parseFiniteNumber(data.durationMs ?? data.duration);
+  if (direct !== undefined) return direct;
+
+  const startedAt = parseFiniteNumber(data.startedAt);
+  const endedAt = parseFiniteNumber(data.endedAt);
+  if (startedAt !== undefined && endedAt !== undefined && endedAt >= startedAt) {
+    return endedAt - startedAt;
+  }
+  return undefined;
+}
+
+function buildSyntheticAssistantDeltaMessage(text: string): Record<string, unknown> {
+  return {
+    role: 'assistant',
+    content: [
+      {
+        type: 'text',
+        text,
+      },
+    ],
+    timestamp: Date.now(),
+  };
+}
+
+function buildSyntheticToolProgressMessage(params: {
+  toolCallId?: string;
+  toolName?: string;
+  status?: string;
+  summary?: string;
+  error?: string;
+  durationMs?: number;
+}): Record<string, unknown> {
+  return {
+    role: 'toolresult',
+    ...(params.toolCallId ? { toolCallId: params.toolCallId } : {}),
+    ...(params.toolName ? { toolName: params.toolName } : {}),
+    ...(params.status ? { status: params.status } : {}),
+    ...(params.durationMs != null ? { durationMs: params.durationMs } : {}),
+    ...(params.error ? { error: params.error } : {}),
+    content: params.summary ?? '',
+    timestamp: Date.now(),
+  };
+}
+
+function normalizeGatewayAgentEvent(params: Record<string, unknown>): Record<string, unknown> | null {
+  const data = asRecord(params.data) ?? {};
+  const runId = params.runId ?? data.runId;
+  const sessionKey = params.sessionKey ?? data.sessionKey;
+  const stream = params.stream ?? data.stream;
+  const seq = params.seq ?? data.seq;
+  const state = params.state ?? data.state;
+  const message = params.message ?? data.message;
+  const errorMessage = params.errorMessage ?? data.errorMessage ?? data.error;
+
+  if (state != null || message != null || errorMessage != null) {
+    return {
+      ...data,
+      runId,
+      sessionKey,
+      stream,
+      seq,
+      state,
+      message,
+      errorMessage,
+    };
+  }
+
+  const normalizedStream = readNonEmptyString(stream);
+
+  if (normalizedStream === 'assistant') {
+    const text = readNonEmptyString(data.text);
+    if (!text) return null;
+    return {
+      runId,
+      sessionKey,
+      stream: normalizedStream,
+      seq,
+      state: 'delta',
+      message: buildSyntheticAssistantDeltaMessage(text),
+    };
+  }
+
+  if (
+    normalizedStream === 'tool'
+    || normalizedStream === 'item'
+    || normalizedStream === 'command_output'
+    || normalizedStream === 'patch'
+  ) {
+    const toolCallId = readNonEmptyString(data.toolCallId) ?? readNonEmptyString(data.itemId);
+    const toolName = resolveAgentStreamToolName(normalizedStream, data);
+    const status = resolveAgentStreamToolStatus(normalizedStream, data);
+    const summary = resolveAgentStreamToolSummary(normalizedStream, data);
+    const error = readNonEmptyString(data.error) ?? (status === 'error' ? summary : undefined);
+    const durationMs = resolveAgentStreamToolDurationMs(data);
+
+    if (!toolCallId && !toolName && !summary && !error) {
+      return null;
+    }
+
+    return {
+      runId,
+      sessionKey,
+      stream: normalizedStream,
+      seq,
+      state: 'delta',
+      message: buildSyntheticToolProgressMessage({
+        toolCallId,
+        toolName,
+        status,
+        summary,
+        error,
+        durationMs,
+      }),
+    };
+  }
+
+  if (normalizedStream === 'lifecycle') {
+    const phase = readNonEmptyString(data.phase)?.toLowerCase();
+    if (phase === 'error') {
+      return {
+        runId,
+        sessionKey,
+        stream: normalizedStream,
+        seq,
+        state: 'error',
+        errorMessage: readNonEmptyString(data.error) ?? readNonEmptyString(data.message) ?? 'Agent run failed',
+      };
+    }
+  }
+
+  return null;
+}
+
 function handleGatewayNotification(notification: { method?: string; params?: Record<string, unknown> } | undefined): void {
   const payload = notification;
   if (!payload || payload.method !== 'agent' || !payload.params || typeof payload.params !== 'object') {
@@ -256,20 +507,11 @@ function handleGatewayNotification(notification: { method?: string; params?: Rec
   }
 
   const p = payload.params;
-  const data = (p.data && typeof p.data === 'object') ? (p.data as Record<string, unknown>) : {};
+  const data = asRecord(p.data) ?? {};
   const phase = data.phase ?? p.phase;
-  const hasChatData = (p.state ?? data.state) || (p.message ?? data.message);
+  const normalizedEvent = normalizeGatewayAgentEvent(p);
 
-  if (hasChatData) {
-    const normalizedEvent: Record<string, unknown> = {
-      ...data,
-      runId: p.runId ?? data.runId,
-      sessionKey: p.sessionKey ?? data.sessionKey,
-      stream: p.stream ?? data.stream,
-      seq: p.seq ?? data.seq,
-      state: p.state ?? data.state,
-      message: p.message ?? data.message,
-    };
+  if (normalizedEvent) {
     if (shouldProcessGatewayEvent(normalizedEvent)) {
       import('./chat')
         .then(({ useChatStore }) => {
