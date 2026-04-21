@@ -1,7 +1,7 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { SkillDetailPage, Skills } from '../../src/pages/Skills';
 import type { MarketplaceSkillDetail, SkillDetail, SkillSnapshot, SkillSource } from '../../src/types/skill';
 
@@ -17,7 +17,6 @@ const fetchSourcesMock = vi.fn();
 const fetchMarketplaceSourceCountsMock = vi.fn();
 const fetchMarketInstalledSkillsMock = vi.fn();
 const loadMoreSearchResultsMock = vi.fn();
-const newSessionMock = vi.fn();
 
 const { gatewayState, skillsState, marketplaceSheetState, toastMocks } = vi.hoisted(() => ({
   gatewayState: {
@@ -50,12 +49,6 @@ const { gatewayState, skillsState, marketplaceSheetState, toastMocks } = vi.hois
 
 vi.mock('@/stores/gateway', () => ({
   useGatewayStore: (selector: (state: typeof gatewayState) => unknown) => selector(gatewayState),
-}));
-
-vi.mock('@/stores/chat', () => ({
-  useChatStore: (selector: (state: { newSession: typeof newSessionMock }) => unknown) => selector({
-    newSession: newSessionMock,
-  }),
 }));
 
 vi.mock('@/stores/skills', () => ({
@@ -114,9 +107,6 @@ vi.mock('react-i18next', () => ({
       if (key === 'toolbar.filtersWithCount') {
         return `filters ${options?.count ?? 0}`;
       }
-      if (key === 'guide.createPrompt') {
-        return 'localized create prompt';
-      }
       return options?.defaultValue ?? key;
     },
   }),
@@ -133,7 +123,7 @@ vi.mock('sonner', () => ({
 vi.mock('../../src/pages/Skills/components/SkillMarketplaceSheet', () => ({
   SkillMarketplaceSheet: (props: Record<string, unknown>) => {
     marketplaceSheetState.latestProps = props;
-    return null;
+    return props.open ? <div data-testid="skills-marketplace-panel" /> : null;
   },
 }));
 
@@ -141,19 +131,9 @@ vi.mock('../../src/pages/Skills/components/SkillDetailContent', () => ({
   SkillDetailContent: () => <div data-testid="skill-detail-content" />,
 }));
 
-function ChatPrefillStateProbe() {
-  const location = useLocation();
-  return (
-    <div data-testid="chat-prefill-state">
-      {JSON.stringify(location.state)}
-    </div>
-  );
-}
-
 describe('Skills page route state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    newSessionMock.mockReset();
     gatewayState.status.state = 'running';
     skillsState.skills = [
       {
@@ -237,7 +217,7 @@ describe('Skills page route state', () => {
     marketplaceSheetState.latestProps = null;
   });
 
-  it('fetches marketplace source counts after loading skill sources', async () => {
+  it('fetches marketplace source counts only after opening the marketplace', async () => {
     render(
       <MemoryRouter initialEntries={['/skills']}>
         <Routes>
@@ -247,29 +227,18 @@ describe('Skills page route state', () => {
     );
 
     await waitFor(() => {
-      expect(fetchMarketplaceSourceCountsMock).toHaveBeenCalledTimes(1);
+      expect(fetchSourcesMock).toHaveBeenCalledTimes(1);
     });
-  });
-
-  it('starts a new chat and passes the skill creation prefill when create is clicked', async () => {
-    render(
-      <MemoryRouter initialEntries={['/skills']}>
-        <Routes>
-          <Route path="/skills" element={<Skills />} />
-          <Route path="/" element={<ChatPrefillStateProbe />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    expect(fetchMarketplaceSourceCountsMock).not.toHaveBeenCalled();
 
     await act(async () => {
-      screen.getByTestId('skills-create-button').click();
+      screen.getByTestId('skills-discover-button').click();
       await Promise.resolve();
     });
 
-    expect(newSessionMock).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('chat-prefill-state')).toHaveTextContent(
-      'localized create prompt',
-    );
+    await waitFor(() => {
+      expect(fetchMarketplaceSourceCountsMock).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('hydrates the list search and filters from the URL', () => {
@@ -334,7 +303,7 @@ describe('Skills page route state', () => {
     await waitFor(() => expect(fetchSkillsMock).toHaveBeenCalledTimes(2));
   });
 
-  it('shows a marketplace success CTA and keeps detail inside the marketplace window', async () => {
+  it('shows a marketplace success CTA and opens the marketplace detail page in place', async () => {
     render(
       <MemoryRouter initialEntries={['/skills']}>
         <Routes>
@@ -349,17 +318,11 @@ describe('Skills page route state', () => {
     });
 
     expect((marketplaceSheetState.latestProps as { open?: boolean } | null)?.open).toBe(true);
-
-    expect((marketplaceSheetState.latestProps as { sourceCounts?: Record<string, number | null> } | null)?.sourceCounts).toEqual({
-      clawhub: 55550,
-      deepaiworker: 10638,
-    });
+    expect(screen.getByTestId('skills-marketplace-panel')).toBeInTheDocument();
 
     const marketplaceProps = marketplaceSheetState.latestProps as null | {
       onInstall?: (slug: string, version?: string, sourceId?: string, force?: boolean) => void;
-      onViewInstalledSkill?: (slug: string) => void;
       onSelectMarketplaceSkill?: (slug: string, sourceId?: string) => void;
-      marketplaceNotice?: { type: string; slug: string; name?: string } | null;
     };
 
     expect(marketplaceProps?.onInstall).toBeTypeOf('function');
@@ -371,14 +334,11 @@ describe('Skills page route state', () => {
 
     expect(installSkillMock).toHaveBeenCalledWith('beta', '1.0.0', 'clawhub', false);
     expect(enableSkillMock).toHaveBeenCalledWith('beta');
+    expect(toastMocks.success).toHaveBeenCalledWith('marketplace.installSuccessDescription');
 
     const updatedMarketplaceProps = marketplaceSheetState.latestProps as null | {
-      onViewInstalledSkill?: (slug: string) => void;
       onSelectMarketplaceSkill?: (slug: string, sourceId?: string) => void;
-      marketplaceNotice?: { type: string; slug: string; name?: string } | null;
     };
-    expect(updatedMarketplaceProps?.marketplaceNotice?.slug).toBe('beta');
-    expect(updatedMarketplaceProps?.marketplaceNotice?.type).toBe('installed');
 
     await act(async () => {
       updatedMarketplaceProps?.onSelectMarketplaceSkill?.('beta', 'clawhub');
@@ -386,10 +346,11 @@ describe('Skills page route state', () => {
     });
 
     await waitFor(() => {
-      expect(marketplaceSheetState.latestProps).toMatchObject({
-        selectedMarketplaceSkill: { slug: 'beta', sourceId: 'clawhub' },
-      });
+      expect(fetchMarketplaceSkillDetailMock).toHaveBeenCalledWith('beta', 'clawhub');
     });
+    expect(screen.getByTestId('skills-marketplace-detail-page')).toBeInTheDocument();
+    expect(screen.getByTestId('skills-marketplace-detail-close')).toBeInTheDocument();
+    expect(screen.queryByTestId('skills-marketplace-panel')).not.toBeInTheDocument();
   });
 
   it('ignores transient undefined skill entries when rendering the skills page', async () => {

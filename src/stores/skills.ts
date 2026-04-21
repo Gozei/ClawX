@@ -15,27 +15,6 @@ import type {
 
 const SKILL_TOGGLE_DEBOUNCE_MS = 500;
 
-function mapErrorCodeToSkillErrorKey(
-  code: AppError['code'],
-  operation: 'fetch' | 'search' | 'install',
-): string {
-  if (code === 'TIMEOUT') {
-    return operation === 'search'
-      ? 'searchTimeoutError'
-      : operation === 'install'
-        ? 'installTimeoutError'
-        : 'fetchTimeoutError';
-  }
-  if (code === 'RATE_LIMIT') {
-    return operation === 'search'
-      ? 'searchRateLimitError'
-      : operation === 'install'
-        ? 'installRateLimitError'
-        : 'fetchRateLimitError';
-  }
-  return 'rateLimitError';
-}
-
 function isGatewayTransientError(error: AppError, gatewayState: 'stopped' | 'starting' | 'running' | 'error' | 'reconnecting'): boolean {
   if (gatewayState === 'running') {
     return false;
@@ -131,10 +110,17 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     }
 
     const result = await hostApiFetch<{ success: boolean; results?: MarketplaceSourceCount[]; error?: string }>('/api/clawhub/source-counts');
-    const counts = (result.success ? (result.results || []) : []).reduce<Record<string, number | null>>((acc, item) => {
-      acc[item.sourceId] = typeof item.total === 'number' ? item.total : null;
+    if (!result.success) {
+      return existing;
+    }
+
+    const counts = (result.results || []).reduce<Record<string, number | null>>((acc, item) => {
+      const previous = acc[item.sourceId];
+      acc[item.sourceId] = typeof item.total === 'number'
+        ? item.total
+        : (typeof previous === 'number' ? previous : null);
       return acc;
-    }, {});
+    }, { ...existing });
     set({ marketplaceSourceCounts: counts });
     return counts;
   },
@@ -210,7 +196,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
         set({ loading: false, refreshing: false, error: null });
         return;
       }
-      set({ loading: false, refreshing: false, error: mapErrorCodeToSkillErrorKey(appError.code, 'fetch') });
+      set({ loading: false, refreshing: false, error: appError.message });
     }
   },
 
@@ -308,7 +294,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       }
     } catch (error) {
       const appError = normalizeAppError(error, { module: 'skills', operation: 'search' });
-      set({ searchError: mapErrorCodeToSkillErrorKey(appError.code, 'search') });
+      set({ searchError: appError.message });
     } finally {
       set(append ? { searchingMore: false } : { searching: false });
     }
@@ -335,7 +321,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
           module: 'skills',
           operation: 'install',
         });
-        throw new Error(mapErrorCodeToSkillErrorKey(appError.code, 'install'));
+        throw new Error(appError.message);
       }
       await get().fetchSkills(true);
       await get().fetchMarketInstalledSkills();

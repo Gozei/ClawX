@@ -10,6 +10,7 @@ vi.mock('@/lib/host-api', () => ({
 vi.mock('@/stores/gateway', () => ({
   useGatewayStore: {
     getState: () => ({
+      status: { state: 'running' },
       rpc: (...args: unknown[]) => gatewayRpcMock(...args),
     }),
   },

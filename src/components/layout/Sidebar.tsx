@@ -38,6 +38,13 @@ const SIDEBAR_COLLAPSED_WIDTH = 64;
 const SESSION_AGENT_BADGE_WIDTH = 'w-[63px]';
 let lastSkillsSearchSnapshot = '';
 
+function sanitizeSkillsSearch(search: string): string {
+  const params = new URLSearchParams(search);
+  params.delete('marketplace');
+  const next = params.toString();
+  return next ? `?${next}` : '';
+}
+
 interface NavItemProps {
   to: string;
   icon: React.ReactNode;
@@ -162,8 +169,9 @@ export function Sidebar() {
 
   useEffect(() => {
     if (location.pathname === '/skills') {
-      lastSkillsSearchSnapshot = location.search;
-      setLastSkillsSearch(location.search);
+      const sanitizedSearch = sanitizeSkillsSearch(location.search);
+      lastSkillsSearchSnapshot = sanitizedSearch;
+      setLastSkillsSearch(sanitizedSearch);
     }
   }, [location.pathname, location.search]);
 

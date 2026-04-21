@@ -68,8 +68,8 @@
     "actions": {
         "discover": "发现技能",
         "tutorial": "教程",
-        "create": "创建技能",
         "marketplace": "技能市场",
+        "backToSkills": "返回技能",
         "enableVisible": "批量启用可见项",
         "disableVisible": "批量禁用可见项",
         "installSkill": "安装技能"
@@ -79,15 +79,10 @@
         "launch": "查看引导",
         "progress": "第 {{current}} / {{total}} 步",
         "finish": "完成",
-        "createPrompt": "请帮我创建一个新的 skill，优先使用内置的 skill 创建能力。我的要求是：",
         "steps": {
             "search": {
                 "title": "先筛出你要处理的技能",
                 "description": "用搜索框和上方来源标签快速定位已安装技能。需要进一步排查状态时，再打开右侧筛选。"
-            },
-            "create": {
-                "title": "需要新技能时，从这里开始",
-                "description": "点击“创建技能”会新建一个对话，并预填 skill 创建请求，让 AI 帮你生成结构和文档骨架。"
             },
             "marketplace": {
                 "title": "现成能力从技能市场安装",
@@ -221,10 +216,10 @@
         "allSources": "全部来源",
         "install": "安装",
         "uninstall": "卸载",
-        "installAction": "下载技能",
+        "installAction": "安装",
         "updateAction": "更新技能",
         "occupiedAction": "已由其他来源提供",
-        "uninstallAction": "卸载技能",
+        "uninstallAction": "卸载",
         "working": "处理中...",
         "installedState": "已安装",
         "notInstalledState": "未安装",
@@ -251,6 +246,7 @@
         "downloads": "下载量",
         "stars": "星标",
         "versions": "版本数",
+        "detailInfoTab": "市场详情",
         "staticScanClean": "安全扫描正常",
         "staticScanUnknown": "安全扫描未知",
         "staticScanReview": "建议复核",

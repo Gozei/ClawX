@@ -69,8 +69,8 @@
     "actions": {
         "discover": "Discover Skills",
         "tutorial": "Tutorial",
-        "create": "Create Skill",
         "marketplace": "Skill Marketplace",
+        "backToSkills": "Back to Skills",
         "enableVisible": "Enable Visible",
         "disableVisible": "Disable Visible",
         "installSkill": "Install Skills"
@@ -80,15 +80,10 @@
         "launch": "View Guide",
         "progress": "Step {{current}} / {{total}}",
         "finish": "Finish",
-        "createPrompt": "Please help me create a new skill, and prefer the built-in skill creation capability. My requirements are:",
         "steps": {
             "search": {
                 "title": "Filter to the skills you need first",
                 "description": "Use the search box and source tabs to narrow installed skills quickly. Open the filter menu when you need to inspect runtime state more closely."
-            },
-            "create": {
-                "title": "Start here when you need a new skill",
-                "description": "Create Skill opens a fresh chat and prefills a skill-creation request so the AI can scaffold the structure and documentation for you."
             },
             "marketplace": {
                 "title": "Install ready-made capabilities from the marketplace",
@@ -222,10 +217,10 @@
         "allSources": "All sources",
         "install": "Install",
         "uninstall": "Uninstall",
-        "installAction": "Download skill",
+        "installAction": "Install",
         "updateAction": "Update skill",
         "occupiedAction": "Provided by another source",
-        "uninstallAction": "Uninstall skill",
+        "uninstallAction": "Uninstall",
         "working": "Working...",
         "installedState": "Installed",
         "notInstalledState": "Not installed",
@@ -252,6 +247,7 @@
         "downloads": "Downloads",
         "stars": "Stars",
         "versions": "Versions",
+        "detailInfoTab": "Marketplace details",
         "staticScanClean": "Security scan clean",
         "staticScanUnknown": "Security scan unknown",
         "staticScanReview": "Review recommended",
