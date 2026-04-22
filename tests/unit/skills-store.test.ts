@@ -57,10 +57,16 @@ describe('skills store refresh behavior', () => {
       }
       if (path === '/api/skills/gh-issues') {
         return {
-          skill: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues', enabled: true, ready: true },
-          runtime: {},
-          config: { apiKey: 'token', env: { GH_TOKEN: 'token' } },
-          spec: { primaryEnv: 'GH_TOKEN' },
+          identity: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues' },
+          status: { enabled: true, ready: true },
+          config: { apiKey: 'token', env: { GH_TOKEN: 'token' }, config: { baseUrl: 'https://api.github.com' } },
+          requirements: { primaryEnv: 'GH_TOKEN', requires: { env: ['GH_TOKEN'], config: ['baseUrl'] } },
+          configuration: {
+            credentials: [{ key: 'GH_TOKEN', label: 'GH_TOKEN', type: 'secret', required: true, configured: true, value: 'token', source: 'apiKey', storageTargets: [{ kind: 'managed-apiKey' }] }],
+            optional: [],
+            config: [{ key: 'baseUrl', label: 'baseUrl', type: 'url', required: true, configured: true, value: 'https://api.github.com', source: 'config', storageTargets: [{ kind: 'managed-config', key: 'baseUrl' }] }],
+            runtime: [],
+          },
         };
       }
       throw new Error(`Unexpected path: ${path}`);
@@ -69,6 +75,7 @@ describe('skills store refresh behavior', () => {
     await useSkillsStore.getState().saveSkillConfig('gh-issues', {
       apiKey: 'token',
       env: { GH_TOKEN: 'token' },
+      config: { baseUrl: 'https://api.github.com' },
     });
 
     expect(hostApiFetchMock.mock.calls.map(([path]) => path)).toEqual([
@@ -78,6 +85,7 @@ describe('skills store refresh behavior', () => {
     ]);
     expect(useSkillsStore.getState().skills[0]?.ready).toBe(true);
     expect(useSkillsStore.getState().skillDetailsById['gh-issues']?.config.apiKey).toBe('token');
+    expect(useSkillsStore.getState().skillDetailsById['gh-issues']?.config.config?.baseUrl).toBe('https://api.github.com');
   });
 
   it('forces list and detail refresh after enabling a cached skill', async () => {
@@ -86,10 +94,11 @@ describe('skills store refresh behavior', () => {
     useSkillsStore.setState({
       skillDetailsById: {
         'gh-issues': {
-          skill: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues', enabled: false, ready: false },
-          runtime: {},
+          identity: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues' },
+          status: { enabled: false, ready: false },
           config: {},
-          spec: {},
+          requirements: {},
+          configuration: { credentials: [], optional: [], config: [], runtime: [] },
         },
       },
     });
@@ -100,10 +109,11 @@ describe('skills store refresh behavior', () => {
       }
       if (path === '/api/skills/gh-issues') {
         return {
-          skill: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues', enabled: true, ready: true },
-          runtime: {},
+          identity: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues' },
+          status: { enabled: true, ready: true },
           config: {},
-          spec: {},
+          requirements: {},
+          configuration: { credentials: [], optional: [], config: [], runtime: [] },
         };
       }
       throw new Error(`Unexpected path: ${path}`);
@@ -117,7 +127,7 @@ describe('skills store refresh behavior', () => {
       '/api/skills/gh-issues',
     ]);
     expect(useSkillsStore.getState().skills[0]?.enabled).toBe(true);
-    expect(useSkillsStore.getState().skillDetailsById['gh-issues']?.skill.ready).toBe(true);
+    expect(useSkillsStore.getState().skillDetailsById['gh-issues']?.status.ready).toBe(true);
   });
 
   it('forces list and detail refresh after disabling a cached skill', async () => {
@@ -126,10 +136,11 @@ describe('skills store refresh behavior', () => {
     useSkillsStore.setState({
       skillDetailsById: {
         'gh-issues': {
-          skill: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues', enabled: true, ready: true },
-          runtime: {},
+          identity: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues' },
+          status: { enabled: true, ready: true },
           config: {},
-          spec: {},
+          requirements: {},
+          configuration: { credentials: [], optional: [], config: [], runtime: [] },
         },
       },
     });
@@ -140,10 +151,11 @@ describe('skills store refresh behavior', () => {
       }
       if (path === '/api/skills/gh-issues') {
         return {
-          skill: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues', enabled: false, ready: false },
-          runtime: {},
+          identity: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues' },
+          status: { enabled: false, ready: false },
           config: {},
-          spec: {},
+          requirements: {},
+          configuration: { credentials: [], optional: [], config: [], runtime: [] },
         };
       }
       throw new Error(`Unexpected path: ${path}`);
@@ -157,7 +169,7 @@ describe('skills store refresh behavior', () => {
       '/api/skills/gh-issues',
     ]);
     expect(useSkillsStore.getState().skills[0]?.enabled).toBe(false);
-    expect(useSkillsStore.getState().skillDetailsById['gh-issues']?.skill.ready).toBe(false);
+    expect(useSkillsStore.getState().skillDetailsById['gh-issues']?.status.ready).toBe(false);
   });
 
   it('updates skill enabled state immediately before the gateway call settles', async () => {

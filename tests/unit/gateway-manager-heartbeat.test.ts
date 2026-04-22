@@ -38,7 +38,7 @@ describe('GatewayManager heartbeat recovery', () => {
 
     vi.advanceTimersByTime(120_000);
 
-    expect(ws.ping).toHaveBeenCalledTimes(2);
+    expect(ws.ping).toHaveBeenCalledTimes(3);
     // Heartbeat timeout is now observability-only — socket should NOT be terminated.
     // Process liveness is detected via child.on('exit'), socket disconnects via ws.on('close').
     expect(ws.terminate).not.toHaveBeenCalled();

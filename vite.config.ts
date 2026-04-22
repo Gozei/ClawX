@@ -4,6 +4,8 @@ import electron from 'vite-plugin-electron';
 import renderer from 'vite-plugin-electron-renderer';
 import { resolve } from 'path';
 
+const manualElectronLaunch = process.env.CLAWX_MANUAL_ELECTRON === '1';
+
 function isMainProcessExternal(id: string): boolean {
   if (!id || id.startsWith('\0')) return false;
   if (id.startsWith('.') || id.startsWith('/') || /^[A-Za-z]:[\\/]/.test(id)) return false;
@@ -25,7 +27,9 @@ export default defineConfig({
         // Main process entry file
         entry: 'electron/main/index.ts',
         onstart(options) {
-          options.startup();
+          if (!manualElectronLaunch) {
+            options.startup();
+          }
         },
         vite: {
           build: {

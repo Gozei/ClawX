@@ -1,4 +1,5 @@
 import { mkdir, readFile, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,7 +11,7 @@ vi.mock('@electron/utils/skill-config', () => ({
   updateSkillConfig: (...args: unknown[]) => updateSkillConfigMock(...args),
 }));
 
-const testRoot = join(process.cwd(), 'tmp-skill-details-test');
+const testRoot = join(tmpdir(), 'clawx-tests', 'skill-details');
 
 describe('skill-details utilities', () => {
   beforeEach(async () => {
@@ -77,6 +78,9 @@ Use the Notion API.
           NOTION_API_KEY: 'secret-key',
           EXTRA_FLAG: '1',
         },
+        config: {
+          baseUrl: 'https://api.notion.com',
+        },
       },
     });
 
@@ -119,6 +123,9 @@ Use the Notion API.
       }),
       config: expect.objectContaining({
         apiKey: 'secret-key',
+        config: {
+          baseUrl: 'https://api.notion.com',
+        },
       }),
       requirements: expect.objectContaining({
         primaryEnv: 'NOTION_API_KEY',
@@ -127,22 +134,43 @@ Use the Notion API.
           bins: ['curl'],
         }),
       }),
+      configuration: expect.objectContaining({
+        credentials: expect.arrayContaining([
+          expect.objectContaining({
+            key: 'NOTION_API_KEY',
+            source: 'apiKey',
+            configured: true,
+          }),
+        ]),
+        optional: expect.arrayContaining([
+          expect.objectContaining({
+            key: 'EXTRA_FLAG',
+            source: 'env',
+          }),
+        ]),
+        config: expect.arrayContaining([
+          expect.objectContaining({
+            key: 'baseUrl',
+            source: 'config',
+            configured: true,
+          }),
+        ]),
+      }),
     }));
     expect(detail?.requirements.rawMarkdown).toContain('Use the Notion API.');
   });
 
-  it('parses inline JSON metadata from the clawdbot namespace', async () => {
-    const skillDir = join(testRoot, 'weather');
+  it('normalizes inline clawdbot metadata into identity and configuration fields', async () => {
+    const skillDir = join(testRoot, 'desearch-web-search');
     await mkdir(skillDir, { recursive: true });
     const skillFile = join(skillDir, 'SKILL.md');
     await writeFile(skillFile, `---
-name: weather
-description: Get current weather and forecasts (no API key required).
-homepage: https://wttr.in/:help
-metadata: {"clawdbot":{"emoji":"🌤️","requires":{"bins":["curl"]}}}
+name: desearch-web-search
+description: Search the web in real time.
+metadata: {"clawdbot":{"emoji":"🌐","homepage":"https://desearch.ai","requires":{"env":["DESEARCH_API_KEY"],"bins":["curl"]}}}
 ---
 
-# Weather
+# DeSearch
 `, 'utf8');
 
     getAllSkillConfigsMock.mockResolvedValue({});
@@ -152,12 +180,12 @@ metadata: {"clawdbot":{"emoji":"🌤️","requires":{"bins":["curl"]}}}
       rpc: vi.fn().mockResolvedValue({
         skills: [
           {
-            skillKey: 'weather',
-            name: 'Weather',
-            description: 'Forecasts',
+            skillKey: 'desearch-web-search',
+            name: 'desearch-web-search',
+            description: 'Search the web in real time.',
             disabled: false,
             eligible: true,
-            missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
+            missing: { bins: [], anyBins: [], env: ['DESEARCH_API_KEY'], config: [], os: [] },
             baseDir: skillDir,
             filePath: skillFile,
           },
@@ -165,13 +193,31 @@ metadata: {"clawdbot":{"emoji":"🌤️","requires":{"bins":["curl"]}}}
       }),
     };
 
-    const detail = await getSkillDetail(gatewayManager as never, 'weather');
+    const detail = await getSkillDetail(gatewayManager as never, 'desearch-web-search');
 
-    expect(detail?.requirements).toEqual(expect.objectContaining({
-      requires: expect.objectContaining({
-        bins: ['curl'],
+    expect(detail).toEqual(expect.objectContaining({
+      identity: expect.objectContaining({
+        icon: '🌐',
+        homepage: 'https://desearch.ai',
       }),
-      parseError: undefined,
+      requirements: expect.objectContaining({
+        primaryEnv: 'DESEARCH_API_KEY',
+        requires: expect.objectContaining({
+          env: ['DESEARCH_API_KEY'],
+          bins: ['curl'],
+        }),
+        parseError: undefined,
+      }),
+      configuration: expect.objectContaining({
+        credentials: expect.arrayContaining([
+          expect.objectContaining({
+            key: 'DESEARCH_API_KEY',
+            source: 'apiKey',
+            required: true,
+            configured: false,
+          }),
+        ]),
+      }),
     }));
   });
 
@@ -272,6 +318,72 @@ metadata:
         config: ['baseUrl'],
       }),
       parseError: undefined,
+    }));
+  });
+
+  it('parses top-level clawdbot metadata without a metadata wrapper', async () => {
+    const skillDir = join(testRoot, 'top-level-desearch');
+    await mkdir(skillDir, { recursive: true });
+    const skillFile = join(skillDir, 'SKILL.md');
+    await writeFile(skillFile, `---
+name: top-level-desearch
+description: Search the web in real time.
+clawdbot:
+  emoji: 🌐
+  homepage: https://desearch.ai
+  requires:
+    env: [DESEARCH_API_KEY]
+    bins: [curl]
+---
+
+# Top-level DeSearch
+`, 'utf8');
+
+    getAllSkillConfigsMock.mockResolvedValue({});
+
+    const { getSkillDetail } = await import('@electron/utils/skill-details');
+    const gatewayManager = {
+      rpc: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            skillKey: 'top-level-desearch',
+            name: 'top-level-desearch',
+            description: 'Search the web in real time.',
+            disabled: false,
+            eligible: true,
+            missing: { bins: [], anyBins: [], env: ['DESEARCH_API_KEY'], config: [], os: [] },
+            baseDir: skillDir,
+            filePath: skillFile,
+          },
+        ],
+      }),
+    };
+
+    const detail = await getSkillDetail(gatewayManager as never, 'top-level-desearch');
+
+    expect(detail).toEqual(expect.objectContaining({
+      identity: expect.objectContaining({
+        icon: '🌐',
+        homepage: 'https://desearch.ai',
+      }),
+      requirements: expect.objectContaining({
+        primaryEnv: 'DESEARCH_API_KEY',
+        requires: expect.objectContaining({
+          env: ['DESEARCH_API_KEY'],
+          bins: ['curl'],
+        }),
+        parseError: undefined,
+      }),
+      configuration: expect.objectContaining({
+        credentials: expect.arrayContaining([
+          expect.objectContaining({
+            key: 'DESEARCH_API_KEY',
+            source: 'apiKey',
+            required: true,
+            configured: false,
+          }),
+        ]),
+      }),
     }));
   });
 
@@ -376,7 +488,114 @@ description: "Captures learnings and errors."
     expect(updateSkillConfigMock).toHaveBeenCalledWith('gh-issues', {
       apiKey: 'token',
       env: { GH_TOKEN: 'token' },
+      config: {},
     });
     expect(result).toEqual({ success: true });
+  });
+
+  it('mirrors config and env writes into local skill files when they are used by the skill', async () => {
+    const skillDir = join(testRoot, 'schedule-feishu');
+    await mkdir(skillDir, { recursive: true });
+    const skillFile = join(skillDir, 'SKILL.md');
+    await writeFile(skillFile, `---
+name: schedule-feishu
+description: Schedule helper
+metadata:
+  openclaw:
+    primaryEnv: FEISHU_APP_SECRET
+    requires:
+      env: [FEISHU_APP_SECRET]
+      config: [schedule_doc_url]
+---
+
+# Schedule
+
+Values are stored in config.json and config/.env.
+`, 'utf8');
+    await writeFile(join(skillDir, 'config.json'), JSON.stringify({
+      schedule_doc_url: '',
+      max_retention_days: 7,
+    }, null, 2), 'utf8');
+
+    getAllSkillConfigsMock.mockResolvedValue({});
+    updateSkillConfigMock.mockResolvedValue({ success: true });
+
+    const { saveSkillConfig } = await import('@electron/utils/skill-details');
+    const gatewayManager = {
+      rpc: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            skillKey: 'schedule-feishu',
+            eligible: false,
+            missing: { env: ['FEISHU_APP_SECRET'], config: ['schedule_doc_url'] },
+            baseDir: skillDir,
+            filePath: skillFile,
+          },
+        ],
+      }),
+    };
+
+    const result = await saveSkillConfig(gatewayManager as never, 'schedule-feishu', {
+      apiKey: 'secret-token',
+      env: { FEISHU_APP_ID: 'cli_123' },
+      config: { schedule_doc_url: 'https://example.com/doc', max_retention_days: 14 },
+    });
+
+    expect(result).toEqual({ success: true });
+    await expect(readFile(join(skillDir, 'config', '.env'), 'utf8')).resolves.toContain('FEISHU_APP_SECRET=secret-token');
+    await expect(readFile(join(skillDir, 'config', '.env'), 'utf8')).resolves.toContain('FEISHU_APP_ID=cli_123');
+    await expect(readFile(join(skillDir, 'config.json'), 'utf8')).resolves.toContain('"schedule_doc_url": "https://example.com/doc"');
+    await expect(readFile(join(skillDir, 'config.json'), 'utf8')).resolves.toContain('"max_retention_days": 14');
+  });
+
+  it('keeps managed config saved when local mirror writes fail', async () => {
+    const skillDir = join(testRoot, 'broken-mirror');
+    await mkdir(skillDir, { recursive: true });
+    const skillFile = join(skillDir, 'SKILL.md');
+    await writeFile(skillFile, `---
+name: broken-mirror
+description: Broken mirror
+metadata:
+  openclaw:
+    primaryEnv: BROKEN_API_KEY
+    requires:
+      env: [BROKEN_API_KEY]
+---
+
+# Broken mirror
+
+Values are stored in config/.env.
+`, 'utf8');
+
+    updateSkillConfigMock.mockResolvedValue({ success: true });
+
+    const { saveSkillConfig } = await import('@electron/utils/skill-details');
+    const gatewayManager = {
+      rpc: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            skillKey: 'broken-mirror',
+            eligible: false,
+            missing: { env: ['BROKEN_API_KEY'] },
+            baseDir: skillDir,
+            filePath: skillFile,
+          },
+        ],
+      }),
+    };
+
+    await writeFile(join(skillDir, 'config'), 'not-a-directory', 'utf8');
+
+    const result = await saveSkillConfig(gatewayManager as never, 'broken-mirror', {
+      apiKey: 'secret-token',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.error).toContain('Managed skill config was saved');
+    expect(updateSkillConfigMock).toHaveBeenCalledWith('broken-mirror', {
+      apiKey: 'secret-token',
+      env: {},
+      config: {},
+    });
   });
 });

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle, ExternalLink, ShieldAlert, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { CheckCircle, ExternalLink, Eye, EyeOff, ShieldAlert, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ import { hostApiFetch } from '@/lib/host-api';
 import { cn } from '@/lib/utils';
 import { useSkillsStore } from '@/stores/skills';
 import { toast } from 'sonner';
-import type { SkillDetail, SkillMissingStatus } from '@/types/skill';
+import type { SkillConfigItem, SkillDetail, SkillMissingStatus } from '@/types/skill';
 import { SkillDetailMarkdownContent } from './SkillDetailMarkdownContent';
 import { SkillDetailOverviewCard } from './SkillDetailOverviewCard';
 
@@ -36,45 +36,151 @@ function flattenMissingRequirements(
   ];
 }
 
+function toEditableString(value: SkillConfigItem['value']): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return '';
+}
+
+function buildStorageHint(item: SkillConfigItem, t: (key: string, options?: Record<string, unknown>) => string): string {
+  const hints = item.storageTargets.map((target) => {
+    if (target.kind === 'file-env') {
+      return t('detail.storage.envFile', { path: target.path });
+    }
+    if (target.kind === 'file-json') {
+      return t('detail.storage.configFile', { path: target.path });
+    }
+    return '';
+  }).filter(Boolean);
+
+  return Array.from(new Set(hints)).join(' · ');
+}
+
+function ConfigField({
+  item,
+  value,
+  onChange,
+  t,
+  dataTestId,
+}: {
+  item: SkillConfigItem;
+  value: string | number | boolean;
+  onChange: (value: string | number | boolean) => void;
+  t: (key: string, options?: Record<string, unknown>) => string;
+  dataTestId?: string;
+}) {
+  const [showSecret, setShowSecret] = useState(false);
+  const configured = typeof value === 'boolean'
+    ? true
+    : String(value ?? '').trim().length > 0;
+  const configuredText = configured ? t('detail.configured') : t('detail.missingValue');
+  const storageHint = buildStorageHint(item, t);
+  const showKey = item.key && item.key !== item.label;
+
+  return (
+    <div className="py-4 first:pt-0 last:pb-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1 text-[14px] font-medium text-slate-900 dark:text-white">
+          {item.required && <span className="text-red-500 dark:text-red-400">*</span>}
+          <span>{item.label}</span>
+        </div>
+        {!configured && (
+          <Badge variant="secondary" className="rounded-full bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+            {configuredText}
+          </Badge>
+        )}
+      </div>
+      {showKey && <div className="mt-1 text-[12px] text-slate-500 dark:text-white/50">{item.key}</div>}
+      {storageHint && !configured && (
+        <div className="mt-1 text-[12px] text-slate-500 dark:text-white/50">{storageHint}</div>
+      )}
+
+      <div className="mt-3">
+        {item.type === 'boolean' ? (
+          <div className="flex h-11 items-center justify-between rounded-xl border border-slate-300 bg-transparent px-3 dark:border-white/12">
+            <span className="text-[13px] text-slate-600 dark:text-white/70">{t('detail.booleanLabel')}</span>
+            <Switch checked={Boolean(value)} onCheckedChange={onChange} data-testid={dataTestId} />
+          </div>
+        ) : (
+          <div className="relative">
+            <Input
+              data-testid={dataTestId}
+              type={item.type === 'secret' ? (showSecret ? 'text' : 'password') : (item.type === 'number' ? 'number' : 'text')}
+              value={typeof value === 'string' || typeof value === 'number' ? value : ''}
+              onChange={(event) => onChange(item.type === 'number' ? event.target.value : event.target.value)}
+              placeholder={item.type === 'url' ? 'https://example.com' : item.key}
+              className={cn(
+                pageInputSurfaceClasses,
+                'h-11 rounded-xl border-slate-300 bg-transparent font-mono text-[13px] dark:border-white/12',
+                item.type === 'secret' && 'pr-11',
+              )}
+            />
+            {item.type === 'secret' && (
+              <button
+                type="button"
+                data-testid={dataTestId ? `${dataTestId}-toggle-visibility` : undefined}
+                aria-label={showSecret ? t('detail.hideValue', { defaultValue: 'Hide value' }) : t('detail.showValue', { defaultValue: 'Show value' })}
+                onClick={() => setShowSecret((current) => !current)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-700 dark:text-white/40 dark:hover:text-white/75"
+              >
+                {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function normalizeConfigInputValue(item: SkillConfigItem, value: string | number | boolean): unknown {
+  if (item.type === 'boolean') {
+    return Boolean(value);
+  }
+  if (item.type === 'number') {
+    const raw = typeof value === 'number' ? value : Number(String(value).trim());
+    return Number.isNaN(raw) ? '' : raw;
+  }
+  return String(value);
+}
+
 export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: SkillDetailContentProps) {
   const { t } = useTranslation('skills');
   const { fetchSkillDetail, saveSkillConfig, enableSkill, disableSkill, deleteSkill, deleting } = useSkillsStore();
-  const [apiKey, setApiKey] = useState('');
-  const [envRows, setEnvRows] = useState<Array<{ key: string; value: string }>>([]);
+  const [credentialValues, setCredentialValues] = useState<Record<string, string>>({});
+  const [configValues, setConfigValues] = useState<Record<string, string | number | boolean>>({});
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'docs' | 'config'>(initialTab);
 
   const status = detail.status ?? { enabled: false, ready: false };
   const requirements = detail.requirements ?? {};
-  const config = detail.config ?? {};
-
+  const configuration = detail.configuration ?? { credentials: [], optional: [], config: [], runtime: [] };
   const missingItems = flattenMissingRequirements(status.missing, t);
   const hasMissing = missingItems.length > 0;
   const isReady = Boolean(status.ready) && !hasMissing;
+  const setupFields = useMemo(
+    () => [...(configuration.credentials ?? []), ...(configuration.optional ?? [])],
+    [configuration.credentials, configuration.optional],
+  );
 
   useEffect(() => {
-    setApiKey(config.apiKey || '');
-    const primaryEnv = requirements.primaryEnv;
-    const requiredKeys = new Set(requirements.requires?.env || []);
-    const currentEnv = config.env || {};
-    const rows: Array<{ key: string; value: string }> = [];
+    const nextCredentialValues: Record<string, string> = {};
+    for (const item of setupFields) {
+      nextCredentialValues[item.key] = toEditableString(item.value);
+    }
+    setCredentialValues(nextCredentialValues);
 
-    requiredKeys.forEach((key) => {
-      if (key !== primaryEnv) {
-        rows.push({ key, value: currentEnv[key] || '' });
-      }
-    });
+    const nextConfigValues: Record<string, string | number | boolean> = {};
+    for (const item of configuration.config ?? []) {
+      nextConfigValues[item.key] = item.value ?? (item.type === 'boolean' ? false : '');
+    }
+    setConfigValues(nextConfigValues);
+  }, [configuration.config, setupFields]);
 
-    Object.entries(currentEnv).forEach(([key, value]) => {
-      if (key !== primaryEnv && !requiredKeys.has(key)) {
-        rows.push({ key, value });
-      }
-    });
-
-    setEnvRows(rows);
-  }, [config.apiKey, config.env, requirements.primaryEnv, requirements.requires]);
-
+  const hasSetupFields = setupFields.length > 0;
+  const hasConfigFields = (configuration.config ?? []).length > 0;
   const onToggle = async (enabled: boolean) => {
     try {
       if (enabled) await enableSkill(detail.identity.id);
@@ -88,13 +194,29 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
     if (saving) return;
     setSaving(true);
     try {
-      const env = envRows.reduce<Record<string, string>>((acc, row) => {
-        const key = row.key.trim();
-        const value = row.value.trim();
-        if (key && value) acc[key] = value;
+      const credentialItems = setupFields;
+      const primaryCredential = credentialItems.find((item) => item.source === 'apiKey');
+      const apiKey = primaryCredential ? (credentialValues[primaryCredential.key] ?? '') : '';
+
+      const env = credentialItems
+        .filter((item) => item.source === 'env')
+        .reduce<Record<string, string>>((acc, item) => {
+          acc[item.key] = credentialValues[item.key] ?? '';
+          return acc;
+        }, {});
+
+      const config = (configuration.config ?? []).reduce<Record<string, unknown>>((acc, item) => {
+        const rawValue = configValues[item.key];
+        const normalized = normalizeConfigInputValue(item, rawValue ?? '');
+        acc[item.key] = normalized;
         return acc;
       }, {});
-      await saveSkillConfig(detail.identity.id, { apiKey, env });
+
+      await saveSkillConfig(detail.identity.id, {
+        apiKey,
+        env,
+        config,
+      });
       await fetchSkillDetail(detail.identity.id, true);
       toast.success(t('detail.configSaved', { defaultValue: 'Config saved' }));
     } catch (error) {
@@ -219,8 +341,8 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
           <section className="overflow-hidden rounded-[24px] bg-white shadow-[0_4px_24px_rgb(0,0,0,0.03)] dark:bg-card">
             <div className="border-b border-slate-200 px-6 pt-2 dark:border-white/10 sm:px-8">
               <TabsList variant="page">
-                <TabsTrigger value="docs" variant="page">{t('detail.docsTab')}</TabsTrigger>
-                <TabsTrigger value="config" variant="page">{t('detail.configTab', 'Configuration')}</TabsTrigger>
+                <TabsTrigger data-testid="skills-detail-tab-docs" value="docs" variant="page">{t('detail.docsTab')}</TabsTrigger>
+                <TabsTrigger data-testid="skills-detail-tab-config" value="config" variant="page">{t('detail.configTab', 'Configuration')}</TabsTrigger>
               </TabsList>
             </div>
 
@@ -235,122 +357,102 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
                 <SkillDetailMarkdownContent content={requirements.rawMarkdown} />
               </TabsContent>
 
-              <TabsContent value="config" data-testid="skills-detail-setup" className="mt-0 max-w-3xl space-y-10">
-                <div className="space-y-4">
-                  <div>
-                    <h3 className="text-[16px] font-semibold text-slate-900 dark:text-white">
-                      {t('detail.requirementsTab', 'Runtime Requirements')}
-                    </h3>
-                    <p className="mt-1 text-[13px] text-slate-500 dark:text-white/60">
-                      {t('detail.runtimeRequirementsDescription')}
-                    </p>
-                  </div>
+              <TabsContent value="config" data-testid="skills-detail-setup" className="mt-0 space-y-6">
+                <div className="space-y-8">
+                  <section data-testid="skills-config-card-settings">
+                    <div className="pb-2 text-[16px] font-semibold text-slate-900 dark:text-white">{t('detail.configTab', 'Configuration')}</div>
 
-                  {hasMissing && (
-                    <div className="flex items-start gap-3 rounded-xl bg-amber-50 p-4 text-[13px] dark:bg-amber-500/10">
-                      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                      <div>
-                        <p className="font-medium text-amber-800 dark:text-amber-300">
-                          {t('detail.missingRuntimeRequirements')}
-                        </p>
-                        <ul className="mt-1.5 list-disc pl-4 text-amber-700/80 dark:text-amber-400/80">
-                          {missingItems.map((item, idx) => (
-                            <li key={idx}>{item}</li>
-                          ))}
-                        </ul>
+                    {!hasSetupFields && !hasConfigFields ? (
+                      <div
+                        data-testid="skills-config-card-settings-empty"
+                        className="py-2 text-[14px] text-slate-600 dark:text-white/60"
+                      >
+                        {t('detail.noSetupRequired', { defaultValue: 'No configuration required.' })}
                       </div>
-                    </div>
-                  )}
+                    ) : (
+                      <div className="space-y-6">
+                        {hasSetupFields && (
+                          <div data-testid="skills-config-card-credentials">
+                            <div className="pb-2 text-[14px] font-medium text-slate-700 dark:text-white/80">{t('detail.credentialsTitle')}</div>
+                            <div className="divide-y divide-slate-200 dark:divide-white/10">
+                              {setupFields.map((item, index) => (
+                                <ConfigField
+                                  key={item.key}
+                                  item={item}
+                                  value={credentialValues[item.key] ?? ''}
+                                  onChange={(value) => setCredentialValues((current) => ({ ...current, [item.key]: String(value) }))}
+                                  t={t}
+                                  dataTestId={index === 0 ? 'skills-detail-primary-env-input' : undefined}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )}
 
-                  <div className="flex flex-wrap gap-x-8 gap-y-3 rounded-xl bg-slate-50/50 p-4 text-[13px] dark:bg-white/[0.02]">
-                    {requirements.requires?.bins && requirements.requires.bins.length > 0 && (
-                      <div>
-                        <span className="block text-[12px] font-medium text-slate-400 dark:text-white/50">{t('detail.requiredBins')}</span>
-                        <span className="mt-0.5 block text-slate-700 dark:text-white/80">{requirements.requires.bins.join(', ')}</span>
+                        {hasConfigFields && (
+                          <div data-testid="skills-config-card-schema">
+                            <div className="pb-2 text-[14px] font-medium text-slate-700 dark:text-white/80">{t('detail.configuration')}</div>
+                            <div className="divide-y divide-slate-200 dark:divide-white/10">
+                              {configuration.config.map((item) => (
+                                <ConfigField
+                                  key={item.key}
+                                  item={item}
+                                  value={configValues[item.key] ?? (item.type === 'boolean' ? false : '')}
+                                  onChange={(value) => setConfigValues((current) => ({ ...current, [item.key]: value }))}
+                                  t={t}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
-                    {requirements.requires?.env && requirements.requires.env.length > 0 && (
-                      <div>
-                        <span className="block text-[12px] font-medium text-slate-400 dark:text-white/50">{t('detail.requiredEnv')}</span>
-                        <span className="mt-0.5 block text-slate-700 dark:text-white/80">{requirements.requires.env.join(', ')}</span>
+                  </section>
+
+                    <section data-testid="skills-config-card-runtime">
+                      <div className="pb-2 text-[16px] font-semibold text-slate-900 dark:text-white">{t('detail.requirementsTab', 'Runtime Requirements')}</div>
+
+                      <div className="space-y-2 text-[14px] leading-6 text-slate-700 dark:text-white/75">
+                        {!hasMissing && (
+                          <div className="flex items-start gap-2">
+                            <CheckCircle className="mt-1 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                            <span>{t('detail.noMissingRequirements', { defaultValue: 'No missing requirements.' })}</span>
+                          </div>
+                        )}
+
+                        {hasMissing && (
+                          <div data-testid="skills-runtime-missing-list" className="space-y-2 pt-2 text-[13px] text-slate-700 dark:text-white/70">
+                            <ul className="space-y-2">
+                              {missingItems.map((item, idx) => (
+                                <li key={idx} className="flex items-start gap-2">
+                                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-amber-500" />
+                                  <span>{t('detail.missingPrefix', { defaultValue: 'Missing' })} {item}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                       </div>
+
+                    </section>
+
+                    {(configuration.mirrors?.envFilePath || configuration.mirrors?.configFilePath) && (
+                      <section data-testid="skills-config-card-storage">
+                        <div className="pb-2 text-[16px] font-semibold text-slate-900 dark:text-white">{t('detail.storageTitle', { defaultValue: 'Storage & mirrors' })}</div>
+                        <div className="space-y-2 text-[12px] leading-5 text-slate-600 dark:text-white/55">
+                          {configuration.mirrors?.envFilePath && <div>{t('detail.storage.envFile', { path: configuration.mirrors.envFilePath })}</div>}
+                          {configuration.mirrors?.configFilePath && <div>{t('detail.storage.configFile', { path: configuration.mirrors.configFilePath })}</div>}
+                        </div>
+                      </section>
                     )}
-                    {requirements.requires?.anyBins && requirements.requires.anyBins.length > 0 && (
-                      <div>
-                        <span className="block text-[12px] font-medium text-slate-400 dark:text-white/50">{t('detail.anyBins')}</span>
-                        <span className="mt-0.5 block text-slate-700 dark:text-white/80">{requirements.requires.anyBins.join(', ')}</span>
-                      </div>
-                    )}
-                    {!(requirements.requires?.bins?.length) && !(requirements.requires?.env?.length) && !(requirements.requires?.anyBins?.length) && (
-                      <span className="text-slate-400 dark:text-white/40">{t('detail.noSpecificRuntimeRequirements')}</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="h-px bg-slate-100 dark:bg-white/10" />
-
-                <div className="space-y-6">
-                  <div>
-                    <h3 className="text-[16px] font-semibold text-slate-900 dark:text-white">
-                      {t('detail.configuration')}
-                    </h3>
-                    <p className="mt-1 text-[13px] text-slate-500 dark:text-white/60">
-                      {t('detail.setupSubtitle')}
-                    </p>
                   </div>
 
-                  {requirements.primaryEnv && (
-                    <div className="max-w-md">
-                      <label className="mb-2 block text-[13px] font-medium text-slate-700 dark:text-white/70">
-                        {t('detail.primaryCredential', { env: requirements.primaryEnv })}
-                      </label>
-                      <Input
-                        data-testid="skills-detail-primary-env-input"
-                        type="password"
-                        value={apiKey}
-                        onChange={(event) => setApiKey(event.target.value)}
-                        className={cn(pageInputSurfaceClasses, 'h-11 rounded-xl border-slate-300 bg-white font-mono text-[13px] dark:border-white/12 dark:bg-white/[0.03]')}
-                      />
-                    </div>
-                  )}
-
-                  <div className="space-y-3">
-                    {envRows.map((row, index) => (
-                      <div key={`${row.key}-${index}`} className="grid grid-cols-[1fr_1fr_auto] gap-3">
-                        <Input
-                          value={row.key}
-                          onChange={(event) => setEnvRows((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, key: event.target.value } : item))}
-                          className={cn(pageInputSurfaceClasses, 'h-11 rounded-xl border-slate-300 bg-white font-mono text-[13px] dark:border-white/12 dark:bg-white/[0.03]')}
-                          placeholder={t('detail.keyPlaceholder')}
-                        />
-                        <Input
-                          value={row.value}
-                          onChange={(event) => setEnvRows((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, value: event.target.value } : item))}
-                          className={cn(pageInputSurfaceClasses, 'h-11 rounded-xl border-slate-300 bg-white font-mono text-[13px] dark:border-white/12 dark:bg-white/[0.03]')}
-                          placeholder={t('detail.valuePlaceholder')}
-                        />
-                        <Button variant="ghost" size="icon" onClick={() => setEnvRows((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="h-11 w-11 shrink-0 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-white/50 dark:hover:bg-white/[0.06] dark:hover:text-white">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="flex items-center justify-between gap-4 pt-2">
-                    <Button
-                      data-testid="skills-detail-add-env-button"
-                      variant="outline"
-                      onClick={() => setEnvRows((current) => [...current, { key: '', value: '' }])}
-                      className="rounded-full border-slate-300 bg-white px-5 text-slate-700 hover:bg-slate-50 dark:border-white/12 dark:bg-white/[0.03] dark:text-white/80 dark:hover:bg-white/[0.06]"
-                    >
-                      {t('detail.addVariable')}
-                    </Button>
-                    <Button data-testid="skills-detail-save-config" onClick={onSave} disabled={saving} className="rounded-full bg-sky-600 px-6 text-white hover:bg-sky-700 dark:bg-sky-600 dark:hover:bg-sky-500">
-                      {saving ? t('detail.saving') : t('detail.saveConfig')}
-                    </Button>
-                  </div>
-                </div>
-              </TabsContent>
+                <section data-testid="skills-config-overview" className="flex justify-end pt-2">
+                  <Button data-testid="skills-detail-save-config" onClick={onSave} disabled={saving} className="rounded-full px-5">
+                    {saving ? t('detail.saving') : t('detail.saveConfig')}
+                  </Button>
+                </section>
+                </TabsContent>
             </div>
           </section>
         </Tabs>

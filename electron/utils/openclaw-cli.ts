@@ -13,7 +13,7 @@ import {
 } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, win32 as winPath } from 'node:path';
 import { getOpenClawDir, getOpenClawEntryPath } from './paths';
 import { logger } from './logger';
 
@@ -31,9 +31,13 @@ function quoteForPowerShell(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+function joinForTargetPlatform(...segments: string[]): string {
+  return process.platform === 'win32' ? winPath.join(...segments) : join(...segments);
+}
+
 function getPackagedWindowsNodePath(): string | null {
   if (!app.isPackaged || process.platform !== 'win32') return null;
-  const nodePath = join(process.resourcesPath, 'bin', 'node.exe');
+  const nodePath = joinForTargetPlatform(process.resourcesPath, 'bin', 'node.exe');
   return existsSync(nodePath) ? nodePath : null;
 }
 
@@ -72,8 +76,8 @@ export function getOpenClawCliCommand(): string {
 
   if (app.isPackaged) {
     if (platform === 'win32') {
-      const cliDir = join(process.resourcesPath, 'cli');
-      const cmdPath = join(cliDir, 'openclaw.cmd');
+      const cliDir = joinForTargetPlatform(process.resourcesPath, 'cli');
+      const cmdPath = joinForTargetPlatform(cliDir, 'openclaw.cmd');
       if (existsSync(cmdPath)) {
         return `& ${quoteForPowerShell(cmdPath)}`;
       }
@@ -109,7 +113,7 @@ function getPackagedCliWrapperPath(): string | null {
     return existsSync(wrapper) ? wrapper : null;
   }
   if (platform === 'win32') {
-    const wrapper = join(process.resourcesPath, 'cli', 'openclaw.cmd');
+    const wrapper = joinForTargetPlatform(process.resourcesPath, 'cli', 'openclaw.cmd');
     return existsSync(wrapper) ? wrapper : null;
   }
   return null;
@@ -117,7 +121,7 @@ function getPackagedCliWrapperPath(): string | null {
 
 function getWindowsPowerShellPath(): string {
   const systemRoot = process.env.SystemRoot || 'C:\\Windows';
-  return join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  return joinForTargetPlatform(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
 // ── macOS / Linux install ────────────────────────────────────────────────────

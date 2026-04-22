@@ -1,7 +1,13 @@
 ---
 name: desearch-web-search
 description: Search the web and get real-time SERP-style results with titles, URLs, and snippets. Use this for general web queries when you need current links and information from across the internet.
-metadata: {"clawdbot":{"emoji":"🌐","homepage":"https://desearch.ai","requires":{"env":["DESEARCH_API_KEY"]}}}
+metadata:
+  openclaw:
+    emoji: "🌐"
+    homepage: "https://desearch.ai"
+    primaryEnv: "DESEARCH_API_KEY"
+    requires:
+      env: ["DESEARCH_API_KEY"]
 ---
 
 # Web Search By Desearch

@@ -44,9 +44,13 @@ export type Skill = SkillSnapshot & {
 
 export interface SkillSpecRequires {
   env?: string[];
+  optionalEnv?: string[];
   config?: string[];
   bins?: string[];
   anyBins?: string[];
+  packages?: string[];
+  runtime?: string[];
+  os?: string[];
 }
 
 export interface SkillMissingStatus {
@@ -86,14 +90,55 @@ export interface SkillDefinition {
   parseError?: string;
 }
 
+export interface SkillConfigStorageTarget {
+  kind: 'managed-apiKey' | 'managed-env' | 'managed-config' | 'file-env' | 'file-json';
+  path?: string;
+  key?: string;
+}
+
+export interface SkillConfigItem {
+  key: string;
+  label: string;
+  description?: string;
+  type: 'secret' | 'env' | 'url' | 'string' | 'number' | 'boolean';
+  required: boolean;
+  configured: boolean;
+  value?: string | number | boolean;
+  source: 'apiKey' | 'env' | 'config';
+  storageTargets: SkillConfigStorageTarget[];
+}
+
+export interface SkillRuntimeRequirement {
+  key: string;
+  label: string;
+  category: 'bin' | 'anyBin' | 'env' | 'config' | 'os' | 'package' | 'runtime';
+  status: 'ok' | 'missing' | 'unknown';
+  detail?: string;
+}
+
+export interface SkillResolvedConfiguration {
+  credentials: SkillConfigItem[];
+  optional: SkillConfigItem[];
+  config: SkillConfigItem[];
+  runtime: SkillRuntimeRequirement[];
+  mirrors?: {
+    envFilePath?: string;
+    configFilePath?: string;
+  };
+}
+
 export interface SkillDetail {
   identity: SkillIdentity;
   status: SkillStatus;
   config: {
     apiKey?: string;
     env?: Record<string, string>;
+    config?: Record<string, unknown>;
+    envFilePath?: string;
+    configFilePath?: string;
   };
   requirements: SkillDefinition;
+  configuration: SkillResolvedConfiguration;
 }
 
 
