@@ -16,6 +16,7 @@ import {
   CHAT_HISTORY_LABEL_PREFETCH_LIMIT,
   CHAT_HISTORY_RPC_TIMEOUT_MS,
   hasAssistantFinalTextContent,
+  hasComposerDraftContent,
   hasStoredSessionLabel,
   isUnusedDraftSession,
 } from './chat/helpers';
@@ -24,9 +25,12 @@ import {
   DEFAULT_SESSION_KEY,
   type ActiveTurnBuffer,
   type AttachedFileMeta,
+  type ChatComposerDraft,
+  type ChatComposerDraftUpdate,
   type ChatMessageDispatchOptions,
   type ChatSession,
   type ChatState,
+  type ComposerFileAttachment,
   type ContentBlock,
   type RawMessage,
   type ToolStatus,
@@ -35,8 +39,11 @@ import {
 export type {
   ActiveTurnBuffer,
   AttachedFileMeta,
+  ChatComposerDraft,
+  ChatComposerDraftUpdate,
   ChatMessageDispatchOptions,
   ChatSession,
+  ComposerFileAttachment,
   ContentBlock,
   RawMessage,
   ToolStatus,
@@ -239,6 +246,38 @@ function cloneMessage(message: RawMessage): RawMessage {
 
 function cloneToolStatuses(tools: ToolStatus[]): ToolStatus[] {
   return tools.map((tool) => ({ ...tool }));
+}
+
+const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = {
+  text: '',
+  attachments: [],
+  targetAgentId: null,
+};
+
+function cloneComposerAttachment(attachment: ComposerFileAttachment): ComposerFileAttachment {
+  return { ...attachment };
+}
+
+function cloneComposerDraft(draft: ChatComposerDraft): ChatComposerDraft {
+  return {
+    text: draft.text,
+    attachments: draft.attachments.map(cloneComposerAttachment),
+    targetAgentId: draft.targetAgentId ?? null,
+  };
+}
+
+function normalizeComposerDraft(draft: ChatComposerDraft | null | undefined): ChatComposerDraft | null {
+  if (!draft) return null;
+
+  const normalized: ChatComposerDraft = {
+    text: typeof draft.text === 'string' ? draft.text : '',
+    attachments: Array.isArray(draft.attachments) ? draft.attachments.map(cloneComposerAttachment) : [],
+    targetAgentId: typeof draft.targetAgentId === 'string' && draft.targetAgentId.trim()
+      ? draft.targetAgentId.trim().toLowerCase()
+      : null,
+  };
+
+  return hasComposerDraftContent(normalized) ? normalized : null;
 }
 
 function cloneSessionViewSnapshot(snapshot: SessionViewSnapshot): SessionViewSnapshot {
@@ -524,7 +563,8 @@ function schedulePendingFinalRecovery(set: ChatStoreSet, get: () => ChatState): 
         const canPromoteStreamingAssistant = !!streamingAssistant
           && (streamingAssistant.role === 'assistant' || streamingAssistant.role === undefined)
           && !isToolResultRole(streamingAssistant.role)
-          && hasNonToolAssistantContent(streamingAssistant);
+          && hasNonToolAssistantContent(streamingAssistant)
+          && !isInternalAssistantControlMessage(streamingAssistant);
         const pendingImgs = s.pendingToolImages;
         const streamingSnapshot = canPromoteStreamingAssistant
           ? {
@@ -1720,6 +1760,7 @@ function buildSessionSwitchPatch(
     | 'pendingToolImages'
     | 'thinkingLevel'
     | 'sessions'
+    | 'composerDrafts'
     | 'sessionLabels'
     | 'sessionLastActivity'
     | 'sessionRunningState'
@@ -1757,6 +1798,9 @@ function buildSessionSwitchPatch(
     currentSessionKey: nextSessionKey,
     currentAgentId: getAgentIdFromSessionKey(nextSessionKey),
     sessions: ensureSessionEntry(nextSessions, nextSessionKey),
+    composerDrafts: leavingEmpty
+      ? clearSessionEntryFromMap(state.composerDrafts, state.currentSessionKey)
+      : state.composerDrafts,
     sessionLabels: leavingEmpty
       ? clearSessionEntryFromMap(state.sessionLabels, state.currentSessionKey)
       : state.sessionLabels,
@@ -1841,6 +1885,16 @@ function isInternalMessage(msg: { role?: unknown; content?: unknown }): boolean 
     if (/^(HEARTBEAT_OK|NO_REPLY)\s*$/.test(text)) return true;
   }
   return false;
+}
+
+function isInternalAssistantControlMessage(message: RawMessage | null | undefined): boolean {
+  if (!message) return false;
+  const role = message.role ?? 'assistant';
+  if (role !== 'assistant') return false;
+  return isInternalMessage({
+    ...message,
+    role,
+  });
 }
 
 function extractTextFromContent(content: unknown): string {
@@ -2256,15 +2310,21 @@ function deriveActiveTurnBuffer(
   const activeTurnMessages = activeTurnStartIndex >= 0 ? safeMessages.slice(activeTurnStartIndex) : [];
   const userMessage = activeTurnMessages[0]?.role === 'user' ? activeTurnMessages[0] : null;
   const assistantMessages = userMessage
-    ? activeTurnMessages.slice(1).filter((message) => message.role === 'assistant')
+    ? activeTurnMessages.slice(1).filter((message) => (
+      message.role === 'assistant' && !isInternalAssistantControlMessage(message)
+    ))
     : [];
   const latestPersistedAssistant = [...safeMessages].reverse().find((message) => {
     if (message.role !== 'assistant') return false;
+    if (isInternalAssistantControlMessage(message)) return false;
     if (!lastUserTsMs || !message.timestamp) return true;
     const messageTsMs = message.timestamp < 1e12 ? message.timestamp * 1000 : message.timestamp;
     return messageTsMs >= lastUserTsMs;
   }) ?? null;
-  const streamingDisplayMessage = buildStreamingDisplayMessageForState(state);
+  const rawStreamingDisplayMessage = buildStreamingDisplayMessageForState(state);
+  const streamingDisplayMessage = isInternalAssistantControlMessage(rawStreamingDisplayMessage)
+    ? null
+    : rawStreamingDisplayMessage;
   const streamText = streamingDisplayMessage ? getMessageText(streamingDisplayMessage.content).trim() : '';
   const streamThinking = streamingDisplayMessage ? extractThinkingFromContent(streamingDisplayMessage.content).trim() : '';
   const streamImageCount = streamingDisplayMessage ? countImageBlocks(streamingDisplayMessage.content) : 0;
@@ -2355,6 +2415,8 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     | 'toggleThinking'
     | 'refresh'
     | 'clearError'
+    | 'setComposerDraft'
+    | 'clearComposerDraft'
     | 'queueOfflineMessage'
     | 'flushQueuedMessage'
     | 'clearQueuedMessage'
@@ -2384,6 +2446,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     currentSessionKey: DEFAULT_SESSION_KEY,
     currentAgentId: 'main',
     sessionModels: {},
+    composerDrafts: {},
     sessionLabels: {},
     sessionLastActivity: {},
     sessionRunningState: {},
@@ -2397,6 +2460,46 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
   ...initialState,
 
   // ── Load sessions via sessions.list ──
+
+  setComposerDraft: (sessionKey: string, nextDraft: ChatComposerDraftUpdate) => {
+    if (!sessionKey) return;
+    set((state) => {
+      const currentDraft = state.composerDrafts[sessionKey] ?? EMPTY_CHAT_COMPOSER_DRAFT;
+      const resolvedDraft = typeof nextDraft === 'function'
+        ? nextDraft(cloneComposerDraft(currentDraft))
+        : nextDraft;
+      const normalizedDraft = normalizeComposerDraft(resolvedDraft);
+
+      if (!normalizedDraft) {
+        if (!state.composerDrafts[sessionKey]) {
+          return {};
+        }
+        return {
+          composerDrafts: clearSessionEntryFromMap(state.composerDrafts, sessionKey),
+        };
+      }
+
+      return {
+        composerDrafts: {
+          ...state.composerDrafts,
+          [sessionKey]: normalizedDraft,
+        },
+      };
+    });
+  },
+
+  clearComposerDraft: (sessionKey?: string) => {
+    const targetSessionKey = sessionKey ?? get().currentSessionKey;
+    if (!targetSessionKey) return;
+    set((state) => {
+      if (!state.composerDrafts[targetSessionKey]) {
+        return {};
+      }
+      return {
+        composerDrafts: clearSessionEntryFromMap(state.composerDrafts, targetSessionKey),
+      };
+    });
+  },
 
   loadSessions: async () => {
     const now = Date.now();
@@ -2493,11 +2596,12 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           }
           const currentState = get();
           const currentIsUnusedDraft = isUnusedDraftSession(currentState, nextSessionKey);
+          const hasLocalSessionEntry = localSessions.some((session) => session.key === nextSessionKey);
           if (!dedupedSessions.find((s) => s.key === nextSessionKey) && dedupedSessions.length > 0) {
-            // Preserve only locally-created pending sessions. On initial boot the
-            // default ghost key (`agent:main:main`) should yield to real history.
-            const hasLocalPendingSession = localSessions.some((session) => session.key === nextSessionKey) && !currentIsUnusedDraft;
-            if (!hasLocalPendingSession) {
+            // Preserve locally-created blank drafts and pending local sessions.
+            // The initial ghost key (`agent:main:main`) is neither, so it still
+            // yields to persisted history when no startup draft exists.
+            if (!currentIsUnusedDraft && !hasLocalSessionEntry) {
               nextSessionKey = dedupedSessions[0].key;
             }
           }
@@ -2529,6 +2633,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
               ...remapSessionEntries(state.sessionModels, canonicalBySuffix),
               ...discoveredModels,
             },
+            composerDrafts: remapSessionEntries(state.composerDrafts, canonicalBySuffix),
             sessionLabels: remapSessionEntries(state.sessionLabels, canonicalBySuffix),
             sessionLastActivity: {
               ...remapSessionEntries(state.sessionLastActivity, canonicalBySuffix, (existing, next) => (
@@ -2698,6 +2803,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       set((s) => ({
         sessions: remaining,
         sessionModels: Object.fromEntries(Object.entries(s.sessionModels).filter(([k]) => k !== key)),
+        composerDrafts: clearSessionEntryFromMap(s.composerDrafts, key),
         sessionLabels: Object.fromEntries(Object.entries(s.sessionLabels).filter(([k]) => k !== key)),
         sessionLastActivity: Object.fromEntries(Object.entries(s.sessionLastActivity).filter(([k]) => k !== key)),
         sessionRunningState: clearSessionEntryFromMap(s.sessionRunningState ?? {}, key),
@@ -2720,6 +2826,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       set((s) => ({
         sessions: remaining,
         sessionModels: Object.fromEntries(Object.entries(s.sessionModels).filter(([k]) => k !== key)),
+        composerDrafts: clearSessionEntryFromMap(s.composerDrafts, key),
         sessionLabels: Object.fromEntries(Object.entries(s.sessionLabels).filter(([k]) => k !== key)),
         sessionLastActivity: Object.fromEntries(Object.entries(s.sessionLastActivity).filter(([k]) => k !== key)),
         sessionRunningState: clearSessionEntryFromMap(s.sessionRunningState ?? {}, key),
@@ -2734,9 +2841,9 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     // NOTE: We intentionally do NOT call sessions.reset on the old session.
     // sessions.reset archives (renames) the session JSONL file, making old
     // conversation history inaccessible when the user switches back to it.
-    const { currentSessionKey, messages, sessions, sessionLastActivity, sessionLabels } = get();
+    const { currentSessionKey, messages, sessions, composerDrafts, sessionLastActivity, sessionLabels } = get();
     const leavingEmpty = isUnusedDraftSession(
-      { currentSessionKey, messages, sessions, sessionLabels, sessionLastActivity },
+      { currentSessionKey, messages, sessions, composerDrafts, sessionLabels, sessionLastActivity },
       currentSessionKey,
     );
     const prefix = resolveDefaultCanonicalPrefix()
@@ -2768,6 +2875,9 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           : s.sessionModels),
         ...(defaultSessionModel ? { [newKey]: defaultSessionModel } : {}),
       },
+      composerDrafts: leavingEmpty
+        ? clearSessionEntryFromMap(s.composerDrafts, currentSessionKey)
+        : s.composerDrafts,
       sessionLabels: leavingEmpty
         ? Object.fromEntries(Object.entries(s.sessionLabels).filter(([k]) => k !== currentSessionKey))
         : s.sessionLabels,
@@ -2775,6 +2885,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         ? Object.fromEntries(Object.entries(s.sessionLastActivity).filter(([k]) => k !== currentSessionKey))
         : s.sessionLastActivity,
       messages: [],
+      loading: false,
       streamingText: '',
       streamingMessage: null,
       streamingTools: [],
@@ -2847,7 +2958,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
   },
 
   cleanupEmptySession: () => {
-    const { currentSessionKey, messages, sessions, sessionLastActivity, sessionLabels } = get();
+    const { currentSessionKey, messages, sessions, composerDrafts, sessionLastActivity, sessionLabels } = get();
     // Only remove non-main sessions that were never used (no messages sent).
     // This mirrors the "leavingEmpty" logic in switchSession so that creating
     // a new session and immediately navigating away doesn't leave a ghost entry
@@ -2855,7 +2966,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     // Also check sessionLastActivity and sessionLabels comprehensively to prevent
     // falsely treating sessions with history as empty due to switchSession clearing messages early.
     const isEmptyNonMain = isUnusedDraftSession(
-      { currentSessionKey, messages, sessions, sessionLabels, sessionLastActivity },
+      { currentSessionKey, messages, sessions, composerDrafts, sessionLabels, sessionLastActivity },
       currentSessionKey,
     );
     if (!isEmptyNonMain) return;
@@ -2863,6 +2974,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     clearHistoryIncompleteRetry(currentSessionKey);
     set((s) => ({
       sessions: s.sessions.filter((sess) => sess.key !== currentSessionKey),
+      composerDrafts: clearSessionEntryFromMap(s.composerDrafts, currentSessionKey),
       sessionLabels: Object.fromEntries(
         Object.entries(s.sessionLabels).filter(([k]) => k !== currentSessionKey),
       ),
@@ -2884,6 +2996,13 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       && !currentState.sessions.some((session) => session.key === currentSessionKey)
     );
     if (shouldSkipUnusedDraftHydration) {
+      if (currentState.loading) {
+        set((state) => (
+          state.currentSessionKey === currentSessionKey && state.loading
+            ? { loading: false }
+            : {}
+        ));
+      }
       return;
     }
     const existingLoad = _historyLoadInFlight.get(currentSessionKey);
@@ -2942,6 +3061,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           message.role === 'assistant'
           && !!message.timestamp
           && toMs(message.timestamp) >= userMs
+          && !isInternalAssistantControlMessage(message)
         ));
         const currentStreamingMessage = get().streamingMessage;
         if (
@@ -2958,6 +3078,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             (streamingRole === 'assistant' || streamingRole === undefined)
             && streamingTimestamp >= userMs
             && hasNonToolAssistantContent(streamingAssistant)
+            && !isInternalAssistantControlMessage(streamingAssistant)
           ) {
             localTurnAssistants.push({
               ...streamingAssistant,
@@ -3851,6 +3972,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             }
             : finalMsg;
           const hasOutput = hasNonToolAssistantContent(previewFinalMsg);
+          const internalAssistantControlMessage = !toolOnly && isInternalAssistantControlMessage(previewFinalMsg);
           const emptyAssistantResponse = !toolOnly && isEmptyAssistantResponse(previewFinalMsg);
           const msgId = finalMsg.id || (toolOnly ? `run-${runId}-tool-${Date.now()}` : `run-${runId}`);
           set((s) => {
@@ -3868,6 +3990,20 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
               }
               : { ...finalMsg, role: (finalMsg.role || 'assistant') as RawMessage['role'], id: msgId };
             const clearPendingImages = { pendingToolImages: [] as AttachedFileMeta[] };
+
+            if (internalAssistantControlMessage) {
+              return {
+                streamingText: '',
+                streamingMessage: null,
+                sending: false,
+                activeRunId: null,
+                sendStage: null,
+                pendingFinal: false,
+                streamingTools: [],
+                sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, false),
+                ...clearPendingImages,
+              };
+            }
 
             // Check if message already exists (prevent duplicates)
             const alreadyExists = s.messages.some(m => m.id === msgId)
@@ -3942,6 +4078,12 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
               ...clearPendingImages,
             };
           });
+          if (internalAssistantControlMessage) {
+            clearHistoryPoll();
+            clearHistoryIncompleteRetry(currentSessionKey);
+            void get().loadHistory(true);
+            break;
+          }
           if (toolOnly || !hasOutput) {
             schedulePendingFinalRecovery(set, get);
           }
@@ -3978,7 +4120,11 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         // content ("Let me get that written down...") is preserved in the UI
         // rather than being silently discarded.
         const currentStream = get().streamingMessage as RawMessage | null;
-        if (currentStream && (currentStream.role === 'assistant' || currentStream.role === undefined)) {
+        if (
+          currentStream
+          && (currentStream.role === 'assistant' || currentStream.role === undefined)
+          && !isInternalAssistantControlMessage(currentStream)
+        ) {
           const snapId = (currentStream as RawMessage).id
             || `error-snap-${Date.now()}`;
           const alreadyExists = get().messages.some(m => m.id === snapId);

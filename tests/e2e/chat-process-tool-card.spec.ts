@@ -277,4 +277,80 @@ test.describe('Chat process tool cards', () => {
       await closeElectronApp(app);
     }
   });
+
+  test('does not render HEARTBEAT_OK as a visible assistant bubble after a hidden heartbeat turn', async ({ homeDir, launchElectronApp }) => {
+    test.fixme(process.platform === 'win32', 'Seeded-session sidebar hydration is currently flaky in Electron E2E on Windows.');
+    const sessionsDir = join(homeDir, '.openclaw', 'agents', 'main', 'sessions');
+    const heartbeatSessionKey = 'agent:main:heartbeat-final-hidden-test';
+    const heartbeatSessionFile = 'heartbeat-final-hidden-test.jsonl';
+    const heartbeatSessionLabel = 'Heartbeat final hidden session';
+    const heartbeatMessages = [
+      {
+        id: 'user-heartbeat-hidden-1',
+        role: 'user',
+        content: [
+          'Read HEARTBEAT.md if it exists.',
+          `When reading HEARTBEAT.md, use workspace file ${homeDir.replace(/\\/g, '/')}/.openclaw/workspace/HEARTBEAT.md.`,
+          'Current time: Wednesday, April 22nd, 2026 - 12:47 (Etc/GMT-8)',
+        ].join('\n'),
+        timestamp: Math.floor(Date.now() / 1000) - 6,
+      },
+      {
+        id: 'assistant-heartbeat-hidden-1',
+        role: 'assistant',
+        content: 'HEARTBEAT_OK',
+        timestamp: Math.floor(Date.now() / 1000) - 5,
+      },
+      {
+        id: 'user-heartbeat-hidden-2',
+        role: 'user',
+        content: 'Continue the main task.',
+        timestamp: Math.floor(Date.now() / 1000) - 3,
+      },
+      {
+        id: 'assistant-heartbeat-hidden-2',
+        role: 'assistant',
+        content: 'Back on the main task now.',
+        timestamp: Math.floor(Date.now() / 1000) - 2,
+      },
+    ];
+
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      JSON.stringify({
+        sessions: [
+          {
+            key: heartbeatSessionKey,
+            id: 'heartbeat-final-hidden-test',
+            file: heartbeatSessionFile,
+            label: heartbeatSessionLabel,
+            updatedAt: Date.now(),
+          },
+        ],
+      }, null, 2),
+      'utf8',
+    );
+    await writeFile(
+      join(sessionsDir, heartbeatSessionFile),
+      `${heartbeatMessages.map((message) => JSON.stringify(message)).join('\n')}\n`,
+      'utf8',
+    );
+
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      const page = await getStableWindow(app);
+      await expect(page.getByTestId('main-layout')).toBeVisible();
+
+      await openSeededSession(page, heartbeatSessionKey);
+
+      await expect(page.getByText('Back on the main task now.', { exact: true })).toBeVisible({ timeout: 60_000 });
+      await expect(page.getByText('Continue the main task.', { exact: true })).toBeVisible({ timeout: 60_000 });
+      await expect(page.getByText('HEARTBEAT_OK', { exact: true })).toHaveCount(0);
+      await expect(page.getByText(/Read HEARTBEAT\.md if it exists\./)).toHaveCount(0);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
 });

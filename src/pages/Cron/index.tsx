@@ -2,7 +2,7 @@
  * Cron Page
  * Manage scheduled tasks
  */
-import { useEffect, useState, useCallback, type ReactNode, type SelectHTMLAttributes } from 'react';
+import { useEffect, useRef, useState, useCallback, type ReactNode, type SelectHTMLAttributes } from 'react';
 import {
   Plus,
   Clock,
@@ -36,6 +36,7 @@ import { useGatewayStore } from '@/stores/gateway';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { formatRelativeTime, cn } from '@/lib/utils';
+import { useBranding } from '@/lib/branding';
 import { toast } from 'sonner';
 import type { CronJob, CronJobCreateInput, ScheduleType } from '@/types/cron';
 import { CHANNEL_ICONS, CHANNEL_NAMES, type ChannelType } from '@/types/channel';
@@ -244,6 +245,7 @@ interface TaskDialogProps {
 
 function TaskDialog({ job, configuredChannels, onClose, onSave }: TaskDialogProps) {
   const { t } = useTranslation('cron');
+  const branding = useBranding();
   const [saving, setSaving] = useState(false);
 
   const [name, setName] = useState(job?.name || '');
@@ -438,7 +440,7 @@ function TaskDialog({ job, configuredChannels, onClose, onSave }: TaskDialogProp
               placeholder={t('dialog.taskNamePlaceholder')}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="h-[44px] rounded-xl font-mono text-[13px] bg-background dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary shadow-sm transition-all text-foreground placeholder:text-foreground/40"
+              className="h-[44px] rounded-xl text-[13px] bg-background dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary shadow-sm transition-all text-foreground placeholder:text-foreground/40"
             />
           </div>
 
@@ -451,7 +453,7 @@ function TaskDialog({ job, configuredChannels, onClose, onSave }: TaskDialogProp
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               rows={3}
-              className="rounded-xl font-mono text-[13px] bg-background dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary shadow-sm transition-all text-foreground placeholder:text-foreground/40 resize-none"
+              className="rounded-xl text-[13px] bg-background dark:bg-muted border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary shadow-sm transition-all text-foreground placeholder:text-foreground/40 resize-none"
             />
           </div>
 
@@ -507,7 +509,7 @@ function TaskDialog({ job, configuredChannels, onClose, onSave }: TaskDialogProp
           <div className="space-y-3">
             <div className="space-y-1">
               <Label className="text-[14px] text-foreground/80 font-bold">{t('dialog.deliveryTitle')}</Label>
-              <p className="text-[12px] text-muted-foreground">{t('dialog.deliveryDescription')}</p>
+              <p className="text-[12px] text-muted-foreground">{t('dialog.deliveryDescription', { appName: branding.productName })}</p>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -524,7 +526,7 @@ function TaskDialog({ job, configuredChannels, onClose, onSave }: TaskDialogProp
                 )}
               >
                 <div>
-                  <div className="text-[13px] font-semibold">{t('dialog.deliveryModeNone')}</div>
+                  <div className="text-[13px] font-semibold">{t('dialog.deliveryModeNone', { appName: branding.productName })}</div>
                   <div className="text-[11px] opacity-80">{t('dialog.deliveryModeNoneDesc')}</div>
                 </div>
               </Button>
@@ -838,6 +840,8 @@ export function Cron() {
   const [editingJob, setEditingJob] = useState<CronJob | undefined>();
   const [jobToDelete, setJobToDelete] = useState<{ id: string } | null>(null);
   const [configuredChannels, setConfiguredChannels] = useState<DeliveryChannelGroup[]>([]);
+  const hasFetchedJobsRef = useRef(false);
+  const previousGatewayRunningRef = useRef(false);
 
   const isGatewayRunning = gatewayStatus.state === 'running';
 
@@ -856,11 +860,21 @@ export function Cron() {
     }
   }, []);
 
-  // Fetch jobs on mount
+  // Fetch persisted jobs once on page open, then refresh again when the
+  // gateway transitions into the running state.
   useEffect(() => {
-    if (isGatewayRunning) {
+    if (!hasFetchedJobsRef.current) {
+      hasFetchedJobsRef.current = true;
+      previousGatewayRunningRef.current = isGatewayRunning;
+      fetchJobs();
+      return;
+    }
+
+    if (isGatewayRunning && !previousGatewayRunningRef.current) {
       fetchJobs();
     }
+
+    previousGatewayRunningRef.current = isGatewayRunning;
   }, [fetchJobs, isGatewayRunning]);
 
   useEffect(() => {

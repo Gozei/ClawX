@@ -6,6 +6,12 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { app, shell } from 'electron';
+import {
+    invalidateMarketplaceCacheForSource,
+    invalidateMarketplaceCacheKey,
+    readMarketplaceCache,
+    writeMarketplaceCache,
+} from '../services/skills/marketplace-cache';
 import { getOpenClawConfigDir, ensureDir, getClawHubCliBinPath, getClawHubCliEntryPath, quoteForCmd } from '../utils/paths';
 import { getSkillSourceById, inferSkillSourceFromBaseDir, listSkillSources, type SkillSourceConfig } from '../utils/skill-sources';
 
@@ -92,11 +98,56 @@ export interface ClawHubInstalledSkillResult {
     sourceLabel?: string;
 }
 
+const MARKETPLACE_SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
+const MARKETPLACE_EXPLORE_CACHE_TTL_MS = 10 * 60 * 1000;
+const MARKETPLACE_DETAIL_CACHE_TTL_MS = 60 * 60 * 1000;
+const MARKETPLACE_SOURCE_COUNTS_CACHE_TTL_MS = 15 * 60 * 1000;
+
+function buildSourceFingerprint(source: SkillSourceConfig): string {
+    return JSON.stringify({
+        id: source.id,
+        site: source.site,
+        apiQueryEndpoint: source.apiQueryEndpoint || '',
+        registry: source.registry || '',
+        workdir: source.workdir,
+    });
+}
+
+function buildMarketplaceSearchCacheKey(
+    source: SkillSourceConfig,
+    params: { query: string; limit?: number; cursor?: string },
+): string {
+    return `search:${JSON.stringify({
+        sourceId: source.id,
+        sourceFingerprint: buildSourceFingerprint(source),
+        query: params.query,
+        limit: params.limit ?? 25,
+        cursor: params.cursor || '',
+    })}`;
+}
+
+function buildMarketplaceDetailCacheKey(source: SkillSourceConfig, slug: string): string {
+    return `detail:${JSON.stringify({
+        sourceId: source.id,
+        sourceFingerprint: buildSourceFingerprint(source),
+        slug,
+    })}`;
+}
+
+function buildMarketplaceSourceCountCacheKey(source: SkillSourceConfig): string {
+    return `source-count:${JSON.stringify({
+        sourceId: source.id,
+        sourceFingerprint: buildSourceFingerprint(source),
+    })}`;
+}
+
 export class ClawHubService {
     private cliPath: string;
     private cliEntryPath: string;
     private useNodeRunner: boolean;
     private ansiRegex: RegExp;
+    private static readonly INSTALL_RETRY_COUNT = 3;
+    private static readonly INSTALL_RETRY_BASE_DELAY_MS = 1000;
 
     constructor() {
         // Use the user's OpenClaw config directory (~/.openclaw) for skill management
@@ -122,6 +173,15 @@ export class ClawHubService {
 
     private stripAnsi(line: string): string {
         return line.replace(this.ansiRegex, '').trim();
+    }
+
+    private isRetryableInstallError(error: unknown): boolean {
+        const message = String(error).toLowerCase();
+        return message.includes('rate limit') || message.includes('429');
+    }
+
+    private async delay(ms: number): Promise<void> {
+        await new Promise((resolve) => setTimeout(resolve, ms));
     }
 
     private extractFrontmatterName(skillManifestPath: string): string | null {
@@ -200,6 +260,39 @@ export class ClawHubService {
             env.CLAWDHUB_REGISTRY = source.registry;
         }
         return env;
+    }
+
+    private async readInstalledSkillsFromLock(workdir: string): Promise<Array<{ slug: string; version: string }>> {
+        const lockPaths = [
+            path.join(workdir, '.clawhub', 'lock.json'),
+            path.join(workdir, '.clawdhub', 'lock.json'),
+        ];
+
+        for (const lockPath of lockPaths) {
+            try {
+                const raw = await fs.promises.readFile(lockPath, 'utf8');
+                const parsed = JSON.parse(raw) as {
+                    skills?: Record<string, { version?: unknown }>;
+                };
+                const skills = parsed?.skills;
+                if (!skills || typeof skills !== 'object' || Array.isArray(skills)) {
+                    continue;
+                }
+
+                return Object.entries(skills)
+                    .filter(([slug]) => typeof slug === 'string' && slug.trim().length > 0)
+                    .map(([slug, entry]) => ({
+                        slug,
+                        version: typeof entry?.version === 'string' && entry.version.trim().length > 0
+                            ? entry.version
+                            : 'latest',
+                    }));
+            } catch {
+                // Try the next known lockfile location.
+            }
+        }
+
+        return [];
     }
 
     private async fetchPublicSkills(source: SkillSourceConfig, limit: number, cursor?: string): Promise<ClawHubSearchResponse> {
@@ -297,6 +390,10 @@ export class ClawHubService {
             }
         } catch (error) {
             console.warn(`Direct HTTP count failed for ${source.id}, falling back to paginated counting:`, error);
+            const message = String(error).toLowerCase();
+            if (message.includes('rate limit') || message.includes('429')) {
+                return null;
+            }
         }
 
         try {
@@ -413,12 +510,23 @@ export class ClawHubService {
             }
 
             const source = await this.resolveSource(params.sourceId);
+            const normalizedQuery = params.query?.trim() || '';
             // If query is empty, use 'explore' to show trending skills
-            if (!params.query || params.query.trim() === '') {
+            if (!normalizedQuery) {
                 return this.explore({ limit: params.limit, sourceId: source.id, cursor: params.cursor });
             }
 
-            const args = ['search', params.query];
+            const cacheKey = buildMarketplaceSearchCacheKey(source, {
+                query: normalizedQuery,
+                limit: params.limit,
+                cursor: params.cursor,
+            });
+            const cached = await readMarketplaceCache<ClawHubSearchResponse>(cacheKey);
+            if (cached) {
+                return cached;
+            }
+
+            const args = ['search', normalizedQuery];
             if (params.limit) {
                 args.push('--limit', String(params.limit));
             }
@@ -475,7 +583,12 @@ export class ClawHubService {
                 return null;
             });
             
-            return { results: results.filter((s): s is ClawHubSkillResult => s !== null) };
+            const response = { results: results.filter((s): s is ClawHubSkillResult => s !== null) };
+            await writeMarketplaceCache(cacheKey, response, {
+                ttlMs: MARKETPLACE_SEARCH_CACHE_TTL_MS,
+                sourceId: source.id,
+            });
+            return response;
         } catch (error) {
             console.error('ClawHub search error:', error);
             throw error;
@@ -489,10 +602,24 @@ export class ClawHubService {
         try {
             const source = await this.resolveSource(params.sourceId);
             const limit = params.limit || 25;
+            const cacheKey = buildMarketplaceSearchCacheKey(source, {
+                query: '',
+                limit,
+                cursor: params.cursor,
+            });
+            const cached = await readMarketplaceCache<ClawHubSearchResponse>(cacheKey);
+            if (cached) {
+                return cached;
+            }
 
             if (source.apiQueryEndpoint) {
                 try {
-                    return await this.fetchPublicSkills(source, limit, params.cursor);
+                    const response = await this.fetchPublicSkills(source, limit, params.cursor);
+                    await writeMarketplaceCache(cacheKey, response, {
+                        ttlMs: MARKETPLACE_EXPLORE_CACHE_TTL_MS,
+                        sourceId: source.id,
+                    });
+                    return response;
                 } catch (httpError) {
                     console.warn(`Direct HTTP explore failed for ${source.id}, falling back to CLI:`, httpError);
                 }
@@ -510,7 +637,7 @@ export class ClawHubService {
             const data = JSON.parse(jsonPart);
 
             const items = Array.isArray(data.items) ? data.items : [];
-            return {
+            const response = {
                 results: items.map((item: any) => ({
                     slug: item.slug,
                     name: item.name || item.slug,
@@ -521,6 +648,11 @@ export class ClawHubService {
                     sourceLabel: source.label,
                 })),
             };
+            await writeMarketplaceCache(cacheKey, response, {
+                ttlMs: MARKETPLACE_EXPLORE_CACHE_TTL_MS,
+                sourceId: source.id,
+            });
+            return response;
         } catch (error) {
             console.error('ClawHub explore error:', error);
             return { results: [] };
@@ -529,6 +661,12 @@ export class ClawHubService {
 
     async getPublicSkillBySlug(params: { slug: string; sourceId?: string }): Promise<unknown> {
         const source = await this.resolveSource(params.sourceId);
+        const cacheKey = buildMarketplaceDetailCacheKey(source, params.slug);
+        const cached = await readMarketplaceCache<unknown>(cacheKey);
+        if (cached) {
+            return cached;
+        }
+
         const data = await this.queryPublicSkills<unknown>(source, 'skills:getBySlug', [{ slug: params.slug }]);
         const detailValue = data?.value;
         if (!detailValue || typeof detailValue !== 'object') {
@@ -560,6 +698,10 @@ export class ClawHubService {
             }
         }
 
+        await writeMarketplaceCache(cacheKey, detail, {
+            ttlMs: MARKETPLACE_DETAIL_CACHE_TTL_MS,
+            sourceId: source.id,
+        });
         return detail;
     }
 
@@ -578,7 +720,28 @@ export class ClawHubService {
             args.push('--force');
         }
 
-        await this.runCommand(args, { sourceId: source.id });
+        let lastError: unknown;
+        for (let attempt = 0; attempt <= ClawHubService.INSTALL_RETRY_COUNT; attempt += 1) {
+            try {
+                await this.runCommand(args, { sourceId: source.id });
+                await invalidateMarketplaceCacheForSource(source.id);
+                return;
+            } catch (error) {
+                lastError = error;
+                const shouldRetry = this.isRetryableInstallError(error) && attempt < ClawHubService.INSTALL_RETRY_COUNT;
+                if (!shouldRetry) {
+                    throw error;
+                }
+
+                const delayMs = ClawHubService.INSTALL_RETRY_BASE_DELAY_MS * (2 ** attempt);
+                console.warn(
+                    `ClawHub install retry ${attempt + 1}/${ClawHubService.INSTALL_RETRY_COUNT} for ${params.slug} from ${source.id} after ${delayMs}ms: ${String(error)}`,
+                );
+                await this.delay(delayMs);
+            }
+        }
+
+        throw lastError instanceof Error ? lastError : new Error(String(lastError));
     }
 
     /**
@@ -618,6 +781,8 @@ export class ClawHubService {
                 console.error('Failed to update ClawHub lock file:', err);
             }
         }
+
+        await invalidateMarketplaceCacheForSource(source.id);
     }
 
     /**
@@ -631,28 +796,15 @@ export class ClawHubService {
         }
         const source = await this.resolveSource(sourceId);
         try {
-            const output = await this.runCommand(['list'], { sourceId: source.id });
-            if (!output || output.includes('No installed skills')) {
-                return [];
-            }
-
-            const lines = output.split('\n').filter(l => l.trim());
-            return lines.flatMap(line => {
-                const cleanLine = this.stripAnsi(line);
-                const match = cleanLine.match(/^(\S+)\s+v?(\d+\.\S+)/);
-                if (match) {
-                    const slug = match[1];
-                    return [{
-                        slug,
-                        version: match[2],
-                        source: 'openclaw-managed',
-                        baseDir: path.join(source.workdir, 'skills', slug),
-                        sourceId: source.id,
-                        sourceLabel: source.label,
-                    } satisfies ClawHubInstalledSkillResult];
-                }
-                return [];
-            });
+            const installed = await this.readInstalledSkillsFromLock(source.workdir);
+            return installed.map((entry) => ({
+                slug: entry.slug,
+                version: entry.version,
+                source: 'openclaw-managed',
+                baseDir: path.join(source.workdir, 'skills', entry.slug),
+                sourceId: source.id,
+                sourceLabel: source.label,
+            } satisfies ClawHubInstalledSkillResult));
         } catch (error) {
             console.error('ClawHub list error:', error);
             return [];
@@ -661,11 +813,29 @@ export class ClawHubService {
 
     async listSourceCounts(): Promise<ClawHubSourceCountResult[]> {
         const sources = (await listSkillSources()).filter((source) => source.enabled);
-        const results = await Promise.allSettled(sources.map(async (source) => ({
-            sourceId: source.id,
-            sourceLabel: source.label,
-            total: await this.fetchPublicSkillCount(source),
-        })));
+        const results = await Promise.allSettled(sources.map(async (source) => {
+            const cacheKey = buildMarketplaceSourceCountCacheKey(source);
+            const cached = await readMarketplaceCache<ClawHubSourceCountResult>(cacheKey);
+            if (cached && typeof cached.total === 'number') {
+                return cached;
+            }
+            if (cached) {
+                await invalidateMarketplaceCacheKey(cacheKey);
+            }
+
+            const result = {
+                sourceId: source.id,
+                sourceLabel: source.label,
+                total: await this.fetchPublicSkillCount(source),
+            } satisfies ClawHubSourceCountResult;
+            if (typeof result.total === 'number') {
+                await writeMarketplaceCache(cacheKey, result, {
+                    ttlMs: MARKETPLACE_SOURCE_COUNTS_CACHE_TTL_MS,
+                    sourceId: source.id,
+                });
+            }
+            return result;
+        }));
 
         return results.map((result, index) => {
             if (result.status === 'fulfilled') {

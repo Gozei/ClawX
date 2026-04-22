@@ -435,8 +435,6 @@ export function Chat() {
     || pendingFinal
     || (sending && (activeTurnAssistantMessages.length > 0 || streamingDisplayMessage != null))
     || shouldShowRecentCompletedTurnLayout;
-  const showProcessActivity = shouldUseProcessLayout
-    && ((sending && !hasStreamingFinalMessage) || shouldShowRecentCompletedTurnLayout);
   const activeTurnProcessStreamingMessage = shouldUseProcessLayout
     ? (isStreamingDuplicateOfPersistedAssistant
         ? null
@@ -455,6 +453,11 @@ export function Chat() {
   const activeTurnFinalStreamingMessage = shouldUseProcessLayout
     ? (!sending && hasStreamingFinalMessage && !isStreamingDuplicateOfPersistedAssistant ? splitStreamingFinalMessage : null)
     : (isStreamingDuplicateOfPersistedAssistant ? null : splitStreamingFinalMessage);
+  const hasVisibleFinalReply = hasVisibleFinalContent(resolvedPersistedFinalMessage)
+    || hasVisibleFinalContent(activeTurnFinalStreamingMessage);
+  const showProcessActivity = shouldUseProcessLayout
+    && !hasVisibleFinalReply
+    && ((sending && !hasStreamingFinalMessage) || shouldShowRecentCompletedTurnLayout);
   const displayHistoryItems = useMemo(() => groupMessagesForDisplay(displayHistoryMessages), [displayHistoryMessages]);
   const shouldHideStandaloneStreamingAvatar = useMemo(() => {
     if (shouldUseProcessLayout || showProcessActivity) return true;
@@ -872,8 +875,18 @@ export function Chat() {
         releaseTopLock();
       }
     };
-    const handlePointerScrollIntentStart = () => {
+    const handlePointerScrollIntentStart = (event: PointerEvent) => {
       pointerScrollIntentActive = true;
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+
+      const scrollElement = scrollContainerRef.current;
+      const target = event.target;
+      if (!scrollElement || !(target instanceof Node)) return;
+
+      const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
+      if (contentColumn?.contains(target)) {
+        releaseTopLock();
+      }
     };
     const clearPointerScrollIntent = () => {
       pointerScrollIntentActive = false;
@@ -1305,9 +1318,22 @@ function trimDeferredHistoryForActiveTurn(
     }
   }
 
-  return activeTurnHistoryIndex >= 0
-    ? deferredHistoryMessages.slice(0, activeTurnHistoryIndex)
-    : deferredHistoryMessages;
+  if (activeTurnHistoryIndex < 0) {
+    return deferredHistoryMessages;
+  }
+
+  // `useDeferredValue` can briefly expose both hydrated and optimistic copies
+  // of the same active-turn user message. Remove the trailing duplicate cluster
+  // so the composer prompt renders exactly once.
+  let trimStartIndex = activeTurnHistoryIndex;
+  while (
+    trimStartIndex > 0
+    && isSameActiveTurnUserMessage(deferredHistoryMessages[trimStartIndex - 1], activeTurnUserMessage)
+  ) {
+    trimStartIndex -= 1;
+  }
+
+  return deferredHistoryMessages.slice(0, trimStartIndex);
 }
 
 function buildStreamingDisplayMessage(
@@ -1435,6 +1461,7 @@ function ProcessSection({
   completedAtMs,
   collapsible,
   showActivity,
+  showStatusOnly,
   showFinalDivider,
   streamingTools,
   onExpandStart,
@@ -1450,6 +1477,7 @@ function ProcessSection({
   completedAtMs?: number;
   collapsible?: boolean;
   showActivity?: boolean;
+  showStatusOnly?: boolean;
   showFinalDivider?: boolean;
   streamingTools?: ToolStatus[];
   onExpandStart?: () => void;
@@ -1473,7 +1501,7 @@ function ProcessSection({
       hasVisibleProcessContent(effectiveProcessStreamingMessage, showThinking, chatProcessDisplayMode, assistantMessageStyle, hideInternalRoutineProcesses)
       || (chatProcessDisplayMode === 'all' && (streamingTools?.length ?? 0) > 0)
     );
-  const hasSection = visibleMessages.length > 0 || hasStreamingProcessContent || !!showActivity;
+  const hasSection = visibleMessages.length > 0 || hasStreamingProcessContent || !!showActivity || !!showStatusOnly;
   // Only collapse completed process sections by default; live sections stay expanded.
   const isCollapsible = collapsible ?? phase === 'processed';
   const [collapsed, setCollapsed] = useState(() => isCollapsible && phase === 'processed' && !!showFinalDivider);
@@ -1622,6 +1650,7 @@ function ProcessSection({
                   chatProcessDisplayMode={chatProcessDisplayMode}
                   hideInternalRoutineProcesses={hideInternalRoutineProcesses}
                   expandAll={expandAllEvents}
+                  onInteractionStart={onExpandStart}
                 />
               ))}
               {hasStreamingProcessContent && effectiveProcessStreamingMessage && (
@@ -1633,6 +1662,7 @@ function ProcessSection({
                   hideInternalRoutineProcesses={hideInternalRoutineProcesses}
                   streamingTools={streamingTools}
                   expandAll={expandAllEvents}
+                  onInteractionStart={onExpandStart}
                   preferPlainDirectContent={phase === 'working'}
                 />
               )}
@@ -1657,6 +1687,7 @@ function ProcessSection({
                   hideInternalRoutineProcesses={hideInternalRoutineProcesses}
                   streamingTools={streamingTools}
                   expandAll={expandAllEvents}
+                  onInteractionStart={onExpandStart}
                   preferPlainDirectContent={phase === 'working'}
                 />
               )}
@@ -1813,6 +1844,9 @@ function ActiveTurn({
       );
 
   // Process content can come from persisted messages or the current streaming process update.
+  const showStatusOnly = !sending
+    && !showActivity
+    && (finalHasVisibleContent || finalStreamingHasVisibleContent);
   const hasProcessSection = liveProcessMessages.some((message) => (
     hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle, hideInternalRoutineProcesses)
   ))
@@ -1823,7 +1857,8 @@ function ActiveTurn({
         || (chatProcessDisplayMode === 'all' && streamingTools.length > 0)
       )
     )
-    || showActivity;
+    || showActivity
+    || showStatusOnly;
 
   return (
     <div className={cn('space-y-3', hasProcessSection && (finalHasVisibleContent || finalStreamingHasVisibleContent) && 'space-y-2')}>
@@ -1845,6 +1880,7 @@ function ActiveTurn({
           completedAtMs={completedAtMs}
           collapsible={false}
           showActivity={showActivity}
+          showStatusOnly={showStatusOnly}
           showFinalDivider={!sending && (finalHasVisibleContent || finalStreamingHasVisibleContent)}
           streamingTools={streamingTools}
           onExpandStart={onProcessSectionExpand}
@@ -1975,19 +2011,124 @@ function ProductNameIndicator({
   );
 }
 
+function useRotatingProcessActivityCopy() {
+  const { t, i18n } = useTranslation('chat');
+  const language = i18n?.resolvedLanguage || i18n?.language;
+  const activityPhrases = useMemo(() => ([
+    t('process.preOutputUnderstanding', 'Understanding the request'),
+    t('process.preOutputRetrieving', 'Retrieving context'),
+    t('process.preOutputComposing', 'Composing the reply'),
+  ]), [language, t]);
+  const [phraseIndex, setPhraseIndex] = useState(0);
+
+  useEffect(() => {
+    setPhraseIndex(0);
+  }, [activityPhrases]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setPhraseIndex((current) => (current + 1) % activityPhrases.length);
+    }, 1800);
+    return () => clearInterval(timer);
+  }, [activityPhrases.length]);
+
+  return {
+    activePhrase: activityPhrases[phraseIndex] ?? activityPhrases[0] ?? t('process.preOutputUnderstanding', 'Understanding the request'),
+    detailLabel: t('process.preOutputReasoning', 'Reasoning pipeline active'),
+    statusLabel: t('process.preOutputStatus', 'Processing'),
+  };
+}
+
+function PreOutputStatusPanel({ testIdPrefix }: { testIdPrefix: string }) {
+  const { activePhrase, detailLabel, statusLabel } = useRotatingProcessActivityCopy();
+
+  return (
+    <div
+      className="w-full max-w-[236px] space-y-1.5"
+      data-testid={`${testIdPrefix}-pre-output-panel`}
+    >
+      <style>{'@keyframes chat-pre-output-pulse { 0% { transform: scale(0.9); opacity: 0.12; } 55% { opacity: 0.28; } 100% { transform: scale(1.16); opacity: 0; } } @keyframes chat-pre-output-dot { 0%, 100% { transform: translateY(0); opacity: 0.52; } 50% { transform: translateY(-2px); opacity: 1; } } @keyframes chat-pre-output-rail { 0% { transform: translateX(-130%); opacity: 0.4; } 45% { opacity: 1; } 100% { transform: translateX(260%); opacity: 0.46; } }'}</style>
+      <div
+        className="rounded-[18px] border border-black/[0.06] bg-[linear-gradient(180deg,rgba(255,255,255,0.82),rgba(255,255,255,0.64))] px-3 py-2 shadow-[0_12px_24px_rgba(15,23,42,0.05)] backdrop-blur-md dark:border-white/[0.08] dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.04))]"
+        data-testid={`${testIdPrefix}-pre-output-card`}
+      >
+        <div className="flex items-center gap-2.5">
+          <div
+            className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#d9e6ff]/85 text-[#4f8df7] dark:bg-[#2e4d82]/45 dark:text-[#82adff]"
+            data-testid={`${testIdPrefix}-pre-output-icon`}
+          >
+            <span
+              aria-hidden="true"
+              className="absolute inset-1 rounded-full border border-[#4f8df7]/18 dark:border-[#82adff]/22"
+              style={{ animation: 'chat-pre-output-pulse 2.6s ease-out infinite' }}
+            />
+            <div className="relative flex items-center gap-1">
+              {[0, 1, 2].map((index) => (
+                <span
+                  key={index}
+                  className="h-2 w-2 rounded-full bg-current shadow-[0_0_0_3px_rgba(79,141,247,0.08)] dark:shadow-[0_0_0_3px_rgba(130,173,255,0.08)]"
+                  style={{ animation: `chat-pre-output-dot 1.15s ease-in-out ${index * 0.12}s infinite` }}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="min-w-0 space-y-0.5">
+            <div
+              className="truncate text-[12.5px] font-semibold tracking-[-0.03em] text-foreground md:text-[13px]"
+              data-testid={`${testIdPrefix}-pre-output-title`}
+            >
+              {activePhrase}
+            </div>
+            <div
+              className="text-[10px] font-medium leading-4 text-muted-foreground md:text-[11px]"
+              data-testid={`${testIdPrefix}-pre-output-detail`}
+            >
+              {detailLabel}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        className="flex items-center gap-1.5 pl-0.5"
+        data-testid={`${testIdPrefix}-pre-output-status`}
+      >
+        <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+          <span className="h-1.5 w-1.5 rounded-full bg-[#4f8df7]" />
+        </span>
+        <span className="relative h-1 w-12 shrink-0 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/[0.08]">
+          <span
+            className="absolute top-0 h-full w-6 rounded-full bg-[linear-gradient(90deg,rgba(79,141,247,0.9),rgba(123,166,248,0.65))]"
+            style={{ animation: 'chat-pre-output-rail 1.9s cubic-bezier(0.4, 0, 0.2, 1) infinite' }}
+          />
+        </span>
+        <span
+          className="text-[11.5px] font-semibold tracking-[-0.02em] text-muted-foreground"
+          data-testid={`${testIdPrefix}-pre-output-status-text`}
+        >
+          {statusLabel}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function TypingIndicator() {
   return (
     <div
-      className="flex w-full items-center gap-3 pt-0.5"
+      className="flex w-full items-start gap-3 pt-0.5"
       data-testid="chat-typing-indicator"
     >
       <AssistantAvatar testId="chat-typing-avatar" />
-      <div className="min-w-0 flex-1">
+      <div
+        className="min-w-0 flex-1 space-y-1.5 pt-0.5"
+        data-testid="chat-typing-indicator-content"
+      >
         <ProductNameIndicator
           scanning
           testIdPrefix="chat-typing-indicator"
           className="max-w-full"
         />
+        <PreOutputStatusPanel testIdPrefix="chat-typing-indicator" />
       </div>
     </div>
   );
@@ -2004,30 +2145,14 @@ function ProcessActivityIndicator({
   label?: string | null;
   detail?: string | null;
 }) {
-  const { t, i18n } = useTranslation('chat');
+  const { t } = useTranslation('chat');
   const resolvedLabel = label || t('process.workingFor', { duration: '...' });
-  const language = i18n?.resolvedLanguage || i18n?.language;
-  const isZh = language?.startsWith('zh');
-
-  const activityPhrases = isZh
-    ? ['理解问题', '检索资料', '整理回答']
-    : ['Understanding', 'Retrieving', 'Composing'];
-  const [phraseIndex, setPhraseIndex] = useState(0);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setPhraseIndex((current) => (current + 1) % activityPhrases.length);
-    }, 1800);
-    return () => clearInterval(timer);
-  }, [activityPhrases.length]);
-
-  const capsuleLabel = `${activityPhrases[phraseIndex]}${isZh ? '中' : ' in progress'}`;
-  const detailLabel = isZh ? '推理链路活跃' : 'Reasoning pipeline active';
+  const { activePhrase, detailLabel } = useRotatingProcessActivityCopy();
 
   const statusBody = (
     <div
       className="space-y-2.5"
-      aria-label={capsuleLabel}
+      aria-label={activePhrase}
       data-process-activity-detail={detailLabel}
     >
       <div

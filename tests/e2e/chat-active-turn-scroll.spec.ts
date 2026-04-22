@@ -337,6 +337,7 @@ test.describe('Chat active turn scroll', () => {
       await sendButton.click();
 
       await expect(page.getByTestId('chat-active-turn-anchor')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText('Please keep this active turn aligned to the top.', { exact: true })).toHaveCount(1);
 
       await expect.poll(async () => {
         const distanceFromBottom = await measureDistanceFromBottom(page);

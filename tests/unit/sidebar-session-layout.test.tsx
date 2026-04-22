@@ -208,7 +208,7 @@ describe('Sidebar session layout', () => {
     expect(screen.getByTestId('sidebar-system-status')).toHaveAttribute('aria-label', 'System degraded: stopped');
   });
 
-  it('shows a gateway restart hint above new chat with a ticking elapsed timer while the gateway is starting', () => {
+  it('shows a gateway status hint above new chat with a ticking elapsed timer while the gateway is starting', () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date('2026-04-15T00:00:00.000Z'));
@@ -220,27 +220,27 @@ describe('Sidebar session layout', () => {
         </MemoryRouter>,
       );
 
-      expect(screen.getByTestId('sidebar-gateway-restarting-hint')).toHaveTextContent('Gateway starting');
-      expect(screen.getByTestId('sidebar-gateway-restarting-hint')).toHaveClass(
+      expect(screen.getByTestId('sidebar-gateway-status-hint')).toHaveTextContent('Gateway starting');
+      expect(screen.getByTestId('sidebar-gateway-status-hint')).toHaveClass(
         'border-red-200/80',
         'bg-red-50/95',
         'text-red-600',
       );
-      expect(screen.getByTestId('sidebar-gateway-restarting-elapsed')).toHaveTextContent('(0s)');
-      expect(screen.getByTestId('sidebar-gateway-restarting-elapsed')).toHaveClass('text-red-600/80');
-      expect(screen.getByTestId('sidebar-gateway-restarting-ellipsis')).toHaveTextContent('...');
+      expect(screen.getByTestId('sidebar-gateway-status-elapsed')).toHaveTextContent('(0s)');
+      expect(screen.getByTestId('sidebar-gateway-status-elapsed')).toHaveClass('text-red-600/80');
+      expect(screen.getByTestId('sidebar-gateway-status-ellipsis')).toHaveTextContent('...');
 
       act(() => {
         vi.advanceTimersByTime(3000);
       });
 
-      expect(screen.getByTestId('sidebar-gateway-restarting-elapsed')).toHaveTextContent('(3s)');
+      expect(screen.getByTestId('sidebar-gateway-status-elapsed')).toHaveTextContent('(3s)');
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('does not show a gateway restart hint when the gateway is stopped', () => {
+  it('shows a disconnected gateway hint without elapsed time when the gateway is stopped', () => {
     gatewayState.status = { state: 'stopped' };
 
     render(
@@ -249,6 +249,8 @@ describe('Sidebar session layout', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.queryByTestId('sidebar-gateway-restarting-hint')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-gateway-status-hint')).toHaveTextContent('Gateway not connected');
+    expect(screen.queryByTestId('sidebar-gateway-status-elapsed')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar-gateway-status-ellipsis')).not.toBeInTheDocument();
   });
 });

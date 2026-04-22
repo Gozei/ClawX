@@ -59,7 +59,13 @@
     },
     "process": {
         "workingFor": "处理中 {{duration}}",
-        "processedFor": "已处理 {{duration}}"
+        "processedFor": "已处理 {{duration}}",
+        "preOutputUnderstanding": "理解问题中",
+        "preOutputRetrieving": "检索资料中",
+        "preOutputComposing": "整理回答中",
+        "preOutputReasoning": "推理链路活跃",
+        "preOutputStatus": "正在处理",
+        "processingToolResults": "正在处理工具结果..."
     },
     "sessionErrors": {
         "noResponse": "模型没有返回响应。提供商可能暂时不可用，或 API Key 配额不足。请检查你的提供商设置。",

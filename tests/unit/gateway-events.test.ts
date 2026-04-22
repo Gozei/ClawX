@@ -148,6 +148,63 @@ describe('gateway store event wiring', () => {
     expect(useChatStore.getState().sessionRunningState).toEqual({});
   });
 
+  it('does not finalize the run when a tool item reports completed before the assistant finishes', async () => {
+    hostApiFetchMock.mockResolvedValue({ state: 'running', port: 18789 });
+
+    const handlers = new Map<string, (payload: unknown) => void>();
+    subscribeHostEventMock.mockImplementation((eventName: string, handler: (payload: unknown) => void) => {
+      handlers.set(eventName, handler);
+      return () => {};
+    });
+
+    const { useChatStore } = await import('../../src/stores/chat');
+    const loadHistory = vi.fn();
+    const loadSessions = vi.fn();
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      sessions: [{ key: 'agent:main:main' }],
+      sessionRunningState: { 'agent:main:main': true },
+      activeRunId: 'run-tool-complete',
+      sending: true,
+      pendingFinal: false,
+      error: null,
+      loadHistory,
+      loadSessions,
+    } as never);
+
+    const { useGatewayStore } = await import('@/stores/gateway');
+    await useGatewayStore.getState().init();
+
+    handlers.get('gateway:notification')?.({
+      method: 'agent',
+      params: {
+        runId: 'run-tool-complete',
+        sessionKey: 'agent:main:main',
+        stream: 'item',
+        data: {
+          itemId: 'tool:browser-live-1',
+          phase: 'completed',
+          kind: 'tool',
+          name: 'browser',
+          status: 'completed',
+          title: 'Open browser',
+          progressText: 'Browser is ready',
+          toolCallId: 'browser-live-1',
+        },
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(useChatStore.getState().sending).toBe(true);
+    expect(useChatStore.getState().activeRunId).toBe('run-tool-complete');
+    expect(useChatStore.getState().sessionRunningState).toEqual({
+      'agent:main:main': true,
+    });
+    expect(loadHistory).not.toHaveBeenCalled();
+  });
+
   it('maps assistant stream notifications into live streaming text', async () => {
     hostApiFetchMock.mockResolvedValue({ state: 'running', port: 18789 });
 

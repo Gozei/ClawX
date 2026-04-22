@@ -33,12 +33,20 @@ import { AppLogo } from '@/components/branding/AppLogo';
 import { useBranding } from '@/lib/branding';
 import { SettingsHub } from '@/components/settings/SettingsHub';
 import { isSessionRunning } from '@/stores/chat/session-running';
+import { DEFAULT_SESSION_KEY } from '@/stores/chat/types';
 
 const SIDEBAR_EXPANDED_MIN_WIDTH = 240;
 const SIDEBAR_EXPANDED_MAX_WIDTH = 420;
 const SIDEBAR_COLLAPSED_WIDTH = 64;
 const SESSION_AGENT_BADGE_WIDTH = 'w-[63px]';
 let lastSkillsSearchSnapshot = '';
+
+function sanitizeSkillsSearch(search: string): string {
+  const params = new URLSearchParams(search);
+  params.delete('marketplace');
+  const next = params.toString();
+  return next ? `?${next}` : '';
+}
 
 interface NavItemProps {
   to: string;
@@ -153,6 +161,39 @@ function formatSidebarGatewayStateLabel(
   }
 }
 
+function formatSidebarGatewayHintLabel(
+  state: 'stopped' | 'starting' | 'running' | 'error' | 'reconnecting',
+  isChinese: boolean,
+): string {
+  if (isChinese) {
+    switch (state) {
+      case 'starting':
+        return '\u7f51\u5173\u542f\u52a8\u4e2d';
+      case 'reconnecting':
+        return '\u7f51\u5173\u91cd\u8fde\u4e2d';
+      case 'error':
+        return '\u7f51\u5173\u5f02\u5e38';
+      case 'stopped':
+        return '\u7f51\u5173\u672a\u8fde\u63a5';
+      default:
+        return '\u7f51\u5173\u6b63\u5e38';
+    }
+  }
+
+  switch (state) {
+    case 'starting':
+      return 'Gateway starting';
+    case 'reconnecting':
+      return 'Gateway reconnecting';
+    case 'error':
+      return 'Gateway error';
+    case 'stopped':
+      return 'Gateway not connected';
+    default:
+      return 'Gateway healthy';
+  }
+}
+
 export function Sidebar() {
   const branding = useBranding();
   const location = useLocation();
@@ -178,15 +219,37 @@ export function Sidebar() {
   const toggleSessionPin = useChatStore((s) => s.toggleSessionPin);
   const loadSessions = useChatStore((s) => s.loadSessions);
   const loadHistory = useChatStore((s) => s.loadHistory);
+  const agents = useAgentsStore((s) => s.agents);
+  const fetchAgents = useAgentsStore((s) => s.fetchAgents);
 
   const gatewayStatus = useGatewayStore((s) => s.status);
   const isGatewayRunning = gatewayStatus.state === 'running';
   const currentVersion = useUpdateStore((s) => s.currentVersion);
+  const startupDraftInitializedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
-    const hasExistingMessages = useChatStore.getState().messages.length > 0;
+    const initialChatState = useChatStore.getState();
+    const shouldInitializeStartupDraft = !startupDraftInitializedRef.current
+      && initialChatState.currentSessionKey === DEFAULT_SESSION_KEY
+      && initialChatState.sessions.length === 0
+      && initialChatState.messages.length === 0
+      && !initialChatState.pendingFinal
+      && !initialChatState.activeRunId
+      && !initialChatState.lastUserMessageAt;
+
     (async () => {
+      await fetchAgents();
+      if (cancelled) return;
+
+      // Cold start should always land on a fresh blank draft instead of
+      // auto-selecting a persisted transcript from the sidebar history.
+      if (shouldInitializeStartupDraft) {
+        startupDraftInitializedRef.current = true;
+        newSession();
+      }
+
+      const hasExistingMessages = useChatStore.getState().messages.length > 0;
       await loadSessions();
       if (cancelled) return;
       await loadHistory(hasExistingMessages || !isGatewayRunning);
@@ -194,9 +257,7 @@ export function Sidebar() {
     return () => {
       cancelled = true;
     };
-  }, [isGatewayRunning, loadHistory, loadSessions]);
-  const agents = useAgentsStore((s) => s.agents);
-  const fetchAgents = useAgentsStore((s) => s.fetchAgents);
+  }, [fetchAgents, isGatewayRunning, loadHistory, loadSessions, newSession]);
 
   const navigate = useNavigate();
   const isOnChat = location.pathname === '/';
@@ -204,8 +265,9 @@ export function Sidebar() {
 
   useEffect(() => {
     if (location.pathname === '/skills') {
-      lastSkillsSearchSnapshot = location.search;
-      setLastSkillsSearch(location.search);
+      const sanitizedSearch = sanitizeSkillsSearch(location.search);
+      lastSkillsSearchSnapshot = sanitizedSearch;
+      setLastSkillsSearch(sanitizedSearch);
     }
   }, [location.pathname, location.search]);
 
@@ -227,10 +289,6 @@ export function Sidebar() {
   const resizeStartWidthRef = useRef(sidebarWidth);
   const gatewayHintStartAtRef = useRef<number | null>(null);
   const [sessionMenuPosition, setSessionMenuPosition] = useState<{ right: number; top: number; transform: string } | null>(null);
-
-  useEffect(() => {
-    void fetchAgents();
-  }, [fetchAgents]);
 
   useEffect(() => {
     if (!editingSessionKey || !renameInputRef.current) return;
@@ -354,8 +412,9 @@ export function Sidebar() {
 
   const isChinese = i18n.resolvedLanguage?.startsWith('zh') ?? false;
   const sessionSectionLabel = isChinese ? '会话记录' : 'Session History';
-  const gatewayRestartHintLabel = isChinese ? '网关启动中' : 'Gateway starting';
-  const showGatewayRestartHint = gatewayStatus.state === 'starting' || gatewayStatus.state === 'reconnecting';
+  const gatewayStatusHintLabel = formatSidebarGatewayHintLabel(gatewayStatus.state, isChinese);
+  const showGatewayStatusHint = gatewayStatus.state !== 'running';
+  const showGatewayStatusElapsed = gatewayStatus.state === 'starting' || gatewayStatus.state === 'reconnecting';
   const sidebarVersionLabel = isChinese ? '版本' : 'Version';
   const sidebarGatewayStateLabel = formatSidebarGatewayStateLabel(gatewayStatus.state, isChinese);
   const sidebarSystemStatusLabel = isChinese
@@ -365,7 +424,7 @@ export function Sidebar() {
   const gatewayRestartElapsedSeconds = gatewayHintStartAtRef.current == null
     ? 0
     : Math.floor((gatewayHintNow - gatewayHintStartAtRef.current) / 1000);
-  const gatewayRestartElapsedLabel = showGatewayRestartHint
+  const gatewayRestartElapsedLabel = showGatewayStatusElapsed
     ? formatGatewayRestartElapsed(gatewayRestartElapsedSeconds, isChinese)
     : '';
   const currentSessionRunSnapshot = useMemo(() => ({
@@ -659,37 +718,41 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex flex-col gap-1 px-2.5 py-3">
-        {!sidebarCollapsed && showGatewayRestartHint && (
+        {!sidebarCollapsed && showGatewayStatusHint && (
           <div
-            data-testid="sidebar-gateway-restarting-hint"
+            data-testid="sidebar-gateway-status-hint"
             className="mb-2 rounded-[14px] border border-red-200/80 bg-red-50/95 px-3.5 py-2 text-[12px] font-medium text-red-600 shadow-[0_4px_14px_rgba(248,113,113,0.10)] dark:border-red-300/20 dark:bg-red-400/10 dark:text-red-200"
           >
             <div className="inline-flex items-center">
-              <span>{gatewayRestartHintLabel}</span>
-              <span
-                data-testid="sidebar-gateway-restarting-elapsed"
-                className="ml-1 text-red-600/80 dark:text-red-200/80"
-              >
-                {isChinese ? `（${gatewayRestartElapsedLabel}）` : `(${gatewayRestartElapsedLabel})`}
-              </span>
-              <span
-                aria-hidden="true"
-                data-testid="sidebar-gateway-restarting-ellipsis"
-                className="ml-1 inline-flex w-[18px] justify-start"
-              >
-                {[0, 1, 2].map((index) => (
+              <span>{gatewayStatusHintLabel}</span>
+              {showGatewayStatusElapsed && (
+                <>
                   <span
-                    key={index}
-                    className="inline-block motion-safe:animate-pulse"
-                    style={{
-                      animationDelay: `${index * 160}ms`,
-                      animationDuration: '1.1s',
-                    }}
+                    data-testid="sidebar-gateway-status-elapsed"
+                    className="ml-1 text-red-600/80 dark:text-red-200/80"
                   >
-                    .
+                    {isChinese ? `（${gatewayRestartElapsedLabel}）` : `(${gatewayRestartElapsedLabel})`}
                   </span>
-                ))}
-              </span>
+                  <span
+                    aria-hidden="true"
+                    data-testid="sidebar-gateway-status-ellipsis"
+                    className="ml-1 inline-flex w-[18px] justify-start"
+                  >
+                    {[0, 1, 2].map((index) => (
+                      <span
+                        key={index}
+                        className="inline-block motion-safe:animate-pulse"
+                        style={{
+                          animationDelay: `${index * 160}ms`,
+                          animationDuration: '1.1s',
+                        }}
+                      >
+                        .
+                      </span>
+                    ))}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         )}

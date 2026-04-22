@@ -261,6 +261,31 @@ function readNonEmptyString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+const TERMINAL_AGENT_PHASES = new Set(['completed', 'done', 'finished', 'end']);
+
+function isTerminalAgentPhase(value: unknown): boolean {
+  const phase = readNonEmptyString(value)?.toLowerCase();
+  return phase != null && TERMINAL_AGENT_PHASES.has(phase);
+}
+
+function shouldFinalizeAgentRunFromPhase(
+  params: Record<string, unknown>,
+  data: Record<string, unknown>,
+  normalizedEvent: Record<string, unknown> | null,
+): boolean {
+  if (!isTerminalAgentPhase(data.phase ?? params.phase)) {
+    return false;
+  }
+
+  const normalizedState = readNonEmptyString(normalizedEvent?.state)?.toLowerCase();
+  if (normalizedState === 'final' || normalizedState === 'error' || normalizedState === 'aborted') {
+    return true;
+  }
+
+  const stream = readNonEmptyString(params.stream ?? data.stream)?.toLowerCase();
+  return !stream || stream === 'lifecycle';
+}
+
 function parseFiniteNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
@@ -566,7 +591,7 @@ function handleGatewayNotification(notification: { method?: string; params?: Rec
       .catch(() => {});
   }
 
-  if (phase === 'completed' || phase === 'done' || phase === 'finished' || phase === 'end') {
+  if (shouldFinalizeAgentRunFromPhase(p, data, normalizedEvent)) {
     import('./chat')
       .then(({ useChatStore }) => {
         const state = useChatStore.getState();

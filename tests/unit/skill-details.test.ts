@@ -131,6 +131,150 @@ Use the Notion API.
     expect(detail?.requirements.rawMarkdown).toContain('Use the Notion API.');
   });
 
+  it('parses inline JSON metadata from the clawdbot namespace', async () => {
+    const skillDir = join(testRoot, 'weather');
+    await mkdir(skillDir, { recursive: true });
+    const skillFile = join(skillDir, 'SKILL.md');
+    await writeFile(skillFile, `---
+name: weather
+description: Get current weather and forecasts (no API key required).
+homepage: https://wttr.in/:help
+metadata: {"clawdbot":{"emoji":"🌤️","requires":{"bins":["curl"]}}}
+---
+
+# Weather
+`, 'utf8');
+
+    getAllSkillConfigsMock.mockResolvedValue({});
+
+    const { getSkillDetail } = await import('@electron/utils/skill-details');
+    const gatewayManager = {
+      rpc: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            skillKey: 'weather',
+            name: 'Weather',
+            description: 'Forecasts',
+            disabled: false,
+            eligible: true,
+            missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
+            baseDir: skillDir,
+            filePath: skillFile,
+          },
+        ],
+      }),
+    };
+
+    const detail = await getSkillDetail(gatewayManager as never, 'weather');
+
+    expect(detail?.requirements).toEqual(expect.objectContaining({
+      requires: expect.objectContaining({
+        bins: ['curl'],
+      }),
+      parseError: undefined,
+    }));
+  });
+
+  it('parses YAML metadata from alternate namespaces', async () => {
+    const skillDir = join(testRoot, 'pdf-smart-tool-cn');
+    await mkdir(skillDir, { recursive: true });
+    const skillFile = join(skillDir, 'SKILL.md');
+    await writeFile(skillFile, `---
+name: pdf-smart-tool-cn
+description: PDF Smart Tool
+metadata:
+  clawhub:
+    emoji: 📄
+    requires:
+      bins: [pdftotext, tesseract, ghostscript]
+      anyBins: [python, python3]
+---
+
+# PDF Smart Tool
+`, 'utf8');
+
+    getAllSkillConfigsMock.mockResolvedValue({});
+
+    const { getSkillDetail } = await import('@electron/utils/skill-details');
+    const gatewayManager = {
+      rpc: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            skillKey: 'pdf-smart-tool-cn',
+            name: 'PDF Smart Tool',
+            description: 'PDF Smart Tool',
+            disabled: false,
+            eligible: false,
+            missing: { bins: ['pdftotext'], anyBins: [], env: [], config: [], os: [] },
+            baseDir: skillDir,
+            filePath: skillFile,
+          },
+        ],
+      }),
+    };
+
+    const detail = await getSkillDetail(gatewayManager as never, 'pdf-smart-tool-cn');
+
+    expect(detail?.requirements).toEqual(expect.objectContaining({
+      requires: expect.objectContaining({
+        bins: ['pdftotext', 'tesseract', 'ghostscript'],
+        anyBins: ['python', 'python3'],
+      }),
+      parseError: undefined,
+    }));
+  });
+
+  it('parses YAML metadata from the openclaw namespace with primaryEnv', async () => {
+    const skillDir = join(testRoot, 'docx-cn');
+    await mkdir(skillDir, { recursive: true });
+    const skillFile = join(skillDir, 'SKILL.md');
+    await writeFile(skillFile, `---
+name: docx-cn
+description: Word 文档处理
+metadata:
+  openclaw:
+    emoji: 📄
+    primaryEnv: DOCX_API_KEY
+    requires:
+      env: [DOCX_API_KEY]
+      config: [baseUrl]
+---
+
+# DOCX
+`, 'utf8');
+
+    getAllSkillConfigsMock.mockResolvedValue({});
+
+    const { getSkillDetail } = await import('@electron/utils/skill-details');
+    const gatewayManager = {
+      rpc: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            skillKey: 'docx-cn',
+            name: 'DOCX',
+            description: 'DOCX',
+            disabled: false,
+            eligible: false,
+            missing: { bins: [], anyBins: [], env: ['DOCX_API_KEY'], config: ['baseUrl'], os: [] },
+            baseDir: skillDir,
+            filePath: skillFile,
+          },
+        ],
+      }),
+    };
+
+    const detail = await getSkillDetail(gatewayManager as never, 'docx-cn');
+
+    expect(detail?.requirements).toEqual(expect.objectContaining({
+      primaryEnv: 'DOCX_API_KEY',
+      requires: expect.objectContaining({
+        env: ['DOCX_API_KEY'],
+        config: ['baseUrl'],
+      }),
+      parseError: undefined,
+    }));
+  });
+
   it('resolves the marketplace install slug from metadata when runtime only exposes the skill key', async () => {
     const skillDir = join(testRoot, 'self-improving-agent');
     await mkdir(skillDir, { recursive: true });

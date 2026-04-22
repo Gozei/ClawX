@@ -237,6 +237,10 @@ test.describe('Chat loading indicator brand', () => {
       const activeBrandScan = page.locator([
         '[data-testid="chat-typing-indicator-scan"]',
       ].join(', ')).first();
+      const preOutputCard = page.getByTestId('chat-typing-indicator-pre-output-card');
+      const preOutputTitle = page.getByTestId('chat-typing-indicator-pre-output-title');
+      const preOutputDetail = page.getByTestId('chat-typing-indicator-pre-output-detail');
+      const preOutputStatus = page.getByTestId('chat-typing-indicator-pre-output-status-text');
       const activeAvatar = page.locator([
         '[data-testid="chat-typing-avatar"]',
         '[data-testid="chat-tool-processing-avatar"]',
@@ -246,6 +250,10 @@ test.describe('Chat loading indicator brand', () => {
       await expect(activeBrandName).toBeVisible({ timeout: 10_000 });
       await expect(activeBrandName).toHaveText('Deep AI Worker');
       await expect(activeBrandName).toHaveCSS('font-size', '16px');
+      await expect(preOutputCard).toBeVisible();
+      await expect(preOutputTitle).not.toHaveText('');
+      await expect(preOutputDetail).not.toHaveText('');
+      await expect(preOutputStatus).not.toHaveText('');
       await expect(activeBrandShell).not.toHaveClass(/rounded-full/);
       await expect(activeBrandShell).not.toHaveClass(/border/);
       if (await activeBrandScan.count()) {
@@ -269,6 +277,9 @@ test.describe('Chat loading indicator brand', () => {
       await expect(page.getByTestId('chat-message-content-assistant').last()).toContainText('reply:model-loading', {
         timeout: 90_000,
       });
+      await expect(page.getByTestId('chat-typing-indicator')).toHaveCount(0);
+      await expect(page.getByTestId('chat-typing-indicator-pre-output-card')).toHaveCount(0);
+      await expect(page.locator('[data-testid="chat-typing-indicator-scan"]')).toHaveCount(0);
     } finally {
       await closeElectronApp(app);
       await mockServer.close();

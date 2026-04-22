@@ -1,7 +1,7 @@
 import i18n from '@/i18n';
 import { invokeIpc } from '@/lib/api-client';
 import { normalizeAppError } from '@/lib/error-model';
-import type { AttachedFileMeta, ChatSession, ContentBlock, RawMessage, ToolStatus } from './types';
+import type { AttachedFileMeta, ChatComposerDraft, ChatSession, ContentBlock, RawMessage, ToolStatus } from './types';
 
 export const CHAT_HISTORY_RPC_TIMEOUT_MS = 60_000;
 export const CHAT_HISTORY_LABEL_PREFETCH_LIMIT = 50;
@@ -10,6 +10,7 @@ type DraftSessionStateLike = {
   currentSessionKey: string;
   messages: unknown[];
   sessions: ChatSession[];
+  composerDrafts?: Record<string, ChatComposerDraft>;
   sessionLabels: Record<string, string>;
   sessionLastActivity: Record<string, number>;
 };
@@ -55,6 +56,13 @@ function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boo
   return typeof session?.label === 'string' && session.label.trim().length > 0;
 }
 
+function hasComposerDraftContent(draft: ChatComposerDraft | null | undefined): boolean {
+  if (!draft) return false;
+  if (draft.text.trim().length > 0) return true;
+  if (draft.attachments.length > 0) return true;
+  return typeof draft.targetAgentId === 'string' && draft.targetAgentId.trim().length > 0;
+}
+
 function isUnusedDraftSession(
   state: DraftSessionStateLike,
   sessionKey: string,
@@ -62,6 +70,7 @@ function isUnusedDraftSession(
   return !sessionKey.endsWith(':main')
     && state.currentSessionKey === sessionKey
     && state.messages.length === 0
+    && !hasComposerDraftContent(state.composerDrafts?.[sessionKey])
     && !state.sessionLastActivity[sessionKey]
     && !state.sessionLabels[sessionKey]
     && !hasStoredSessionLabel(state.sessions, sessionKey);
@@ -1156,6 +1165,7 @@ export {
   hasNonToolAssistantContent,
   hasAssistantFinalTextContent,
   hasStoredSessionLabel,
+  hasComposerDraftContent,
   isEmptyAssistantResponse,
   isUnusedDraftSession,
   isToolOnlyMessage,

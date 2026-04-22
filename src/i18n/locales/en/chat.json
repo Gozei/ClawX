@@ -59,7 +59,13 @@
     },
     "process": {
         "workingFor": "Working for {{duration}}",
-        "processedFor": "Processed {{duration}}"
+        "processedFor": "Processed {{duration}}",
+        "preOutputUnderstanding": "Understanding the request",
+        "preOutputRetrieving": "Retrieving context",
+        "preOutputComposing": "Composing the reply",
+        "preOutputReasoning": "Reasoning pipeline active",
+        "preOutputStatus": "Processing",
+        "processingToolResults": "Processing tool results..."
     },
     "sessionErrors": {
         "noResponse": "No response received from the model. The provider may be unavailable or the API key may have insufficient quota. Please check your provider settings.",

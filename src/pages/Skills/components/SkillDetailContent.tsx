@@ -10,10 +10,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { pageInputSurfaceClasses } from '@/components/layout/page-tokens';
 import { hostApiFetch } from '@/lib/host-api';
 import { cn } from '@/lib/utils';
-import { MarkdownRenderer } from '@/pages/Chat/MarkdownRenderer';
 import { useSkillsStore } from '@/stores/skills';
 import { toast } from 'sonner';
 import type { SkillDetail, SkillMissingStatus } from '@/types/skill';
+import { SkillDetailMarkdownContent } from './SkillDetailMarkdownContent';
+import { SkillDetailOverviewCard } from './SkillDetailOverviewCard';
 
 type SkillDetailContentProps = {
   detail: SkillDetail;
@@ -21,14 +22,17 @@ type SkillDetailContentProps = {
   initialTab?: 'docs' | 'config';
 };
 
-function flattenMissingRequirements(missing?: SkillMissingStatus): string[] {
+function flattenMissingRequirements(
+  missing: SkillMissingStatus | undefined,
+  t: (key: string) => string,
+): string[] {
   if (!missing) return [];
   return [
-    ...(missing.bins ?? []).map((item) => `bin: ${item}`),
-    ...(missing.anyBins ?? []).map((item) => `any bin: ${item}`),
-    ...(missing.env ?? []).map((item) => `env: ${item}`),
-    ...(missing.config ?? []).map((item) => `config: ${item}`),
-    ...(missing.os ?? []).map((item) => `os: ${item}`),
+    ...(missing.bins ?? []).map((item) => `${t('detail.missingLabel.bin')}: ${item}`),
+    ...(missing.anyBins ?? []).map((item) => `${t('detail.missingLabel.anyBin')}: ${item}`),
+    ...(missing.env ?? []).map((item) => `${t('detail.missingLabel.env')}: ${item}`),
+    ...(missing.config ?? []).map((item) => `${t('detail.missingLabel.config')}: ${item}`),
+    ...(missing.os ?? []).map((item) => `${t('detail.missingLabel.os')}: ${item}`),
   ];
 }
 
@@ -45,7 +49,7 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
   const requirements = detail.requirements ?? {};
   const config = detail.config ?? {};
 
-  const missingItems = flattenMissingRequirements(status.missing);
+  const missingItems = flattenMissingRequirements(status.missing, t);
   const hasMissing = missingItems.length > 0;
   const isReady = Boolean(status.ready) && !hasMissing;
 
@@ -125,44 +129,36 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
   return (
     <>
       <div data-testid="skills-detail-page-content" className="grid gap-6">
-        <section data-testid="skills-detail-overview" className="rounded-[24px] bg-white p-6 shadow-[0_4px_24px_rgb(0,0,0,0.03)] dark:bg-card sm:p-7">
-          <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex min-w-0 items-start gap-5">
-              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[18px] bg-sky-50 text-3xl text-sky-700 shadow-sm shadow-sky-100/50 dark:bg-sky-500/10 dark:text-sky-200 dark:shadow-none">
-                {detail.identity.icon || '📦'}
+        <SkillDetailOverviewCard
+          testId="skills-detail-overview"
+          title={detail.identity.name}
+          description={detail.identity.description}
+          icon={detail.identity.icon || '📦'}
+          badges={(
+            <>
+              <Badge variant="secondary" className="rounded-md border-0 bg-slate-100 text-slate-600 dark:bg-white/[0.06] dark:text-white/70">
+                v{detail.identity.version || '1.0.0'}
+              </Badge>
+              {detail.identity.source && (
+                <Badge variant="secondary" className="rounded-md border-0 bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-200">
+                  {detail.identity.source}
+                </Badge>
+              )}
+              <div
+                className={cn(
+                  'flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[12px] font-medium',
+                  isReady
+                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
+                    : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400',
+                )}
+              >
+                {isReady ? <CheckCircle className="h-3.5 w-3.5" /> : <ShieldAlert className="h-3.5 w-3.5" />}
+                {isReady ? t('list.ready') : t('detail.missingRuntimeRequirements')}
               </div>
-              <div className="min-w-0 pt-0.5">
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <h2 className="truncate text-[24px] font-bold tracking-tight text-slate-900 dark:text-white">
-                    {detail.identity.name}
-                  </h2>
-                  <Badge variant="secondary" className="rounded-md border-0 bg-slate-100 text-slate-600 dark:bg-white/[0.06] dark:text-white/70">
-                    v{detail.identity.version || '1.0.0'}
-                  </Badge>
-                  {detail.identity.source && (
-                    <Badge variant="secondary" className="rounded-md border-0 bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-200">
-                      {detail.identity.source}
-                    </Badge>
-                  )}
-                  <div
-                    className={cn(
-                      'flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[12px] font-medium',
-                      isReady
-                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
-                        : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400',
-                    )}
-                  >
-                    {isReady ? <CheckCircle className="h-3.5 w-3.5" /> : <ShieldAlert className="h-3.5 w-3.5" />}
-                    {isReady ? t('list.ready') : t('detail.missingRuntimeRequirements')}
-                  </div>
-                </div>
-                <p className="mt-2.5 max-w-2xl text-[14px] leading-relaxed text-slate-500 dark:text-white/60">
-                  {detail.identity.description}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex shrink-0 items-center justify-center gap-3 self-center">
+            </>
+          )}
+          actions={(
+            <>
               <div className="flex h-11 items-center justify-center">
                 <Switch
                   checked={Boolean(status.enabled)}
@@ -181,42 +177,43 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
               >
                 <Trash2 className="h-5 w-5" />
               </Button>
-            </div>
-          </div>
+            </>
+          )}
+          metadata={(
+            <>
+              {detail.identity.author && (
+                <span className="flex items-center gap-1.5">
+                  <span className="font-medium text-slate-500 dark:text-white/60">{t('detail.author')}:</span>
+                  {detail.identity.author}
+                </span>
+              )}
 
-          <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-slate-100 pt-5 text-[12px] text-slate-400 dark:border-white/8 dark:text-white/45">
-            {detail.identity.author && (
-              <span className="flex items-center gap-1.5">
-                <span className="font-medium text-slate-500 dark:text-white/60">{t('detail.author')}:</span>
-                {detail.identity.author}
-              </span>
-            )}
+              {detail.identity.homepage && (
+                <a
+                  className="flex items-center gap-1.5 text-sky-600 transition-colors hover:text-sky-700 hover:underline dark:text-sky-400 dark:hover:text-sky-300"
+                  href={detail.identity.homepage}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  {t('detail.openManual')}
+                </a>
+              )}
 
-            {detail.identity.homepage && (
-              <a
-                className="flex items-center gap-1.5 text-sky-600 transition-colors hover:text-sky-700 hover:underline dark:text-sky-400 dark:hover:text-sky-300"
-                href={detail.identity.homepage}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-                {t('detail.openManual')}
-              </a>
-            )}
-
-            {detail.identity.baseDir && (
-              <button
-                type="button"
-                onClick={() => void openSkillFolder()}
-                className="flex max-w-[200px] items-center gap-1.5 truncate text-left transition-colors hover:text-slate-600 hover:underline dark:hover:text-white/70 sm:max-w-md"
-                title={detail.identity.baseDir}
-              >
-                <span className="font-medium text-slate-500 dark:text-white/60">{t('detail.baseDir')}:</span>
-                <span className="truncate">{detail.identity.baseDir}</span>
-              </button>
-            )}
-          </div>
-        </section>
+              {detail.identity.baseDir && (
+                <button
+                  type="button"
+                  onClick={() => void openSkillFolder()}
+                  className="flex max-w-[200px] items-center gap-1.5 truncate text-left transition-colors hover:text-slate-600 hover:underline dark:hover:text-white/70 sm:max-w-md"
+                  title={detail.identity.baseDir}
+                >
+                  <span className="font-medium text-slate-500 dark:text-white/60">{t('detail.baseDir')}:</span>
+                  <span className="truncate">{detail.identity.baseDir}</span>
+                </button>
+              )}
+            </>
+          )}
+        />
 
         <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'docs' | 'config')}>
           <section className="overflow-hidden rounded-[24px] bg-white shadow-[0_4px_24px_rgb(0,0,0,0.03)] dark:bg-card">
@@ -235,11 +232,7 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
                     <p>{t('detail.parseFailed', { error: requirements.parseError })}</p>
                   </div>
                 )}
-                <div className="min-w-0 max-w-full overflow-x-hidden">
-                  <div className="prose prose-slate prose-sm max-w-none break-words [overflow-wrap:anywhere] prose-headings:font-semibold dark:prose-invert dark:prose-p:text-white/70 [&_img]:max-w-full [&_img]:h-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_pre]:break-words [&_pre]:overflow-x-hidden [&_code]:break-all [&_table]:w-full [&_table]:table-fixed [&_table]:overflow-x-hidden [&_td]:break-words [&_th]:break-words">
-                    <MarkdownRenderer content={requirements.rawMarkdown || '*No documentation available.*'} />
-                  </div>
-                </div>
+                <SkillDetailMarkdownContent content={requirements.rawMarkdown} />
               </TabsContent>
 
               <TabsContent value="config" data-testid="skills-detail-setup" className="mt-0 max-w-3xl space-y-10">

@@ -16,7 +16,13 @@ import { hostApiFetch } from '@/lib/host-api';
 import { invokeIpc } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import { useAgentsStore } from '@/stores/agents';
-import { useChatStore, type ChatMessageDispatchOptions } from '@/stores/chat';
+import {
+  useChatStore,
+  type ChatComposerDraft,
+  type ChatComposerDraftUpdate,
+  type ChatMessageDispatchOptions,
+  type ComposerFileAttachment,
+} from '@/stores/chat';
 import { useProviderStore } from '@/stores/providers';
 import { useSettingsStore } from '@/stores/settings';
 import type { AgentSummary } from '@/types/agent';
@@ -28,17 +34,7 @@ import { CHAT_SURFACE_MAX_WIDTH_CLASS } from './layout';
 
 // ── Types ────────────────────────────────────────────────────────
 
-export interface FileAttachment {
-  id: string;
-  fileName: string;
-  mimeType: string;
-  fileSize: number;
-  dedupeKey?: string;
-  stagedPath: string;        // disk path for gateway
-  preview: string | null;    // data URL for images, null for others
-  status: 'staging' | 'ready' | 'error';
-  error?: string;
-}
+export type FileAttachment = ComposerFileAttachment;
 
 interface ChatInputProps {
   onSend: (text: string, attachments?: FileAttachment[], targetAgentId?: string | null) => void;
@@ -65,6 +61,11 @@ type ModelOption = {
 
 const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
 const GOOGLE_OAUTH_RUNTIME_PROVIDER = 'google-gemini-cli';
+const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = {
+  text: '',
+  attachments: [],
+  targetAgentId: null,
+};
 
 function getRuntimeProviderKey(account: ProviderAccount): string {
   if (account.authMode === 'oauth_browser') {
@@ -172,9 +173,6 @@ export function ChatInput({
   shellPaddingRightPx,
 }: ChatInputProps) {
   const { t, i18n } = useTranslation('chat');
-  const [input, setInput] = useState('');
-  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
-  const [targetAgentId, setTargetAgentId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [modelSwitchPending, setModelSwitchPending] = useState(false);
@@ -200,8 +198,17 @@ export function ChatInput({
   const chatFontScale = useSettingsStore((s) => s.chatFontScale);
   const currentAgentId = useChatStore((s) => s.currentAgentId);
   const currentSessionKey = useChatStore((s) => s.currentSessionKey);
+  const composerDraft = useChatStore(useCallback(
+    (state) => state.composerDrafts[currentSessionKey] ?? EMPTY_CHAT_COMPOSER_DRAFT,
+    [currentSessionKey],
+  ));
+  const setComposerDraft = useChatStore((s) => s.setComposerDraft);
+  const clearComposerDraft = useChatStore((s) => s.clearComposerDraft);
   const sessions = useChatStore((s) => s.sessions);
   const sessionModels = useChatStore((s) => s.sessionModels);
+  const input = composerDraft.text;
+  const attachments = composerDraft.attachments;
+  const targetAgentId = composerDraft.targetAgentId;
   const currentAgent = useMemo(
     () => (agents ?? []).find((agent) => agent.id === currentAgentId) ?? null,
     [agents, currentAgentId],
@@ -211,7 +218,6 @@ export function ChatInput({
     [currentSessionKey, sessions],
   );
   const previousSessionKeyRef = useRef(currentSessionKey);
-  const activeSessionKeyRef = useRef(currentSessionKey);
   const currentAgentName = useMemo(
     () => currentAgent?.name ?? currentAgentId,
     [currentAgent, currentAgentId],
@@ -277,6 +283,35 @@ export function ChatInput({
     () => new Set(attachments.map((attachment) => attachment.dedupeKey).filter(Boolean)),
     [attachments],
   );
+  const updateComposerDraftForSession = useCallback((
+    sessionKey: string,
+    nextDraft: ChatComposerDraftUpdate,
+  ) => {
+    setComposerDraft(sessionKey, nextDraft);
+  }, [setComposerDraft]);
+  const updateCurrentComposerDraft = useCallback((
+    nextDraft: ChatComposerDraftUpdate,
+  ) => {
+    updateComposerDraftForSession(currentSessionKey, nextDraft);
+  }, [currentSessionKey, updateComposerDraftForSession]);
+  const updateCurrentAttachments = useCallback((
+    updater: FileAttachment[] | ((attachments: FileAttachment[]) => FileAttachment[]),
+  ) => {
+    updateCurrentComposerDraft((draft) => ({
+      ...draft,
+      attachments: typeof updater === 'function' ? updater(draft.attachments) : updater,
+    }));
+  }, [updateCurrentComposerDraft]);
+  const updateCurrentTargetAgentId = useCallback((
+    nextTargetAgentId: string | null | ((currentTargetAgentId: string | null) => string | null),
+  ) => {
+    updateCurrentComposerDraft((draft) => ({
+      ...draft,
+      targetAgentId: typeof nextTargetAgentId === 'function'
+        ? nextTargetAgentId(draft.targetAgentId)
+        : nextTargetAgentId,
+    }));
+  }, [updateCurrentComposerDraft]);
 
   useLayoutEffect(() => {
     const measuredLabelWidth = modelLabelMeasureRef.current?.offsetWidth ?? 0;
@@ -331,14 +366,10 @@ export function ChatInput({
   }, []);
 
   useLayoutEffect(() => {
-    activeSessionKeyRef.current = currentSessionKey;
     if (previousSessionKeyRef.current === currentSessionKey) {
       return;
     }
     previousSessionKeyRef.current = currentSessionKey;
-    setInput('');
-    setAttachments([]);
-    setTargetAgentId(null);
     setPickerOpen(false);
     setModelMenuOpen(false);
     setDragOver(false);
@@ -365,15 +396,15 @@ export function ChatInput({
   useEffect(() => {
     if (!targetAgentId) return;
     if (targetAgentId === currentAgentId) {
-      setTargetAgentId(null);
+      updateCurrentTargetAgentId(null);
       setPickerOpen(false);
       return;
     }
     if (!(agents ?? []).some((agent) => agent.id === targetAgentId)) {
-      setTargetAgentId(null);
+      updateCurrentTargetAgentId(null);
       setPickerOpen(false);
     }
-  }, [agents, currentAgentId, targetAgentId]);
+  }, [agents, currentAgentId, targetAgentId, updateCurrentTargetAgentId]);
 
   useEffect(() => {
     if (!pickerOpen) return;
@@ -483,13 +514,12 @@ export function ChatInput({
 
   const pickFiles = useCallback(async () => {
     if (!canEditDraft) return;
+    const draftSessionKey = currentSessionKey;
     try {
       const result = await invokeIpc('dialog:open', {
         properties: ['openFile', 'multiSelections'],
       }) as { canceled: boolean; filePaths?: string[] };
       if (result.canceled || !result.filePaths?.length) return;
-      const draftSessionKey = currentSessionKey;
-      if (draftSessionKey !== activeSessionKeyRef.current) return;
 
       const seenKeys = new Set(attachmentKeys);
       let skippedDuplicates = false;
@@ -509,22 +539,24 @@ export function ChatInput({
 
       // Add placeholder entries immediately
       const tempIds: string[] = [];
-      for (const filePath of nextFilePaths) {
+      const placeholders = nextFilePaths.map((filePath) => {
         const tempId = crypto.randomUUID();
         tempIds.push(tempId);
-        // Handle both Unix (/) and Windows (\) path separators
-        const fileName = filePath.split(/[\\/]/).pop() || 'file';
-        setAttachments(prev => [...prev, {
+        return {
           id: tempId,
-          fileName,
+          fileName: filePath.split(/[\\/]/).pop() || 'file',
           mimeType: '',
           fileSize: 0,
           dedupeKey: buildPathAttachmentKey(filePath),
           stagedPath: '',
           preview: null,
           status: 'staging' as const,
-        }]);
-      }
+        };
+      });
+      updateComposerDraftForSession(draftSessionKey, (draft) => ({
+        ...draft,
+        attachments: [...draft.attachments, ...placeholders],
+      }));
 
       // Stage all files via IPC
       console.log('[pickFiles] Staging files:', nextFilePaths);
@@ -540,12 +572,11 @@ export function ChatInput({
         body: JSON.stringify({ filePaths: nextFilePaths }),
       });
       console.log('[pickFiles] Stage result:', staged?.map(s => ({ id: s?.id, fileName: s?.fileName, mimeType: s?.mimeType, fileSize: s?.fileSize, stagedPath: s?.stagedPath, hasPreview: !!s?.preview })));
-      if (draftSessionKey !== activeSessionKeyRef.current) return;
       const stagedItems = Array.isArray(staged) ? staged : [];
 
       // Update each placeholder with real data
-      setAttachments(prev => {
-        let updated = [...prev];
+      updateComposerDraftForSession(draftSessionKey, (draft) => {
+        let updated = [...draft.attachments];
         for (let i = 0; i < tempIds.length; i++) {
           const tempId = tempIds[i];
           const data = stagedItems[i];
@@ -564,20 +595,25 @@ export function ChatInput({
             );
           }
         }
-        return updated;
+        return {
+          ...draft,
+          attachments: updated,
+        };
       });
     } catch (err) {
-      if (currentSessionKey !== activeSessionKeyRef.current) return;
       console.error('[pickFiles] Failed to stage files:', err);
       // Mark any stuck 'staging' attachments as 'error' so the user can remove them
       // and the send button isn't permanently blocked
-      setAttachments(prev => prev.map(a =>
-        a.status === 'staging'
-          ? { ...a, status: 'error' as const, error: String(err) }
-          : a,
-      ));
+      updateComposerDraftForSession(draftSessionKey, (draft) => ({
+        ...draft,
+        attachments: draft.attachments.map((attachment) => (
+          attachment.status === 'staging'
+            ? { ...attachment, status: 'error' as const, error: String(err) }
+            : attachment
+        )),
+      }));
     }
-  }, [attachmentKeys, canEditDraft, currentSessionKey]);
+  }, [attachmentKeys, canEditDraft, currentSessionKey, updateComposerDraftForSession]);
 
   // ── Stage browser File objects (paste / drag-drop) ─────────────
 
@@ -600,23 +636,24 @@ export function ChatInput({
     }
 
     for (const file of nextFiles) {
-      if (draftSessionKey !== activeSessionKeyRef.current) return;
       const tempId = crypto.randomUUID();
-      setAttachments(prev => [...prev, {
-        id: tempId,
-        fileName: file.name,
-        mimeType: file.type || 'application/octet-stream',
-        fileSize: file.size,
-        dedupeKey: buildBrowserFileAttachmentKey(file),
-        stagedPath: '',
-        preview: null,
-        status: 'staging' as const,
-      }]);
+      updateComposerDraftForSession(draftSessionKey, (draft) => ({
+        ...draft,
+        attachments: [...draft.attachments, {
+          id: tempId,
+          fileName: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          fileSize: file.size,
+          dedupeKey: buildBrowserFileAttachmentKey(file),
+          stagedPath: '',
+          preview: null,
+          status: 'staging' as const,
+        }],
+      }));
 
       try {
         console.log(`[stageBuffer] Reading file: ${file.name} (${file.type}, ${file.size} bytes)`);
         const base64 = await readFileAsBase64(file);
-        if (draftSessionKey !== activeSessionKeyRef.current) return;
         console.log(`[stageBuffer] Base64 length: ${base64?.length ?? 'null'}`);
         const staged = await hostApiFetch<{
           id: string;
@@ -634,26 +671,33 @@ export function ChatInput({
           }),
         });
         console.log(`[stageBuffer] Staged: id=${staged?.id}, path=${staged?.stagedPath}, size=${staged?.fileSize}`);
-        setAttachments(prev => prev.map(a =>
-          a.id === tempId ? { ...staged, dedupeKey: buildBrowserFileAttachmentKey(file), status: 'ready' as const } : a,
-        ));
+        updateComposerDraftForSession(draftSessionKey, (draft) => ({
+          ...draft,
+          attachments: draft.attachments.map((attachment) => (
+            attachment.id === tempId
+              ? { ...staged, dedupeKey: buildBrowserFileAttachmentKey(file), status: 'ready' as const }
+              : attachment
+          )),
+        }));
       } catch (err) {
-        if (draftSessionKey !== activeSessionKeyRef.current) return;
         console.error(`[stageBuffer] Error staging ${file.name}:`, err);
-        setAttachments(prev => prev.map(a =>
-          a.id === tempId
-            ? { ...a, status: 'error' as const, error: String(err) }
-            : a,
-        ));
+        updateComposerDraftForSession(draftSessionKey, (draft) => ({
+          ...draft,
+          attachments: draft.attachments.map((attachment) => (
+            attachment.id === tempId
+              ? { ...attachment, status: 'error' as const, error: String(err) }
+              : attachment
+          )),
+        }));
       }
     }
-  }, [attachmentKeys, canEditDraft, currentSessionKey]);
+  }, [attachmentKeys, canEditDraft, currentSessionKey, updateComposerDraftForSession]);
 
   // ── Attachment management ──────────────────────────────────────
 
   const removeAttachment = useCallback((id: string) => {
-    setAttachments(prev => prev.filter(a => a.id !== id));
-  }, []);
+    updateCurrentAttachments((currentAttachments) => currentAttachments.filter((attachment) => attachment.id !== id));
+  }, [updateCurrentAttachments]);
 
   const allReady = attachments.length === 0 || attachments.every(a => a.status === 'ready');
   const hasFailedAttachments = attachments.some((a) => a.status === 'error');
@@ -670,14 +714,17 @@ export function ChatInput({
     if (!prefillText || prefillNonce === 0) {
       return;
     }
-    setInput(prefillText);
+    updateCurrentComposerDraft((draft) => ({
+      ...draft,
+      text: prefillText,
+    }));
     requestAnimationFrame(() => {
       if (!textareaRef.current) return;
       textareaRef.current.focus();
       const cursor = prefillText.length;
       textareaRef.current.setSelectionRange(cursor, cursor);
     });
-  }, [prefillNonce, prefillText]);
+  }, [prefillNonce, prefillText, updateCurrentComposerDraft]);
 
   const handleSubmitDraft = useCallback(() => {
     if (!canSend && !canQueueDraft) return;
@@ -693,8 +740,7 @@ export function ChatInput({
         stagedPath: a.stagedPath, status: a.status, hasPreview: !!a.preview,
       })));
     }
-    setInput('');
-    setAttachments([]);
+    clearComposerDraft(currentSessionKey);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
@@ -707,13 +753,14 @@ export function ChatInput({
     } else {
       onSend(textToSend, attachmentsToSend, targetAgentId);
     }
-    setTargetAgentId(null);
     setPickerOpen(false);
   }, [
     activeComposerSessionKey,
     attachments,
     canQueueDraft,
     canSend,
+    clearComposerDraft,
+    currentSessionKey,
     effectiveModelRef,
     input,
     isZh,
@@ -738,7 +785,7 @@ export function ChatInput({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Backspace' && !input && targetAgentId) {
-        setTargetAgentId(null);
+        updateCurrentTargetAgentId(null);
         return;
       }
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -750,7 +797,7 @@ export function ChatInput({
         handleSubmitDraft();
       }
     },
-    [handleSubmitDraft, input, targetAgentId],
+    [handleSubmitDraft, input, targetAgentId, updateCurrentTargetAgentId],
   );
 
   // Handle paste (Ctrl/Cmd+V with files)
@@ -883,6 +930,7 @@ export function ChatInput({
   return (
       <div
         data-testid="chat-composer-shell"
+        data-session-key={currentSessionKey}
         className={cn(
           'relative w-full pt-0 pb-2 transition-all duration-300',
           (pickerOpen || modelMenuOpen) && 'z-[140]',
@@ -919,7 +967,7 @@ export function ChatInput({
             <div className="px-2.5 pb-1 pt-1">
               <button
                 type="button"
-                onClick={() => setTargetAgentId(null)}
+                onClick={() => updateCurrentTargetAgentId(null)}
                 className="inline-flex items-center gap-1.5 rounded-[10px] border border-primary/20 bg-primary/7 px-3 py-1 text-[13px] font-medium text-foreground transition-colors hover:bg-primary/12"
                 title={t('composer.clearTarget')}
               >
@@ -934,7 +982,10 @@ export function ChatInput({
               <Textarea
                 ref={textareaRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => updateCurrentComposerDraft((draft) => ({
+                  ...draft,
+                  text: e.target.value,
+                }))}
                 onKeyDown={handleKeyDown}
                 onCompositionStart={() => {
                   isComposingRef.current = true;
@@ -1009,7 +1060,7 @@ export function ChatInput({
                       onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
-                        setTargetAgentId(null);
+                        updateCurrentTargetAgentId(null);
                         setPickerOpen(false);
                         textareaRef.current?.focus();
                       }}
@@ -1103,7 +1154,7 @@ export function ChatInput({
             size="sm"
             className="mt-2.5 h-auto px-4 py-0 text-[11px] text-muted-foreground/58"
             onClick={() => {
-              setAttachments((prev) => prev.filter((att) => att.status !== 'error'));
+              updateCurrentAttachments((currentAttachments) => currentAttachments.filter((attachment) => attachment.status !== 'error'));
               void pickFiles();
             }}
           >
@@ -1137,7 +1188,7 @@ export function ChatInput({
                   agent={agent}
                   selected={agent.id === targetAgentId}
                   onSelect={() => {
-                    setTargetAgentId((current) => (current === agent.id ? null : agent.id));
+                    updateCurrentTargetAgentId((current) => (current === agent.id ? null : agent.id));
                     setPickerOpen(false);
                     textareaRef.current?.focus();
                   }}

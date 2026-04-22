@@ -138,7 +138,7 @@ export function createSessionActions(
             return true;
           });
 
-          const { currentSessionKey } = get();
+          const { currentSessionKey, sessions: localSessions } = get();
           let nextSessionKey = currentSessionKey || DEFAULT_SESSION_KEY;
           if (!nextSessionKey.startsWith('agent:')) {
             const canonicalMatch = canonicalBySuffix.get(nextSessionKey);
@@ -148,10 +148,12 @@ export function createSessionActions(
           }
           const currentState = get();
           const currentIsUnusedDraft = isUnusedDraftSession(currentState, nextSessionKey);
+          const hasLocalSessionEntry = localSessions.some((session) => session.key === nextSessionKey);
           if (!dedupedSessions.find((s) => s.key === nextSessionKey) && dedupedSessions.length > 0) {
-            // Current session not found in the backend list
-            const isNewEmptySession = currentIsUnusedDraft;
-            if (!isNewEmptySession) {
+            // Preserve locally-created blank drafts and pending local sessions.
+            // The initial ghost key is neither, so it still yields to
+            // persisted history when no startup draft exists.
+            if (!currentIsUnusedDraft && !hasLocalSessionEntry) {
               nextSessionKey = dedupedSessions[0].key;
             }
           }
@@ -380,6 +382,7 @@ export function createSessionActions(
           ? Object.fromEntries(Object.entries(s.sessionLastActivity).filter(([k]) => k !== currentSessionKey))
           : s.sessionLastActivity,
         messages: [],
+        loading: false,
         streamingText: '',
         streamingMessage: null,
         streamingTools: [],

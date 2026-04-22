@@ -147,6 +147,7 @@ describe('chat session actions', () => {
       currentAgentId: 'foo',
       sessions: [{ key: 'agent:foo:main' }],
       messages: [{ role: 'assistant' }],
+      loading: true,
       streamingText: 'streaming',
       activeRunId: 'r1',
       pendingFinal: true,
@@ -159,6 +160,7 @@ describe('chat session actions', () => {
     expect(next.currentAgentId).toBe('ops');
     expect(next.sessions.some((s) => s.key === 'agent:ops:session-1711111111111')).toBe(false);
     expect(next.messages).toEqual([]);
+    expect(next.loading).toBe(false);
     expect(next.streamingText).toBe('');
     expect(next.activeRunId).toBeNull();
     expect(next.pendingFinal).toBe(false);
@@ -189,6 +191,41 @@ describe('chat session actions', () => {
 
     expect(h.read().currentSessionKey).toBe('agent:foo:session-draft');
     expect(h.read().sessions.some((session) => session.key === 'agent:foo:session-draft')).toBe(false);
+  });
+
+  it('loadSessions keeps the blank default session selected on cold start', async () => {
+    const { createSessionActions } = await import('@/stores/chat/session-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:main:main',
+      sessions: [],
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+    });
+    const actions = createSessionActions(h.set as never, h.get as never);
+
+    invokeIpcMock.mockResolvedValueOnce({
+      success: true,
+      result: {
+        sessions: [
+          { key: 'agent:main:session-latest', label: 'Latest session', updatedAt: 2_000 },
+          { key: 'agent:main:main', displayName: 'Main', updatedAt: 1_000 },
+        ],
+      },
+    });
+    hostApiFetchMock.mockResolvedValueOnce({
+      success: true,
+      metadata: {},
+    });
+
+    await actions.loadSessions();
+
+    expect(h.read().currentSessionKey).toBe('agent:main:main');
+    expect(h.read().sessions.map((session) => session.key)).toEqual([
+      'agent:main:session-latest',
+      'agent:main:main',
+    ]);
+    expect(h.read().loadHistory).not.toHaveBeenCalled();
   });
 
   it('renameSession persists and updates the local label with a 30-character cap', async () => {

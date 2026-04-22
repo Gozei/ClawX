@@ -89,6 +89,29 @@ export interface QueuedChatMessage {
   queuedAt: number;
 }
 
+export interface ComposerFileAttachment {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  dedupeKey?: string;
+  stagedPath: string;
+  preview: string | null;
+  status: 'staging' | 'ready' | 'error';
+  error?: string;
+}
+
+export interface ChatComposerDraft {
+  text: string;
+  attachments: ComposerFileAttachment[];
+  targetAgentId: string | null;
+}
+
+export type ChatComposerDraftUpdate =
+  | ChatComposerDraft
+  | null
+  | ((draft: ChatComposerDraft) => ChatComposerDraft | null);
+
 export type ChatSendStage =
   | 'sending_to_gateway'
   | 'awaiting_runtime'
@@ -134,6 +157,7 @@ export interface ChatState {
   currentSessionKey: string;
   currentAgentId: string;
   sessionModels: Record<string, string>;
+  composerDrafts: Record<string, ChatComposerDraft>;
   /** First user message text per session key, used as display label */
   sessionLabels: Record<string, string>;
   /** Last message timestamp (ms) per session key, used for sorting */
@@ -172,6 +196,8 @@ export interface ChatState {
   toggleThinking: () => void;
   refresh: () => Promise<void>;
   clearError: () => void;
+  setComposerDraft: (sessionKey: string, draft: ChatComposerDraftUpdate) => void;
+  clearComposerDraft: (sessionKey?: string) => void;
   queueOfflineMessage: (
     text: string,
     attachments?: Array<{

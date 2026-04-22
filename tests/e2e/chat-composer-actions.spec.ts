@@ -1,4 +1,6 @@
-import { closeElectronApp, completeSetup, expect, getStableWindow, test } from './fixtures/electron';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { closeElectronApp, completeSetup, expect, getStableWindow, openModelsFromSettings, test } from './fixtures/electron';
 
 const SEEDED_ACCOUNT_ID = 'chat-composer-openai-e2e';
 
@@ -59,6 +61,54 @@ async function setLanguage(page: Parameters<typeof completeSetup>[0], language: 
 }
 
 test.describe('Chat composer actions', () => {
+  test('keeps the current draft text and attachment after navigating away and back', async ({ launchElectronApp, homeDir }) => {
+    const attachmentPath = join(homeDir, 'composer-draft-persist.txt');
+    await writeFile(attachmentPath, 'keep this attachment with the draft');
+
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      const page = await getStableWindow(app);
+      await expect(page.getByTestId('main-layout')).toBeVisible();
+
+      await app.evaluate(({ ipcMain }, filePath) => {
+        ipcMain.removeHandler('dialog:open');
+        ipcMain.handle('dialog:open', async () => ({
+          canceled: false,
+          filePaths: [filePath],
+        }));
+      }, attachmentPath);
+
+      await page.getByTestId('sidebar-new-chat').click();
+
+      const composerShell = page.getByTestId('chat-composer-shell');
+      const composer = page.getByTestId('chat-composer');
+      const messageInput = composer.getByRole('textbox');
+      await messageInput.fill('leave and come back draft');
+      await expect(messageInput).toHaveValue('leave and come back draft');
+      const draftSessionKey = await composerShell.getAttribute('data-session-key');
+      expect(draftSessionKey).toBeTruthy();
+      await composer.getByTestId('chat-attach-button').click();
+      await expect(composerShell).toContainText('composer-draft-persist.txt', { timeout: 20_000 });
+      const draftSessionRow = page.getByTestId(`sidebar-session-${draftSessionKey}`);
+      await expect(draftSessionRow).toBeVisible();
+
+      await openModelsFromSettings(page);
+      await expect(page.getByTestId('models-page')).toBeVisible();
+
+      await draftSessionRow.click();
+      await expect(page.getByTestId('chat-composer')).toBeVisible();
+
+      const restoredComposerShell = page.getByTestId('chat-composer-shell');
+      const restoredComposer = page.getByTestId('chat-composer');
+      await expect(restoredComposerShell).toHaveAttribute('data-session-key', draftSessionKey!);
+      await expect(restoredComposerShell).toContainText('composer-draft-persist.txt');
+      await expect(restoredComposer.getByRole('textbox')).toHaveValue('leave and come back draft');
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
   test('renders the redesigned bottom action row', async ({ launchElectronApp }) => {
     const app = await launchElectronApp({ skipSetup: true });
 

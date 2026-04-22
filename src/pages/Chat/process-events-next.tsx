@@ -770,10 +770,12 @@ const ProcessEventRow = memo(function ProcessEventRow({
   item,
   language,
   expandedByDefault = false,
+  onInteractionStart,
 }: {
   item: ProcessEventItem;
   language: string | undefined;
   expandedByDefault?: boolean;
+  onInteractionStart?: () => void;
 }) {
   const canExpand = !!item.detail;
   const [expanded, setExpanded] = useState(() => expandedByDefault && canExpand);
@@ -811,6 +813,16 @@ const ProcessEventRow = memo(function ProcessEventRow({
           'flex w-full items-start gap-3 text-left',
           isActive ? 'rounded-xl px-1.5 py-1.5' : 'px-1.5 py-1',
         )}
+        onPointerDown={() => {
+          if (!canExpand || expandedByDefault) return;
+          onInteractionStart?.();
+        }}
+        onKeyDown={(event) => {
+          if (!canExpand || expandedByDefault) return;
+          if (event.key === 'Enter' || event.key === ' ') {
+            onInteractionStart?.();
+          }
+        }}
         onClick={() => {
           if (!canExpand || expandedByDefault) return;
           setExpanded((current) => !current);
@@ -897,6 +909,7 @@ export const ProcessEventMessage = memo(function ProcessEventMessage({
   hideInternalRoutineProcesses = true,
   streamingTools = [],
   expandAll = false,
+  onInteractionStart,
   /** 当前轮网关流式 delta：思考/笔记不走 Markdown，降低长回复时主线程阻塞 */
   preferPlainDirectContent = false,
 }: {
@@ -906,6 +919,7 @@ export const ProcessEventMessage = memo(function ProcessEventMessage({
   hideInternalRoutineProcesses?: boolean;
   streamingTools?: ToolStatus[];
   expandAll?: boolean;
+  onInteractionStart?: () => void;
   preferPlainDirectContent?: boolean;
 }) {
   const { i18n } = useTranslation('chat');
@@ -938,6 +952,7 @@ export const ProcessEventMessage = memo(function ProcessEventMessage({
             item={item}
             language={language}
             expandedByDefault={expandAll && isActiveProcessItem(item)}
+            onInteractionStart={onInteractionStart}
           />
         )
       ))}

@@ -17,6 +17,7 @@
       "enabled": true,
       "site": "https://clawhub.ai",
       "apiQueryEndpoint": "https://wry-manatee-359.convex.cloud/api/query",
+      "registry": "https://clawhub.ai",
       "workdir": "~/.openclaw/skill-sources/clawhub"
     }
   ]

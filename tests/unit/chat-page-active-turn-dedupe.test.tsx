@@ -237,4 +237,27 @@ describe('Chat active turn dedupe', () => {
 
     expect(screen.getAllByText('你叫啥呢')).toHaveLength(1);
   });
+
+  it('collapses trailing hydrated and optimistic copies of the active turn user bubble', () => {
+    chatState.messages = [
+      {
+        id: 'history-user-1',
+        role: 'user',
+        content: 'Daily at 11',
+        timestamp: 995,
+      },
+      {
+        id: 'optimistic-user-1',
+        role: 'user',
+        content: 'Daily at 11',
+        timestamp: 1000,
+      },
+    ];
+    chatState.lastUserMessageAt = 1000;
+    useDeferredValueMock.mockImplementation(() => chatState.messages);
+
+    render(<Chat />);
+
+    expect(screen.getAllByText('Daily at 11')).toHaveLength(1);
+  });
 });

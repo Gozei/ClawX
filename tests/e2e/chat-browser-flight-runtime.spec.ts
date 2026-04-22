@@ -157,7 +157,43 @@ test.describe('Chat browser flight runtime', () => {
                   },
                 },
               });
-            }, 700);
+            }, 900);
+
+            setTimeout(() => {
+              emitNotification({
+                method: 'agent',
+                params: {
+                  runId,
+                  sessionKey: activeSessionKey,
+                  stream: 'item',
+                  data: {
+                    itemId: 'tool:browser-flight-1',
+                    phase: 'completed',
+                    kind: 'tool',
+                    name: 'browser',
+                    status: 'completed',
+                    title: 'Open browser',
+                    progressText: 'Travel site opened successfully',
+                    toolCallId: 'browser-flight-1',
+                  },
+                },
+              });
+            }, 1_200);
+
+            setTimeout(() => {
+              emitNotification({
+                method: 'agent',
+                params: {
+                  runId,
+                  sessionKey: activeSessionKey,
+                  stream: 'assistant',
+                  data: {
+                    text: streamingText,
+                    delta: streamingText,
+                  },
+                },
+              });
+            }, 2_600);
 
             setTimeout(() => {
               const completedAt = Date.now();
@@ -191,7 +227,7 @@ test.describe('Chat browser flight runtime', () => {
                 label: visiblePrompt,
                 updatedAt: completedAt,
               }];
-            }, 2_800);
+            }, 4_200);
 
             return {
               success: true,
@@ -230,6 +266,12 @@ test.describe('Chat browser flight runtime', () => {
       await expect.poll(async () => {
         return await sendButton.evaluate((node) => !!node.querySelector('svg.lucide-square'));
       }, { timeout: 30_000 }).toBe(true);
+
+      await page.waitForTimeout(1_700);
+      await expect(page.getByTestId(`sidebar-session-running-indicator-${SESSION_KEY}`)).toBeVisible();
+      await expect.poll(async () => {
+        return await sendButton.evaluate((node) => !!node.querySelector('svg.lucide-square'));
+      }, { timeout: 10_000 }).toBe(true);
 
       await expect(page.getByText('MU2878', { exact: true })).toBeVisible({ timeout: 60_000 });
       await expect(page.getByText('23:25', { exact: true })).toBeVisible({ timeout: 60_000 });

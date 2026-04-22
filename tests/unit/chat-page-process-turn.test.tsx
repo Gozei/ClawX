@@ -93,6 +93,18 @@ vi.mock('react-i18next', async (importOriginal) => {
             return `Working for ${params?.duration}`;
           case 'process.processedFor':
             return `Processed ${params?.duration}`;
+          case 'process.preOutputUnderstanding':
+            return 'Understanding the request';
+          case 'process.preOutputRetrieving':
+            return 'Retrieving context';
+          case 'process.preOutputComposing':
+            return 'Composing the reply';
+          case 'process.preOutputReasoning':
+            return 'Reasoning pipeline active';
+          case 'process.preOutputStatus':
+            return 'Processing';
+          case 'process.processingToolResults':
+            return 'Processing tool results...';
           default:
             if (!params) return key;
             return `${key}:${Object.values(params).join(' ')}`;
@@ -1132,6 +1144,7 @@ describe('Chat process turn rendering', () => {
     expect(screen.getByTestId('chat-process-header')).toBeInTheDocument();
     expect(screen.getByTestId('chat-process-content')).toBeInTheDocument();
     expect(screen.getByTestId('chat-process-status')).toHaveTextContent('Processed 1s');
+    expect(screen.queryByTestId('chat-process-activity-label')).not.toBeInTheDocument();
     expect(screen.getByText('现在还是 custom-custombc/qwen3.5-plus，没变。')).toBeInTheDocument();
     expect(screen.queryByTestId('chat-assistant-avatar')).not.toBeInTheDocument();
   });
@@ -1970,6 +1983,132 @@ describe('Chat process turn rendering', () => {
     expect(scrollContainer.scrollTop).toBe(264);
   });
 
+  it('stops auto-following once the user clicks inside the transcript during streaming', () => {
+    const rafQueue: FrameRequestCallback[] = [];
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      rafQueue.push(callback);
+      return rafQueue.length;
+    });
+    const resizeObserverCallbacks: ResizeObserverCallback[] = [];
+    class MockResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeObserverCallbacks.push(callback);
+      }
+
+      observe() {}
+
+      disconnect() {}
+
+      unobserve() {}
+    }
+
+    vi.stubGlobal('requestAnimationFrame', requestAnimationFrameMock);
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal('ResizeObserver', MockResizeObserver as unknown as typeof ResizeObserver);
+
+    settingsState.assistantMessageStyle = 'stream';
+    chatState.messages = [
+      {
+        id: 'history-user-1',
+        role: 'user',
+        content: 'Old question one.',
+        timestamp: fixedNow / 1000 - 5,
+      },
+      {
+        id: 'history-assistant-1',
+        role: 'assistant',
+        content: 'Old answer one.',
+        timestamp: fixedNow / 1000 - 4,
+      },
+      {
+        id: 'history-user-2',
+        role: 'user',
+        content: 'Pause the follow logic when the user clicks here.',
+        timestamp: fixedNow / 1000 - 1,
+      },
+    ];
+    chatState.pendingFinal = false;
+    chatState.streamingMessage = null;
+    chatState.lastUserMessageAt = fixedNow / 1000 - 1;
+    chatState.sessionRunningState = { 'agent:main:main': true };
+
+    render(<Chat />);
+
+    const scrollContainer = screen.getByTestId('chat-scroll-container');
+    const activeTurnAnchor = screen.getByTestId('chat-active-turn-anchor');
+    scrollContainer.scrollTop = 120;
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 640,
+    });
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 920,
+    });
+
+    const scrollRect = {
+      x: 0,
+      y: 80,
+      width: 960,
+      height: 640,
+      top: 80,
+      right: 960,
+      bottom: 720,
+      left: 0,
+      toJSON: () => ({}),
+    } as DOMRect;
+    const activeTurnRect = {
+      x: 0,
+      y: 520,
+      width: 960,
+      height: 240,
+      top: 520,
+      right: 960,
+      bottom: 760,
+      left: 0,
+      toJSON: () => ({}),
+    } as DOMRect;
+
+    vi.spyOn(scrollContainer, 'getBoundingClientRect').mockImplementation(() => scrollRect);
+    vi.spyOn(activeTurnAnchor, 'getBoundingClientRect').mockImplementation(() => activeTurnRect);
+
+    act(() => {
+      let now = 0;
+      while (rafQueue.length > 0) {
+        const callback = rafQueue.shift();
+        now += 16;
+        callback?.(now);
+      }
+    });
+
+    expect(scrollContainer.scrollTop).toBe(264);
+
+    fireEvent.pointerDown(activeTurnAnchor, {
+      button: 0,
+      pointerType: 'mouse',
+    });
+
+    activeTurnRect.height = 640;
+    activeTurnRect.bottom = 1160;
+
+    act(() => {
+      for (const callback of resizeObserverCallbacks) {
+        callback([], {} as ResizeObserver);
+      }
+    });
+
+    act(() => {
+      let now = 200;
+      while (rafQueue.length > 0) {
+        const callback = rafQueue.shift();
+        now += 16;
+        callback?.(now);
+      }
+    });
+
+    expect(scrollContainer.scrollTop).toBe(264);
+  });
+
   it('lets the user keep scrolling up and back down after interrupting auto-follow', () => {
     const rafQueue: FrameRequestCallback[] = [];
     const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
@@ -2118,6 +2257,173 @@ describe('Chat process turn rendering', () => {
 
     expect(scrollContainer.scrollTop).toBe(244);
     expect(requestAnimationFrameMock).toHaveBeenCalled();
+  });
+
+  it('stops auto-following before expanding a streamed process event row', () => {
+    const rafQueue: FrameRequestCallback[] = [];
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      rafQueue.push(callback);
+      return rafQueue.length;
+    });
+    const resizeObserverCallbacks: ResizeObserverCallback[] = [];
+    class MockResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeObserverCallbacks.push(callback);
+      }
+
+      observe() {}
+
+      disconnect() {}
+
+      unobserve() {}
+    }
+
+    vi.stubGlobal('requestAnimationFrame', requestAnimationFrameMock);
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal('ResizeObserver', MockResizeObserver as unknown as typeof ResizeObserver);
+
+    settingsState.assistantMessageStyle = 'stream';
+    chatState.messages = [
+      {
+        id: 'history-user-1',
+        role: 'user',
+        content: 'Open the browser and keep the live log visible.',
+        timestamp: fixedNow / 1000 - 1,
+      },
+    ];
+    chatState.activeTurnBuffer = {
+      historyMessages: [],
+      userMessage: chatState.messages[0],
+      assistantMessages: [],
+      processMessages: [
+        {
+          id: 'persisted-process-1',
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'browser-persisted-1',
+              name: 'browser',
+              input: {
+                action: 'navigate',
+                url: 'https://www.ctrip.com',
+              },
+            },
+          ],
+          timestamp: fixedNow / 1000 - 0.5,
+        },
+      ],
+      latestPersistedAssistant: null,
+      persistedFinalMessage: null,
+      streamingDisplayMessage: null,
+      processStreamingMessage: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'browser-streaming-1',
+            name: 'browser',
+            input: {
+              action: 'snapshot',
+              targetId: 'tab-1',
+            },
+          },
+        ],
+        timestamp: fixedNow / 1000,
+      },
+      finalStreamingMessage: null,
+      startedAtMs: fixedNow - 1000,
+      hasAnyStreamContent: true,
+      isStreamingDuplicateOfPersistedAssistant: false,
+    };
+    chatState.streamingMessage = null;
+    chatState.streamingTools = [
+      {
+        id: 'browser-streaming-1',
+        toolCallId: 'browser-streaming-1',
+        name: 'browser',
+        status: 'running',
+        updatedAt: fixedNow,
+      },
+    ];
+    chatState.pendingFinal = false;
+    chatState.lastUserMessageAt = fixedNow / 1000 - 1;
+    chatState.sessionRunningState = { 'agent:main:main': true };
+
+    render(<Chat />);
+
+    const scrollContainer = screen.getByTestId('chat-scroll-container');
+    const activeTurnAnchor = screen.getByTestId('chat-active-turn-anchor');
+    scrollContainer.scrollTop = 120;
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 640,
+    });
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 920,
+    });
+
+    const scrollRect = {
+      x: 0,
+      y: 80,
+      width: 960,
+      height: 640,
+      top: 80,
+      right: 960,
+      bottom: 720,
+      left: 0,
+      toJSON: () => ({}),
+    } as DOMRect;
+    const activeTurnRect = {
+      x: 0,
+      y: 520,
+      width: 960,
+      height: 240,
+      top: 520,
+      right: 960,
+      bottom: 760,
+      left: 0,
+      toJSON: () => ({}),
+    } as DOMRect;
+
+    vi.spyOn(scrollContainer, 'getBoundingClientRect').mockImplementation(() => scrollRect);
+    vi.spyOn(activeTurnAnchor, 'getBoundingClientRect').mockImplementation(() => activeTurnRect);
+
+    act(() => {
+      let now = 0;
+      while (rafQueue.length > 0) {
+        const callback = rafQueue.shift();
+        now += 16;
+        callback?.(now);
+      }
+    });
+
+    expect(scrollContainer.scrollTop).toBe(264);
+
+    const eventToggle = screen.getAllByTestId('chat-process-event-toggle')[0];
+    fireEvent.pointerDown(eventToggle);
+    fireEvent.click(eventToggle);
+
+    activeTurnRect.height = 640;
+    activeTurnRect.bottom = 1160;
+
+    act(() => {
+      for (const callback of resizeObserverCallbacks) {
+        callback([], {} as ResizeObserver);
+      }
+    });
+
+    act(() => {
+      let now = 200;
+      while (rafQueue.length > 0) {
+        const callback = rafQueue.shift();
+        now += 16;
+        callback?.(now);
+      }
+    });
+
+    expect(scrollContainer.scrollTop).toBe(264);
   });
 
   it('hides the persisted copy of an optimistic user message when the active turn already renders it', () => {
@@ -2312,13 +2618,23 @@ describe('Chat process turn rendering', () => {
     render(<Chat />);
 
     expect(screen.getByTestId('chat-typing-indicator')).not.toHaveClass('-mx-4');
-    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('w-full');
-    expect(screen.getByTestId('chat-typing-indicator')).not.toHaveClass('px-4');
     expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('flex');
-    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('items-center');
-    expect(screen.getByTestId('chat-typing-avatar').nextElementSibling).toContainElement(
+    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('w-full');
+    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('items-start');
+    expect(screen.getByTestId('chat-typing-indicator')).not.toHaveClass('px-4');
+    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('gap-3');
+    expect(screen.getByTestId('chat-typing-indicator-content')).toContainElement(
+      screen.getByTestId('chat-typing-indicator-pre-output-card'),
+    );
+    expect(screen.getByTestId('chat-typing-indicator-content')).toContainElement(
       screen.getByTestId('chat-typing-indicator-shell'),
     );
+    expect(screen.getByTestId('chat-typing-avatar').nextElementSibling).toBe(
+      screen.getByTestId('chat-typing-indicator-content'),
+    );
+    expect(screen.getByTestId('chat-typing-indicator-content')).toHaveClass('flex-1');
+    expect(screen.getByTestId('chat-typing-indicator-content')).toHaveClass('space-y-1.5');
+    expect(screen.getByTestId('chat-typing-indicator-content')).toHaveClass('pt-0.5');
     expect(screen.getByTestId('chat-typing-indicator-shell')).not.toHaveClass('rounded-full');
     expect(screen.getByTestId('chat-typing-indicator-shell')).not.toHaveClass('border');
     expect(screen.getByTestId('chat-typing-indicator-name')).toHaveTextContent('ClawX');
@@ -2330,8 +2646,58 @@ describe('Chat process turn rendering', () => {
     expect(screen.getByTestId('chat-typing-indicator-scan')).toHaveStyle({ WebkitTextFillColor: 'transparent' });
     expect(screen.getByTestId('chat-typing-indicator-scan').getAttribute('style')).toContain('radial-gradient(circle at 28% 50%');
     expect(screen.getByTestId('chat-typing-indicator-scan').getAttribute('style')).toContain('radial-gradient(circle at 56% 38%');
+    expect(screen.getByTestId('chat-typing-indicator-pre-output-card')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-typing-indicator-pre-output-title')).toHaveTextContent('Understanding the request');
+    expect(screen.getByTestId('chat-typing-indicator-pre-output-detail')).toHaveTextContent('Reasoning pipeline active');
+    expect(screen.getByTestId('chat-typing-indicator-pre-output-status-text')).toHaveTextContent('Processing');
     expect(Array.from(document.querySelectorAll('style')).some((node) => node.textContent?.includes('0% { background-position: -52% 50%'))).toBe(true);
     expect(Array.from(document.querySelectorAll('style')).some((node) => node.textContent?.includes('100% { background-position: 152% 50%'))).toBe(true);
+  });
+
+  it('hides the waiting affordance once final output starts streaming', () => {
+    chatState.messages = [
+      {
+        id: 'user-1',
+        role: 'user',
+        content: 'Ping the model.',
+        timestamp: fixedNow / 1000 - 1,
+      },
+    ];
+    chatState.sending = true;
+    chatState.pendingFinal = false;
+    chatState.streamingMessage = {
+      role: 'assistant',
+      content: 'The formal reply has started streaming.',
+      timestamp: fixedNow / 1000,
+    };
+    chatState.activeTurnBuffer = {
+      historyMessages: [],
+      userMessage: chatState.messages[0],
+      assistantMessages: [],
+      processMessages: [],
+      latestPersistedAssistant: null,
+      persistedFinalMessage: null,
+      streamingDisplayMessage: {
+        role: 'assistant',
+        content: 'The formal reply has started streaming.',
+        timestamp: fixedNow / 1000,
+      },
+      processStreamingMessage: null,
+      finalStreamingMessage: {
+        role: 'assistant',
+        content: 'The formal reply has started streaming.',
+        timestamp: fixedNow / 1000,
+      },
+      startedAtMs: fixedNow - 1_000,
+      hasAnyStreamContent: true,
+      isStreamingDuplicateOfPersistedAssistant: false,
+    };
+
+    render(<Chat />);
+
+    expect(screen.queryByTestId('chat-typing-indicator')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-typing-indicator-pre-output-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-process-activity-label')).not.toBeInTheDocument();
   });
 
   it('hides internal pre-compaction memory flush turns while keeping later real conversation visible', () => {

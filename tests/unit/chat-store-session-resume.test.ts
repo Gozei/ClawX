@@ -316,7 +316,7 @@ describe('chat store session resume', () => {
       lastUserMessageAt: null,
       pendingToolImages: [],
       error: null,
-      loading: false,
+      loading: true,
       thinkingLevel: null,
       showThinking: true,
       sendStage: null,
@@ -802,6 +802,7 @@ describe('chat store session resume', () => {
     await useChatStore.getState().loadSessions();
 
     expect(gatewayRpcMock).not.toHaveBeenCalled();
+    expect(useChatStore.getState().currentSessionKey).toBe('agent:main:main');
     expect(useChatStore.getState().sessions.map((session) => session.key)).toEqual([
       'agent:main:session-recovered',
       'agent:main:main',
@@ -898,6 +899,75 @@ describe('chat store session resume', () => {
     expect(useChatStore.getState().loading).toBe(false);
     expect(hostApiFetchMock).not.toHaveBeenCalled();
     expect(gatewayRpcMock).not.toHaveBeenCalled();
+  });
+
+  it('loadSessions keeps an active empty draft selected when persisted sessions exist', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+    hostApiFetchMock.mockReset();
+    hostApiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/sessions/list') {
+        return Promise.resolve({
+          success: true,
+          sessions: [
+            {
+              key: 'agent:main:session-recovered',
+              label: 'Recovered session',
+              updatedAt: userTimestampMs,
+            },
+            {
+              key: 'agent:main:main',
+              displayName: 'Main',
+              updatedAt: userTimestampMs - 1_000,
+            },
+          ],
+        });
+      }
+      if (path === '/api/sessions/metadata') {
+        return Promise.resolve({
+          success: true,
+          metadata: {},
+        });
+      }
+      throw new Error(`Unexpected host route: ${path}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:session-draft',
+      currentAgentId: 'main',
+      sessions: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionModels: {},
+      sessionRunningState: {},
+      messages: [],
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().loadSessions();
+
+    const next = useChatStore.getState();
+    expect(gatewayRpcMock).not.toHaveBeenCalled();
+    expect(next.currentSessionKey).toBe('agent:main:session-draft');
+    expect(next.sessions.map((session) => session.key)).toEqual([
+      'agent:main:session-recovered',
+      'agent:main:main',
+    ]);
   });
 
   it('loads inactive session history through the host route before falling back to gateway chat.history', async () => {
@@ -1056,6 +1126,53 @@ describe('chat store session resume', () => {
       'assistant-real',
     ]);
     expect(useChatStore.getState().sessionLabels['agent:main:session-flush']).toBe('你是什么模型');
+  });
+
+  it('does not reinsert hidden HEARTBEAT_OK replies while quiet history polling catches up', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({ messages: [] });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:session-heartbeat-hidden',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:session-heartbeat-hidden' }],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionModels: {},
+      sessionRunningState: { 'agent:main:session-heartbeat-hidden': true },
+      messages: [
+        {
+          id: 'assistant-heartbeat-hidden',
+          role: 'assistant',
+          content: 'HEARTBEAT_OK',
+          timestamp: assistantTimestampSeconds,
+        },
+      ],
+      sending: true,
+      activeRunId: 'run-heartbeat-hidden',
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().loadHistory(true);
+
+    expect(useChatStore.getState().messages).toEqual([]);
   });
 
   it('reruns an explicit history reload after an in-flight quiet load finishes', async () => {
@@ -1259,6 +1376,97 @@ describe('chat store session resume', () => {
     expect(useChatStore.getState().sessionLabels['agent:main:session-preview']).toBe('Preview from host route');
   });
 
+  it('keeps the blank default session selected on cold start even when newer history exists', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+    hostApiFetchMock.mockReset();
+    hostApiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/sessions/list') {
+        return Promise.resolve({
+          success: true,
+          sessions: [
+            {
+              key: 'agent:main:session-latest',
+              label: 'Recovered startup session',
+              updatedAt: userTimestampMs,
+            },
+            {
+              key: 'agent:main:main',
+              displayName: 'Main',
+              updatedAt: userTimestampMs - 1_000,
+            },
+          ],
+        });
+      }
+      if (path === '/api/sessions/metadata') {
+        return Promise.resolve({
+          success: true,
+          metadata: {},
+        });
+      }
+      if (path === '/api/sessions/history') {
+        return Promise.resolve({
+          success: true,
+          resolved: true,
+          messages: [
+            {
+              id: 'user-startup-1',
+              role: 'user',
+              content: 'Restore the most recent session.',
+              timestamp: userTimestampSeconds,
+            },
+            {
+              id: 'assistant-startup-1',
+              role: 'assistant',
+              content: 'Recovered startup history.',
+              timestamp: assistantTimestampSeconds,
+            },
+          ],
+          thinkingLevel: null,
+        });
+      }
+      return Promise.resolve({ success: true });
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionModels: {},
+      sessionRunningState: {},
+      messages: [],
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().loadSessions();
+
+    const next = useChatStore.getState();
+    expect(gatewayRpcMock).not.toHaveBeenCalled();
+    expect(next.currentSessionKey).toBe('agent:main:main');
+    expect(next.sessions.map((session) => session.key)).toEqual([
+      'agent:main:session-latest',
+      'agent:main:main',
+    ]);
+    expect(next.messages).toEqual([]);
+  });
+
   it('remaps legacy session running state when sessions load canonical keys', async () => {
     gatewayRpcMock.mockReset();
     gatewayRpcMock.mockImplementation((method: string) => {
@@ -1356,5 +1564,53 @@ describe('chat store session resume', () => {
     expect(next.activeRunId).toBeNull();
     expect(next.sessionRunningState).toEqual({});
     expect(next.messages.map((message) => message.id)).toEqual(['user-1', 'assistant-legacy']);
+  });
+
+  it('does not append HEARTBEAT_OK when a hidden heartbeat turn finishes', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'legacy-session',
+      currentAgentId: 'main',
+      sessions: [{ key: 'legacy-session' }],
+      sessionRunningState: { 'legacy-session': true },
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionModels: {},
+      messages: [],
+      sending: true,
+      activeRunId: 'run-heartbeat-final',
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    useChatStore.getState().handleChatEvent({
+      state: 'final',
+      runId: 'run-heartbeat-final',
+      sessionKey: 'agent:main:legacy-session',
+      message: {
+        id: 'assistant-heartbeat-final',
+        role: 'assistant',
+        content: 'HEARTBEAT_OK',
+        timestamp: assistantTimestampSeconds,
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const next = useChatStore.getState();
+    expect(next.sending).toBe(false);
+    expect(next.activeRunId).toBeNull();
+    expect(next.sessionRunningState).toEqual({});
+    expect(next.messages).toEqual([]);
   });
 });
