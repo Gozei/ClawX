@@ -231,60 +231,48 @@ const BUILTIN_CHANNEL_IDS = new Set([
   'mattermost',
   'qqbot',
 ]);
-const SAFE_BUNDLED_ALLOWLIST_PLUGIN_IDS = new Set([
-  'acpx',
-  'copilot-proxy',
-  'device-pair',
-  'phone-control',
-  'talk-voice',
-]);
 const AUTH_PROFILE_PROVIDER_KEY_MAP: Record<string, string> = {
   'openai-codex': 'openai',
   'google-gemini-cli': 'google',
 };
 
-/**
- * Scan OpenClaw's bundled extensions directory to find all plugins that have
- * `enabledByDefault: true` in their `openclaw.plugin.json` manifest.
- *
- * When `plugins.allow` is explicitly set (e.g. for third-party channel
- * plugins), OpenClaw blocks ALL plugins not in the allowlist — even bundled
- * ones with `enabledByDefault: true`.  This function discovers those plugins
- * so they can be preserved in the allowlist.
- *
- * Results are cached for the lifetime of the process since bundled
- * extensions don't change at runtime.
- */
 let _bundledPluginCache: { all: Set<string>; enabledByDefault: string[] } | null = null;
 function discoverBundledPlugins(): { all: Set<string>; enabledByDefault: string[] } {
   if (_bundledPluginCache) return _bundledPluginCache;
+
   const all = new Set<string>();
   const enabledByDefault: string[] = [];
+
   try {
     const extensionsDir = join(getOpenClawResolvedDir(), 'dist', 'extensions');
     if (!existsSync(extensionsDir)) {
       _bundledPluginCache = { all, enabledByDefault };
       return _bundledPluginCache;
     }
+
     for (const entry of readdirSync(extensionsDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const manifestPath = join(extensionsDir, entry.name, 'openclaw.plugin.json');
       if (!existsSync(manifestPath)) continue;
       try {
-        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-        if (typeof manifest.id === 'string') {
-          all.add(manifest.id);
-          if (manifest.enabledByDefault === true) {
-            enabledByDefault.push(manifest.id);
-          }
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
+          id?: unknown;
+          enabledByDefault?: unknown;
+        };
+        if (typeof manifest.id !== 'string' || !manifest.id.trim()) continue;
+        const pluginId = manifest.id.trim();
+        all.add(pluginId);
+        if (manifest.enabledByDefault === true) {
+          enabledByDefault.push(pluginId);
         }
       } catch {
-        // Malformed manifest — skip silently
+        // Ignore malformed bundled manifests.
       }
     }
   } catch {
-    // Extension directory not found or unreadable — return empty
+    // Ignore bundled extension enumeration failures.
   }
+
   _bundledPluginCache = { all, enabledByDefault };
   return _bundledPluginCache;
 }
@@ -296,23 +284,25 @@ function discoverInstalledTopLevelPluginIds(): Set<string> {
     if (!existsSync(extensionsDir)) {
       return installed;
     }
+
     for (const entry of readdirSync(extensionsDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       if (entry.name.startsWith('.openclaw-install-')) continue;
       const manifestPath = join(extensionsDir, entry.name, 'openclaw.plugin.json');
       if (!existsSync(manifestPath)) continue;
       try {
-        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { id?: unknown };
         if (typeof manifest.id === 'string' && manifest.id.trim()) {
           installed.add(manifest.id.trim());
         }
       } catch {
-        // Ignore malformed manifests from external plugins.
+        // Ignore malformed external plugin manifests.
       }
     }
   } catch {
     // Ignore extension enumeration failures.
   }
+
   return installed;
 }
 
@@ -1713,21 +1703,6 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
         }
       }
 
-      const INLINE_MANAGED_BUNDLED_PLUGIN_IDS = ['browser', 'openai', 'moonshot', 'zai'] as const;
-      for (const pluginId of INLINE_MANAGED_BUNDLED_PLUGIN_IDS) {
-        if (pEntries[pluginId]) {
-          delete pEntries[pluginId];
-          console.log(`[sanitize] Removed redundant bundled plugin entry from plugins.entries: ${pluginId}`);
-          modified = true;
-        }
-        const allowIndex = allowArr2.indexOf(pluginId);
-        if (allowIndex !== -1) {
-          allowArr2.splice(allowIndex, 1);
-          console.log(`[sanitize] Removed redundant bundled plugin id from plugins.allow: ${pluginId}`);
-          modified = true;
-        }
-      }
-
       if (pEntries['memory-core']) {
         const memoryCoreEntry = pEntries['memory-core'];
         if ('config' in memoryCoreEntry) {
@@ -1747,21 +1722,18 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
         modified = true;
       }
 
-      // Keep only true external plugin ids in plugins.allow, then re-add
-      // configured built-in channels and the bundled utility plugins that
-      // still require explicit allowlist entries. Provider-style bundled ids
-      // such as `openai` and `moonshot` now trigger "plugin not found"
-      // warnings when written into plugins.allow.
       const bundled = discoverBundledPlugins();
       const installedTopLevelPluginIds = discoverInstalledTopLevelPluginIds();
       const externalPluginIds = allowArr2.filter((pluginId) => {
         if (BUILTIN_CHANNEL_IDS.has(pluginId)) return false;
-        if (bundled.all.has(pluginId)) return false;
         if (pluginId === 'wecom-openclaw-plugin') return false;
+        if (bundled.all.has(pluginId)) {
+          return installedTopLevelPluginIds.has(pluginId) || Boolean(pEntries[pluginId]);
+        }
         return installedTopLevelPluginIds.has(pluginId) || Boolean(pEntries[pluginId]);
       });
-      const nextAllow = [...externalPluginIds];
 
+      const nextAllow = [...externalPluginIds];
       if (externalPluginIds.length > 0) {
         const channels = config.channels;
         if (channels && typeof channels === 'object' && !Array.isArray(channels)) {
@@ -1775,10 +1747,19 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
           }
         }
 
+        const preservedBundledPluginIds = new Set<string>([
+          ...allowArr2.filter((pluginId) => bundled.all.has(pluginId)),
+          ...Object.entries(pEntries)
+            .filter(([pluginId, entry]) => bundled.all.has(pluginId) && entry?.enabled !== false)
+            .map(([pluginId]) => pluginId),
+        ]);
+
         for (const pluginId of bundled.enabledByDefault) {
-          if (!SAFE_BUNDLED_ALLOWLIST_PLUGIN_IDS.has(pluginId)) {
-            continue;
+          if (!nextAllow.includes(pluginId)) {
+            nextAllow.push(pluginId);
           }
+        }
+        for (const pluginId of preservedBundledPluginIds) {
           if (!nextAllow.includes(pluginId)) {
             nextAllow.push(pluginId);
           }

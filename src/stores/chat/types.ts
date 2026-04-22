@@ -54,6 +54,9 @@ export interface ChatSession {
   updatedAt?: number;
   pinned?: boolean;
   pinOrder?: number;
+  archived?: boolean;
+  archivedAt?: number;
+  createdAt?: number;
 }
 
 export interface ChatMessageDispatchOptions {
@@ -176,6 +179,8 @@ export interface ChatState {
   newSession: () => void;
   renameSession: (key: string, label: string) => Promise<void>;
   toggleSessionPin: (key: string) => Promise<void>;
+  archiveSession: (key: string) => Promise<void>;
+  restoreSession: (key: string) => Promise<void>;
   deleteSession: (key: string) => Promise<void>;
   cleanupEmptySession: () => void;
   loadHistory: (quiet?: boolean) => Promise<void>;

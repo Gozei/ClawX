@@ -88,6 +88,10 @@
         "finalReplyMissing": "The final reply did not arrive, but you can continue the conversation.",
         "assistantMissingInUI": "A reply may exist in the session, but the current display settings cannot render it. Try Refresh in the toolbar, enable thinking/process details, or wait for the gateway to finish syncing."
     },
+    "archive": {
+        "confirmMessage": "Are you sure you want to archive this session? You can review archived tasks later in Settings - Session Archive.",
+        "success": "Archived successfully"
+    },
     "historyBuckets": {
         "today": "Today",
         "yesterday": "Yesterday",

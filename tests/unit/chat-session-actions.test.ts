@@ -26,7 +26,7 @@ vi.mock('@/stores/agents', () => ({
 type ChatLikeState = {
   currentSessionKey: string;
   currentAgentId: string;
-  sessions: Array<{ key: string; label?: string; displayName?: string; updatedAt?: number; pinned?: boolean; pinOrder?: number }>;
+  sessions: Array<{ key: string; label?: string; displayName?: string; updatedAt?: number; pinned?: boolean; pinOrder?: number; archived?: boolean; archivedAt?: number; createdAt?: number }>;
   messages: Array<{ role: string; timestamp?: number; content?: unknown }>;
   sessionLabels: Record<string, string>;
   sessionLastActivity: Record<string, number>;
@@ -38,6 +38,8 @@ type ChatLikeState = {
   pendingFinal: boolean;
   lastUserMessageAt: number | null;
   pendingToolImages: unknown[];
+  loadSessions?: () => Promise<void>;
+  switchSession?: (key: string) => void;
   loadHistory: ReturnType<typeof vi.fn>;
 };
 
@@ -285,6 +287,65 @@ describe('chat session actions', () => {
     });
   });
 
+  it('archiveSession removes the session from the visible list and switches away when needed', async () => {
+    const { createSessionActions } = await import('@/stores/chat/session-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:foo:session-a',
+      sessions: [
+        { key: 'agent:foo:session-a', label: 'Alpha' },
+        { key: 'agent:foo:session-b', label: 'Bravo' },
+      ],
+      sessionLabels: { 'agent:foo:session-a': 'Alpha' },
+      sessionLastActivity: { 'agent:foo:session-a': 1 },
+      messages: [{ role: 'user' }],
+    });
+    const actions = createSessionActions(h.set as never, h.get as never);
+
+    hostApiFetchMock.mockResolvedValueOnce({ success: true, archived: true, archivedAt: 123 });
+    await actions.archiveSession('agent:foo:session-a');
+
+    expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/archive', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKey: 'agent:foo:session-a', archived: true }),
+    });
+    expect(h.read().currentSessionKey).toBe('agent:foo:session-b');
+    expect(h.read().sessions.map((session) => session.key)).toEqual(['agent:foo:session-b']);
+    expect(h.read().sessionLabels['agent:foo:session-a']).toBeUndefined();
+    expect(h.read().loadHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it('restoreSession unarchives and switches back to the restored session', async () => {
+    const { createSessionActions } = await import('@/stores/chat/session-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:foo:session-b',
+      sessions: [{ key: 'agent:foo:session-b', label: 'Bravo' }],
+    });
+    const actions = createSessionActions(h.set as never, h.get as never);
+    (h.read() as ChatLikeState).loadSessions = actions.loadSessions;
+    (h.read() as ChatLikeState).switchSession = actions.switchSession;
+
+    hostApiFetchMock.mockResolvedValueOnce({ success: true, archived: false });
+    invokeIpcMock.mockResolvedValueOnce({
+      success: true,
+      result: {
+        sessions: [
+          { key: 'agent:foo:session-a', label: 'Alpha' },
+          { key: 'agent:foo:session-b', label: 'Bravo' },
+        ],
+      },
+    });
+    hostApiFetchMock.mockResolvedValueOnce({ success: true, metadata: {} });
+
+    await actions.restoreSession('agent:foo:session-a');
+
+    expect(hostApiFetchMock).toHaveBeenNthCalledWith(1, '/api/sessions/archive', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKey: 'agent:foo:session-a', archived: false }),
+    });
+    expect(h.read().currentSessionKey).toBe('agent:foo:session-a');
+    expect(h.read().loadHistory).toHaveBeenCalledTimes(1);
+  });
+
   it('seeds sessionLastActivity from backend updatedAt metadata', async () => {
     const { createSessionActions } = await import('@/stores/chat/session-actions');
     const h = makeHarness({
@@ -364,6 +425,36 @@ describe('chat session actions', () => {
       pinned: true,
       pinOrder: 7,
     });
+  });
+
+  it('loadSessions hides archived sessions from the primary session list', async () => {
+    const { createSessionActions } = await import('@/stores/chat/session-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:main:main',
+      sessions: [],
+    });
+    const actions = createSessionActions(h.set as never, h.get as never);
+
+    invokeIpcMock.mockResolvedValueOnce({
+      success: true,
+      result: {
+        sessions: [
+          { key: 'agent:main:session-visible', label: 'Visible' },
+          { key: 'agent:main:session-archived', label: 'Archived' },
+        ],
+      },
+    });
+    hostApiFetchMock.mockResolvedValueOnce({
+      success: true,
+      metadata: {
+        'agent:main:session-visible': {},
+        'agent:main:session-archived': { archived: true, archivedAt: 123 },
+      },
+    });
+
+    await actions.loadSessions();
+
+    expect(h.read().sessions.map((session) => session.key)).toEqual(['agent:main:session-visible']);
   });
 });
 

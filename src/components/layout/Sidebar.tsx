@@ -18,6 +18,7 @@ import {
   Pin,
   Loader2,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { useChatStore } from '@/stores/chat';
@@ -214,6 +215,7 @@ export function Sidebar() {
   const switchSession = useChatStore((s) => s.switchSession);
   const newSession = useChatStore((s) => s.newSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
+  const archiveSession = useChatStore((s) => s.archiveSession);
   const renameSession = useChatStore((s) => s.renameSession);
   const toggleSessionPin = useChatStore((s) => s.toggleSessionPin);
   const loadSessions = useChatStore((s) => s.loadSessions);
@@ -275,6 +277,7 @@ export function Sidebar() {
 
   const { t, i18n } = useTranslation(['common', 'chat']);
   const [sessionToDelete, setSessionToDelete] = useState<{ key: string; label: string } | null>(null);
+  const [sessionToArchive, setSessionToArchive] = useState<{ key: string; label: string } | null>(null);
   const [editingSessionKey, setEditingSessionKey] = useState<string | null>(null);
   const [editingSessionName, setEditingSessionName] = useState('');
   const [openSessionMenuKey, setOpenSessionMenuKey] = useState<string | null>(null);
@@ -303,7 +306,7 @@ export function Sidebar() {
 
     const rect = anchor.getBoundingClientRect();
     const viewportPadding = 12;
-    const estimatedMenuHeight = 112;
+    const estimatedMenuHeight = 152;
     const right = Math.max(window.innerWidth - rect.right, viewportPadding);
     const canOpenBelow = rect.bottom + 6 + estimatedMenuHeight <= window.innerHeight - viewportPadding;
 
@@ -396,6 +399,7 @@ export function Sidebar() {
   const sessionMenuLabels = useMemo(() => {
     if (i18n.resolvedLanguage?.startsWith('zh')) {
       return {
+        archive: '\u5f52\u6863',
         rename: '\u91cd\u547d\u540d',
         pin: '\u7f6e\u9876',
         unpin: '\u53d6\u6d88\u7f6e\u9876',
@@ -403,6 +407,7 @@ export function Sidebar() {
     }
 
     return {
+      archive: 'Archive',
       rename: 'Rename',
       pin: 'Pin',
       unpin: 'Unpin',
@@ -819,6 +824,22 @@ export function Sidebar() {
         >
           <button
             type="button"
+            data-testid={`sidebar-session-menu-archive-${openSessionMenuKey}`}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setOpenSessionMenuKey(null);
+              setSessionToArchive({
+                key: openSessionMenuKey,
+                label: activeSessionMenuLabel,
+              });
+            }}
+            className="flex w-full items-center px-3 py-2 text-left text-[13px] text-foreground/85 transition-colors hover:bg-[#eef3fb] dark:hover:bg-white/5"
+          >
+            {sessionMenuLabels.archive}
+          </button>
+          <button
+            type="button"
             data-testid={`sidebar-session-menu-rename-${openSessionMenuKey}`}
             onClick={(e) => {
               e.preventDefault();
@@ -922,6 +943,21 @@ export function Sidebar() {
         )}
       </div>
 
+      <ConfirmDialog
+        open={!!sessionToArchive}
+        title={t('common:actions.confirm')}
+        message={t('chat:archive.confirmMessage')}
+        confirmLabel={t('common:actions.confirm')}
+        cancelLabel={t('common:actions.cancel')}
+        onConfirm={async () => {
+          if (!sessionToArchive) return;
+          await archiveSession(sessionToArchive.key);
+          setSessionToArchive(null);
+          navigate('/');
+          toast.success(t('chat:archive.success'));
+        }}
+        onCancel={() => setSessionToArchive(null)}
+      />
       <ConfirmDialog
         open={!!sessionToDelete}
         title={t('common:actions.confirm')}

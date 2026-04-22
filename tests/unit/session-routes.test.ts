@@ -239,6 +239,71 @@ describe('handleSessionRoutes', () => {
     expect(stored.sessions[0]?.pinOrder).toBeUndefined();
   });
 
+  it('persists archive metadata in sessions.json and clears it when restored', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      JSON.stringify({
+        sessions: [
+          { key: 'agent:main:session-1', label: 'Archive me', updatedAt: 1, createdAt: 1 },
+        ],
+      }, null, 2),
+      'utf8',
+    );
+
+    parseJsonBodyMock.mockResolvedValueOnce({
+      sessionKey: 'agent:main:session-1',
+      archived: true,
+    });
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    let handled = await handleSessionRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/archive'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(
+      expect.anything(),
+      200,
+      expect.objectContaining({ success: true, archived: true }),
+    );
+
+    let stored = JSON.parse(await readFile(join(sessionsDir, 'sessions.json'), 'utf8')) as {
+      sessions: Array<{ key: string; archived?: boolean; archivedAt?: number }>;
+    };
+    expect(stored.sessions[0]).toMatchObject({ archived: true });
+    expect(typeof stored.sessions[0]?.archivedAt).toBe('number');
+
+    parseJsonBodyMock.mockResolvedValueOnce({
+      sessionKey: 'agent:main:session-1',
+      archived: false,
+    });
+
+    handled = await handleSessionRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/archive'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(
+      expect.anything(),
+      200,
+      expect.objectContaining({ success: true, archived: false }),
+    );
+
+    stored = JSON.parse(await readFile(join(sessionsDir, 'sessions.json'), 'utf8')) as {
+      sessions: Array<{ key: string; archived?: boolean; archivedAt?: number }>;
+    };
+    expect(stored.sessions[0]?.archived).toBeUndefined();
+    expect(stored.sessions[0]?.archivedAt).toBeUndefined();
+  });
+
   it('persists a session model override in sessions.json', async () => {
     const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
     await mkdir(sessionsDir, { recursive: true });
@@ -665,7 +730,7 @@ describe('handleSessionRoutes', () => {
       join(sessionsDir, 'sessions.json'),
       JSON.stringify({
         sessions: [
-          { key: 'agent:main:session-1', label: 'Pinned me', pinned: true, pinOrder: 2, updatedAt: 1 },
+          { key: 'agent:main:session-1', label: 'Pinned me', pinned: true, pinOrder: 2, updatedAt: 1, archived: true, archivedAt: 10, createdAt: 1 },
           { key: 'agent:main:session-2', label: 'Normal', updatedAt: 2 },
         ],
       }, null, 2),
@@ -687,9 +752,60 @@ describe('handleSessionRoutes', () => {
     expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
       success: true,
       metadata: {
-        'agent:main:session-1': { pinned: true, pinOrder: 2 },
+        'agent:main:session-1': { pinned: true, pinOrder: 2, archived: true, archivedAt: 10, createdAt: 1 },
         'agent:main:session-2': { pinned: undefined, pinOrder: undefined },
       },
     });
+  });
+
+  it('lists archived sessions from the dedicated archive route', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      JSON.stringify({
+        sessions: [
+          {
+            key: 'agent:main:session-archived',
+            file: 'session-archived.jsonl',
+            label: 'Archived session',
+            archived: true,
+            archivedAt: 200,
+            createdAt: 100,
+          },
+          {
+            key: 'agent:main:session-active',
+            file: 'session-active.jsonl',
+            label: 'Active session',
+            updatedAt: 300,
+          },
+        ],
+      }, null, 2),
+      'utf8',
+    );
+    await writeFile(join(sessionsDir, 'session-archived.jsonl'), '', 'utf8');
+    await writeFile(join(sessionsDir, 'session-active.jsonl'), '', 'utf8');
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    const handled = await handleSessionRoutes(
+      { method: 'GET' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/archived'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, expect.objectContaining({
+      success: true,
+      sessions: [
+        expect.objectContaining({
+          key: 'agent:main:session-archived',
+          label: 'Archived session',
+          archived: true,
+          archivedAt: 200,
+          createdAt: 100,
+        }),
+      ],
+    }));
   });
 });

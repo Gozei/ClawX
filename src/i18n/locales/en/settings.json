@@ -8,6 +8,7 @@
       "dashboard": "System Monitoring",
       "models": "Models",
       "channels": "Channels",
+      "archives": "Session Archive",
       "theme": "Theme",
       "language": "Language",
       "checkUpdates": "Check for Updates",
@@ -39,6 +40,27 @@
     "console": {
       "failed": "Failed to open OpenClaw Console"
     }
+  },
+  "sessionArchive": {
+    "title": "Session Archive",
+    "subtitle": "Review archived conversations from {{appName}} and restore them when you need to continue.",
+    "searchPlaceholder": "Search by title or session ID",
+    "count": "{{count}} archived sessions",
+    "empty": "No archived sessions yet.",
+    "emptyFiltered": "No archived sessions match the current search.",
+    "columns": {
+      "title": "Session Title",
+      "sessionId": "Session ID",
+      "createdAt": "Created At",
+      "actions": "Actions"
+    },
+    "actions": {
+      "restore": "Unarchive",
+      "delete": "Delete Session"
+    },
+    "unarchiveSuccess": "Session restored",
+    "deleteSuccess": "Session deleted",
+    "deleteConfirm": "Are you sure you want to delete session \"{{label}}\"?"
   },
   "appearance": {
     "title": "General",
