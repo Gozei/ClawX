@@ -13,6 +13,88 @@
         "title": "Models",
         "subtitle": "Manage your AI providers and monitor token usage."
     },
+    "systemMonitor": {
+        "title": "System Monitoring",
+        "subtitle": "A read-only monitoring view for gateway, models, channels, and scheduled tasks.",
+        "metadata": {
+            "gateway": "Gateway: {{state}}",
+            "models": "Model accounts: {{count}}",
+            "channels": "Channels online: {{connected}} / {{total}}",
+            "tasks": "Tasks enabled: {{enabled}} / {{total}}",
+            "syncing": "Monitoring data is syncing",
+            "synced": "Monitoring data is up to date"
+        },
+        "sections": {
+            "summary": "System Monitoring Summary",
+            "taskList": "Task Monitoring Details"
+        },
+        "cards": {
+            "gateway": "Gateway",
+            "models": "Models",
+            "channels": "Channels",
+            "tasks": "Tasks"
+        },
+        "states": {
+            "healthy": "Healthy",
+            "attention": "Needs attention",
+            "disconnected": "Disconnected",
+            "scheduled": "Scheduled",
+            "idle": "Idle",
+            "gateway": {
+                "running": "Running",
+                "starting": "Starting",
+                "reconnecting": "Reconnecting",
+                "error": "Error",
+                "stopped": "Stopped"
+            }
+        },
+        "rows": {
+            "port": "Port",
+            "uptime": "Uptime",
+            "lastError": "Last error",
+            "totalAccounts": "Total accounts",
+            "enabledAccounts": "Enabled accounts",
+            "healthyAccounts": "Healthy accounts",
+            "missingCredentials": "Missing credentials",
+            "totalChannels": "Total channels",
+            "connectedChannels": "Connected",
+            "degradedChannels": "Degraded",
+            "disconnectedChannels": "Disconnected",
+            "totalTasks": "Total tasks",
+            "enabledTasks": "Enabled tasks",
+            "failedTasks": "Failed tasks",
+            "nextRun": "Next run",
+            "lastUpdated": "Last updated"
+        },
+        "values": {
+            "none": "None",
+            "noError": "No errors",
+            "notScheduled": "Not scheduled"
+        },
+        "summary": {
+            "healthyTitle": "System is stable",
+            "healthyDetail": "No immediate issues were detected across the gateway, models, channels, or scheduled tasks.",
+            "gatewayErrorTitle": "Gateway status issue",
+            "providerMissingTitle": "Model accounts need credentials",
+            "providerMissingDetail": "{{count}} enabled model accounts are missing API keys or access credentials.",
+            "channelErrorTitle": "Channel issues detected",
+            "channelErrorDetail": "{{count}} channels are currently in an error state.",
+            "taskFailedTitle": "Task execution failures",
+            "taskFailedDetail": "{{count}} tasks failed on their latest run.",
+            "dataSourceErrorTitle": "Monitoring data source warning"
+        },
+        "taskList": {
+            "nextRun": "Next run",
+            "lastRun": "Last run",
+            "enabled": "Enabled",
+            "paused": "Paused",
+            "success": "Success",
+            "failed": "Failed",
+            "neverRun": "Never run",
+            "emptyTitle": "No task monitoring data yet",
+            "emptyDetail": "There are no tasks to display right now. Configure tasks in System Management to monitor them here."
+        }
+    },
     "quickActions": {
         "title": "Quick Actions",
         "description": "Common tasks and shortcuts",

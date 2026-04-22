@@ -5,6 +5,7 @@
     "title": "Settings Menu",
     "subtitle": "Manage models, channels, appearance, and system settings from one place.",
     "menu": {
+      "dashboard": "System Monitoring",
       "models": "Models",
       "channels": "Channels",
       "theme": "Theme",
