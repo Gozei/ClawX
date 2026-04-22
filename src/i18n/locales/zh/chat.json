@@ -40,6 +40,7 @@
     },
     "composer": {
         "attachFiles": "添加文件",
+        "role": "角色",
         "pickAgent": "选择 Role",
         "selectModel": "切换模型",
         "switchModel": "切换模型",
