@@ -899,7 +899,7 @@ function extractToolUseUpdates(message: unknown): ToolStatus[] {
   return updates;
 }
 
-function extractToolResultBlocks(message: unknown, eventState: string): ToolStatus[] {
+function extractToolResultBlocks(message: unknown, _eventState: string): ToolStatus[] {
   if (!message || typeof message !== 'object') return [];
   const msg = message as Record<string, unknown>;
   const content = msg.content;
@@ -914,7 +914,10 @@ function extractToolResultBlocks(message: unknown, eventState: string): ToolStat
       id: block.id || block.name || 'tool',
       toolCallId: block.id,
       name: block.name || block.id || 'tool',
-      status: normalizeToolStatus(block.status, eventState === 'delta' ? 'running' : 'completed'),
+      // A tool_result block means the tool has already produced a result.
+      // Even during streaming deltas, treat missing statuses as completed so
+      // earlier process cards don't stay stuck in a running state.
+      status: normalizeToolStatus(block.status, 'completed'),
       summary,
       failureMessage: block.status === 'error' ? normalizeToolFailureMessage(outputText) : undefined,
       updatedAt: Date.now(),
@@ -1050,10 +1053,10 @@ function upsertToolStatuses(current: ToolStatus[], updates: ToolStatus[]): ToolS
 
 function collectToolUpdates(message: unknown, eventState: string): ToolStatus[] {
   const updates: ToolStatus[] = [];
+  updates.push(...extractToolUseUpdates(message));
+  updates.push(...extractToolResultBlocks(message, eventState));
   const toolResultUpdate = extractToolResultUpdate(message, eventState);
   if (toolResultUpdate) updates.push(toolResultUpdate);
-  updates.push(...extractToolResultBlocks(message, eventState));
-  updates.push(...extractToolUseUpdates(message));
   return updates;
 }
 

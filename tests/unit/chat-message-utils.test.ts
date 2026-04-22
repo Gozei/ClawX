@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { extractText, isInternalMaintenanceTurnUserMessage } from '@/pages/Chat/message-utils';
 import type { RawMessage } from '@/stores/chat';
 
+const FULLY_INJECTED_VISIBLE_TEXT = 'Only this sentence should be shown in chat.';
+
 describe('chat message utils', () => {
   it('hides heartbeat-only prompt injection from user-visible chat text', () => {
     const message: RawMessage = {
@@ -134,6 +136,46 @@ describe('chat message utils', () => {
     };
 
     expect(extractText(message)).toBe('你现在是什么模型');
+  });
+
+  it('strips AGENTS, environment, and attachment routing preludes from user-visible text', () => {
+    const message: RawMessage = {
+      id: 'conversation-metadata-full-prelude-1',
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: [
+            '# AGENTS.md instructions for D:/AI/Deep AI Worker/ClawX',
+            '',
+            '<INSTRUCTIONS>',
+            'Use the repository playbook before responding.',
+            '</INSTRUCTIONS>',
+            '<environment_context>',
+            '  <cwd>D:/AI/Deep AI Worker/ClawX</cwd>',
+            '  <shell>powershell</shell>',
+            '</environment_context>',
+            'To send an image back, prefer the message tool (media/path/filePath). If you must inline, use MEDIA:https://example.com/image.jpg (spaces ok, quote if needed) or a safe relative path like MEDIA:./image.jpg. Absolute and ~ paths only work when they stay inside your allowed file-read boundary; host file:// URLs are blocked. Keep caption in the text body.',
+            'Only the files listed in the current attachment note for this turn are newly uploaded inputs for this request. Do not automatically inspect older uploaded files, prior-turn attachments, or unrelated workspace files unless the user explicitly asks for them or the current file directly points to them.',
+            'When the current turn includes uploaded attachments, resolve references like "this", "this file", "this output", "这个", "这个文件", and "这个输出" against the current turn attachment set first. Do not default those references to prior assistant outputs, earlier uploaded files, or historical workspace artifacts.',
+            'This turn has exactly one uploaded attachment, so answer about that file unless the user explicitly names another file. Do not summarize prior assistant outputs when the current turn attachment set is present unless the user explicitly asks for that earlier output.',
+            '',
+            '[Wed 2026-04-22 19:54 GMT+8] Conversation info (untrusted metadata): ```json',
+            '{"agent":{"id":"main","name":"Main Role","preferredModel":"custom-custombc/qwen3.5-plus"}}',
+            '```',
+            'Execution playbook:',
+            '- You are currently acting as "Main Role" (ID: main).',
+            '- Preferred model: custom-custombc/qwen3.5-plus',
+            '- If tools are unavailable, explain the block instead of fabricating.',
+            '',
+            FULLY_INJECTED_VISIBLE_TEXT,
+          ].join('\n'),
+        },
+      ],
+      timestamp: 1713000008,
+    };
+
+    expect(extractText(message)).toBe(FULLY_INJECTED_VISIBLE_TEXT);
   });
 
   it('strips injected leading system and conversation metadata from user-visible text', () => {

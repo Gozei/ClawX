@@ -9,6 +9,7 @@ import { isWithinCompletedTurnProcessGrace } from '@/lib/chat-turn-grace';
 import { normalizeAppError } from '@/lib/error-model';
 import { hostApiFetch } from '@/lib/host-api';
 import i18n from '@/i18n';
+import { stripInjectedInboundPrelude } from '../../shared/inbound-user-text';
 import { useGatewayStore } from './gateway';
 import { useAgentsStore } from './agents';
 import { buildCronSessionHistoryPath, isCronSessionKey } from './chat/cron-session-utils';
@@ -543,9 +544,14 @@ function isEquivalentRecentAssistantMessage(
   });
 }
 
-function schedulePendingFinalRecovery(set: ChatStoreSet, get: () => ChatState): void {
+function schedulePendingFinalRecovery(
+  set: ChatStoreSet,
+  get: () => ChatState,
+  options?: { delayMs?: number },
+): void {
   clearPendingFinalRecoveryTimer();
   const sessionKey = get().currentSessionKey;
+  const delayMs = Math.max(100, Math.floor(options?.delayMs ?? PENDING_FINAL_RECOVERY_DELAY_MS));
 
   pendingFinalRecoveryHandle = setTimeout(() => {
     pendingFinalRecoveryHandle = null;
@@ -602,7 +608,7 @@ function schedulePendingFinalRecovery(set: ChatStoreSet, get: () => ChatState): 
         };
       });
     });
-  }, PENDING_FINAL_RECOVERY_DELAY_MS);
+  }, delayMs);
 }
 
 function finalizeStreamingAssistantIfStale(set: ChatStoreSet, get: () => ChatState): boolean {
@@ -678,10 +684,6 @@ function saveImageCache(cache: Map<string, AttachedFileMeta>): void {
 }
 
 const _imageCache = loadImageCache();
-const SYSTEM_LINE_RE = /^System(?: \(untrusted\))?:\s*(?:\[[^\]]+\]\s*)?(.*)$/i;
-const SENDER_METADATA_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*```[a-z]*\s*[\s\S]*?```\s*/i;
-const SENDER_METADATA_JSON_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*\{[\s\S]*?\}\s*/i;
-const GATEWAY_TIMESTAMP_PREFIX_RE = /^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i;
 
 function isPreCompactionMemoryFlushPrompt(text: string): boolean {
   const normalized = text.trim();
@@ -702,74 +704,11 @@ function getMessageText(content: unknown): string {
   return '';
 }
 
-function stripInjectedConversationInfo(text: string): string {
-  const hasStructuredInjection = /Conversation info\s*\([^)]*\):|Execution playbook:|Sender(?: \(untrusted metadata\))?:/i.test(text);
-  const withoutLeadingSystemLines = (() => {
-    if (!hasStructuredInjection) return text;
-
-    const lines = text.split(/\r?\n/);
-    let index = 0;
-    let sawSystemLine = false;
-
-    while (index < lines.length) {
-      const line = lines[index].trim();
-      if (!line) {
-        index += 1;
-        continue;
-      }
-      if (SYSTEM_LINE_RE.test(line)) {
-        sawSystemLine = true;
-        index += 1;
-        continue;
-      }
-      break;
-    }
-
-    if (!sawSystemLine) return text;
-
-    const remainder = lines.slice(index).join('\n').trimStart();
-    return remainder || text;
-  })();
-  const withoutConversationInfo = withoutLeadingSystemLines
-    .replace(/^Conversation info\s*\([^)]*\):\s*```[a-z]*\n[\s\S]*?```\s*/i, '')
-    .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '');
-
-  return withoutConversationInfo.replace(/^Execution playbook:\s*(?:\r?\n- .*)+\s*/i, '');
-}
-
 function cleanUserMessageText(text: string): string {
-  const hadStructuredInjection = /Conversation info\s*\([^)]*\):|Execution playbook:|Sender(?: \(untrusted metadata\))?:/i.test(text);
-
-  const cleaned = (() => {
-    const stripped = stripInjectedConversationInfo(text
-    .replace(SENDER_METADATA_PREFIX_RE, '')
-    .replace(SENDER_METADATA_JSON_PREFIX_RE, '')
+  const cleaned = stripInjectedInboundPrelude(text
     .replace(/\s*\[media attached:[^\]]*\]/g, '')
-    .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')
-    .replace(GATEWAY_TIMESTAMP_PREFIX_RE, ''));
-
-    if (!hadStructuredInjection) {
-      return stripped.trim();
-    }
-
-    const lines = stripped.split(/\r?\n/);
-    let index = 0;
-
-    while (index < lines.length) {
-      const line = lines[index].trim();
-      if (!line) {
-        index += 1;
-        continue;
-      }
-      if (SYSTEM_LINE_RE.test(line)) {
-        index += 1;
-        continue;
-      }
-      break;
-    }
-
-    return (index > 0 ? lines.slice(index).join('\n') : stripped).trim();
-  })();
+    .replace(/\s*\[message_id:\s*[^\]]+\]/g, ''))
+    .trim();
 
   return isPreCompactionMemoryFlushPrompt(cleaned) ? '' : cleaned;
 }
@@ -1997,7 +1936,7 @@ function extractToolUseUpdates(message: unknown): ToolStatus[] {
   return updates;
 }
 
-function extractToolResultBlocks(message: unknown, eventState: string): ToolStatus[] {
+function extractToolResultBlocks(message: unknown, _eventState: string): ToolStatus[] {
   if (!message || typeof message !== 'object') return [];
   const msg = message as Record<string, unknown>;
   const content = msg.content;
@@ -2012,7 +1951,10 @@ function extractToolResultBlocks(message: unknown, eventState: string): ToolStat
       id: block.id || block.name || 'tool',
       toolCallId: block.id,
       name: block.name || block.id || 'tool',
-      status: normalizeToolStatus(block.status, eventState === 'delta' ? 'running' : 'completed'),
+      // A tool_result block means the tool has already produced a result.
+      // Even during streaming deltas, treat missing statuses as completed so
+      // earlier process cards don't stay stuck in a running state.
+      status: normalizeToolStatus(block.status, 'completed'),
       summary,
       failureMessage: block.status === 'error' ? normalizeToolFailureMessage(outputText) : undefined,
       updatedAt: Date.now(),
@@ -2159,10 +2101,10 @@ function isRecoverableChatSendTimeout(error: string): boolean {
 
 function collectToolUpdates(message: unknown, eventState: string): ToolStatus[] {
   const updates: ToolStatus[] = [];
+  updates.push(...extractToolUseUpdates(message));
+  updates.push(...extractToolResultBlocks(message, eventState));
   const toolResultUpdate = extractToolResultUpdate(message, eventState);
   if (toolResultUpdate) updates.push(toolResultUpdate);
-  updates.push(...extractToolResultBlocks(message, eventState));
-  updates.push(...extractToolUseUpdates(message));
   return updates;
 }
 
@@ -3267,6 +3209,14 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       // until the run completes, causing it to flash out of the UI.
       let finalMessages = enrichedMessages;
       const userMsgAt = get().lastUserMessageAt;
+      const historyUserMsForPreserve = userMsgAt ? toMs(userMsgAt) : 0;
+      const loadedHistoryHasSettledAssistant = [...filteredMessages].some((message) => {
+        if (message.role !== 'assistant') return false;
+        if (historyUserMsForPreserve && message.timestamp && toMs(message.timestamp) < historyUserMsForPreserve) {
+          return false;
+        }
+        return hasAssistantFinalTextContent(message) || isEmptyAssistantResponse(message);
+      });
       if (get().sending && userMsgAt) {
         const userMsMs = toMs(userMsgAt);
         const currentMsgs = get().messages;
@@ -3291,7 +3241,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           }
         }
       }
-      if (get().sending) {
+      if (get().sending && !loadedHistoryHasSettledAssistant) {
         finalMessages = preservePendingAssistantMessages(get().messages, finalMessages, userMsgAt);
       }
 
@@ -3315,19 +3265,25 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         return isAfterHistoryUserMsg(msg);
       });
 
+      const observedHistoryRecentAssistant = [...filteredMessages].reverse().find((msg) => {
+        if (msg.role !== 'assistant') return false;
+        if (!hasAssistantFinalTextContent(msg)) return false;
+        return isAfterHistoryUserMsg(msg);
+      });
+      const observedHistoryEmptyAssistant = [...filteredMessages].reverse().find((msg) => (
+        msg.role === 'assistant'
+        && isAfterHistoryUserMsg(msg)
+        && isEmptyAssistantResponse(msg)
+      ));
+      const shouldDeferSettledHistoryFinal = historyIsSendingNow
+        && !historyPendingFinal
+        && hasBlockingLiveTurnSignal
+        && !!(observedHistoryRecentAssistant || observedHistoryEmptyAssistant);
       const historyRecentAssistant = (historyPendingFinal || shouldEnterHistoryPendingFinal)
-        ? [...filteredMessages].reverse().find((msg) => {
-            if (msg.role !== 'assistant') return false;
-            if (!hasAssistantFinalTextContent(msg)) return false;
-            return isAfterHistoryUserMsg(msg);
-          })
+        ? observedHistoryRecentAssistant
         : undefined;
       const historyEmptyAssistant = (historyPendingFinal || shouldEnterHistoryPendingFinal)
-        ? [...filteredMessages].reverse().find((msg) => (
-            msg.role === 'assistant'
-            && isAfterHistoryUserMsg(msg)
-            && isEmptyAssistantResponse(msg)
-          ))
+        ? observedHistoryEmptyAssistant
         : undefined;
       const staleStreamingReferenceTs = (() => {
         const currentStreamingMessage = get().streamingMessage;
@@ -3371,7 +3327,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         : { messages: finalMessages, appendedProcessCount: 0 };
       const mergedMessagesForActiveSend = deferredMergeResult.messages;
 
-      if (historyRecentAssistant || historyEmptyAssistant) {
+      if (historyRecentAssistant || historyEmptyAssistant || shouldDeferSettledHistoryFinal) {
         clearHistoryPoll();
       }
       if (shouldRetryIncompleteHistory) {
@@ -3420,7 +3376,9 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                   pendingToolImages: [],
                   error: EMPTY_ASSISTANT_RESPONSE_ERROR,
                 }
-            : shouldEnterHistoryPendingFinal || (shouldDeferHistoryCurrentTurn && deferredMergeResult.appendedProcessCount > 0)
+            : shouldEnterHistoryPendingFinal
+              || shouldDeferSettledHistoryFinal
+              || (shouldDeferHistoryCurrentTurn && deferredMergeResult.appendedProcessCount > 0)
                 ? { pendingFinal: true, sendStage: 'finalizing' }
                 : shouldClearSettledStreamingState
                   ? {
@@ -3436,6 +3394,14 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                 : {}),
         };
       });
+
+      if (shouldDeferSettledHistoryFinal) {
+        const lastChatEventAgeMs = _lastChatEventAt > 0
+          ? Math.max(0, Date.now() - _lastChatEventAt)
+          : HISTORY_POLL_SILENCE_WINDOW_MS;
+        const followupDelayMs = Math.max(200, HISTORY_POLL_SILENCE_WINDOW_MS - lastChatEventAgeMs + 80);
+        schedulePendingFinalRecovery(set, get, { delayMs: followupDelayMs });
+      }
 
       let recoveredAutoLabel = '';
       let shouldPersistRecoveredAutoLabel = false;
