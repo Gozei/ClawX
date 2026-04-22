@@ -147,7 +147,7 @@ test.describe('Settings hub menu', () => {
       const languageToggle = page.getByTestId('settings-hub-menu-language').locator('[data-slot="settings-hub-trailing"]');
 
       await expect(themeToggle).toContainText('/');
-      await expect(languageToggle).toContainText('中');
+      await expect(languageToggle).toContainText('\u4e2d\u6587');
       await expect(languageToggle).toContainText('English');
 
       const htmlClassBefore = await page.locator('html').getAttribute('class');

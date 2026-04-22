@@ -201,7 +201,7 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
       onClick: handleToggleLanguage,
       trailing: (
         <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold">
-          <span className={cn(language === 'zh' ? 'text-foreground dark:text-white' : 'text-muted-foreground/60 dark:text-white/42')}>{'\u4e2d'}</span>
+          <span className={cn(language === 'zh' ? 'text-foreground dark:text-white' : 'text-muted-foreground/60 dark:text-white/42')}>{'\u4e2d\u6587'}</span>
           <span className="text-muted-foreground/55 dark:text-white/35">/</span>
           <span className={cn(language === 'en' ? 'text-foreground dark:text-white' : 'text-muted-foreground/60 dark:text-white/42')}>English</span>
         </span>
