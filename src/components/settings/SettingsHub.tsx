@@ -1,4 +1,4 @@
-import { useMemo, type ComponentType } from 'react';
+import { useMemo, useState, type ComponentType } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Archive,
@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useSettingsStore } from '@/stores/settings';
 import { useUpdateStore } from '@/stores/update';
 import { hostApiFetch } from '@/lib/host-api';
@@ -40,6 +41,10 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
   const language = useSettingsStore((state) => state.language);
   const setLanguage = useSettingsStore((state) => state.setLanguage);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
+  const downloadUpdate = useUpdateStore((state) => state.downloadUpdate);
+  const clearUpdateError = useUpdateStore((state) => state.clearError);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
 
   const resolvedTheme = useMemo(() => {
     if (theme === 'dark' || theme === 'light') return theme;
@@ -71,13 +76,39 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
   };
 
   const handleCheckUpdates = async () => {
-    navigate('/settings#updates');
-    onRequestClose?.();
+    if (checkingUpdates) return;
+    setCheckingUpdates(true);
+    clearUpdateError();
     try {
       await checkForUpdates();
+      const { status, error } = useUpdateStore.getState();
+      if (status === 'available') {
+        setUpdateDialogOpen(true);
+        return;
+      }
+      if (status === 'not-available') {
+        toast.success(t('settingsHub.update.latest'));
+        return;
+      }
+      toast.error(error || t('settingsHub.update.failed'));
     } catch {
-      // Update store keeps user-facing error state.
+      const { error } = useUpdateStore.getState();
+      toast.error(error || t('settingsHub.update.failed'));
+    } finally {
+      setCheckingUpdates(false);
     }
+  };
+
+  const handleConfirmUpdate = async () => {
+    setUpdateDialogOpen(false);
+    await downloadUpdate({ autoInstallAfterDownload: true });
+    const { status, error } = useUpdateStore.getState();
+    if (status === 'error') {
+      toast.error(error || t('settingsHub.update.failed'));
+      return;
+    }
+    toast.success(t('settingsHub.update.started'));
+    onRequestClose?.();
   };
 
   const handleOpenConsole = async () => {
@@ -102,11 +133,9 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
         ? 'archives'
       : location.pathname.startsWith('/dashboard')
         ? 'dashboard'
-      : location.pathname.startsWith('/settings') && location.hash === '#updates'
-        ? 'checkUpdates'
-        : location.pathname.startsWith('/settings')
-          ? 'settings'
-          : '';
+      : location.pathname.startsWith('/settings')
+        ? 'settings'
+        : '';
 
   const menuItems: Array<{
     key: string;
@@ -116,6 +145,7 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
     onClick: () => void;
     selected?: boolean;
     trailing?: React.ReactNode;
+    disabled?: boolean;
   }> = [
     {
       key: 'dashboard',
@@ -191,7 +221,12 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
       testId: 'settings-hub-menu-check-updates',
       icon: RefreshCw,
       onClick: () => { void handleCheckUpdates(); },
-      selected: selectedKey === 'checkUpdates',
+      trailing: checkingUpdates ? (
+        <span className="text-[12px] font-medium">
+          {t('settingsHub.update.checking')}
+        </span>
+      ) : undefined,
+      disabled: checkingUpdates,
     },
     {
       key: 'console',
@@ -221,9 +256,11 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
                 type="button"
                 data-testid={item.testId}
                 onClick={item.onClick}
+                disabled={item.disabled}
                 data-selected={item.selected ? 'true' : 'false'}
                 className={cn(
                   'group flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[14px] font-medium transition-all duration-200',
+                  item.disabled && 'cursor-not-allowed opacity-70',
                   item.selected
                     ? 'bg-white text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:text-white dark:ring-white/10'
                     : 'text-foreground/78 hover:bg-[#eef3fb] hover:text-foreground dark:text-white/78 dark:hover:bg-white/5 dark:hover:text-white',
@@ -262,6 +299,15 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
           })}
         </div>
       </aside>
+      <ConfirmDialog
+        open={updateDialogOpen}
+        title={t('settingsHub.update.dialogTitle')}
+        message={t('settingsHub.update.dialogMessage')}
+        confirmLabel={t('settingsHub.update.confirm')}
+        cancelLabel={t('common:actions.cancel')}
+        onConfirm={handleConfirmUpdate}
+        onCancel={() => setUpdateDialogOpen(false)}
+      />
     </div>
   );
 }

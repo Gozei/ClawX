@@ -111,7 +111,7 @@ export function UpdateSettings() {
         );
       case 'available':
         return (
-          <Button onClick={downloadUpdate} size="sm">
+          <Button onClick={() => { void downloadUpdate(); }} size="sm">
             <Download className="h-4 w-4 mr-2" />
             {t('updates.action.download')}
           </Button>
@@ -126,7 +126,7 @@ export function UpdateSettings() {
           );
         }
         return (
-          <Button onClick={installUpdate} size="sm" variant="default">
+          <Button onClick={() => { void installUpdate(); }} size="sm" variant="default">
             <Rocket className="h-4 w-4 mr-2" />
             {t('updates.action.install')}
           </Button>
