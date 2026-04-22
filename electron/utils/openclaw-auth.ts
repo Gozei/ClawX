@@ -231,6 +231,13 @@ const BUILTIN_CHANNEL_IDS = new Set([
   'mattermost',
   'qqbot',
 ]);
+const SAFE_BUNDLED_ALLOWLIST_PLUGIN_IDS = new Set([
+  'acpx',
+  'copilot-proxy',
+  'device-pair',
+  'phone-control',
+  'talk-voice',
+]);
 const AUTH_PROFILE_PROVIDER_KEY_MAP: Record<string, string> = {
   'openai-codex': 'openai',
   'google-gemini-cli': 'google',
@@ -1741,10 +1748,10 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
       }
 
       // Keep only true external plugin ids in plugins.allow, then re-add
-      // configured built-in channels and bundled enabledByDefault plugins.
-      // This preserves OpenClaw's default bundled CLI/plugin surface (for
-      // example `openclaw browser`) whenever the user also has an explicit
-      // allowlist for third-party plugins or configured channels.
+      // configured built-in channels and the bundled utility plugins that
+      // still require explicit allowlist entries. Provider-style bundled ids
+      // such as `openai` and `moonshot` now trigger "plugin not found"
+      // warnings when written into plugins.allow.
       const bundled = discoverBundledPlugins();
       const installedTopLevelPluginIds = discoverInstalledTopLevelPluginIds();
       const externalPluginIds = allowArr2.filter((pluginId) => {
@@ -1769,6 +1776,9 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
         }
 
         for (const pluginId of bundled.enabledByDefault) {
+          if (!SAFE_BUNDLED_ALLOWLIST_PLUGIN_IDS.has(pluginId)) {
+            continue;
+          }
           if (!nextAllow.includes(pluginId)) {
             nextAllow.push(pluginId);
           }
