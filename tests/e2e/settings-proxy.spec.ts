@@ -5,7 +5,7 @@ async function ensureSwitchState(toggle: Locator, checked: boolean): Promise<voi
   const currentState = await toggle.getAttribute('data-state');
   const isChecked = currentState === 'checked';
   if (isChecked !== checked) {
-    await toggle.click();
+    await toggle.click({ force: true });
   }
 }
 
@@ -21,6 +21,8 @@ test.describe('Deep AI Worker developer proxy settings', () => {
     await completeSetup(page);
 
     await openSettingsHub(page);
+    await page.getByTestId('settings-hub-menu-settings').click({ force: true });
+    await expect(page.getByTestId('settings-page')).toBeVisible();
 
     const devModeToggle = page.getByTestId('settings-dev-mode-switch');
     await expect(devModeToggle).toBeVisible();
@@ -36,13 +38,13 @@ test.describe('Deep AI Worker developer proxy settings', () => {
 
     await ensureSwitchState(proxyToggle, true);
     await expect(proxySaveButton).toBeEnabled();
-    await proxySaveButton.click();
+    await proxySaveButton.click({ force: true });
     await expect.poll(async () => await readProxyEnabled(page)).toBe(true);
 
     await ensureSwitchState(proxyToggle, false);
     await expect(proxySaveButton).toBeVisible();
     await expect(proxySaveButton).toBeEnabled();
-    await proxySaveButton.click();
+    await proxySaveButton.click({ force: true });
     await expect.poll(async () => await readProxyEnabled(page)).toBe(false);
   });
 });

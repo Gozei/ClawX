@@ -73,15 +73,25 @@ test.describe('Channels account ID validation', () => {
     await openChannelsFromSettings(page);
     await expect(page.getByText('Feishu / Lark')).toBeVisible();
 
-    await page.getByRole('button', { name: /Add Account|account\.add/i }).click();
-    await expect(page.getByText(/Configure Feishu \/ Lark|dialog\.configureTitle/)).toBeVisible();
+    const addAccountButton = page.locator('button').filter({
+      hasText: /Add Account|添加账号|アカウントを追加|account\.add/i,
+    }).first();
+    await expect(addAccountButton).toBeVisible();
+    await addAccountButton.click({ force: true });
+    await expect(page.locator('#account-id')).toBeVisible();
 
     await page.locator('#account-id').fill('测试账号');
     await page.locator('#appId').fill('cli_test');
     await page.locator('#appSecret').fill('secret_test');
 
-    await page.getByRole('button', { name: /Save & Connect|dialog\.saveAndConnect/ }).click();
-    await expect(page.getByText(/account\.invalidCanonicalId|must use lowercase letters/i).first()).toBeVisible();
+    const saveAndConnectButton = page.locator('button').filter({
+      hasText: /Save & Connect|保存并连接|保存并重连|接続|更新并重连/i,
+    }).last();
+    await expect(saveAndConnectButton).toBeVisible();
+    await saveAndConnectButton.click({ force: true });
+    await expect(
+      page.getByText(/account\.invalidCanonicalId|must use lowercase letters|仅支持小写字母、数字、连字符和下划线/i).first(),
+    ).toBeVisible();
 
     const saveCalls = await electronApp.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

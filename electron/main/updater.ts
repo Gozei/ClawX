@@ -102,6 +102,11 @@ export class AppUpdater extends EventEmitter {
     this.on('error', (error: Error) => {
       logger.error('[Updater] AppUpdater emitted error:', error);
     });
+
+    if (!app?.isPackaged) {
+      logger.info('[Updater] Skipping electron-updater initialization in development mode');
+      return;
+    }
     
     // Override feed URL for prerelease channels so that
     // alpha -> /alpha/alpha-mac.yml, beta -> /beta/beta-mac.yml, etc.
@@ -246,6 +251,14 @@ export class AppUpdater extends EventEmitter {
    * final status so the UI never gets stuck in 'checking'.
    */
   async checkForUpdates(): Promise<UpdateInfo | null> {
+    if (!app?.isPackaged) {
+      this.updateStatus({
+        status: 'error',
+        error: 'Update check skipped (dev mode - app is not packaged)',
+      });
+      return null;
+    }
+
     try {
       const autoUpdater = await this.getAutoUpdater();
       if (!autoUpdater) {
@@ -306,6 +319,10 @@ export class AppUpdater extends EventEmitter {
    * Download available update
    */
   async downloadUpdate(): Promise<void> {
+    if (!app?.isPackaged) {
+      throw new Error('Update download is unavailable in development mode');
+    }
+
     try {
       const autoUpdater = await this.getAutoUpdater();
       if (!autoUpdater) {
@@ -330,6 +347,11 @@ export class AppUpdater extends EventEmitter {
    * the window cleanly while ShipIt runs independently to replace the app.
    */
   quitAndInstall(): void {
+    if (!app?.isPackaged) {
+      logger.warn('[Updater] quitAndInstall ignored in development mode');
+      return;
+    }
+
     logger.info('[Updater] quitAndInstall called');
     this.clearAutoInstallTimer();
     this.updateStatus({
@@ -413,7 +435,7 @@ export class AppUpdater extends EventEmitter {
    * Get current version
    */
   getCurrentVersion(): string {
-    return app.getVersion();
+    return app?.getVersion?.() ?? 'dev';
   }
 }
 

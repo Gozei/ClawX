@@ -166,14 +166,17 @@ export function inferSkillSourceFromBaseDir(baseDir: string | undefined, sources
   if (!normalizedBaseDir) return undefined;
   return sources.find((source) => {
     const sourceRoot = normalizeForComparison(path.join(expandHome(source.workdir), 'skills'));
-    return Boolean(sourceRoot) && (normalizedBaseDir === sourceRoot || normalizedBaseDir.startsWith(`${sourceRoot}${path.sep}`));
+    return Boolean(sourceRoot) && (normalizedBaseDir === sourceRoot || normalizedBaseDir.startsWith(`${sourceRoot}/`));
   });
 }
 
 function normalizeForComparison(filePath: string | undefined): string | null {
   if (!filePath) return null;
   try {
-    return path.normalize(expandHome(filePath));
+    const expanded = expandHome(filePath).replace(/\\/g, '/');
+    const normalized = path.posix.normalize(expanded);
+    const withoutTrailingSlash = normalized.replace(/\/+$/, '');
+    return withoutTrailingSlash.toLowerCase();
   } catch {
     return null;
   }

@@ -15,6 +15,16 @@ import type {
 
 const SKILL_TOGGLE_DEBOUNCE_MS = 500;
 
+function getGatewayStateOrDefault(): 'stopped' | 'starting' | 'running' | 'error' | 'reconnecting' {
+  const rawState = useGatewayStore.getState()?.status?.state;
+  return rawState === 'stopped'
+    || rawState === 'starting'
+    || rawState === 'running'
+    || rawState === 'error'
+    || rawState === 'reconnecting'
+    ? rawState
+    : 'running';
+}
 function isGatewayTransientError(error: AppError, gatewayState: 'stopped' | 'starting' | 'running' | 'error' | 'reconnecting'): boolean {
   if (gatewayState === 'running') {
     return false;
@@ -168,7 +178,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   fetchSkills: async (force = false) => {
     const existingSkills = Array.isArray(get().skills) ? get().skills : [];
     const lastFetchedAt = get().lastFetchedAt;
-    const gatewayState = useGatewayStore.getState().status.state;
+    const gatewayState = getGatewayStateOrDefault();
     if (!force && existingSkills.length > 0 && lastFetchedAt && Date.now() - lastFetchedAt < 15_000) {
       return;
     }

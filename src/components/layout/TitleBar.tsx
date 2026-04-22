@@ -62,8 +62,8 @@ function WindowsTitleBar() {
           onClick={handleMinimize}
           className={windowControlButtonClass}
           data-testid="titlebar-minimize-button"
-          aria-label="\u6700\u5c0f\u5316"
-          title="\u6700\u5c0f\u5316"
+          aria-label="最小化"
+          title="最小化"
         >
           <Minus className="h-4 w-4" {...controlIconProps} />
         </button>
@@ -71,8 +71,8 @@ function WindowsTitleBar() {
           onClick={handleMaximize}
           className={windowControlButtonClass}
           data-testid="titlebar-maximize-button"
-          aria-label={maximized ? '\u8fd8\u539f' : '\u6700\u5927\u5316'}
-          title={maximized ? '\u8fd8\u539f' : '\u6700\u5927\u5316'}
+          aria-label={maximized ? '还原' : '最大化'}
+          title={maximized ? '还原' : '最大化'}
         >
           {maximized ? <Copy className="h-4 w-4" {...controlIconProps} /> : <Square className="h-4 w-4" {...controlIconProps} />}
         </button>
@@ -80,8 +80,8 @@ function WindowsTitleBar() {
           onClick={handleClose}
           className={windowCloseButtonClass}
           data-testid="titlebar-close-button"
-          aria-label="\u5173\u95ed"
-          title="\u5173\u95ed"
+          aria-label="关闭"
+          title="关闭"
         >
           <X className="h-4 w-4" {...controlIconProps} />
         </button>

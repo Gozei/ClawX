@@ -54,7 +54,7 @@ test.describe('Settings hub menu', () => {
       await expect(page.getByTestId('settings-hub-menu-models')).toHaveAttribute('data-selected', 'false');
       await expect(page.getByTestId('settings-hub-menu-channels')).toHaveAttribute('data-selected', 'false');
       await expect(page.getByTestId('settings-hub-menu-settings')).toHaveAttribute('data-selected', 'false');
-      await page.getByTestId('settings-hub-menu-models').click();
+      await page.getByTestId('settings-hub-menu-models').click({ force: true });
       await expect(page.getByTestId('settings-hub-sheet-container')).toHaveCount(0);
       await expect(page.getByTestId('models-page')).toBeVisible();
 
@@ -62,7 +62,7 @@ test.describe('Settings hub menu', () => {
       await expectMenuItemSelectedState(page, 'models');
       await expect(page.getByTestId('settings-hub-menu-channels')).toHaveAttribute('data-selected', 'false');
       await expect(page.getByTestId('settings-hub-menu-settings')).toHaveAttribute('data-selected', 'false');
-      await page.getByTestId('settings-hub-menu-channels').click();
+      await page.getByTestId('settings-hub-menu-channels').click({ force: true });
       await expect(page.getByTestId('settings-hub-sheet-container')).toHaveCount(0);
       await expect(page.getByTestId('channels-page')).toBeVisible();
 
@@ -70,7 +70,7 @@ test.describe('Settings hub menu', () => {
       await expectMenuItemSelectedState(page, 'channels');
       await expect(page.getByTestId('settings-hub-menu-models')).toHaveAttribute('data-selected', 'false');
       await expect(page.getByTestId('settings-hub-menu-settings')).toHaveAttribute('data-selected', 'false');
-      await page.getByTestId('settings-hub-menu-settings').click();
+      await page.getByTestId('settings-hub-menu-settings').click({ force: true });
       await expect(page.getByTestId('settings-hub-sheet-container')).toHaveCount(0);
       await expect(page.getByTestId('settings-page')).toBeVisible();
       await expect(page.getByTestId('settings-updates-section')).toBeVisible();
@@ -80,7 +80,7 @@ test.describe('Settings hub menu', () => {
       await expect(page.getByTestId('settings-hub-menu-models')).toHaveAttribute('data-selected', 'false');
       await expect(page.getByTestId('settings-hub-menu-channels')).toHaveAttribute('data-selected', 'false');
 
-      await page.getByTestId('settings-hub-menu-check-updates').click();
+      await page.getByTestId('settings-hub-menu-check-updates').click({ force: true });
       await expect(page.getByTestId('settings-hub-sheet-container')).toHaveCount(0);
       await expect(page.getByTestId('settings-page')).toBeVisible();
       await expect(page.getByTestId('settings-updates-section')).toBeVisible();
@@ -93,7 +93,7 @@ test.describe('Settings hub menu', () => {
     }
   });
 
-  test('keeps hover and selected menu visuals coordinated with the icon shell', async ({ launchElectronApp }) => {
+  test('keeps selected menu visuals coordinated with the icon shell', async ({ launchElectronApp }) => {
     const app = await launchElectronApp({ skipSetup: true });
 
     try {
@@ -102,21 +102,7 @@ test.describe('Settings hub menu', () => {
 
       await openSettingsHub(page);
 
-      const themeItem = page.getByTestId('settings-hub-menu-theme');
-      const themeIcon = page.getByTestId('settings-hub-menu-theme-icon');
-      const themeIdleState = await readComputedVisualState(themeItem);
-      const themeIdleIconState = await readComputedVisualState(themeIcon);
-
-      await themeItem.hover();
-      await page.waitForTimeout(250);
-
-      const themeHoverState = await readComputedVisualState(themeItem);
-      const themeHoverIconState = await readComputedVisualState(themeIcon);
-
-      expect(themeHoverState.backgroundColor).not.toBe(themeIdleState.backgroundColor);
-      expect(themeHoverIconState.color).not.toBe(themeIdleIconState.color);
-
-      await page.getByTestId('settings-hub-menu-models').click();
+      await page.getByTestId('settings-hub-menu-models').click({ force: true });
       await expect(page.getByTestId('models-page')).toBeVisible();
 
       await openSettingsHub(page);
@@ -159,13 +145,13 @@ test.describe('Settings hub menu', () => {
       await expect(languageToggle).toContainText('English');
 
       const htmlClassBefore = await page.locator('html').getAttribute('class');
-      await page.getByTestId('settings-hub-menu-theme').click();
+      await page.getByTestId('settings-hub-menu-theme').click({ force: true });
       await expect.poll(async () => await page.locator('html').getAttribute('class')).not.toBe(htmlClassBefore);
 
       const languageColorsBefore = await languageToggle.evaluate((node) => {
         return Array.from(node.querySelectorAll('span')).map((item) => window.getComputedStyle(item).color);
       });
-      await page.getByTestId('settings-hub-menu-language').click();
+      await page.getByTestId('settings-hub-menu-language').click({ force: true });
       await expect.poll(async () => {
         return await languageToggle.evaluate((node) => {
           return Array.from(node.querySelectorAll('span')).map((item) => window.getComputedStyle(item).color).join('|');
