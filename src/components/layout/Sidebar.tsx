@@ -7,7 +7,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
-  LayoutDashboard,
   Bot,
   Puzzle,
   Clock,
@@ -670,7 +669,6 @@ export function Sidebar() {
     : '';
 
   const navItems = [
-    { to: '/dashboard', icon: <LayoutDashboard className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.dashboard'), testId: 'sidebar-nav-dashboard' },
     { to: '/agents', icon: <Bot className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.agents'), testId: 'sidebar-nav-agents' },
     { to: `/skills${lastSkillsSearch}`, icon: <Puzzle className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.skills'), testId: 'sidebar-nav-skills' },
     { to: '/cron', icon: <Clock className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.cronTasks'), testId: 'sidebar-nav-cron' },

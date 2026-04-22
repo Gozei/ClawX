@@ -288,9 +288,11 @@ test.describe('Deep AI Worker main navigation without setup flow', () => {
       await expect(aboutLogo).toHaveAttribute('src', /logo-whale-light/);
       await closeSettingsHub(page);
 
-      await page.getByTestId('sidebar-nav-dashboard').click();
+      await openSettingsHub(page);
+      await page.getByTestId('settings-hub-menu-dashboard').click();
       await expect(page.getByTestId('dashboard-page')).toBeVisible();
-      await expect(page.getByTestId('dashboard-refresh-button')).toHaveCSS('color', 'rgb(255, 255, 255)');
+      await expect(page.getByTestId('dashboard-page-title')).toBeVisible();
+      await expect(page.getByTestId('dashboard-refresh-button')).toHaveCount(0);
 
       await page.getByTestId('sidebar-nav-agents').click();
       await expect(page.getByTestId('agents-page')).toBeVisible();

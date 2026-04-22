@@ -18,7 +18,7 @@ function fsPath(filePath: string): string {
 import { getAllSettings } from '../utils/store';
 import { getApiKey, getDefaultProvider, getProvider } from '../utils/secure-storage';
 import { getProviderEnvVar, getKeyableProviderTypes } from '../utils/provider-registry';
-import { getOpenClawDir, getOpenClawEntryPath, isOpenClawPresent } from '../utils/paths';
+import { getOpenClawDir, getOpenClawEntryPath, getOpenClawStatus, isOpenClawPresent } from '../utils/paths';
 import { getUvMirrorEnv } from '../utils/uv-env';
 import { cleanupDanglingWeChatPluginState, listConfiguredChannels, readOpenClawConfig } from '../utils/channel-config';
 import { syncGatewayTokenToConfig, syncBrowserConfigToOpenClaw, syncSessionIdleMinutesToOpenClaw, sanitizeOpenClawConfig } from '../utils/openclaw-auth';
@@ -442,6 +442,7 @@ async function resolveChannelStartupPolicy(): Promise<{
 export async function prepareGatewayLaunchContext(port: number): Promise<GatewayLaunchContext> {
   const openclawDir = getOpenClawDir();
   const entryScript = getOpenClawEntryPath();
+  const openclawVersion = getOpenClawStatus().version?.trim();
 
   if (!isOpenClawPresent()) {
     throw new Error(`OpenClaw package not found at: ${openclawDir}`);
@@ -490,6 +491,17 @@ export async function prepareGatewayLaunchContext(port: number): Promise<Gateway
     ...providerEnv,
     ...uvEnv,
     ...proxyEnv,
+    // UtilityProcess can occasionally lose the package-version signal under
+    // pnpm/Electron dev startup. Export the resolved version explicitly so the
+    // Gateway and any nested runtime helpers agree on the same release label.
+    ...(openclawVersion ? {
+      OPENCLAW_VERSION: openclawVersion,
+      OPENCLAW_SERVICE_VERSION: openclawVersion,
+      OPENCLAW_BUNDLED_VERSION: openclawVersion,
+    } : {}),
+    // Some bundled/external plugins still import the transitional compat entry.
+    // Keep the runtime quiet here so genuine Gateway failures remain visible.
+    OPENCLAW_SUPPRESS_PLUGIN_SDK_COMPAT_WARNING: '1',
     OPENCLAW_GATEWAY_TOKEN: appSettings.gatewayToken,
     OPENCLAW_SKIP_CHANNELS: skipChannels ? '1' : '',
     CLAWDBOT_SKIP_CHANNELS: skipChannels ? '1' : '',

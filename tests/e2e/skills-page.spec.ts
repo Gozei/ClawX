@@ -1,4 +1,4 @@
-import { closeElectronApp, expect, getStableWindow, test } from './fixtures/electron';
+import { closeElectronApp, expect, getStableWindow, openSettingsHub, test } from './fixtures/electron';
 
 test.describe('Deep AI Worker skills page flows', () => {
   test('keeps the empty state and embedded marketplace usable without runtime skills', async ({ launchElectronApp }) => {
@@ -604,7 +604,8 @@ test.describe('Deep AI Worker skills page flows', () => {
       await page.getByTestId('skills-filter-status-enabled').click();
       await expect(page.getByTestId('skills-filter-status-enabled')).toHaveAttribute('aria-pressed', 'true');
 
-      await page.getByTestId('sidebar-nav-dashboard').click();
+      await openSettingsHub(page);
+      await page.getByTestId('settings-hub-menu-dashboard').click();
       await expect(page.getByTestId('dashboard-page')).toBeVisible();
 
       await page.getByTestId('sidebar-nav-skills').click();

@@ -263,14 +263,20 @@ test.describe('Chat loading indicator brand', () => {
         await expect(activeBrandScan).toHaveCSS('background-image', /radial-gradient/);
       }
       if (await activeAvatar.count()) {
-        const [avatarBox, brandBox] = await Promise.all([
+        const [avatarBox, brandBox, preOutputBox] = await Promise.all([
           activeAvatar.boundingBox(),
           activeBrandName.boundingBox(),
+          preOutputCard.boundingBox(),
         ]);
         expect(avatarBox).not.toBeNull();
         expect(brandBox).not.toBeNull();
+        expect(preOutputBox).not.toBeNull();
         if (avatarBox && brandBox) {
           expect(brandBox.x).toBeGreaterThanOrEqual(avatarBox.x + avatarBox.width - 1);
+        }
+        if (avatarBox && brandBox && preOutputBox) {
+          expect(preOutputBox.x).toBeLessThan(brandBox.x - 8);
+          expect(Math.abs(preOutputBox.x - avatarBox.x)).toBeLessThanOrEqual(4);
         }
       }
 

@@ -2089,7 +2089,7 @@ function PreOutputStatusPanel({ testIdPrefix }: { testIdPrefix: string }) {
         </div>
       </div>
       <div
-        className="flex items-center gap-1.5 pl-0.5"
+        className="flex items-center gap-1.5"
         data-testid={`${testIdPrefix}-pre-output-status`}
       >
         <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
@@ -2115,19 +2115,26 @@ function PreOutputStatusPanel({ testIdPrefix }: { testIdPrefix: string }) {
 function TypingIndicator() {
   return (
     <div
-      className="flex w-full items-start gap-3 pt-0.5"
+      className="group min-w-0 max-w-full space-y-3.5 pt-0.5"
       data-testid="chat-typing-indicator"
     >
-      <AssistantAvatar testId="chat-typing-avatar" />
       <div
-        className="min-w-0 flex-1 space-y-1.5 pt-0.5"
+        className="flex w-full min-w-0 items-center gap-3"
+        data-testid="chat-typing-indicator-header"
+      >
+        <AssistantAvatar testId="chat-typing-avatar" />
+        <div className="min-w-0 flex-1">
+          <ProductNameIndicator
+            scanning
+            testIdPrefix="chat-typing-indicator"
+            className="max-w-full"
+          />
+        </div>
+      </div>
+      <div
+        className="flex w-full min-w-0 flex-col items-start space-y-1.5 max-w-[80%]"
         data-testid="chat-typing-indicator-content"
       >
-        <ProductNameIndicator
-          scanning
-          testIdPrefix="chat-typing-indicator"
-          className="max-w-full"
-        />
         <PreOutputStatusPanel testIdPrefix="chat-typing-indicator" />
       </div>
     </div>

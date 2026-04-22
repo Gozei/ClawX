@@ -286,7 +286,7 @@ function pickPrimaryListAccount(
 export async function fetchProviderSnapshot(): Promise<ProviderSnapshot> {
   const [accounts, statuses, vendors, defaultInfo] = await Promise.all([
     hostApiFetch<ProviderAccount[]>('/api/provider-accounts'),
-    hostApiFetch<ProviderWithKeyInfo[]>('/api/providers'),
+    hostApiFetch<ProviderWithKeyInfo[]>('/api/provider-account-statuses'),
     hostApiFetch<ProviderVendorInfo[]>('/api/provider-vendors'),
     hostApiFetch<{ accountId: string | null }>('/api/provider-accounts/default'),
   ]);

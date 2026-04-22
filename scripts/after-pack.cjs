@@ -49,7 +49,7 @@ function cleanupUnnecessaryFiles(dir) {
   const REMOVE_DIRS = new Set([
     'test', 'tests', '__tests__', '.github', 'examples', 'example',
   ]);
-  const REMOVE_FILE_EXTS = ['.d.ts', '.d.ts.map', '.js.map', '.mjs.map', '.ts.map', '.markdown'];
+  const REMOVE_FILE_EXTS = ['.d.ts', '.d.ts.map', '.js.map', '.mjs.map', '.ts.map', '.markdown', '.o'];
   const REMOVE_FILE_NAMES = new Set([
     '.DS_Store', 'README.md', 'CHANGELOG.md', 'LICENSE.md', 'CONTRIBUTING.md',
     'tsconfig.json', '.npmignore', '.eslintrc', '.prettierrc', '.editorconfig',
@@ -63,7 +63,7 @@ function cleanupUnnecessaryFiles(dir) {
       const fullPath = join(currentDir, entry.name);
 
       if (entry.isDirectory()) {
-        if (REMOVE_DIRS.has(entry.name)) {
+        if (REMOVE_DIRS.has(entry.name) || entry.name.startsWith('build-tmp')) {
           try { rmSync(fullPath, { recursive: true, force: true }); removedCount++; } catch { /* */ }
         } else {
           walk(fullPath);
@@ -249,6 +249,37 @@ function materializeSymlinks(rootDir) {
 
   walk(rootDir);
   return { materialized, removed };
+}
+
+function removeStaleTlonSignatures(nodeModulesDir, platform) {
+  if (platform !== 'darwin') return 0;
+
+  const tlonScopeDir = join(nodeModulesDir, '@tloncorp');
+  if (!existsSync(tlonScopeDir)) return 0;
+
+  let removed = 0;
+  let entries;
+  try { entries = readdirSync(tlonScopeDir, { withFileTypes: true }); } catch { return 0; }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('tlon-skill-darwin-')) continue;
+
+    const tlonBinary = join(tlonScopeDir, entry.name, 'tlon');
+    if (!existsSync(tlonBinary)) continue;
+
+    try {
+      // Some tlon native binaries ship with an LC_CODE_SIGNATURE load command
+      // that `codesign` reports as unsigned/unsupported. Removing it lets
+      // electron-builder apply the real Developer ID signature later.
+      execFileSync('codesign', ['--remove-signature', tlonBinary], { stdio: 'ignore' });
+      removed++;
+    } catch {
+      // If the binary has no removable signature, let electron-builder's
+      // normal signing step handle it and surface any real failure.
+    }
+  }
+
+  return removed;
 }
 
 // ── Broken module patcher ─────────────────────────────────────────────────────
@@ -630,6 +661,11 @@ exports.default = async function afterPack(context) {
   const topLevelSymlinks = materializeSymlinks(dest);
   if (topLevelSymlinks.materialized > 0 || topLevelSymlinks.removed > 0) {
     console.log(`[after-pack] 🔗 Materialized ${topLevelSymlinks.materialized} symlink(s), removed ${topLevelSymlinks.removed} broken symlink(s) in openclaw/node_modules.`);
+  }
+
+  const staleTlonSignatures = removeStaleTlonSignatures(dest, platform);
+  if (staleTlonSignatures > 0) {
+    console.log(`[after-pack] 🧽 Removed stale tlon code signature(s): ${staleTlonSignatures}.`);
   }
 
   // Patch broken modules whose CJS transpiled output sets module.exports = undefined,

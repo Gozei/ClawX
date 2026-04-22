@@ -227,6 +227,21 @@ export class ProviderService {
     }
   }
 
+  async listAccountStatuses(): Promise<ProviderWithKeyInfo[]> {
+    const accounts = await this.listAccounts();
+    const results: ProviderWithKeyInfo[] = [];
+    for (const account of accounts) {
+      const provider = providerAccountToConfig(account);
+      const apiKey = await getApiKey(account.id);
+      results.push({
+        ...provider,
+        hasKey: !!apiKey,
+        keyMasked: maskApiKey(apiKey),
+      });
+    }
+    return results;
+  }
+
 
 
   /**
@@ -307,6 +322,11 @@ export class ProviderService {
   async getDefaultAccountId(): Promise<string | undefined> {
     await ensureProviderStoreMigrated();
     return getDefaultProviderAccountId();
+  }
+
+  async getAccountApiKey(accountId: string): Promise<string | null> {
+    await ensureProviderStoreMigrated();
+    return getApiKey(accountId);
   }
 
   async createAccount(account: ProviderAccount, apiKey?: string): Promise<ProviderAccount> {

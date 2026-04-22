@@ -87,6 +87,52 @@ describe('gateway store event wiring', () => {
     expect(useChatStore.getState().error).toBeNull();
   });
 
+  it('clears the current session running flag when completion arrives without sessionKey', async () => {
+    hostApiFetchMock.mockResolvedValue({ state: 'running', port: 18789 });
+
+    const handlers = new Map<string, (payload: unknown) => void>();
+    subscribeHostEventMock.mockImplementation((eventName: string, handler: (payload: unknown) => void) => {
+      handlers.set(eventName, handler);
+      return () => {};
+    });
+
+    const { useChatStore } = await import('../../src/stores/chat');
+    const loadHistory = vi.fn();
+    const loadSessions = vi.fn();
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      sessions: [{ key: 'agent:main:main' }],
+      activeRunId: 'run-missing-session',
+      sending: true,
+      pendingFinal: false,
+      error: 'stale error',
+      sessionRunningState: {
+        'agent:main:main': true,
+      },
+      loadHistory,
+      loadSessions,
+    } as never);
+
+    const { useGatewayStore } = await import('@/stores/gateway');
+    await useGatewayStore.getState().init();
+
+    handlers.get('gateway:notification')?.({
+      method: 'agent',
+      params: {
+        phase: 'completed',
+        runId: 'run-missing-session',
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(useChatStore.getState().sending).toBe(false);
+    expect(useChatStore.getState().sessionRunningState).toEqual({});
+    expect(useChatStore.getState().activeRunId).toBeNull();
+    expect(useChatStore.getState().error).toBeNull();
+  });
+
   it('tracks running state for non-current sessions from gateway notifications', async () => {
     hostApiFetchMock.mockResolvedValue({ state: 'running', port: 18789 });
 

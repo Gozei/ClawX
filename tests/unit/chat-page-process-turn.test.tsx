@@ -2618,23 +2618,27 @@ describe('Chat process turn rendering', () => {
     render(<Chat />);
 
     expect(screen.getByTestId('chat-typing-indicator')).not.toHaveClass('-mx-4');
-    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('flex');
-    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('w-full');
-    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('items-start');
+    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('group');
+    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('max-w-full');
     expect(screen.getByTestId('chat-typing-indicator')).not.toHaveClass('px-4');
-    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('gap-3');
+    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('space-y-3.5');
+    expect(screen.getByTestId('chat-typing-indicator-header')).toHaveClass('flex');
+    expect(screen.getByTestId('chat-typing-indicator-header')).toHaveClass('w-full');
+    expect(screen.getByTestId('chat-typing-indicator-header')).toHaveClass('items-center');
+    expect(screen.getByTestId('chat-typing-indicator-header')).toHaveClass('gap-3');
     expect(screen.getByTestId('chat-typing-indicator-content')).toContainElement(
       screen.getByTestId('chat-typing-indicator-pre-output-card'),
     );
-    expect(screen.getByTestId('chat-typing-indicator-content')).toContainElement(
+    expect(screen.getByTestId('chat-typing-indicator-header')).toContainElement(
       screen.getByTestId('chat-typing-indicator-shell'),
     );
-    expect(screen.getByTestId('chat-typing-avatar').nextElementSibling).toBe(
-      screen.getByTestId('chat-typing-indicator-content'),
+    expect(screen.getByTestId('chat-typing-avatar').nextElementSibling).toContainElement(
+      screen.getByTestId('chat-typing-indicator-shell'),
     );
-    expect(screen.getByTestId('chat-typing-indicator-content')).toHaveClass('flex-1');
+    expect(screen.getByTestId('chat-typing-indicator-content')).toHaveClass('w-full');
+    expect(screen.getByTestId('chat-typing-indicator-content')).toHaveClass('items-start');
     expect(screen.getByTestId('chat-typing-indicator-content')).toHaveClass('space-y-1.5');
-    expect(screen.getByTestId('chat-typing-indicator-content')).toHaveClass('pt-0.5');
+    expect(screen.getByTestId('chat-typing-indicator-content')).toHaveClass('max-w-[80%]');
     expect(screen.getByTestId('chat-typing-indicator-shell')).not.toHaveClass('rounded-full');
     expect(screen.getByTestId('chat-typing-indicator-shell')).not.toHaveClass('border');
     expect(screen.getByTestId('chat-typing-indicator-name')).toHaveTextContent('ClawX');
