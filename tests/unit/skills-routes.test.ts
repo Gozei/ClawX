@@ -71,7 +71,7 @@ describe('skill routes', () => {
 
   it('saves skill config through the detail endpoint', async () => {
     const { handleSkillRoutes } = await import('@electron/api/routes/skills');
-    parseJsonBodyMock.mockResolvedValue({ apiKey: 'token', env: { GH_TOKEN: 'token' } });
+    parseJsonBodyMock.mockResolvedValue({ apiKey: 'token', env: { GH_TOKEN: 'token' }, config: { baseUrl: 'https://api.github.com' } });
     saveSkillConfigMock.mockResolvedValue({ success: true });
 
     await handleSkillRoutes(
@@ -84,6 +84,7 @@ describe('skill routes', () => {
     expect(saveSkillConfigMock).toHaveBeenCalledWith({}, 'gh-issues', {
       apiKey: 'token',
       env: { GH_TOKEN: 'token' },
+      config: { baseUrl: 'https://api.github.com' },
     });
     expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, { success: true });
   });

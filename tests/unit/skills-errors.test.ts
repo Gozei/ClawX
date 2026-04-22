@@ -4,6 +4,14 @@ const hostApiFetchMock = vi.fn();
 vi.mock('@/lib/host-api', () => ({
   hostApiFetch: (...args: unknown[]) => hostApiFetchMock(...args),
 }));
+vi.mock('@/stores/gateway', () => ({
+  useGatewayStore: {
+    getState: () => ({
+      status: { state: 'running' },
+      rpc: vi.fn(),
+    }),
+  },
+}));
 
 describe('skills store error mapping', () => {
   beforeEach(() => {

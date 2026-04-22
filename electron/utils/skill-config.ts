@@ -23,6 +23,7 @@ interface SkillEntry {
     enabled?: boolean;
     apiKey?: string;
     env?: Record<string, string>;
+    config?: Record<string, unknown>;
 }
 
 interface PreinstalledSkillSpec {
@@ -81,7 +82,7 @@ export async function getSkillConfig(skillKey: string): Promise<SkillEntry | und
  */
 export async function updateSkillConfig(
     skillKey: string,
-    updates: { apiKey?: string; env?: Record<string, string> }
+    updates: { apiKey?: string; env?: Record<string, string>; config?: Record<string, unknown> }
 ): Promise<{ success: boolean; error?: string }> {
     try {
         return await withConfigLock(async () => {
@@ -119,6 +120,30 @@ export async function updateSkillConfig(
                     entry.env = newEnv;
                 } else {
                     delete entry.env;
+                }
+            }
+
+            if (updates.config !== undefined) {
+                const nextConfig: Record<string, unknown> = {};
+                for (const [key, value] of Object.entries(updates.config)) {
+                    const trimmedKey = key.trim();
+                    if (!trimmedKey) continue;
+                    if (value === undefined || value === null) continue;
+                    if (typeof value === 'string') {
+                        const trimmedValue = value.trim();
+                        if (!trimmedValue) continue;
+                        nextConfig[trimmedKey] = trimmedValue;
+                        continue;
+                    }
+                    if (typeof value === 'number' || typeof value === 'boolean') {
+                        nextConfig[trimmedKey] = value;
+                    }
+                }
+
+                if (Object.keys(nextConfig).length > 0) {
+                    entry.config = nextConfig;
+                } else {
+                    delete entry.config;
                 }
             }
 
