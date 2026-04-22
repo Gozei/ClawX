@@ -49,7 +49,7 @@ function cleanupUnnecessaryFiles(dir) {
   const REMOVE_DIRS = new Set([
     'test', 'tests', '__tests__', '.github', 'examples', 'example',
   ]);
-  const REMOVE_FILE_EXTS = ['.d.ts', '.d.ts.map', '.js.map', '.mjs.map', '.ts.map', '.markdown'];
+  const REMOVE_FILE_EXTS = ['.d.ts', '.d.ts.map', '.js.map', '.mjs.map', '.ts.map', '.markdown', '.o'];
   const REMOVE_FILE_NAMES = new Set([
     '.DS_Store', 'README.md', 'CHANGELOG.md', 'LICENSE.md', 'CONTRIBUTING.md',
     'tsconfig.json', '.npmignore', '.eslintrc', '.prettierrc', '.editorconfig',
@@ -63,7 +63,7 @@ function cleanupUnnecessaryFiles(dir) {
       const fullPath = join(currentDir, entry.name);
 
       if (entry.isDirectory()) {
-        if (REMOVE_DIRS.has(entry.name)) {
+        if (REMOVE_DIRS.has(entry.name) || entry.name.startsWith('build-tmp')) {
           try { rmSync(fullPath, { recursive: true, force: true }); removedCount++; } catch { /* */ }
         } else {
           walk(fullPath);

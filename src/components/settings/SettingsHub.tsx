@@ -1,6 +1,7 @@
 import { useMemo, type ComponentType } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
+  LayoutDashboard,
   Cpu,
   Languages,
   MonitorCog,
@@ -96,6 +97,8 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
     ? 'models'
     : location.pathname.startsWith('/channels')
       ? 'channels'
+      : location.pathname.startsWith('/dashboard')
+        ? 'dashboard'
       : location.pathname.startsWith('/settings') && location.hash === '#updates'
         ? 'checkUpdates'
         : location.pathname.startsWith('/settings')
@@ -111,6 +114,14 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
     selected?: boolean;
     trailing?: React.ReactNode;
   }> = [
+    {
+      key: 'dashboard',
+      label: t('settingsHub.menu.dashboard'),
+      testId: 'settings-hub-menu-dashboard',
+      icon: LayoutDashboard,
+      onClick: () => navigateFromMenu('/dashboard'),
+      selected: selectedKey === 'dashboard',
+    },
     {
       key: 'models',
       label: t('settingsHub.menu.models'),

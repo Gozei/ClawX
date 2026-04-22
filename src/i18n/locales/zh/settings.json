@@ -5,6 +5,7 @@
     "title": "设置菜单",
     "subtitle": "从这里统一管理模型、通道、外观与系统设置。",
     "menu": {
+      "dashboard": "系统监控",
       "models": "模型",
       "channels": "通道",
       "theme": "主题",

@@ -16,7 +16,7 @@ test.describe('Settings hub menu', () => {
 
   async function expectMenuItemSelectedState(
     page: Awaited<ReturnType<typeof getStableWindow>>,
-    key: 'models' | 'channels' | 'settings',
+    key: 'dashboard' | 'models' | 'channels' | 'settings',
   ): Promise<void> {
     const selectedItem = page.getByTestId(`settings-hub-menu-${key}`);
     await expect(selectedItem).toHaveAttribute('data-selected', 'true');
@@ -37,6 +37,7 @@ test.describe('Settings hub menu', () => {
       expect(settingsHubWidth).toBe('300px');
 
       await expect(page.getByTestId('settings-hub-menu-models')).toBeVisible();
+      await expect(page.getByTestId('settings-hub-menu-dashboard')).toBeVisible();
       await expect(page.getByTestId('settings-hub-menu-channels')).toBeVisible();
       await expect(page.getByTestId('settings-hub-menu-theme')).toBeVisible();
       await expect(page.getByTestId('settings-hub-menu-language')).toBeVisible();
@@ -44,6 +45,15 @@ test.describe('Settings hub menu', () => {
       await expect(page.getByTestId('settings-hub-menu-check-updates')).toBeVisible();
       await expect(page.getByTestId('settings-hub-menu-console')).toBeVisible();
 
+      await page.getByTestId('settings-hub-menu-dashboard').click();
+      await expect(page.getByTestId('settings-hub-sheet-container')).toHaveCount(0);
+      await expect(page.getByTestId('dashboard-page')).toBeVisible();
+
+      await openSettingsHub(page);
+      await expectMenuItemSelectedState(page, 'dashboard');
+      await expect(page.getByTestId('settings-hub-menu-models')).toHaveAttribute('data-selected', 'false');
+      await expect(page.getByTestId('settings-hub-menu-channels')).toHaveAttribute('data-selected', 'false');
+      await expect(page.getByTestId('settings-hub-menu-settings')).toHaveAttribute('data-selected', 'false');
       await page.getByTestId('settings-hub-menu-models').click();
       await expect(page.getByTestId('settings-hub-sheet-container')).toHaveCount(0);
       await expect(page.getByTestId('models-page')).toBeVisible();
