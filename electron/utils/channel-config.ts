@@ -804,6 +804,7 @@ export async function saveChannelConfig(
             }
         }
 
+        syncBuiltinChannelsWithPluginAllowlist(currentConfig);
         await writeOpenClawConfig(currentConfig);
         logger.info('Channel config saved', {
             channelType: resolvedChannelType,
@@ -972,7 +973,6 @@ export async function deleteChannelConfig(channelType: string): Promise<void> {
         const resolvedChannelType = resolveStoredChannelType(channelType);
         const currentConfig = await readOpenClawConfig();
         cleanupLegacyBuiltInChannelPluginRegistration(currentConfig, resolvedChannelType);
-
         if (currentConfig.channels?.[resolvedChannelType]) {
             delete currentConfig.channels[resolvedChannelType];
             if (isWechatChannelType(resolvedChannelType)) {
@@ -1224,7 +1224,6 @@ export async function setChannelEnabled(channelType: string, enabled: boolean): 
         const resolvedChannelType = resolveStoredChannelType(channelType);
         const currentConfig = await readOpenClawConfig();
         cleanupLegacyBuiltInChannelPluginRegistration(currentConfig, resolvedChannelType);
-
         if (isWechatChannelType(resolvedChannelType)) {
             if (enabled) {
                 await ensurePluginAllowlist(currentConfig, WECHAT_PLUGIN_ID);
