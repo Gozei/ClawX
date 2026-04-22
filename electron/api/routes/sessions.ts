@@ -373,6 +373,21 @@ function parsePinnedMetadata(session: Record<string, unknown>): { pinned?: boole
   return { pinned, pinOrder };
 }
 
+function parseArchivedMetadata(session: Record<string, unknown>): {
+  archived?: boolean;
+  archivedAt?: number;
+  createdAt?: number;
+} {
+  const archived = session.archived === true ? true : undefined;
+  const archivedAt = normalizeSessionUpdatedAt(session.archivedAt);
+  const createdAt = normalizeSessionUpdatedAt(session.createdAt);
+  return {
+    archived,
+    ...(typeof archivedAt === 'number' ? { archivedAt } : {}),
+    ...(typeof createdAt === 'number' ? { createdAt } : {}),
+  };
+}
+
 function resolveSessionTranscriptPathFromEntry(
   sessionsDir: string,
   entry: Record<string, unknown> | null,
@@ -439,11 +454,36 @@ function buildLocalSessionRow(sessionKey: string, entry: Record<string, unknown>
     ...(label ? { label } : {}),
     ...(displayName ? { displayName } : {}),
     ...(typeof updatedAt === 'number' ? { updatedAt } : {}),
+    ...(typeof normalizeSessionUpdatedAt(entry.createdAt) === 'number' ? { createdAt: normalizeSessionUpdatedAt(entry.createdAt) } : {}),
     ...(modelProvider ? { modelProvider } : {}),
     ...(model ? { model } : {}),
     ...(thinkingLevel ? { thinkingLevel } : {}),
     ...parsePinnedMetadata(entry),
+    ...parseArchivedMetadata(entry),
   };
+}
+
+async function resolveSessionCreatedAt(
+  sessionsDir: string,
+  entry: Record<string, unknown>,
+): Promise<number | undefined> {
+  const explicitCreatedAt = normalizeSessionUpdatedAt(entry.createdAt);
+  if (typeof explicitCreatedAt === 'number') {
+    return explicitCreatedAt;
+  }
+
+  const transcriptPath = resolveSessionTranscriptPathFromEntry(sessionsDir, entry);
+  if (!transcriptPath) {
+    return normalizeSessionUpdatedAt(entry.updatedAt ?? entry.lastUpdatedAt);
+  }
+
+  try {
+    const fsP = await import('node:fs/promises');
+    const stat = await fsP.stat(transcriptPath);
+    return stat.birthtimeMs || stat.ctimeMs || normalizeSessionUpdatedAt(entry.updatedAt ?? entry.lastUpdatedAt);
+  } catch {
+    return normalizeSessionUpdatedAt(entry.updatedAt ?? entry.lastUpdatedAt);
+  }
 }
 
 function stripInjectedConversationInfo(text: string): string {
@@ -917,6 +957,53 @@ export async function handleSessionRoutes(
     return true;
   }
 
+  if (url.pathname === '/api/sessions/archive' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{ sessionKey: string; archived: boolean }>(req);
+      const sessionKey = typeof body.sessionKey === 'string' ? body.sessionKey : '';
+      const resolved = getSessionPaths(sessionKey);
+      if (!resolved) {
+        sendJson(res, 400, { success: false, error: `Invalid sessionKey: ${sessionKey}` });
+        return true;
+      }
+
+      const archived = body.archived === true;
+      const archivedAt = archived ? Date.now() : undefined;
+      const sessionsIndex = await loadMutableSessionStoreDocument(resolved.sessionsJsonPath);
+      const sessionsJson = sessionsIndex.document;
+
+      const found = updateSessionEntry(
+        sessionsJson,
+        sessionKey,
+        (session) => {
+          const nextSession = { ...session };
+          if (archived) {
+            nextSession.archived = true;
+            nextSession.archivedAt = archivedAt;
+            if (normalizeSessionUpdatedAt(nextSession.createdAt) == null) {
+              nextSession.createdAt = normalizeSessionUpdatedAt(nextSession.updatedAt) ?? archivedAt;
+            }
+          } else {
+            delete nextSession.archived;
+            delete nextSession.archivedAt;
+          }
+          return nextSession;
+        },
+      );
+
+      if (!found) {
+        sendJson(res, 404, { success: false, error: `Session not found: ${sessionKey}` });
+        return true;
+      }
+
+      await writeSessionStoreDocument(resolved.sessionsJsonPath, sessionsJson);
+      sendJson(res, 200, { success: true, archived, archivedAt });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
   if (url.pathname === '/api/sessions/model' && req.method === 'POST') {
     try {
       const body = await parseJsonBody<{ sessionKey: string; modelRef?: string | null }>(req);
@@ -1026,6 +1113,58 @@ export async function handleSessionRoutes(
     return true;
   }
 
+  if (url.pathname === '/api/sessions/archived' && req.method === 'GET') {
+    try {
+      const fsP = await import('node:fs/promises');
+      const agentsRoot = join(getOpenClawConfigDir(), 'agents');
+      const sessions: Array<Record<string, unknown>> = [];
+
+      try {
+        const agentDirs = await fsP.readdir(agentsRoot, { withFileTypes: true }) as Array<{
+          name: string;
+          isDirectory: () => boolean;
+        }>;
+        for (const agentDir of agentDirs) {
+          if (!agentDir.isDirectory()) continue;
+          const sessionsDir = join(agentsRoot, agentDir.name, 'sessions');
+          const sessionsJsonPath = join(sessionsDir, 'sessions.json');
+          const index = await loadSessionStoreIndex(sessionsJsonPath, { repairRecovered: true });
+
+          for (const [sessionKey, entry] of Object.entries(index.entries)) {
+            if (entry.archived !== true) continue;
+
+            const row = buildLocalSessionRow(sessionKey, entry);
+            const createdAt = await resolveSessionCreatedAt(sessionsDir, entry);
+            sessions.push({
+              ...row,
+              ...(typeof createdAt === 'number' ? { createdAt } : {}),
+            });
+          }
+        }
+      } catch {
+        sendJson(res, 200, { success: true, sessions: [] });
+        return true;
+      }
+
+      sendJson(res, 200, {
+        success: true,
+        sessions: sessions.sort((left, right) => {
+          const leftArchivedAt = normalizeSessionUpdatedAt(left.archivedAt) ?? 0;
+          const rightArchivedAt = normalizeSessionUpdatedAt(right.archivedAt) ?? 0;
+          if (rightArchivedAt !== leftArchivedAt) {
+            return rightArchivedAt - leftArchivedAt;
+          }
+          const leftCreatedAt = normalizeSessionUpdatedAt(left.createdAt) ?? 0;
+          const rightCreatedAt = normalizeSessionUpdatedAt(right.createdAt) ?? 0;
+          return rightCreatedAt - leftCreatedAt;
+        }),
+      });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
   if (url.pathname === '/api/sessions/metadata' && req.method === 'POST') {
     try {
       const body = await parseJsonBody<{ sessionKeys?: string[] }>(req);
@@ -1033,7 +1172,7 @@ export async function handleSessionRoutes(
         ? body.sessionKeys.filter((value): value is string => typeof value === 'string' && value.startsWith('agent:'))
         : [];
 
-      const metadata: Record<string, { pinned?: boolean; pinOrder?: number }> = {};
+      const metadata: Record<string, { pinned?: boolean; pinOrder?: number; archived?: boolean; archivedAt?: number; createdAt?: number }> = {};
       const sessionsByPath = new Map<string, string[]>();
 
       for (const sessionKey of sessionKeys) {
@@ -1049,7 +1188,10 @@ export async function handleSessionRoutes(
         for (const sessionKey of keys) {
           const matched = index.entries[sessionKey];
           if (matched) {
-            metadata[sessionKey] = parsePinnedMetadata(matched);
+            metadata[sessionKey] = {
+              ...parsePinnedMetadata(matched),
+              ...parseArchivedMetadata(matched),
+            };
           }
         }
       }

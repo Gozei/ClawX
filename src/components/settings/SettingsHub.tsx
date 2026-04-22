@@ -1,6 +1,7 @@
 import { useMemo, type ComponentType } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
+  Archive,
   LayoutDashboard,
   Cpu,
   Languages,
@@ -97,6 +98,8 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
     ? 'models'
     : location.pathname.startsWith('/channels')
       ? 'channels'
+      : location.pathname.startsWith('/settings/archives')
+        ? 'archives'
       : location.pathname.startsWith('/dashboard')
         ? 'dashboard'
       : location.pathname.startsWith('/settings') && location.hash === '#updates'
@@ -137,6 +140,14 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
       icon: Network,
       onClick: () => navigateFromMenu('/channels'),
       selected: selectedKey === 'channels',
+    },
+    {
+      key: 'archives',
+      label: t('settingsHub.menu.archives'),
+      testId: 'settings-hub-menu-archives',
+      icon: Archive,
+      onClick: () => navigateFromMenu('/settings/archives'),
+      selected: selectedKey === 'archives',
     },
     {
       key: 'theme',
