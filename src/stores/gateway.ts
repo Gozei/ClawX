@@ -592,18 +592,23 @@ function handleGatewayNotification(notification: { method?: string; params?: Rec
         const matchesCurrentSession = resolvedSessionKey == null || sessionKeysMatch(resolvedSessionKey, state.currentSessionKey);
         const matchesActiveRun = runId != null && state.activeRunId != null && String(runId) === state.activeRunId;
         const shouldDeferHistoryRefresh = shouldDeferCompletedHistoryRefresh(state);
+        const completionSessionKey = resolvedSessionKey
+          ?? ((matchesCurrentSession || matchesActiveRun) ? state.currentSessionKey : null);
 
         if (matchesCurrentSession || matchesActiveRun) {
           scheduleLoadHistory(true, shouldDeferHistoryRefresh ? 700 : 0);
         }
         if ((matchesCurrentSession || matchesActiveRun) && (state.sending || matchesActiveRun)) {
-          useChatStore.setState({
+          useChatStore.setState((chatState) => ({
             sending: false,
             activeRunId: null,
             sendStage: null,
             pendingFinal: false,
             error: null,
-          });
+            sessionRunningState: completionSessionKey
+              ? updateSessionRunningState(chatState.sessionRunningState, completionSessionKey, false)
+              : chatState.sessionRunningState,
+          }));
         }
       })
       .catch(() => {});

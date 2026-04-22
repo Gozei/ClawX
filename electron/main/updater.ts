@@ -6,7 +6,7 @@
  * For prerelease channels (alpha, beta), the feed URL is overridden at runtime
  * to point at the channel-specific OSS directory (e.g. /alpha/, /beta/).
  */
-import { autoUpdater, UpdateInfo, ProgressInfo, UpdateDownloadedEvent } from 'electron-updater';
+import type { UpdateInfo, ProgressInfo, UpdateDownloadedEvent } from 'electron-updater';
 import { BrowserWindow, app, ipcMain } from 'electron';
 import { logger } from '../utils/logger';
 import { EventEmitter } from 'events';
@@ -14,6 +14,9 @@ import { setQuitting } from './app-state';
 
 /** Base CDN URL (without trailing channel path) */
 const OSS_BASE_URL = 'https://deep-ai-worker-1253696187.cos.ap-guangzhou.myqcloud.com/deepclaw';
+
+type ElectronUpdaterModule = typeof import('electron-updater');
+type AutoUpdaterInstance = ElectronUpdaterModule['autoUpdater'];
 
 export interface UpdateStatus {
   status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'installing' | 'error';
@@ -82,6 +85,11 @@ export class AppUpdater extends EventEmitter {
   private status: UpdateStatus = { status: 'idle' };
   private autoInstallTimer: NodeJS.Timeout | null = null;
   private autoInstallCountdown = 0;
+  private updaterModulePromise: Promise<ElectronUpdaterModule | null> | null = null;
+  private updaterModule: ElectronUpdaterModule | null = null;
+  private updaterListenersReady = false;
+  private preferredChannel: string;
+  private preferredAutoDownload = false;
 
   /** Delay (in seconds) before auto-installing a downloaded update. */
   private static readonly AUTO_INSTALL_DELAY_SECONDS = 5;
@@ -95,35 +103,17 @@ export class AppUpdater extends EventEmitter {
       logger.error('[Updater] AppUpdater emitted error:', error);
     });
     
-    autoUpdater.autoDownload = false;
-    autoUpdater.autoInstallOnAppQuit = true;
-    
-    autoUpdater.logger = {
-      info: (msg: string) => logger.info('[Updater]', msg),
-      warn: (msg: string) => logger.warn('[Updater]', msg),
-      error: (msg: string) => logger.error('[Updater]', msg),
-      debug: (msg: string) => logger.debug('[Updater]', msg),
-    };
-
     // Override feed URL for prerelease channels so that
     // alpha -> /alpha/alpha-mac.yml, beta -> /beta/beta-mac.yml, etc.
     const version = app.getVersion();
     const channel = detectChannel(version);
     const feedUrl = OSS_BASE_URL;
+    this.preferredChannel = channel;
 
     logger.info(`[Updater] Version: ${version}, channel: ${channel}, feedUrl: ${feedUrl}`);
 
     // Set channel so electron-updater requests the correct yml filename.
     // e.g. channel "alpha" → requests alpha-mac.yml, channel "latest" → requests latest-mac.yml
-    autoUpdater.channel = channel;
-
-    autoUpdater.setFeedURL({
-      provider: 'generic',
-      url: feedUrl,
-      useMultipleRangeRequest: false,
-    });
-
-    this.setupListeners();
   }
 
   /**
@@ -143,7 +133,7 @@ export class AppUpdater extends EventEmitter {
   /**
    * Setup auto-updater event listeners
    */
-  private setupListeners(): void {
+  private setupListeners(autoUpdater: AutoUpdaterInstance): void {
     autoUpdater.on('checking-for-update', () => {
       this.updateStatus({ status: 'checking' });
       this.emit('checking-for-update');
@@ -179,6 +169,52 @@ export class AppUpdater extends EventEmitter {
     });
   }
 
+  private async getAutoUpdater(): Promise<AutoUpdaterInstance | null> {
+    if (!app.isPackaged && process.env.CLAWX_FORCE_DEV_UPDATER !== '1') {
+      return null;
+    }
+
+    if (this.updaterModule) {
+      return this.updaterModule.autoUpdater;
+    }
+
+    if (!this.updaterModulePromise) {
+      this.updaterModulePromise = import('electron-updater')
+        .then((module) => {
+          const autoUpdater = module.autoUpdater;
+          autoUpdater.autoDownload = this.preferredAutoDownload;
+          autoUpdater.autoInstallOnAppQuit = true;
+          autoUpdater.logger = {
+            info: (msg: string) => logger.info('[Updater]', msg),
+            warn: (msg: string) => logger.warn('[Updater]', msg),
+            error: (msg: string) => logger.error('[Updater]', msg),
+            debug: (msg: string) => logger.debug('[Updater]', msg),
+          };
+          autoUpdater.channel = this.preferredChannel;
+          autoUpdater.setFeedURL({
+            provider: 'generic',
+            url: OSS_BASE_URL,
+            useMultipleRangeRequest: false,
+          });
+
+          if (!this.updaterListenersReady) {
+            this.setupListeners(autoUpdater);
+            this.updaterListenersReady = true;
+          }
+
+          this.updaterModule = module;
+          return module;
+        })
+        .catch((error) => {
+          this.updaterModulePromise = null;
+          throw error;
+        });
+    }
+
+    const module = await this.updaterModulePromise;
+    return module?.autoUpdater ?? null;
+  }
+
   /**
    * Update status and notify renderer
    */
@@ -211,6 +247,16 @@ export class AppUpdater extends EventEmitter {
    */
   async checkForUpdates(): Promise<UpdateInfo | null> {
     try {
+      const autoUpdater = await this.getAutoUpdater();
+      if (!autoUpdater) {
+        logger.info('[Updater] Skip checkForUpdates because application is not packed and dev update config is not forced');
+        this.updateStatus({
+          status: 'error',
+          error: 'Update check skipped (dev mode - app is not packaged)',
+        });
+        return null;
+      }
+
       const result = await autoUpdater.checkForUpdates();
 
       // In dev mode (app not packaged), autoUpdater silently returns null
@@ -261,6 +307,10 @@ export class AppUpdater extends EventEmitter {
    */
   async downloadUpdate(): Promise<void> {
     try {
+      const autoUpdater = await this.getAutoUpdater();
+      if (!autoUpdater) {
+        throw new Error('Update download unavailable in dev mode');
+      }
       await autoUpdater.downloadUpdate();
     } catch (error) {
       logger.error('[Updater] Download update failed:', error);
@@ -300,7 +350,11 @@ export class AppUpdater extends EventEmitter {
       this.mainWindow.hide();
     }
     setQuitting(true, 'update-install');
-    autoUpdater.quitAndInstall();
+    if (this.updaterModule) {
+      this.updaterModule.autoUpdater.quitAndInstall();
+      return;
+    }
+    logger.warn('[Updater] quitAndInstall ignored because updater is not loaded');
   }
 
   /**
@@ -339,14 +393,20 @@ export class AppUpdater extends EventEmitter {
    * Set update channel (stable, beta, dev)
    */
   setChannel(channel: 'stable' | 'beta' | 'dev'): void {
-    autoUpdater.channel = channel;
+    this.preferredChannel = channel;
+    if (this.updaterModule) {
+      this.updaterModule.autoUpdater.channel = channel;
+    }
   }
 
   /**
    * Set auto-download preference
    */
   setAutoDownload(enable: boolean): void {
-    autoUpdater.autoDownload = enable;
+    this.preferredAutoDownload = enable;
+    if (this.updaterModule) {
+      this.updaterModule.autoUpdater.autoDownload = enable;
+    }
   }
 
   /**

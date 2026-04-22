@@ -120,9 +120,27 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         updatedAt: new Date().toISOString(),
       };
       
-      const result = await hostApiFetch<{ success: boolean; error?: string }>('/api/providers', {
+      const result = await hostApiFetch<{ success: boolean; error?: string }>('/api/provider-accounts', {
         method: 'POST',
-        body: JSON.stringify({ config: fullConfig, apiKey }),
+        body: JSON.stringify({
+          account: {
+            id: fullConfig.id,
+            vendorId: fullConfig.type,
+            label: fullConfig.name,
+            authMode: fullConfig.type === 'ollama' ? 'local' : 'api_key',
+            baseUrl: fullConfig.baseUrl,
+            apiProtocol: fullConfig.apiProtocol,
+            headers: fullConfig.headers,
+            model: fullConfig.model,
+            fallbackModels: fullConfig.fallbackModels,
+            fallbackAccountIds: fullConfig.fallbackProviderIds,
+            enabled: fullConfig.enabled,
+            isDefault: false,
+            createdAt: fullConfig.createdAt,
+            updatedAt: fullConfig.updatedAt,
+          },
+          apiKey,
+        }),
       });
       
       if (!result.success) {
@@ -172,9 +190,22 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         updatedAt: new Date().toISOString(),
       };
       
-      const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/providers/${encodeURIComponent(providerId)}`, {
+      const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/provider-accounts/${encodeURIComponent(providerId)}`, {
         method: 'PUT',
-        body: JSON.stringify({ updates: updatedConfig, apiKey }),
+        body: JSON.stringify({
+          updates: {
+            label: updatedConfig.name,
+            baseUrl: updatedConfig.baseUrl,
+            apiProtocol: updatedConfig.apiProtocol,
+            headers: updatedConfig.headers,
+            model: updatedConfig.model,
+            fallbackModels: updatedConfig.fallbackModels,
+            fallbackAccountIds: updatedConfig.fallbackProviderIds,
+            enabled: updatedConfig.enabled,
+            updatedAt: updatedConfig.updatedAt,
+          },
+          apiKey,
+        }),
       });
       
       if (!result.success) {
@@ -209,7 +240,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   
   deleteProvider: async (providerId) => {
     try {
-      const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/providers/${encodeURIComponent(providerId)}`, {
+      const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/provider-accounts/${encodeURIComponent(providerId)}`, {
         method: 'DELETE',
       });
       
@@ -246,7 +277,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   
   setApiKey: async (providerId, apiKey) => {
     try {
-      const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/providers/${encodeURIComponent(providerId)}`, {
+      const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/provider-accounts/${encodeURIComponent(providerId)}`, {
         method: 'PUT',
         body: JSON.stringify({ updates: {}, apiKey }),
       });
@@ -265,9 +296,22 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
 
   updateProviderWithKey: async (providerId, updates, apiKey) => {
     try {
-      const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/providers/${encodeURIComponent(providerId)}`, {
+      const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/provider-accounts/${encodeURIComponent(providerId)}`, {
         method: 'PUT',
-        body: JSON.stringify({ updates, apiKey }),
+        body: JSON.stringify({
+          updates: {
+            label: updates.name,
+            baseUrl: updates.baseUrl,
+            apiProtocol: updates.apiProtocol,
+            headers: updates.headers,
+            model: updates.model,
+            fallbackModels: updates.fallbackModels,
+            fallbackAccountIds: updates.fallbackProviderIds,
+            enabled: updates.enabled,
+            updatedAt: updates.updatedAt,
+          },
+          apiKey,
+        }),
       });
 
       if (!result.success) {
@@ -284,7 +328,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   deleteApiKey: async (providerId) => {
     try {
       const result = await hostApiFetch<{ success: boolean; error?: string }>(
-        `/api/providers/${encodeURIComponent(providerId)}?apiKeyOnly=1`,
+        `/api/provider-accounts/${encodeURIComponent(providerId)}?apiKeyOnly=1`,
         { method: 'DELETE' },
       );
       
@@ -302,9 +346,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   
   setDefaultProvider: async (providerId) => {
     try {
-      const result = await hostApiFetch<{ success: boolean; error?: string }>('/api/providers/default', {
+      const result = await hostApiFetch<{ success: boolean; error?: string }>('/api/provider-accounts/default', {
         method: 'PUT',
-        body: JSON.stringify({ providerId }),
+        body: JSON.stringify({ accountId: providerId }),
       });
       
       if (!result.success) {
@@ -338,9 +382,13 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   
   validateAccountApiKey: async (providerId, apiKey, options) => {
     try {
-      const result = await hostApiFetch<{ valid: boolean; error?: string }>('/api/providers/validate', {
+      const result = await hostApiFetch<{ valid: boolean; error?: string }>(`/api/provider-accounts/${encodeURIComponent(providerId)}/test`, {
         method: 'POST',
-        body: JSON.stringify({ providerId, apiKey, options }),
+        body: JSON.stringify({
+          apiKey,
+          baseUrl: options?.baseUrl,
+          apiProtocol: options?.apiProtocol,
+        }),
       });
       return result;
     } catch (error) {
@@ -352,7 +400,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   
   getAccountApiKey: async (providerId) => {
     try {
-      const result = await hostApiFetch<{ apiKey: string | null }>(`/api/providers/${encodeURIComponent(providerId)}/api-key`);
+      const result = await hostApiFetch<{ apiKey: string | null }>(`/api/provider-accounts/${encodeURIComponent(providerId)}/api-key`);
       return result.apiKey;
     } catch {
       return null;

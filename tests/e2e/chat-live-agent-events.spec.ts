@@ -30,6 +30,104 @@ async function emitGatewayEvent(
 }
 
 test.describe('Chat live agent events', () => {
+  test('clears the stop state when completion arrives without a session key', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      await installIpcMocks(app, {
+        gatewayStatus: { state: 'running', port: 18789, pid: 12345, connectedAt: Date.now() },
+        hostApi: {
+          [stableStringify(['/api/gateway/status', 'GET'])]: {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                state: 'running',
+                port: 18789,
+                pid: 12345,
+                connectedAt: Date.now(),
+              },
+            },
+          },
+          [stableStringify(['/api/agents', 'GET'])]: {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                success: true,
+                agents: [],
+              },
+            },
+          },
+        },
+      });
+
+      await app.evaluate(({ ipcMain }) => {
+        ipcMain.removeHandler('gateway:rpc');
+        ipcMain.handle('gateway:rpc', async (_event, method: string) => {
+          if (method === 'sessions.list') {
+            return {
+              success: true,
+              result: { sessions: [] },
+            };
+          }
+          if (method === 'chat.history') {
+            return {
+              success: true,
+              result: { messages: [] },
+            };
+          }
+          if (method === 'chat.send') {
+            return {
+              success: true,
+              result: {
+                runId: 'run-complete-without-session',
+              },
+            };
+          }
+          if (method === 'chat.abort') {
+            return {
+              success: true,
+              result: { ok: true },
+            };
+          }
+          return {
+            success: true,
+            result: {},
+          };
+        });
+      });
+
+      const page = await getStableWindow(app);
+      await expect(page.getByTestId('main-layout')).toBeVisible();
+
+      const composer = page.getByTestId('chat-composer');
+      const sendButton = composer.getByTestId('chat-send-button');
+      await composer.getByRole('textbox').fill('Finish this task cleanly.');
+      await sendButton.click();
+
+      await expect.poll(async () => (
+        await sendButton.evaluate((node) => !!node.querySelector('svg.lucide-square'))
+      ), { timeout: 15_000 }).toBe(true);
+
+      await emitGatewayEvent(app, 'gateway:notification', {
+        method: 'agent',
+        params: {
+          phase: 'completed',
+          runId: 'run-complete-without-session',
+        },
+      });
+
+      await expect.poll(async () => (
+        await sendButton.evaluate((node) => !!node.querySelector('svg.lucide-square'))
+      ), { timeout: 15_000 }).toBe(false);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
   test('renders running process events and live text before the turn completes', async ({ launchElectronApp }) => {
     test.fixme(
       process.platform === 'win32',
