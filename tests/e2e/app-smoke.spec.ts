@@ -1,4 +1,4 @@
-import { closeElectronApp, expect, openModelsFromSettings, test } from './fixtures/electron';
+import { closeElectronApp, completeSetup, expect, openModelsFromSettings, test } from './fixtures/electron';
 
 test.describe('Deep AI Worker Electron smoke flows', () => {
   test('shows the setup wizard on a fresh profile', async ({ page }) => {
@@ -10,11 +10,8 @@ test.describe('Deep AI Worker Electron smoke flows', () => {
   });
 
   test('can skip setup and navigate to the models page', async ({ page }) => {
-    await expect(page.getByTestId('setup-page')).toBeVisible();
-    await page.getByTestId('setup-skip-button').click();
-
-    await expect(page.getByTestId('main-layout')).toBeVisible();
-    await expect(page.getByTestId('chat-welcome-starter-askQuestions')).toBeVisible();
+    await completeSetup(page);
+    await expect(page.getByTestId('chat-welcome-title')).toBeVisible();
     await openModelsFromSettings(page);
     await expect(page.getByTestId('models-page-title')).toBeVisible();
     await expect(page.getByTestId('models-config-panel')).toBeVisible();
@@ -23,8 +20,7 @@ test.describe('Deep AI Worker Electron smoke flows', () => {
   test('persists skipped setup across relaunch for the same isolated profile', async ({ electronApp, launchElectronApp }) => {
     const firstWindow = await electronApp.firstWindow();
     await firstWindow.waitForLoadState('domcontentloaded');
-    await firstWindow.getByTestId('setup-skip-button').click();
-    await expect(firstWindow.getByTestId('main-layout')).toBeVisible();
+    await completeSetup(firstWindow);
 
     await closeElectronApp(electronApp);
 

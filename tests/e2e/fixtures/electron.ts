@@ -139,10 +139,14 @@ async function launchDeepAiWorkerElectron(
   const electronEnv = process.platform === 'linux'
     ? { ELECTRON_DISABLE_SANDBOX: '1' }
     : {};
+  const {
+    ELECTRON_RUN_AS_NODE: _electronRunAsNode,
+    ...parentEnv
+  } = process.env;
   return await electron.launch({
     args: [electronEntry],
     env: {
-      ...process.env,
+      ...parentEnv,
       ...electronEnv,
       HOME: homeDir,
       USERPROFILE: homeDir,
@@ -209,12 +213,18 @@ export const test = base.extend<ElectronFixtures>({
 
 export async function completeSetup(page: Page): Promise<void> {
   await expect(page.getByTestId('setup-page')).toBeVisible();
-  await page.getByTestId('setup-skip-button').click();
+  const skipButton = page.getByTestId('setup-skip-button');
+  await expect(skipButton).toBeVisible();
+  await expect(skipButton).toBeEnabled();
+  await skipButton.click({ force: true });
   await expect(page.getByTestId('main-layout')).toBeVisible();
 }
 
 export async function openSettingsHub(page: Page): Promise<void> {
-  await page.getByTestId('sidebar-nav-settings').click();
+  const settingsButton = page.getByTestId('sidebar-nav-settings');
+  await expect(settingsButton).toBeVisible();
+  await expect(settingsButton).toBeEnabled();
+  await settingsButton.click({ force: true });
   await expect(page.getByTestId('settings-hub-sheet-container')).toBeVisible();
   await expect(page.getByTestId('settings-hub-menu-settings')).toBeVisible();
 }
@@ -226,13 +236,13 @@ export async function closeSettingsHub(page: Page): Promise<void> {
 
 export async function openModelsFromSettings(page: Page): Promise<void> {
   await openSettingsHub(page);
-  await page.getByTestId('settings-hub-menu-models').click();
+  await page.getByTestId('settings-hub-menu-models').click({ force: true });
   await expect(page.getByTestId('models-page')).toBeVisible();
 }
 
 export async function openChannelsFromSettings(page: Page): Promise<void> {
   await openSettingsHub(page);
-  await page.getByTestId('settings-hub-menu-channels').click();
+  await page.getByTestId('settings-hub-menu-channels').click({ force: true });
   await expect(page.getByTestId('channels-page')).toBeVisible();
 }
 

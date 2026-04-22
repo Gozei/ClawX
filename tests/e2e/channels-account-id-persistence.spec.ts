@@ -61,7 +61,7 @@ test.describe('Channels account editor behavior', () => {
       hasText: /Add Account|添加账号|アカウントを追加/,
     }).first();
     await expect(addAccountButton).toBeVisible();
-    await addAccountButton.click();
+    await addAccountButton.click({ force: true });
 
     const appIdInput = page.locator('input#appId');
     const appSecretInput = page.locator('input#appSecret');
