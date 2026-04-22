@@ -346,8 +346,8 @@ export function Dashboard() {
           />
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
-          <Card className="border-black/10 dark:border-white/10">
+        <section data-testid="dashboard-details-grid" className="grid gap-6 xl:grid-cols-2">
+          <Card data-testid="dashboard-summary-card" className="border-black/10 dark:border-white/10">
             <CardHeader>
               <CardTitle className="text-xl">{t('systemMonitor.sections.summary')}</CardTitle>
             </CardHeader>
@@ -385,7 +385,7 @@ export function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="border-black/10 dark:border-white/10">
+          <Card data-testid="dashboard-task-list-card" className="border-black/10 dark:border-white/10">
             <CardHeader>
               <CardTitle className="text-xl">{t('systemMonitor.sections.taskList')}</CardTitle>
             </CardHeader>

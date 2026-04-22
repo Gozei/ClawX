@@ -44,7 +44,7 @@ interface UpdateState {
   // Actions
   init: () => Promise<void>;
   checkForUpdates: () => Promise<void>;
-  downloadUpdate: () => Promise<void>;
+  downloadUpdate: (options?: { autoInstallAfterDownload?: boolean }) => Promise<void>;
   installUpdate: () => Promise<void>;
   cancelAutoInstall: () => Promise<void>;
   setChannel: (channel: 'stable' | 'beta' | 'dev') => Promise<void>;
@@ -176,7 +176,7 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
     }
   },
 
-  downloadUpdate: async () => {
+  downloadUpdate: async (options) => {
     set({ status: 'downloading', error: null });
     
     try {
@@ -187,6 +187,11 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
       
       if (!result.success) {
         set({ status: 'error', error: result.error || 'Failed to download update' });
+        return;
+      }
+
+      if (options?.autoInstallAfterDownload) {
+        await get().installUpdate();
       }
     } catch (error) {
       set({ status: 'error', error: String(error) });

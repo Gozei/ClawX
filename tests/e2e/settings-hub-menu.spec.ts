@@ -79,7 +79,7 @@ test.describe('Settings hub menu', () => {
       await expectMenuItemSelectedState(page, 'settings');
       await expect(page.getByTestId('settings-hub-menu-models')).toHaveAttribute('data-selected', 'false');
       await expect(page.getByTestId('settings-hub-menu-channels')).toHaveAttribute('data-selected', 'false');
-
+      await expect(page.getByTestId('settings-hub-menu-check-updates')).toHaveAttribute('data-selected', 'false');
       await page.getByTestId('settings-hub-menu-check-updates').click({ force: true });
       await expect(page.getByTestId('settings-hub-sheet-container')).toHaveCount(0);
       await expect(page.getByTestId('settings-page')).toBeVisible();
