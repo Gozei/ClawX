@@ -62,6 +62,11 @@ export async function handleProviderRoutes(
     return true;
   }
 
+  if (url.pathname === '/api/provider-account-statuses' && req.method === 'GET') {
+    sendJson(res, 200, await providerService.listAccountStatuses());
+    return true;
+  }
+
   if (url.pathname === '/api/provider-accounts' && req.method === 'POST') {
     const startedAt = Date.now();
     try {
@@ -176,7 +181,64 @@ export async function handleProviderRoutes(
 
   if (url.pathname.startsWith('/api/provider-accounts/') && req.method === 'GET') {
     const accountId = decodeURIComponent(url.pathname.slice('/api/provider-accounts/'.length));
+    if (accountId.endsWith('/api-key')) {
+      const actualId = accountId.slice(0, -'/api-key'.length);
+      sendJson(res, 200, { apiKey: await providerService.getAccountApiKey(actualId) });
+      return true;
+    }
     sendJson(res, 200, await providerService.getAccount(accountId));
+    return true;
+  }
+
+  if (url.pathname === '/api/provider-accounts/oauth/start' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{
+        provider: OAuthProviderType | BrowserOAuthProviderType;
+        region?: 'global' | 'cn';
+        accountId?: string;
+        label?: string;
+      }>(req);
+      if (body.provider === 'google' || body.provider === 'openai') {
+        await browserOAuthManager.startFlow(body.provider, {
+          accountId: body.accountId,
+          label: body.label,
+        });
+      } else {
+        await deviceOAuthManager.startFlow(body.provider, body.region, {
+          accountId: body.accountId,
+          label: body.label,
+        });
+      }
+      sendJson(res, 200, { success: true });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === '/api/provider-accounts/oauth/cancel' && req.method === 'POST') {
+    try {
+      await deviceOAuthManager.stopFlow();
+      await browserOAuthManager.stopFlow();
+      sendJson(res, 200, { success: true });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === '/api/provider-accounts/oauth/submit' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{ code: string }>(req);
+      const accepted = browserOAuthManager.submitManualCode(body.code || '');
+      if (!accepted) {
+        sendJson(res, 400, { success: false, error: 'No active manual OAuth input pending' });
+        return true;
+      }
+      sendJson(res, 200, { success: true });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
     return true;
   }
 

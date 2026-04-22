@@ -2,6 +2,7 @@
  * Electron Main Process Entry
  * Manages window creation, system tray, and IPC handlers
  */
+import './warning-filter';
 import { app, BrowserWindow, nativeImage, session, shell } from 'electron';
 import type { Server } from 'node:http';
 import { join } from 'path';
@@ -705,7 +706,12 @@ if (gotTheLock) {
   // These handlers attempt to terminate the Gateway child process within a
   // short timeout before force-exiting, preventing orphaned processes.
   const emergencyGatewayCleanup = (reason: string, error: unknown): void => {
-    logger.error(`${reason}:`, error);
+    try {
+      logger.error(`${reason}:`, error);
+    } catch {
+      // Ignore logger failures here so emergency cleanup can still proceed
+      // even if stdout/stderr are already unavailable.
+    }
     try {
       void gatewayManager?.stop().catch(() => { /* ignore */ });
     } catch {

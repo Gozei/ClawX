@@ -934,7 +934,7 @@ export function toUserMessage(error: unknown): string {
     case 'CONFIG':
       return 'Configuration is invalid. Please review settings.';
     case 'GATEWAY':
-      return 'Gateway is unavailable. Start or restart the gateway and retry.';
+      return 'Gateway error. Please restart the gateway and try again.';
     default:
       return appError.message || 'Unexpected error occurred.';
   }

@@ -1,12 +1,12 @@
 import { useMemo, type ComponentType } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  ChevronRight,
   Cpu,
   Languages,
   MonitorCog,
   Moon,
   Network,
+  RefreshCw,
   Settings2,
   Sun,
   TerminalSquare,
@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
-import { SUPPORTED_LANGUAGES } from '@/i18n';
+import { useUpdateStore } from '@/stores/update';
 import { hostApiFetch } from '@/lib/host-api';
 
 type SettingsHubProps = {
@@ -37,6 +37,12 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
   const setTheme = useSettingsStore((state) => state.setTheme);
   const language = useSettingsStore((state) => state.language);
   const setLanguage = useSettingsStore((state) => state.setLanguage);
+  const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
+
+  const resolvedTheme = useMemo(() => {
+    if (theme === 'dark' || theme === 'light') return theme;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }, [theme]);
 
   const nextTheme = useMemo(() => {
     if (theme === 'dark') return 'light';
@@ -44,9 +50,8 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'light' : 'dark';
   }, [theme]);
 
-  const ThemeIcon = theme === 'dark' ? Moon : Sun;
-  const languageLabel = SUPPORTED_LANGUAGES.find((item) => item.code === language)?.label ?? language.toUpperCase();
   const nextLanguage = language === 'zh' ? 'en' : 'zh';
+  const nextLanguageLabel = nextLanguage === 'zh' ? '\u4e2d\u6587' : 'English';
 
   const navigateFromMenu = (path: string) => {
     navigate(path);
@@ -60,7 +65,17 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
 
   const handleToggleLanguage = () => {
     setLanguage(nextLanguage);
-    toast.success(t('settingsHub.language.changed', { language: SUPPORTED_LANGUAGES.find((item) => item.code === nextLanguage)?.label ?? nextLanguage }));
+    toast.success(t('settingsHub.language.changed', { language: nextLanguageLabel }));
+  };
+
+  const handleCheckUpdates = async () => {
+    navigate('/settings#updates');
+    onRequestClose?.();
+    try {
+      await checkForUpdates();
+    } catch {
+      // Update store keeps user-facing error state.
+    }
   };
 
   const handleOpenConsole = async () => {
@@ -81,9 +96,11 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
     ? 'models'
     : location.pathname.startsWith('/channels')
       ? 'channels'
-      : location.pathname.startsWith('/settings')
-        ? 'settings'
-        : '';
+      : location.pathname.startsWith('/settings') && location.hash === '#updates'
+        ? 'checkUpdates'
+        : location.pathname.startsWith('/settings')
+          ? 'settings'
+          : '';
 
   const menuItems: Array<{
     key: string;
@@ -101,7 +118,6 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
       icon: Cpu,
       onClick: () => navigateFromMenu('/models'),
       selected: selectedKey === 'models',
-      trailing: <ChevronRight className="h-4 w-4 text-muted-foreground/70" />,
     },
     {
       key: 'channels',
@@ -110,7 +126,6 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
       icon: Network,
       onClick: () => navigateFromMenu('/channels'),
       selected: selectedKey === 'channels',
-      trailing: <ChevronRight className="h-4 w-4 text-muted-foreground/70" />,
     },
     {
       key: 'theme',
@@ -118,7 +133,13 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
       testId: 'settings-hub-menu-theme',
       icon: MonitorCog,
       onClick: handleToggleTheme,
-      trailing: <ThemeIcon className="h-4 w-4 text-muted-foreground/80" />,
+      trailing: (
+        <span className="inline-flex items-center gap-1.5 text-[12px]">
+          <Sun className={cn('h-3.5 w-3.5', resolvedTheme === 'light' ? 'text-foreground dark:text-white' : 'text-muted-foreground/60 dark:text-white/42')} />
+          <span className="text-muted-foreground/55 dark:text-white/35">/</span>
+          <Moon className={cn('h-3.5 w-3.5', resolvedTheme === 'dark' ? 'text-foreground dark:text-white' : 'text-muted-foreground/60 dark:text-white/42')} />
+        </span>
+      ),
     },
     {
       key: 'language',
@@ -126,7 +147,13 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
       testId: 'settings-hub-menu-language',
       icon: Languages,
       onClick: handleToggleLanguage,
-      trailing: <span className="text-xs font-semibold text-muted-foreground/80">{languageLabel}</span>,
+      trailing: (
+        <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold">
+          <span className={cn(language === 'zh' ? 'text-foreground dark:text-white' : 'text-muted-foreground/60 dark:text-white/42')}>{'\u4e2d'}</span>
+          <span className="text-muted-foreground/55 dark:text-white/35">/</span>
+          <span className={cn(language === 'en' ? 'text-foreground dark:text-white' : 'text-muted-foreground/60 dark:text-white/42')}>English</span>
+        </span>
+      ),
     },
     {
       key: 'settings',
@@ -135,7 +162,14 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
       icon: Settings2,
       onClick: () => navigateFromMenu('/settings'),
       selected: selectedKey === 'settings',
-      trailing: <ChevronRight className="h-4 w-4 text-muted-foreground/70" />,
+    },
+    {
+      key: 'checkUpdates',
+      label: t('settingsHub.menu.checkUpdates'),
+      testId: 'settings-hub-menu-check-updates',
+      icon: RefreshCw,
+      onClick: () => { void handleCheckUpdates(); },
+      selected: selectedKey === 'checkUpdates',
     },
     {
       key: 'console',
@@ -143,55 +177,70 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
       testId: 'settings-hub-menu-console',
       icon: TerminalSquare,
       onClick: () => { void handleOpenConsole(); },
-      trailing: <ChevronRight className="h-4 w-4 text-muted-foreground/70" />,
     },
   ];
 
   return (
-    <>
-      <div
-        data-testid="settings-hub-sheet"
-        className={cn(
-          'w-full max-w-[360px] overflow-hidden rounded-[24px] border border-black/8 bg-white/96 shadow-[0_24px_80px_rgba(15,23,42,0.24)] backdrop-blur dark:border-white/10 dark:bg-[#0e131b]/96',
-          mode === 'sheet' && 'ml-0',
-        )}
-      >
-        <aside className="w-full p-4">
-          <div className="space-y-1.5">
-            {menuItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  data-testid={item.testId}
-                  onClick={item.onClick}
+    <div
+      data-testid="settings-hub-sheet"
+      className={cn(
+        'overflow-hidden rounded-[24px] border border-black/8 bg-background/95 shadow-[0_12px_28px_rgba(15,23,42,0.10)] backdrop-blur-sm supports-[backdrop-filter]:bg-background/88 dark:border-white/10 dark:bg-card/95 dark:shadow-[0_12px_28px_rgba(0,0,0,0.24)] dark:supports-[backdrop-filter]:bg-card/88',
+        mode === 'sheet' && 'ml-0',
+      )}
+      style={{ width: '300px', maxWidth: 'calc(100vw - 2rem)' }}
+    >
+      <aside className="w-full p-4">
+        <div className="space-y-1.5">
+          {menuItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                data-testid={item.testId}
+                onClick={item.onClick}
+                data-selected={item.selected ? 'true' : 'false'}
+                className={cn(
+                  'group flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[14px] font-medium transition-all duration-200',
+                  item.selected
+                    ? 'bg-white text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:text-white dark:ring-white/10'
+                    : 'text-foreground/78 hover:bg-[#eef3fb] hover:text-foreground dark:text-white/78 dark:hover:bg-white/5 dark:hover:text-white',
+                )}
+              >
+                <div
+                  data-testid={`${item.testId}-icon`}
+                  data-slot="settings-hub-icon-shell"
+                  data-selected={item.selected ? 'true' : 'false'}
                   className={cn(
-                    'group flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition-colors',
+                    'flex shrink-0 items-center justify-center transition-colors duration-200',
                     item.selected
-                      ? 'bg-[#eef3fb] text-foreground dark:bg-white/88 dark:text-[#111827]'
-                      : 'text-foreground/82 hover:bg-[#f3f6fb] dark:text-white/82 dark:hover:bg-white/88 dark:hover:text-[#111827]',
+                      ? 'text-primary dark:text-white'
+                      : 'text-muted-foreground group-hover:text-foreground dark:text-white/56 dark:group-hover:text-white/84',
                   )}
                 >
-                  <div className={cn(
-                    'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border',
-                    item.selected
-                      ? 'border-black/5 bg-white text-primary dark:border-black/10 dark:bg-white dark:text-[#111827]'
-                      : 'border-black/5 bg-black/[0.03] text-muted-foreground dark:border-white/10 dark:bg-white/[0.04] dark:group-hover:border-black/10 dark:group-hover:bg-white dark:group-hover:text-[#111827]',
-                  )}>
-                    <Icon className="h-[18px] w-[18px]" />
-                  </div>
-                  <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{item.label}</span>
-                  <span className={cn(item.selected ? 'dark:text-[#111827]' : '')}>
+                  <Icon className="h-[18px] w-[18px]" />
+                </div>
+                <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{item.label}</span>
+                {item.trailing ? (
+                  <span
+                    data-slot="settings-hub-trailing"
+                    data-selected={item.selected ? 'true' : 'false'}
+                    className={cn(
+                      'shrink-0 transition-colors duration-200',
+                      item.selected
+                        ? 'text-foreground/70 dark:text-white/80'
+                        : 'text-muted-foreground/78 group-hover:text-foreground/72 dark:text-white/46 dark:group-hover:text-white/72',
+                    )}
+                  >
                     {item.trailing}
                   </span>
-                </button>
-              );
-            })}
-          </div>
-        </aside>
-      </div>
-    </>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </aside>
+    </div>
   );
 }
 

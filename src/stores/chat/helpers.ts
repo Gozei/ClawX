@@ -6,6 +6,14 @@ import type { AttachedFileMeta, ChatSession, ContentBlock, RawMessage, ToolStatu
 export const CHAT_HISTORY_RPC_TIMEOUT_MS = 60_000;
 export const CHAT_HISTORY_LABEL_PREFETCH_LIMIT = 50;
 
+type DraftSessionStateLike = {
+  currentSessionKey: string;
+  messages: unknown[];
+  sessions: ChatSession[];
+  sessionLabels: Record<string, string>;
+  sessionLastActivity: Record<string, number>;
+};
+
 // Module-level timestamp tracking the last chat event received.
 // Used by the safety timeout to avoid false-positive "no response" errors
 // during tool-use conversations where streamingMessage is temporarily cleared
@@ -40,6 +48,23 @@ function clearHistoryPoll(): void {
     clearTimeout(_historyPollTimer);
     _historyPollTimer = null;
   }
+}
+
+function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boolean {
+  const session = sessions.find((entry) => entry.key === sessionKey);
+  return typeof session?.label === 'string' && session.label.trim().length > 0;
+}
+
+function isUnusedDraftSession(
+  state: DraftSessionStateLike,
+  sessionKey: string,
+): boolean {
+  return !sessionKey.endsWith(':main')
+    && state.currentSessionKey === sessionKey
+    && state.messages.length === 0
+    && !state.sessionLastActivity[sessionKey]
+    && !state.sessionLabels[sessionKey]
+    && !hasStoredSessionLabel(state.sessions, sessionKey);
 }
 
 // ── Local image cache ─────────────────────────────────────────
@@ -163,7 +188,7 @@ function localizeChatErrorDetail(error?: string | null): string | null {
       }
       return translateChat(
         'sessionErrorDetails.gatewayUnavailable',
-        'Gateway is unavailable. Start or restart the gateway and try again.',
+        'Gateway error. Please restart the gateway and try again.',
       );
     default:
       return normalizedDetail;
@@ -802,8 +827,15 @@ function normalizeToolName(name: string | undefined): string {
   return (name || 'tool').trim() || 'tool';
 }
 
+function normalizeToolFailureMessage(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().replace(/^Error:\s*/i, '');
+  return normalized || undefined;
+}
+
 function normalizeToolStatus(rawStatus: unknown, fallback: 'running' | 'completed'): ToolStatus['status'] {
   const status = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : '';
+  if (status.includes('retry')) return 'retrying';
   if (status === 'error' || status === 'failed') return 'error';
   if (status === 'completed' || status === 'success' || status === 'done') return 'completed';
   return fallback;
@@ -873,8 +905,9 @@ function extractToolResultBlocks(message: unknown, eventState: string): ToolStat
       id: block.id || block.name || 'tool',
       toolCallId: block.id,
       name: block.name || block.id || 'tool',
-      status: normalizeToolStatus(undefined, eventState === 'delta' ? 'running' : 'completed'),
+      status: normalizeToolStatus(block.status, eventState === 'delta' ? 'running' : 'completed'),
       summary,
+      failureMessage: block.status === 'error' ? normalizeToolFailureMessage(outputText) : undefined,
       updatedAt: Date.now(),
     });
   }
@@ -899,7 +932,8 @@ function extractToolResultUpdate(message: unknown, eventState: string): ToolStat
   const outputText = (details && typeof details.aggregated === 'string')
     ? details.aggregated
     : extractTextFromContent(msg.content);
-  const summary = summarizeToolOutput(outputText) ?? summarizeToolOutput(String(details?.error ?? msg.error ?? ''));
+  const failureMessage = normalizeToolFailureMessage(details?.error ?? msg.error);
+  const summary = summarizeToolOutput(outputText) ?? summarizeToolOutput(failureMessage ?? '');
 
   const name = toolName || toolCallId || 'tool';
   const id = toolCallId || name;
@@ -911,6 +945,7 @@ function extractToolResultUpdate(message: unknown, eventState: string): ToolStat
     status,
     durationMs,
     summary,
+    failureMessage,
     updatedAt: Date.now(),
   };
 }
@@ -962,7 +997,7 @@ function createToolResultProcessMessage(message: RawMessage): RawMessage | null 
 }
 
 function mergeToolStatus(existing: ToolStatus['status'], incoming: ToolStatus['status']): ToolStatus['status'] {
-  const order: Record<ToolStatus['status'], number> = { running: 0, completed: 1, error: 2 };
+  const order: Record<ToolStatus['status'], number> = { running: 0, retrying: 1, completed: 2, error: 3 };
   return order[incoming] >= order[existing] ? incoming : existing;
 }
 
@@ -978,13 +1013,26 @@ function upsertToolStatuses(current: ToolStatus[], updates: ToolStatus[]): ToolS
       continue;
     }
     const existing = next[index];
+    const isRetryTransition = existing.status === 'error' && (update.status === 'running' || update.status === 'retrying');
+    const mergedStatus = isRetryTransition
+      ? 'retrying'
+      : (existing.status === 'retrying' && update.status === 'running')
+        ? 'retrying'
+        : mergeToolStatus(existing.status, update.status);
+    const failureMessage = update.failureMessage
+      ?? (update.status === 'error' ? update.summary : undefined)
+      ?? ((mergedStatus === 'retrying' || mergedStatus === 'error') ? existing.failureMessage ?? existing.summary : undefined);
     next[index] = {
       ...existing,
       ...update,
       name: update.name || existing.name,
-      status: mergeToolStatus(existing.status, update.status),
+      status: mergedStatus,
       durationMs: update.durationMs ?? existing.durationMs,
       summary: update.summary ?? existing.summary,
+      failureMessage,
+      retries: isRetryTransition
+        ? (existing.retries ?? 0) + 1
+        : update.retries ?? existing.retries,
       updatedAt: update.updatedAt || existing.updatedAt,
     };
   }
@@ -1107,7 +1155,9 @@ export {
   EMPTY_ASSISTANT_RESPONSE_ERROR,
   hasNonToolAssistantContent,
   hasAssistantFinalTextContent,
+  hasStoredSessionLabel,
   isEmptyAssistantResponse,
+  isUnusedDraftSession,
   isToolOnlyMessage,
   setHistoryPollTimer,
   hasErrorRecoveryTimer,

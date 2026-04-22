@@ -5,12 +5,26 @@ import { closeElectronApp, expect, getStableWindow, test } from './fixtures/elec
 const SESSION_KEY = 'agent:main:history-refresh-hydration-test';
 const SESSION_FILE = 'history-refresh-hydration-test.jsonl';
 const SESSION_LABEL = 'History refresh hydration session';
-const USER_TEXT = 'Who are you?';
+const EARLIER_USER_TEXT = 'Earlier seeded question.';
+const EARLIER_ASSISTANT_TEXT = 'Earlier seeded answer.';
+const USER_TEXT = 'Who are you? '.repeat(10).trim();
 const FINAL_TEXT = 'I am ClawX.';
 
 function buildSeededMessages(includeAssistant: boolean) {
   const baseTimestamp = Math.floor(Date.now() / 1000);
   return [
+    {
+      id: 'user-0',
+      role: 'user',
+      content: EARLIER_USER_TEXT,
+      timestamp: baseTimestamp - 2,
+    },
+    {
+      id: 'assistant-0',
+      role: 'assistant',
+      content: EARLIER_ASSISTANT_TEXT,
+      timestamp: baseTimestamp - 1,
+    },
     {
       id: 'user-1',
       role: 'user',
@@ -83,6 +97,29 @@ test.describe('Chat history refresh hydration', () => {
 
       await expect(page.getByText(FINAL_TEXT, { exact: true })).toBeVisible({ timeout: 60_000 });
       await expect(userMessages).toHaveCount(1);
+      await expect(page.getByTestId('chat-active-turn-bottom-spacer')).toHaveCount(0);
+      await expect(page.getByTestId(`sidebar-session-running-indicator-${SESSION_KEY}`)).toHaveCount(0);
+      const sendButtonTitle = await page.getByTestId('chat-send-button').getAttribute('title');
+      expect(['Send', '发送']).toContain(sendButtonTitle);
+      await expect
+        .poll(async () => page.getByTestId('chat-send-button').locator('svg').getAttribute('fill'))
+        .not.toBe('currentColor');
+
+      const [finalMessageBox, composerBox] = await Promise.all([
+        page.getByTestId('chat-assistant-message-shell').last().boundingBox(),
+        page.getByTestId('chat-composer').boundingBox(),
+      ]);
+
+      if (finalMessageBox && composerBox) {
+        const gap = composerBox.y - (finalMessageBox.y + finalMessageBox.height);
+        expect(gap).toBeGreaterThan(0);
+      }
+
+      const scrollContainer = page.getByTestId('chat-scroll-container');
+      await scrollContainer.hover();
+      await page.mouse.wheel(0, -180);
+      await expect(page.getByText(EARLIER_ASSISTANT_TEXT, { exact: true })).toBeVisible();
+      await expect(page.getByText(USER_TEXT, { exact: true })).toBeVisible();
     } finally {
       await closeElectronApp(app);
     }

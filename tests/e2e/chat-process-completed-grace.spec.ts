@@ -19,6 +19,7 @@ async function seedSession(homeDir: string): Promise<void> {
           id: 'process-completed-grace-test',
           file: SESSION_FILE,
           label: SESSION_LABEL,
+          model: 'custom-custombc/qwen3.5-plus',
           updatedAt: Date.now(),
         },
       ],
@@ -79,7 +80,10 @@ test.describe('Chat process completed grace state', () => {
       await expect(processStatus).toBeVisible({ timeout: 60_000 });
       await expect(processStatus).toContainText(/Processed|已处理/);
       await expect(processStatus).not.toContainText(/Working for|处理中/);
-      await expect(page.getByText('I am using qwen3.5-plus.', { exact: true })).toBeVisible();
+      const finalReply = page.getByText('I am using qwen3.5-plus.', { exact: true });
+      await expect(finalReply).toBeVisible();
+      await finalReply.hover();
+      await expect(page.getByTestId('chat-message-model-label').last()).toContainText(/qwen3\.5-plus/);
     } finally {
       await closeElectronApp(app);
     }

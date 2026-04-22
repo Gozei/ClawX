@@ -28,6 +28,7 @@ const { agentsState, chatState, gatewayState, settingsState } = vi.hoisted(() =>
     abortRun: vi.fn(),
     clearError: vi.fn(),
     cleanupEmptySession: vi.fn(),
+    loadHistory: vi.fn(async () => {}),
     queuedMessages: {} as Record<string, unknown>,
   },
   gatewayState: {
@@ -83,6 +84,84 @@ vi.mock('@/stores/settings', () => ({
   useSettingsStore: (selector: (state: typeof settingsState) => unknown) => selector(settingsState),
 }));
 
+vi.mock('react-virtuoso', async () => {
+  const React = await import('react');
+
+  const DefaultScroller = React.forwardRef<HTMLDivElement, React.ComponentProps<'div'>>(
+    function DefaultScroller({ children, ...props }, ref) {
+      return <div ref={ref} {...props}>{children}</div>;
+    },
+  );
+  const DefaultList = React.forwardRef<HTMLDivElement, React.ComponentProps<'div'>>(
+    function DefaultList({ children, ...props }, ref) {
+      return <div ref={ref} {...props}>{children}</div>;
+    },
+  );
+
+  const Virtuoso = React.forwardRef<any, Record<string, unknown>>(function MockVirtuoso(props, ref) {
+    const {
+      data = [],
+      itemContent,
+      components = {},
+      context,
+      computeItemKey,
+      scrollerRef,
+    } = props as {
+      components?: {
+        Footer?: React.ComponentType<{ context: unknown }>;
+        List?: React.ComponentType<any>;
+        Scroller?: React.ComponentType<any>;
+      };
+      computeItemKey?: (index: number, item: unknown) => React.Key;
+      context?: unknown;
+      data?: unknown[];
+      itemContent?: (index: number, item: unknown) => React.ReactNode;
+      scrollerRef?: (node: HTMLElement | null) => void;
+    };
+
+    const scrollerNodeRef = React.useRef<HTMLDivElement | null>(null);
+    const Scroller = components.Scroller ?? DefaultScroller;
+    const List = components.List ?? DefaultList;
+    const Footer = components.Footer ?? null;
+
+    React.useImperativeHandle(ref, () => ({
+      autoscrollToBottom: () => {},
+      getState: (callback: (state: unknown) => void) => callback({}),
+      scrollBy: () => {},
+      scrollIntoView: () => {},
+      scrollTo: () => {},
+      scrollToIndex: () => {},
+    }), []);
+
+    React.useEffect(() => {
+      scrollerRef?.(scrollerNodeRef.current);
+    }, [scrollerRef]);
+
+    return (
+      <Scroller
+        ref={(node: HTMLDivElement | null) => {
+          scrollerNodeRef.current = node;
+        }}
+        context={context}
+        data-testid="virtuoso-scroller"
+        style={{ height: '100%' }}
+        tabIndex={0}
+      >
+        <List context={context} data-testid="virtuoso-list" style={{}}>
+          {data.map((item, index) => (
+            <React.Fragment key={computeItemKey?.(index, item) ?? index}>
+              {itemContent?.(index, item)}
+            </React.Fragment>
+          ))}
+        </List>
+        {Footer ? <Footer context={context} /> : null}
+      </Scroller>
+    );
+  });
+
+  return { Virtuoso };
+});
+
 vi.mock('@/hooks/use-stick-to-bottom-instant', () => ({
   useStickToBottomInstant: () => ({
     contentRef: { current: null },
@@ -117,6 +196,7 @@ describe('Chat streaming dedupe', () => {
   beforeEach(() => {
     navigateMock.mockReset();
     agentsState.fetchAgents.mockClear();
+    chatState.loadHistory.mockClear();
     chatState.messages = [
       {
         id: 'user-1',

@@ -1,4 +1,4 @@
-import { PostHog } from 'posthog-node';
+import type { PostHog } from 'posthog-node';
 import { machineIdSync } from 'node-machine-id';
 import { app } from 'electron';
 import { getSetting, setSetting } from './store';
@@ -10,6 +10,14 @@ const TELEMETRY_SHUTDOWN_TIMEOUT_MS = 1500;
 
 let posthogClient: PostHog | null = null;
 let distinctId: string = '';
+let posthogModulePromise: Promise<typeof import('posthog-node')> | null = null;
+
+async function loadPostHogModule(): Promise<typeof import('posthog-node')> {
+    if (!posthogModulePromise) {
+        posthogModulePromise = import('posthog-node');
+    }
+    return await posthogModulePromise;
+}
 
 function getCommonProperties(): Record<string, string> {
     return {
@@ -53,6 +61,7 @@ export async function initTelemetry(): Promise<void> {
         }
 
         // Initialize PostHog client
+        const { PostHog } = await loadPostHogModule();
         posthogClient = new PostHog(POSTHOG_API_KEY, { host: POSTHOG_HOST });
 
         // Get or generate machine ID

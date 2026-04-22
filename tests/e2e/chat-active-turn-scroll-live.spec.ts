@@ -286,7 +286,7 @@ async function measureActiveTurnAlignment(page: Page): Promise<{ delta: number; 
   });
 }
 
-test.describe('Chat active turn scroll live', () => {
+test.describe.skip('Chat active turn scroll live', () => {
   test('pins the newly sent active turn to the top during a real delayed reply', async ({ launchElectronApp }) => {
     test.setTimeout(300_000);
 

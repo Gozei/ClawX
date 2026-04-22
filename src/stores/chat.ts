@@ -12,7 +12,13 @@ import i18n from '@/i18n';
 import { useGatewayStore } from './gateway';
 import { useAgentsStore } from './agents';
 import { buildCronSessionHistoryPath, isCronSessionKey } from './chat/cron-session-utils';
-import { CHAT_HISTORY_LABEL_PREFETCH_LIMIT, CHAT_HISTORY_RPC_TIMEOUT_MS } from './chat/helpers';
+import {
+  CHAT_HISTORY_LABEL_PREFETCH_LIMIT,
+  CHAT_HISTORY_RPC_TIMEOUT_MS,
+  hasAssistantFinalTextContent,
+  hasStoredSessionLabel,
+  isUnusedDraftSession,
+} from './chat/helpers';
 import {
   DEFAULT_CANONICAL_PREFIX,
   DEFAULT_SESSION_KEY,
@@ -82,7 +88,7 @@ let _historyPollTimer: ReturnType<typeof setTimeout> | null = null;
 let _errorRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 let _loadSessionsInFlight: Promise<void> | null = null;
 let _lastLoadSessionsAt = 0;
-const _historyLoadInFlight = new Map<string, Promise<void>>();
+const _historyLoadInFlight = new Map<string, { promise: Promise<void>; quiet: boolean }>();
 const _lastHistoryLoadAtBySession = new Map<string, number>();
 const SESSION_LOAD_MIN_INTERVAL_MS = 1_200;
 const HISTORY_LOAD_MIN_INTERVAL_MS = 800;
@@ -396,11 +402,12 @@ function startHistoryPoll(get: () => ChatState, sessionKey: string): void {
       clearHistoryPoll();
       return;
     }
-    if (state.streamingMessage) {
+    const hasRecentChatActivity = Date.now() - _lastChatEventAt < HISTORY_POLL_SILENCE_WINDOW_MS;
+    if (state.streamingMessage && hasRecentChatActivity) {
       _historyPollTimer = setTimeout(pollHistory, HISTORY_POLL_INTERVAL_MS);
       return;
     }
-    if (Date.now() - _lastChatEventAt < HISTORY_POLL_SILENCE_WINDOW_MS) {
+    if (hasRecentChatActivity) {
       _historyPollTimer = setTimeout(pollHistory, HISTORY_POLL_INTERVAL_MS);
       return;
     }
@@ -807,7 +814,7 @@ function localizeChatErrorDetail(error?: string): string | null {
       }
       return translateChat(
         'sessionErrorDetails.gatewayUnavailable',
-        'Gateway is unavailable. Start or restart the gateway and try again.',
+        'Gateway error. Please restart the gateway and try again.',
       );
     default:
       return normalizedDetail;
@@ -1686,11 +1693,6 @@ function remapSessionEntries<T>(
   }, {});
 }
 
-function hasStoredSessionLabel(sessions: ChatSession[], sessionKey: string): boolean {
-  const session = sessions.find((entry) => entry.key === sessionKey);
-  return typeof session?.label === 'string' && session.label.trim().length > 0;
-}
-
 function findLastUserMessageIndex(messages: RawMessage[]): number {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]?.role === 'user') {
@@ -1698,18 +1700,6 @@ function findLastUserMessageIndex(messages: RawMessage[]): number {
     }
   }
   return -1;
-}
-
-function isUnusedDraftSession(
-  state: Pick<ChatState, 'currentSessionKey' | 'messages' | 'sessions' | 'sessionLabels' | 'sessionLastActivity'>,
-  sessionKey: string,
-): boolean {
-  return !sessionKey.endsWith(':main')
-    && state.currentSessionKey === sessionKey
-    && state.messages.length === 0
-    && !state.sessionLastActivity[sessionKey]
-    && !state.sessionLabels[sessionKey]
-    && !hasStoredSessionLabel(state.sessions, sessionKey);
 }
 
 function buildSessionSwitchPatch(
@@ -1880,6 +1870,7 @@ function summarizeToolOutput(text: string): string | undefined {
 
 function normalizeToolStatus(rawStatus: unknown, fallback: 'running' | 'completed'): ToolStatus['status'] {
   const status = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : '';
+  if (status.includes('retry')) return 'retrying';
   if (status === 'error' || status === 'failed') return 'error';
   if (status === 'completed' || status === 'success' || status === 'done') return 'completed';
   return fallback;
@@ -1887,6 +1878,12 @@ function normalizeToolStatus(rawStatus: unknown, fallback: 'running' | 'complete
 
 function normalizeToolName(name: string | undefined): string {
   return (name || 'tool').trim() || 'tool';
+}
+
+function normalizeToolFailureMessage(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().replace(/^Error:\s*/i, '');
+  return normalized || undefined;
 }
 
 function parseDurationMs(value: unknown): number | undefined {
@@ -1953,8 +1950,9 @@ function extractToolResultBlocks(message: unknown, eventState: string): ToolStat
       id: block.id || block.name || 'tool',
       toolCallId: block.id,
       name: block.name || block.id || 'tool',
-      status: normalizeToolStatus(undefined, eventState === 'delta' ? 'running' : 'completed'),
+      status: normalizeToolStatus(block.status, eventState === 'delta' ? 'running' : 'completed'),
       summary,
+      failureMessage: block.status === 'error' ? normalizeToolFailureMessage(outputText) : undefined,
       updatedAt: Date.now(),
     });
   }
@@ -1979,7 +1977,8 @@ function extractToolResultUpdate(message: unknown, eventState: string): ToolStat
   const outputText = (details && typeof details.aggregated === 'string')
     ? details.aggregated
     : extractTextFromContent(msg.content);
-  const summary = summarizeToolOutput(outputText) ?? summarizeToolOutput(String(details?.error ?? msg.error ?? ''));
+  const failureMessage = normalizeToolFailureMessage(details?.error ?? msg.error);
+  const summary = summarizeToolOutput(outputText) ?? summarizeToolOutput(failureMessage ?? '');
 
   const name = toolName || toolCallId || 'tool';
   const id = toolCallId || name;
@@ -1991,12 +1990,13 @@ function extractToolResultUpdate(message: unknown, eventState: string): ToolStat
     status,
     durationMs,
     summary,
+    failureMessage,
     updatedAt: Date.now(),
   };
 }
 
 function mergeToolStatus(existing: ToolStatus['status'], incoming: ToolStatus['status']): ToolStatus['status'] {
-  const order: Record<ToolStatus['status'], number> = { running: 0, completed: 1, error: 2 };
+  const order: Record<ToolStatus['status'], number> = { running: 0, retrying: 1, completed: 2, error: 3 };
   return order[incoming] >= order[existing] ? incoming : existing;
 }
 
@@ -2060,13 +2060,26 @@ function upsertToolStatuses(current: ToolStatus[], updates: ToolStatus[]): ToolS
       continue;
     }
     const existing = next[index];
+    const isRetryTransition = existing.status === 'error' && (update.status === 'running' || update.status === 'retrying');
+    const mergedStatus = isRetryTransition
+      ? 'retrying'
+      : (existing.status === 'retrying' && update.status === 'running')
+        ? 'retrying'
+        : mergeToolStatus(existing.status, update.status);
+    const failureMessage = update.failureMessage
+      ?? (update.status === 'error' ? update.summary : undefined)
+      ?? ((mergedStatus === 'retrying' || mergedStatus === 'error') ? existing.failureMessage ?? existing.summary : undefined);
     next[index] = {
       ...existing,
       ...update,
       name: update.name || existing.name,
-      status: mergeToolStatus(existing.status, update.status),
+      status: mergedStatus,
       durationMs: update.durationMs ?? existing.durationMs,
       summary: update.summary ?? existing.summary,
+      failureMessage,
+      retries: isRetryTransition
+        ? (existing.retries ?? 0) + 1
+        : update.retries ?? existing.retries,
       updatedAt: update.updatedAt || existing.updatedAt,
     };
   }
@@ -2301,24 +2314,16 @@ function deriveActiveTurnBuffer(
 
 function hasLiveTurnSignal(state: Pick<
   ChatState,
-  | 'messages'
   | 'sending'
   | 'streamingMessage'
   | 'streamingText'
   | 'streamingTools'
-  | 'lastUserMessageAt'
 >): boolean {
   if (!state.sending) return false;
   if (state.streamingMessage && typeof state.streamingMessage === 'object') return true;
   if (typeof state.streamingText === 'string' && state.streamingText.trim().length > 0) return true;
   if (state.streamingTools.length > 0) return true;
-
-  const userMsTs = state.lastUserMessageAt ? toMs(state.lastUserMessageAt) : 0;
-  return state.messages.some((message) => (
-    message.role === 'assistant'
-    && !!message.timestamp
-    && (!userMsTs || toMs(message.timestamp) >= userMsTs)
-  ));
+  return false;
 }
 
 // ── Store ────────────────────────────────────────────────────────
@@ -2871,11 +2876,22 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
   // ── Load chat history ──
 
   loadHistory: async (quiet = false) => {
-    const { currentSessionKey } = get();
+    const currentState = get();
+    const { currentSessionKey } = currentState;
+    const shouldSkipUnusedDraftHydration = (
+      currentSessionKey.includes(':session-')
+      && isUnusedDraftSession(currentState, currentSessionKey)
+      && !currentState.sessions.some((session) => session.key === currentSessionKey)
+    );
+    if (shouldSkipUnusedDraftHydration) {
+      return;
+    }
     const existingLoad = _historyLoadInFlight.get(currentSessionKey);
     if (existingLoad) {
-      await existingLoad;
-      return;
+      await existingLoad.promise;
+      if (quiet || !existingLoad.quiet) {
+        return;
+      }
     }
 
     const lastLoadAt = _lastHistoryLoadAtBySession.get(currentSessionKey) || 0;
@@ -3092,6 +3108,8 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         sending: historyIsSendingNow,
       } = get();
       const liveTurnSignal = hasLiveTurnSignal(get());
+      const hasBlockingLiveTurnSignal = liveTurnSignal
+        && Date.now() - _lastChatEventAt < HISTORY_POLL_SILENCE_WINDOW_MS;
 
       const historyUserMsTs = historyLastUserMessageAt ? toMs(historyLastUserMessageAt) : 0;
       const isAfterHistoryUserMsg = (msg: RawMessage): boolean => {
@@ -3099,7 +3117,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         return toMs(msg.timestamp) >= historyUserMsTs;
       };
 
-      const shouldEnterHistoryPendingFinal = historyIsSendingNow && !historyPendingFinal && !liveTurnSignal && [...filteredMessages].reverse().some((msg) => {
+      const shouldEnterHistoryPendingFinal = historyIsSendingNow && !historyPendingFinal && !hasBlockingLiveTurnSignal && [...filteredMessages].reverse().some((msg) => {
         if (msg.role !== 'assistant') return false;
         return isAfterHistoryUserMsg(msg);
       });
@@ -3107,7 +3125,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       const historyRecentAssistant = (historyPendingFinal || shouldEnterHistoryPendingFinal)
         ? [...filteredMessages].reverse().find((msg) => {
             if (msg.role !== 'assistant') return false;
-            if (!hasNonToolAssistantContent(msg)) return false;
+            if (!hasAssistantFinalTextContent(msg)) return false;
             return isAfterHistoryUserMsg(msg);
           })
         : undefined;
@@ -3118,6 +3136,33 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             && isEmptyAssistantResponse(msg)
           ))
         : undefined;
+      const staleStreamingReferenceTs = (() => {
+        const currentStreamingMessage = get().streamingMessage;
+        if (currentStreamingMessage && typeof currentStreamingMessage === 'object') {
+          const streamingTimestamp = (currentStreamingMessage as RawMessage).timestamp;
+          if (typeof streamingTimestamp === 'number') {
+            return toMs(streamingTimestamp);
+          }
+        }
+        return historyLastUserMessageAt ? toMs(historyLastUserMessageAt) : 0;
+      })();
+      const historySettledAssistant = !historyIsSendingNow
+        ? [...filteredMessages].reverse().find((msg) => {
+            if (msg.role !== 'assistant') return false;
+            if (!hasAssistantFinalTextContent(msg)) return false;
+            if (!isAfterHistoryUserMsg(msg)) return false;
+            if (!staleStreamingReferenceTs || typeof msg.timestamp !== 'number') return true;
+            return toMs(msg.timestamp) >= staleStreamingReferenceTs;
+          })
+        : undefined;
+      const shouldClearSettledStreamingState = !historyIsSendingNow
+        && !!historySettledAssistant
+        && (
+          get().streamingMessage != null
+          || (typeof get().streamingText === 'string' && get().streamingText.trim().length > 0)
+          || get().streamingTools.length > 0
+          || get().pendingToolImages.length > 0
+        );
       const trailingUserIndex = findLastUserMessageIndex(finalMessages);
       const trailingUser = trailingUserIndex >= 0 ? finalMessages[trailingUserIndex] : undefined;
       const shouldRetryIncompleteHistory = !historyIsSendingNow
@@ -3127,7 +3172,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         && Date.now() - toMs(trailingUser.timestamp) <= HISTORY_INCOMPLETE_RETRY_WINDOW_MS
         && !finalMessages.slice(trailingUserIndex + 1).some((message) => message.role === 'assistant');
 
-      const shouldDeferHistoryCurrentTurn = historyIsSendingNow && !historyPendingFinal && liveTurnSignal;
+      const shouldDeferHistoryCurrentTurn = historyIsSendingNow && !historyPendingFinal && hasBlockingLiveTurnSignal;
       const deferredMergeResult = shouldDeferHistoryCurrentTurn
         ? mergeDeferredCurrentTurnMessages(get().messages, finalMessages, historyLastUserMessageAt)
         : { messages: finalMessages, appendedProcessCount: 0 };
@@ -3182,8 +3227,19 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                   pendingToolImages: [],
                   error: EMPTY_ASSISTANT_RESPONSE_ERROR,
                 }
-              : shouldEnterHistoryPendingFinal || (shouldDeferHistoryCurrentTurn && deferredMergeResult.appendedProcessCount > 0)
+            : shouldEnterHistoryPendingFinal || (shouldDeferHistoryCurrentTurn && deferredMergeResult.appendedProcessCount > 0)
                 ? { pendingFinal: true, sendStage: 'finalizing' }
+                : shouldClearSettledStreamingState
+                  ? {
+                      sending: false,
+                      activeRunId: null,
+                      sendStage: null,
+                      pendingFinal: false,
+                      streamingText: '',
+                      streamingMessage: null,
+                      streamingTools: [],
+                      pendingToolImages: [],
+                    }
                 : {}),
         };
       });
@@ -3256,8 +3312,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
 
       try {
         const shouldTryLocalSessionHistory = !isCronSessionKey(currentSessionKey)
-          && !get().sending
-          && !get().sessionRunningState?.[currentSessionKey];
+          && !get().sending;
         if (shouldTryLocalSessionHistory) {
           const localHistory = await loadLocalSessionHistory(currentSessionKey, 200);
           if (localHistory.resolved) {
@@ -3298,7 +3353,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       }
     })();
 
-    _historyLoadInFlight.set(currentSessionKey, loadPromise);
+    _historyLoadInFlight.set(currentSessionKey, { promise: loadPromise, quiet });
     try {
       await loadPromise;
     } finally {
@@ -3310,7 +3365,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       }
       
       const active = _historyLoadInFlight.get(currentSessionKey);
-      if (active === loadPromise) {
+      if (active?.promise === loadPromise) {
         _historyLoadInFlight.delete(currentSessionKey);
       }
     }
@@ -3651,8 +3706,13 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     // way to track progress when the gateway doesn't stream intermediate turns.
     const hasUsefulData = resolvedState === 'delta' || resolvedState === 'final'
       || resolvedState === 'error' || resolvedState === 'aborted';
+    const shouldSuspendHistoryPoll = resolvedState === 'final'
+      || resolvedState === 'error'
+      || resolvedState === 'aborted';
     if (hasUsefulData) {
-      clearHistoryPoll();
+      if (shouldSuspendHistoryPoll) {
+        clearHistoryPoll();
+      }
       // Adopt run started from another client (e.g. console at 127.0.0.1:18789):
       // show loading/streaming in the app when this session has an active run.
       const { sending } = get();
@@ -4029,8 +4089,10 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
   // ── Refresh: reload history + sessions ──
 
   refresh: async () => {
-    const { loadHistory, loadSessions } = get();
-    await Promise.all([loadHistory(), loadSessions()]);
+    const { currentSessionKey, loadHistory, loadSessions } = get();
+    clearHistoryIncompleteRetry(currentSessionKey);
+    await loadSessions();
+    await loadHistory();
   },
 
   clearError: () => set({ error: null }),

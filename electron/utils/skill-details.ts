@@ -169,13 +169,199 @@ function sanitizeJsonLike(input: string): string {
     .trim();
 }
 
-function parseMetadata(frontmatter: string): Record<string, unknown> | undefined {
-  const match = frontmatter.match(/^metadata:\s*\n((?:^[ \t].*(?:\n|$))*)/m);
-  if (!match) return undefined;
-  const block = dedentBlock(match[1]);
-  const sanitized = sanitizeJsonLike(block);
+function parseJsonObject(input: string): Record<string, unknown> | undefined {
+  const sanitized = sanitizeJsonLike(input);
   if (!sanitized) return undefined;
-  return JSON.parse(sanitized) as Record<string, unknown>;
+
+  try {
+    const parsed = JSON.parse(sanitized) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return undefined;
+    }
+
+    return parsed as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+function countLeadingIndent(line: string): number {
+  const match = line.match(/^[ \t]*/);
+  return match ? match[0].replace(/\t/g, '  ').length : 0;
+}
+
+function splitInlineCollection(input: string): string[] {
+  const items: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+
+  for (let index = 0; index < input.length; index += 1) {
+    const character = input[index];
+    const previous = index > 0 ? input[index - 1] : '';
+
+    if ((character === '"' || character === '\'') && previous !== '\\') {
+      if (quote === character) {
+        quote = null;
+      } else if (quote === null) {
+        quote = character;
+      }
+      current += character;
+      continue;
+    }
+
+    if (character === ',' && quote === null) {
+      items.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += character;
+  }
+
+  if (current.trim().length > 0) {
+    items.push(current.trim());
+  }
+
+  return items;
+}
+
+function parseYamlScalar(rawValue: string): unknown {
+  const value = rawValue.trim();
+  if (!value) return '';
+
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) {
+    return value.slice(1, -1);
+  }
+
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (value === 'null' || value === '~') return null;
+
+  if (/^-?\d+(?:\.\d+)?$/.test(value)) {
+    return Number(value);
+  }
+
+  if (value.startsWith('[') && value.endsWith(']')) {
+    const inner = value.slice(1, -1).trim();
+    if (!inner) return [];
+    return splitInlineCollection(inner).map((item) => parseYamlScalar(item));
+  }
+
+  return value;
+}
+
+function parseYamlLikeObject(input: string): Record<string, unknown> | undefined {
+  const lines = input
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/\t/g, '  '));
+
+  function parseObject(startIndex: number, indent: number): { value: Record<string, unknown>; nextIndex: number } {
+    const result: Record<string, unknown> = {};
+    let index = startIndex;
+
+    while (index < lines.length) {
+      const rawLine = lines[index];
+      const trimmed = rawLine.trim();
+
+      if (!trimmed || trimmed.startsWith('#')) {
+        index += 1;
+        continue;
+      }
+
+      const lineIndent = countLeadingIndent(rawLine);
+      if (lineIndent < indent) {
+        break;
+      }
+      if (lineIndent > indent) {
+        throw new Error(`Unexpected indentation in metadata at line ${index + 1}`);
+      }
+
+      const line = rawLine.slice(indent);
+      const separatorIndex = line.indexOf(':');
+      if (separatorIndex <= 0) {
+        throw new Error(`Invalid metadata line: ${line}`);
+      }
+
+      const key = line.slice(0, separatorIndex).trim();
+      const remainder = line.slice(separatorIndex + 1).trim();
+
+      if (!remainder) {
+        let nextIndex = index + 1;
+        while (nextIndex < lines.length && !lines[nextIndex].trim()) {
+          nextIndex += 1;
+        }
+
+        if (nextIndex >= lines.length || countLeadingIndent(lines[nextIndex]) <= lineIndent) {
+          result[key] = {};
+          index = nextIndex;
+          continue;
+        }
+
+        const nested = parseObject(nextIndex, countLeadingIndent(lines[nextIndex]));
+        result[key] = nested.value;
+        index = nested.nextIndex;
+        continue;
+      }
+
+      result[key] = parseYamlScalar(remainder);
+      index += 1;
+    }
+
+    return { value: result, nextIndex: index };
+  }
+
+  const firstContentLineIndex = lines.findIndex((line) => line.trim().length > 0);
+  if (firstContentLineIndex === -1) return undefined;
+
+  return parseObject(firstContentLineIndex, countLeadingIndent(lines[firstContentLineIndex])).value;
+}
+
+function extractMetadataBlock(frontmatter: string): string | undefined {
+  const lines = frontmatter.replace(/\r\n/g, '\n').split('\n');
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const match = line.match(/^metadata:\s*(.*)$/);
+    if (!match) continue;
+
+    const inlineValue = match[1].trim();
+    if (inlineValue) {
+      return inlineValue;
+    }
+
+    const metadataIndent = countLeadingIndent(line);
+    const blockLines: string[] = [];
+
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const candidate = lines[cursor];
+      const trimmed = candidate.trim();
+
+      if (!trimmed) {
+        blockLines.push(candidate);
+        continue;
+      }
+
+      const candidateIndent = countLeadingIndent(candidate);
+      if (candidateIndent <= metadataIndent) {
+        break;
+      }
+
+      blockLines.push(candidate);
+    }
+
+    const block = dedentBlock(blockLines.join('\n')).trim();
+    return block || undefined;
+  }
+
+  return undefined;
+}
+
+function parseMetadata(frontmatter: string): Record<string, unknown> | undefined {
+  const metadataBlock = extractMetadataBlock(frontmatter);
+  if (!metadataBlock) return undefined;
+
+  return parseJsonObject(metadataBlock) ?? parseYamlLikeObject(metadataBlock);
 }
 
 function parseSimpleString(frontmatter: string, key: string): string | undefined {
@@ -201,11 +387,13 @@ function parseSkillSpec(raw: string): ParsedSkillSpec {
 
   try {
     const metadata = parseMetadata(frontmatter);
-    const openclaw = (metadata?.openclaw && typeof metadata.openclaw === 'object')
-      ? metadata.openclaw as Record<string, unknown>
+    const metadataNamespace = ['openclaw', 'clawhub', 'clawdbot']
+      .find((key) => metadata?.[key] && typeof metadata[key] === 'object' && !Array.isArray(metadata[key]));
+    const skillMetadata = metadataNamespace
+      ? metadata?.[metadataNamespace] as Record<string, unknown>
       : undefined;
-    const requires = (openclaw?.requires && typeof openclaw.requires === 'object')
-      ? openclaw.requires as Record<string, unknown>
+    const requires = (skillMetadata?.requires && typeof skillMetadata.requires === 'object' && !Array.isArray(skillMetadata.requires))
+      ? skillMetadata.requires as Record<string, unknown>
       : undefined;
     const toStringArray = (value: unknown): string[] | undefined => {
       if (!Array.isArray(value)) return undefined;
@@ -217,7 +405,7 @@ function parseSkillSpec(raw: string): ParsedSkillSpec {
       name: parseSimpleString(frontmatter, 'name'),
       description: parseSimpleString(frontmatter, 'description'),
       homepage: parseSimpleString(frontmatter, 'homepage'),
-      primaryEnv: typeof openclaw?.primaryEnv === 'string' ? openclaw.primaryEnv : undefined,
+      primaryEnv: typeof skillMetadata?.primaryEnv === 'string' ? skillMetadata.primaryEnv : undefined,
       requires: {
         env: toStringArray(requires?.env),
         config: toStringArray(requires?.config),

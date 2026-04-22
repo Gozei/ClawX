@@ -43,6 +43,15 @@ function classifyMessage(message: string): AppErrorCode {
   const lower = message.toLowerCase();
 
   if (
+    lower.includes('pairing required')
+    || lower.includes('gateway closed')
+    || lower.includes('gateway not connected')
+    || lower.includes('gateway ping timeout')
+    || lower.includes('gateway connect failed')
+  ) {
+    return 'GATEWAY';
+  }
+  if (
     lower.includes('invalid ipc channel')
     || lower.includes('no handler registered')
     || lower.includes('window is not defined')

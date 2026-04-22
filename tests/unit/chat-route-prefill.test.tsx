@@ -28,6 +28,7 @@ const { agentsState, chatState, gatewayState, settingsState } = vi.hoisted(() =>
     abortRun: vi.fn(),
     clearError: vi.fn(),
     cleanupEmptySession: vi.fn(),
+    loadHistory: vi.fn(async () => {}),
     queuedMessages: {} as Record<string, unknown>,
   },
   gatewayState: {
@@ -114,6 +115,7 @@ vi.mock('@/pages/Chat/ChatToolbarV2', () => ({
 describe('Chat route prefill', () => {
   beforeEach(() => {
     agentsState.fetchAgents.mockClear();
+    chatState.loadHistory.mockClear();
     chatState.messages = [];
     chatState.currentSessionKey = 'agent:main:main';
     chatState.loading = false;

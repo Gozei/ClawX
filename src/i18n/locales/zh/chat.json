@@ -77,7 +77,7 @@
         "network": "网络异常，请检查连接后重试。",
         "config": "当前配置无效，请检查设置后重试。",
         "gatewayNotConnected": "网关未连接。",
-        "gatewayUnavailable": "网关暂不可用，请启动或重启网关后重试。"
+        "gatewayUnavailable": "网关异常，请重启网关后重试。"
     },
     "sessionWarnings": {
         "finalReplyMissing": "最终回复暂未到达，但你仍然可以继续当前会话。",

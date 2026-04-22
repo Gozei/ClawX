@@ -17,6 +17,7 @@ import {
   loadMissingPreviews,
   getEmptyAssistantResponseError,
   toMs,
+  isUnusedDraftSession,
 } from './helpers';
 import { buildCronSessionHistoryPath, isCronSessionKey } from './cron-session-utils';
 import type { RawMessage } from './types';
@@ -41,7 +42,16 @@ export function createHistoryActions(
 ): Pick<SessionHistoryActions, 'loadHistory'> {
   return {
     loadHistory: async (quiet = false) => {
-      const { currentSessionKey } = get();
+      const currentState = get();
+      const { currentSessionKey } = currentState;
+      const shouldSkipUnusedDraftHydration = (
+        currentSessionKey.includes(':session-')
+        && !currentState.sessions.some((session) => session.key === currentSessionKey)
+        && isUnusedDraftSession(currentState, currentSessionKey)
+      );
+      if (shouldSkipUnusedDraftHydration) {
+        return;
+      }
       if (!quiet) set({ loading: true, error: null });
 
       const isCurrentSession = () => get().currentSessionKey === currentSessionKey;

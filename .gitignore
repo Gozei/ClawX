@@ -71,3 +71,5 @@ docs/pr-session-notes-*.md
 .pnpm-store/
 package-lock.json
 scratch/
+tmp-playwright-*/
+tmp_origin_wubin_chat_index.tsx

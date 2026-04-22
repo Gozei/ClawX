@@ -178,6 +178,19 @@ test.describe('Chat composer actions', () => {
     await expect(page.getByTestId('chat-queued-message-send-now')).toHaveText('立即发送');
   });
 
+  test.fixme('keeps the queued draft card visible while the current run is still active', async ({ page }) => {
+    await completeSetup(page);
+    await seedConfiguredModels(page);
+    await page.reload();
+    await expect(page.getByTestId('main-layout')).toBeVisible();
+
+    // This scenario needs a deterministic in-flight run so the second submit
+    // queues behind the current turn instead of sending immediately.
+    // The unit test suite covers the rendering contract until the Electron
+    // harness exposes a stable seeded-running-session path.
+    void page;
+  });
+
   test('keeps model switching available while the gateway is disconnected', async ({ page }) => {
     await completeSetup(page);
     await seedConfiguredModels(page);
