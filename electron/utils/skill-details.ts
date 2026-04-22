@@ -1,5 +1,5 @@
 import { basename, dirname, join } from 'path';
-import { access, readFile, rm } from 'fs/promises';
+import { access, readFile, rm, stat } from 'fs/promises';
 import { constants } from 'fs';
 import type { GatewayManager } from '../gateway/manager';
 import { getAllSkillConfigs, updateSkillConfig } from './skill-config';
@@ -120,6 +120,13 @@ type ParsedSkillSpec = {
   rawMarkdown?: string;
   parseError?: string;
 };
+
+type CachedSkillSpec = {
+  mtimeMs: number;
+  spec: ParsedSkillSpec;
+};
+
+const skillSpecCache = new Map<string, CachedSkillSpec>();
 
 function mapSkillStatus(skill: GatewaySkillStatus): SkillListItem {
   return {
@@ -432,8 +439,19 @@ async function readSkillSpec(filePath: string | undefined, baseDir: string | und
   }
 
   try {
+    const fileStat = await stat(skillFile);
+    const cached = skillSpecCache.get(skillFile);
+    if (cached && cached.mtimeMs === fileStat.mtimeMs) {
+      return cached.spec;
+    }
+
     const raw = await readFile(skillFile, 'utf8');
-    return parseSkillSpec(raw);
+    const spec = parseSkillSpec(raw);
+    skillSpecCache.set(skillFile, {
+      mtimeMs: fileStat.mtimeMs,
+      spec,
+    });
+    return spec;
   } catch (error) {
     return { parseError: String(error) };
   }

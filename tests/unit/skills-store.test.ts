@@ -86,10 +86,10 @@ describe('skills store refresh behavior', () => {
     useSkillsStore.setState({
       skillDetailsById: {
         'gh-issues': {
-          skill: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues', enabled: false, ready: false },
-          runtime: {},
+          identity: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues' },
+          status: { enabled: false, ready: false },
           config: {},
-          spec: {},
+          requirements: {},
         },
       },
     });
@@ -100,10 +100,10 @@ describe('skills store refresh behavior', () => {
       }
       if (path === '/api/skills/gh-issues') {
         return {
-          skill: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues', enabled: true, ready: true },
-          runtime: {},
+          identity: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues' },
+          status: { enabled: true, ready: true },
           config: {},
-          spec: {},
+          requirements: {},
         };
       }
       throw new Error(`Unexpected path: ${path}`);
@@ -117,7 +117,7 @@ describe('skills store refresh behavior', () => {
       '/api/skills/gh-issues',
     ]);
     expect(useSkillsStore.getState().skills[0]?.enabled).toBe(true);
-    expect(useSkillsStore.getState().skillDetailsById['gh-issues']?.skill.ready).toBe(true);
+    expect(useSkillsStore.getState().skillDetailsById['gh-issues']?.status.ready).toBe(true);
   });
 
   it('forces list and detail refresh after disabling a cached skill', async () => {
@@ -126,10 +126,10 @@ describe('skills store refresh behavior', () => {
     useSkillsStore.setState({
       skillDetailsById: {
         'gh-issues': {
-          skill: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues', enabled: true, ready: true },
-          runtime: {},
+          identity: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues' },
+          status: { enabled: true, ready: true },
           config: {},
-          spec: {},
+          requirements: {},
         },
       },
     });
@@ -140,10 +140,10 @@ describe('skills store refresh behavior', () => {
       }
       if (path === '/api/skills/gh-issues') {
         return {
-          skill: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues', enabled: false, ready: false },
-          runtime: {},
+          identity: { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues' },
+          status: { enabled: false, ready: false },
           config: {},
-          spec: {},
+          requirements: {},
         };
       }
       throw new Error(`Unexpected path: ${path}`);
@@ -157,7 +157,7 @@ describe('skills store refresh behavior', () => {
       '/api/skills/gh-issues',
     ]);
     expect(useSkillsStore.getState().skills[0]?.enabled).toBe(false);
-    expect(useSkillsStore.getState().skillDetailsById['gh-issues']?.skill.ready).toBe(false);
+    expect(useSkillsStore.getState().skillDetailsById['gh-issues']?.status.ready).toBe(false);
   });
 
   it('updates skill enabled state immediately before the gateway call settles', async () => {

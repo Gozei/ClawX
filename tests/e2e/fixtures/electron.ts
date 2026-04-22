@@ -1,4 +1,3 @@
-import electronBinaryPath from 'electron';
 import { _electron as electron, expect, test as base, type ElectronApplication, type Page } from '@playwright/test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -141,7 +140,6 @@ async function launchDeepAiWorkerElectron(
     ? { ELECTRON_DISABLE_SANDBOX: '1' }
     : {};
   return await electron.launch({
-    executablePath: electronBinaryPath,
     args: [electronEntry],
     env: {
       ...process.env,
