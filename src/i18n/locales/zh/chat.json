@@ -91,7 +91,8 @@
     },
     "archive": {
         "confirmMessage": "确认将该会话归档吗？归档后可在「系统设置-会话归档」中查看已归档任务。",
-        "success": "归档成功"
+        "success": "归档成功，可在「系统设置-会话归档」中查看已归档任务",
+        "error": "归档失败"
     },
     "historyBuckets": {
         "today": "今天",

@@ -277,7 +277,6 @@ export function Sidebar() {
 
   const { t, i18n } = useTranslation(['common', 'chat']);
   const [sessionToDelete, setSessionToDelete] = useState<{ key: string; label: string } | null>(null);
-  const [sessionToArchive, setSessionToArchive] = useState<{ key: string; label: string } | null>(null);
   const [editingSessionKey, setEditingSessionKey] = useState<string | null>(null);
   const [editingSessionName, setEditingSessionName] = useState('');
   const [openSessionMenuKey, setOpenSessionMenuKey] = useState<string | null>(null);
@@ -323,6 +322,16 @@ export function Sidebar() {
 
     setSessionMenuPosition(resolveSessionMenuPosition(openSessionMenuKey));
   }, [openSessionMenuKey, resolveSessionMenuPosition]);
+
+  const handleArchiveSession = useCallback(async (sessionKey: string) => {
+    try {
+      await archiveSession(sessionKey);
+      navigate('/');
+      toast.success(t('chat:archive.success'));
+    } catch {
+      toast.error(t('chat:archive.error'));
+    }
+  }, [archiveSession, navigate, t]);
 
   useLayoutEffect(() => {
     if (!openSessionMenuKey) return;
@@ -829,10 +838,7 @@ export function Sidebar() {
               e.preventDefault();
               e.stopPropagation();
               setOpenSessionMenuKey(null);
-              setSessionToArchive({
-                key: openSessionMenuKey,
-                label: activeSessionMenuLabel,
-              });
+              void handleArchiveSession(openSessionMenuKey);
             }}
             className="flex w-full items-center px-3 py-2 text-left text-[13px] text-foreground/85 transition-colors hover:bg-[#eef3fb] dark:hover:bg-white/5"
           >
@@ -943,21 +949,6 @@ export function Sidebar() {
         )}
       </div>
 
-      <ConfirmDialog
-        open={!!sessionToArchive}
-        title={t('common:actions.confirm')}
-        message={t('chat:archive.confirmMessage')}
-        confirmLabel={t('common:actions.confirm')}
-        cancelLabel={t('common:actions.cancel')}
-        onConfirm={async () => {
-          if (!sessionToArchive) return;
-          await archiveSession(sessionToArchive.key);
-          setSessionToArchive(null);
-          navigate('/');
-          toast.success(t('chat:archive.success'));
-        }}
-        onCancel={() => setSessionToArchive(null)}
-      />
       <ConfirmDialog
         open={!!sessionToDelete}
         title={t('common:actions.confirm')}

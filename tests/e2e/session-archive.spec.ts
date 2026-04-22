@@ -48,16 +48,14 @@ test.describe('Session archive', () => {
 
       const sessionRow = page.getByTestId(`sidebar-session-${SESSION_KEY}`);
       await expect(sessionRow).toBeVisible({ timeout: 60_000 });
-      await sessionRow.click();
       await sessionRow.hover();
       await page.getByTestId(`sidebar-session-menu-trigger-${SESSION_KEY}`).click();
+      await expect(page.getByTestId(`sidebar-session-menu-panel-${SESSION_KEY}`)).toBeVisible();
       await expect(page.getByTestId(`sidebar-session-menu-archive-${SESSION_KEY}`)).toBeVisible();
       await page.getByTestId(`sidebar-session-menu-archive-${SESSION_KEY}`).click();
 
-      await expect(page.getByText('确认将该会话归档吗？归档后可在「系统设置-会话归档」中查看已归档任务。')).toBeVisible();
-      await page.getByRole('button', { name: '确认' }).click();
-
-      await expect(page.getByText('归档成功')).toBeVisible();
+      await expect(page.getByText('确认将该会话归档吗？归档后可在「系统设置-会话归档」中查看已归档任务。')).toHaveCount(0);
+      await expect(page.getByText('归档成功，可在「系统设置-会话归档」中查看已归档任务')).toBeVisible();
       await expect(page.getByTestId(`sidebar-session-${SESSION_KEY}`)).toHaveCount(0);
 
       await openSettingsHub(page);

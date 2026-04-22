@@ -90,7 +90,8 @@
     },
     "archive": {
         "confirmMessage": "Are you sure you want to archive this session? You can review archived tasks later in Settings - Session Archive.",
-        "success": "Archived successfully"
+        "success": "Archived successfully. You can find archived tasks in Settings - Session Archive.",
+        "error": "Failed to archive"
     },
     "historyBuckets": {
         "today": "Today",
