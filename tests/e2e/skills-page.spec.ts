@@ -831,6 +831,282 @@ test.describe('Deep AI Worker skills page flows', () => {
     }
   });
 
+  test('renders the redesigned configuration workspace and saves unified skill config from the detail page', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      await app.evaluate(({ ipcMain }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (globalThis as any).__clawxE2eSkillConfigSaveBody = null;
+
+        ipcMain.removeHandler('hostapi:fetch');
+        ipcMain.handle('hostapi:fetch', async (_event, request: { path?: string; method?: string; body?: string | null }) => {
+          const method = request?.method ?? 'GET';
+          const path = request?.path ?? '';
+          const body = request?.body ? JSON.parse(request.body) : null;
+
+          if (path === '/api/gateway/status' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: { state: 'running', port: 18789, pid: 12345 },
+              },
+            };
+          }
+
+          if (path === '/api/skills' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: [{
+                  id: 'schedule-feishu',
+                  slug: 'schedule-feishu',
+                  name: 'schedule-feishu',
+                  description: 'Feishu schedule helper.',
+                  enabled: true,
+                  ready: false,
+                  version: '1.0.0',
+                  missing: { env: ['FEISHU_APP_SECRET'], config: ['schedule_doc_url'] },
+                  baseDir: 'C:/Users/test/.openclaw/skills/schedule-feishu',
+                }],
+              },
+            };
+          }
+
+          if (path === '/api/skills/schedule-feishu' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: {
+                  identity: {
+                    id: 'schedule-feishu',
+                    slug: 'schedule-feishu',
+                    name: 'schedule-feishu',
+                    description: 'Feishu schedule helper.',
+                    version: '1.0.0',
+                    baseDir: 'C:/Users/test/.openclaw/skills/schedule-feishu',
+                  },
+                  status: {
+                    enabled: true,
+                    ready: false,
+                    missing: { env: ['FEISHU_APP_SECRET'], config: ['schedule_doc_url'] },
+                  },
+                  requirements: {
+                    primaryEnv: 'FEISHU_APP_SECRET',
+                    requires: {
+                      env: ['FEISHU_APP_SECRET'],
+                      config: ['schedule_doc_url'],
+                    },
+                    rawMarkdown: '# Schedule',
+                  },
+                  config: {
+                    apiKey: '',
+                    env: { FEISHU_APP_ID: 'cli_test' },
+                    config: { schedule_doc_url: '' },
+                    envFilePath: 'C:/Users/test/.openclaw/skills/schedule-feishu/config/.env',
+                    configFilePath: 'C:/Users/test/.openclaw/skills/schedule-feishu/config.json',
+                  },
+                  configuration: {
+                    credentials: [
+                      {
+                        key: 'FEISHU_APP_SECRET',
+                        label: 'FEISHU_APP_SECRET',
+                        type: 'secret',
+                        required: true,
+                        configured: false,
+                        value: '',
+                        source: 'apiKey',
+                        storageTargets: [{ kind: 'managed-apiKey' }],
+                      },
+                    ],
+                    optional: [
+                      {
+                        key: 'FEISHU_APP_ID',
+                        label: 'FEISHU_APP_ID',
+                        type: 'env',
+                        required: false,
+                        configured: true,
+                        value: 'cli_test',
+                        source: 'env',
+                        storageTargets: [{ kind: 'managed-env', key: 'FEISHU_APP_ID' }],
+                      },
+                    ],
+                    config: [
+                      {
+                        key: 'schedule_doc_url',
+                        label: 'schedule_doc_url',
+                        type: 'url',
+                        required: true,
+                        configured: false,
+                        value: '',
+                        source: 'config',
+                        storageTargets: [{ kind: 'managed-config', key: 'schedule_doc_url' }],
+                      },
+                    ],
+                    runtime: [
+                      { key: 'env:FEISHU_APP_SECRET', label: 'FEISHU_APP_SECRET', category: 'env', status: 'missing' },
+                      { key: 'config:schedule_doc_url', label: 'schedule_doc_url', category: 'config', status: 'missing' },
+                    ],
+                    mirrors: {
+                      envFilePath: 'C:/Users/test/.openclaw/skills/schedule-feishu/config/.env',
+                      configFilePath: 'C:/Users/test/.openclaw/skills/schedule-feishu/config.json',
+                    },
+                  },
+                },
+              },
+            };
+          }
+
+          if (path === '/api/skills/schedule-feishu/config' && method === 'PUT') {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (globalThis as any).__clawxE2eSkillConfigSaveBody = body;
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: { success: true },
+              },
+            };
+          }
+
+          if (path === '/api/clawhub/sources' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: {
+                  success: true,
+                  results: [],
+                },
+              },
+            };
+          }
+
+          if (path === '/api/clawhub/source-counts' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: {
+                  success: true,
+                  results: [],
+                },
+              },
+            };
+          }
+
+          if (path === '/api/clawhub/list' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: {
+                  success: true,
+                  results: [],
+                },
+              },
+            };
+          }
+
+          return {
+            ok: false,
+            error: {
+              message: `Unexpected hostapi:fetch request: ${method} ${path}`,
+            },
+          };
+        });
+      });
+
+      const page = await getStableWindow(app);
+      await page.reload();
+      await expect(page.getByTestId('main-layout')).toBeVisible();
+
+      await app.evaluate(({ BrowserWindow }) => {
+        BrowserWindow.getAllWindows().forEach((window) => {
+          window.webContents.send('gateway:status-changed', {
+            state: 'running',
+            port: 18789,
+            pid: 12345,
+          });
+        });
+      });
+
+      await page.getByTestId('sidebar-nav-skills').click();
+      await expect(page.getByTestId('skills-page')).toBeVisible();
+      await expect(page.getByTestId('skills-list-item-schedule-feishu')).toBeVisible();
+      await page.getByTestId('skills-list-item-schedule-feishu').click();
+      await expect(page.getByTestId('skills-detail-page')).toBeVisible();
+      await page.getByTestId('skills-detail-tab-config').click();
+
+      await page.getByTestId('skills-config-overview').waitFor();
+      await expect(page.getByTestId('skills-config-metric-credentials')).toContainText('0/1');
+      await expect(page.getByTestId('skills-config-metric-config')).toContainText('1');
+      await expect(page.getByTestId('skills-config-metric-runtime')).toContainText('2');
+      await expect(page.getByTestId('skills-config-metric-missing')).toContainText('2');
+      await expect(page.getByTestId('skills-config-card-credentials')).toBeVisible();
+      await expect(page.getByTestId('skills-config-card-optional-env')).toBeVisible();
+      await expect(page.getByTestId('skills-config-card-settings')).toBeVisible();
+      await expect(page.getByTestId('skills-config-card-runtime')).toBeVisible();
+      await expect(page.getByTestId('skills-config-card-storage')).toBeVisible();
+      await expect(page.getByTestId('skills-runtime-missing-list')).toBeVisible();
+
+      await page.getByTestId('skills-detail-primary-env-input').fill('secret-value');
+      await page.getByText('Add variable').click();
+      await page.getByPlaceholder(/KEY|键名/).last().fill('FEISHU_REGION');
+      await page.getByPlaceholder(/VALUE|值/).last().fill('cn');
+      await page.getByDisplayValue('').last().fill('https://docs.feishu.test/doc');
+      await page.getByTestId('skills-detail-save-config').click();
+
+      await expect.poll(async () => await app.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (globalThis as any).__clawxE2eSkillConfigSaveBody;
+      })).toEqual({
+        apiKey: 'secret-value',
+        env: {
+          FEISHU_APP_ID: 'cli_test',
+          FEISHU_REGION: 'cn',
+        },
+        config: {
+          schedule_doc_url: 'https://docs.feishu.test/doc',
+        },
+      });
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
+  test('does not re-surface the gateway restart hint after opening the skills page', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      const page = await getStableWindow(app);
+
+      await expect(page.getByTestId('main-layout')).toBeVisible();
+
+      const gatewayRestartHint = page.getByTestId('sidebar-gateway-restarting-hint');
+      await expect(gatewayRestartHint).toHaveCount(0, { timeout: 60_000 });
+
+      await page.getByTestId('sidebar-nav-skills').click();
+      await expect(page.getByTestId('skills-page')).toBeVisible();
+      await expect(page.getByTestId('app-guide-overlay')).toHaveCount(0);
+
+      await page.waitForTimeout(2_000);
+      await expect(gatewayRestartHint).toHaveCount(0);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
   test('shows the disconnected gateway hint above new chat and keeps it visible on the skills page', async ({ launchElectronApp }) => {
     const app = await launchElectronApp({ skipSetup: true });
 

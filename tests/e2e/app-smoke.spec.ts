@@ -1,6 +1,20 @@
 import { closeElectronApp, expect, openModelsFromSettings, test } from './fixtures/electron';
 
 test.describe('Deep AI Worker Electron smoke flows', () => {
+  test('shows the first window without waiting indefinitely for ready-to-show', async ({ launchElectronApp }) => {
+    const startupStart = performance.now();
+    const electronApp = await launchElectronApp({ skipSetup: true });
+
+    try {
+      const firstWindow = await electronApp.firstWindow();
+      await firstWindow.waitForLoadState('domcontentloaded');
+      await expect(firstWindow.getByTestId('main-layout')).toBeVisible({ timeout: 20_000 });
+      expect(performance.now() - startupStart).toBeLessThan(20_000);
+    } finally {
+      await closeElectronApp(electronApp);
+    }
+  });
+
   test('shows the setup wizard on a fresh profile', async ({ page }) => {
     await expect(page.getByTestId('setup-page')).toBeVisible();
     await expect(page.getByTestId('setup-welcome-step')).toBeVisible();

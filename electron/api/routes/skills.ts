@@ -35,10 +35,12 @@ export async function handleSkillRoutes(
         skillKey: string;
         apiKey?: string;
         env?: Record<string, string>;
+        config?: Record<string, unknown>;
       }>(req);
       sendJson(res, 200, await updateSkillConfig(body.skillKey, {
         apiKey: body.apiKey,
         env: body.env,
+        config: body.config,
       }));
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
@@ -67,6 +69,7 @@ export async function handleSkillRoutes(
       const body = await parseJsonBody<{
         apiKey?: string;
         env?: Record<string, string>;
+        config?: Record<string, unknown>;
       }>(req);
       sendJson(res, 200, await saveSkillConfig(ctx.gatewayManager, skillId, body));
     } catch (error) {

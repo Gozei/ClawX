@@ -4,8 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { testHome } = vi.hoisted(() => {
   const suffix = Math.random().toString(36).slice(2);
+  const systemTmp = process.env.TMPDIR || process.env.TEMP || process.env.TMP || '/tmp';
+  const separator = process.platform === 'win32' ? '\\' : '/';
+  const normalizedTmp = systemTmp.replace(/[\\/]+$/, '');
   return {
-    testHome: `/tmp/clawx-skill-config-${suffix}`,
+    testHome: `${normalizedTmp}${separator}clawx-skill-config-${suffix}`,
   };
 });
 
@@ -99,6 +102,10 @@ describe('skill-config managed assembly', () => {
       env: {
         FOO: 'bar',
       },
+      config: {
+        baseUrl: 'https://api.example.com',
+        retries: 3,
+      },
     });
 
     expect(result).toEqual({ success: true });
@@ -112,6 +119,10 @@ describe('skill-config managed assembly', () => {
           apiKey: 'sk-live',
           env: {
             FOO: 'bar',
+          },
+          config: {
+            baseUrl: 'https://api.example.com',
+            retries: 3,
           },
         },
       },
@@ -130,6 +141,10 @@ describe('skill-config managed assembly', () => {
           apiKey: 'sk-live',
           env: {
             FOO: 'bar',
+          },
+          config: {
+            baseUrl: 'https://api.example.com',
+            retries: 3,
           },
         },
       },

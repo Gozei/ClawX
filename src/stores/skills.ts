@@ -57,7 +57,7 @@ interface SkillsState {
   fetchMarketInstalledSkills: () => Promise<MarketplaceInstalledSkill[]>;
   fetchMarketplaceSkillDetail: (slug: string, sourceId?: string, force?: boolean) => Promise<MarketplaceSkillDetail>;
   fetchSkillDetail: (skillId: string, force?: boolean) => Promise<SkillDetail>;
-  saveSkillConfig: (skillId: string, input: { apiKey?: string; env?: Record<string, string> }) => Promise<void>;
+  saveSkillConfig: (skillId: string, input: { apiKey?: string; env?: Record<string, string>; config?: Record<string, unknown> }) => Promise<void>;
   deleteSkill: (skillId: string) => Promise<void>;
   searchSkills: (query: string, sourceId?: string, options?: { append?: boolean; cursor?: string }) => Promise<void>;
   loadMoreSearchResults: (query: string, sourceId?: string) => Promise<void>;
