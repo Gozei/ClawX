@@ -83,6 +83,10 @@
         "finalReplyMissing": "最终回复暂未到达，但你仍然可以继续当前会话。",
         "assistantMissingInUI": "助手回复可能已写入会话，但当前显示模式无法展示。请尝试工具栏「刷新聊天」、打开「显示思考过程」或「过程详情」，或稍等网关同步后再试。"
     },
+    "archive": {
+        "confirmMessage": "确认将该会话归档吗？归档后可在「系统设置-会话归档」中查看已归档任务。",
+        "success": "归档成功"
+    },
     "historyBuckets": {
         "today": "今天",
         "yesterday": "昨天",

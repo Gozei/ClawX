@@ -8,6 +8,7 @@
       "dashboard": "系统监控",
       "models": "模型",
       "channels": "通道",
+      "archives": "会话归档",
       "theme": "主题",
       "language": "语言",
       "checkUpdates": "检查更新",
@@ -39,6 +40,27 @@
     "console": {
       "failed": "打开 OpenClaw 控制台失败"
     }
+  },
+  "sessionArchive": {
+    "title": "会话归档",
+    "subtitle": "在 {{appName}} 中统一查看已归档会话，需要时可随时恢复继续对话。",
+    "searchPlaceholder": "按标题或会话编号搜索",
+    "count": "共 {{count}} 个已归档会话",
+    "empty": "暂无已归档会话。",
+    "emptyFiltered": "没有找到匹配的已归档会话。",
+    "columns": {
+      "title": "会话标题",
+      "sessionId": "会话编号",
+      "createdAt": "创建时间",
+      "actions": "操作"
+    },
+    "actions": {
+      "restore": "取消归档",
+      "delete": "删除会话"
+    },
+    "unarchiveSuccess": "取消归档成功",
+    "deleteSuccess": "删除成功",
+    "deleteConfirm": "确定要删除会话 \"{{label}}\" 吗？"
   },
   "appearance": {
     "title": "通用",

@@ -1369,6 +1369,14 @@ function parseSessionPinOrder(value: unknown): number | undefined {
   return undefined;
 }
 
+function parseSessionArchived(value: unknown): boolean {
+  return value === true;
+}
+
+function parseSessionArchivedAt(value: unknown): number | undefined {
+  return parseSessionUpdatedAtMs(value);
+}
+
 function normalizeSessionModelRef(model: unknown, modelProvider: unknown): string | undefined {
   const normalizedModel = typeof model === 'string' ? model.trim() : '';
   if (!normalizedModel) {
@@ -2346,6 +2354,8 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     | 'newSession'
     | 'renameSession'
     | 'toggleSessionPin'
+    | 'archiveSession'
+    | 'restoreSession'
     | 'deleteSession'
     | 'cleanupEmptySession'
     | 'loadHistory'
@@ -2432,12 +2442,12 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             .map((session) => (typeof (session as Record<string, unknown>).key === 'string' ? String((session as Record<string, unknown>).key) : ''))
             .filter(Boolean);
 
-          let persistedMetadata: Record<string, { pinned?: boolean; pinOrder?: number }> = {};
+          let persistedMetadata: Record<string, { pinned?: boolean; pinOrder?: number; archived?: boolean; archivedAt?: number; createdAt?: number }> = {};
           if (sessionKeys.length > 0) {
             try {
               const metadataResult = await hostApiFetch<{
                 success: boolean;
-                metadata?: Record<string, { pinned?: boolean; pinOrder?: number }>;
+                metadata?: Record<string, { pinned?: boolean; pinOrder?: number; archived?: boolean; archivedAt?: number; createdAt?: number }>;
               }>('/api/sessions/metadata', {
                 method: 'POST',
                 body: JSON.stringify({ sessionKeys }),
@@ -2461,10 +2471,15 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             updatedAt: parseSessionUpdatedAtMs(s.updatedAt),
             pinned: parseSessionPinned(persistedMetadata[String(s.key || '')]?.pinned ?? s.pinned),
             pinOrder: parseSessionPinOrder(persistedMetadata[String(s.key || '')]?.pinOrder ?? s.pinOrder),
+            archived: parseSessionArchived(persistedMetadata[String(s.key || '')]?.archived ?? s.archived),
+            archivedAt: parseSessionArchivedAt(persistedMetadata[String(s.key || '')]?.archivedAt ?? s.archivedAt),
+            createdAt: parseSessionUpdatedAtMs(persistedMetadata[String(s.key || '')]?.createdAt ?? s.createdAt),
           })).filter((s: ChatSession) => s.key);
 
+          const visibleSessions = sessions.filter((session) => !session.archived);
+
           const canonicalBySuffix = new Map<string, string>();
-          for (const session of sessions) {
+          for (const session of visibleSessions) {
             if (!session.key.startsWith('agent:')) continue;
             const parts = session.key.split(':');
             if (parts.length < 3) continue;
@@ -2476,7 +2491,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
 
           // Deduplicate: if both short and canonical existed, keep canonical only
           const seen = new Set<string>();
-          const dedupedSessions = sessions.filter((s) => {
+          const dedupedSessions = visibleSessions.filter((s) => {
             if (!s.key.startsWith('agent:') && canonicalBySuffix.has(s.key)) return false;
             if (seen.has(s.key)) return false;
             seen.add(s.key);
@@ -2842,8 +2857,65 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             pinOrder: nextPinned ? normalizedPinOrder : undefined,
           }
           : session
-      )),
+        )),
+      }));
+  },
+
+  archiveSession: async (key: string) => {
+    await hostApiFetch<{ success: boolean; archived: boolean; archivedAt?: number }>('/api/sessions/archive', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKey: key, archived: true }),
+    });
+
+    clearSessionView(key);
+    clearHistoryIncompleteRetry(key);
+
+    const { currentSessionKey, sessions } = get();
+    const remaining = sessions.filter((session) => session.key !== key);
+
+    if (currentSessionKey === key) {
+      const next = remaining[0];
+      set((s) => ({
+        sessions: remaining,
+        sessionModels: Object.fromEntries(Object.entries(s.sessionModels).filter(([sessionKey]) => sessionKey !== key)),
+        sessionLabels: Object.fromEntries(Object.entries(s.sessionLabels).filter(([sessionKey]) => sessionKey !== key)),
+        sessionLastActivity: Object.fromEntries(Object.entries(s.sessionLastActivity).filter(([sessionKey]) => sessionKey !== key)),
+        sessionRunningState: clearSessionEntryFromMap(s.sessionRunningState ?? {}, key),
+        messages: [],
+        streamingText: '',
+        streamingMessage: null,
+        streamingTools: [],
+        activeRunId: null,
+        error: null,
+        pendingFinal: false,
+        lastUserMessageAt: null,
+        pendingToolImages: [],
+        currentSessionKey: next?.key ?? DEFAULT_SESSION_KEY,
+        currentAgentId: getAgentIdFromSessionKey(next?.key ?? DEFAULT_SESSION_KEY),
+      }));
+      if (next) {
+        void get().loadHistory();
+      }
+      return;
+    }
+
+    set((s) => ({
+      sessions: remaining,
+      sessionModels: Object.fromEntries(Object.entries(s.sessionModels).filter(([sessionKey]) => sessionKey !== key)),
+      sessionLabels: Object.fromEntries(Object.entries(s.sessionLabels).filter(([sessionKey]) => sessionKey !== key)),
+      sessionLastActivity: Object.fromEntries(Object.entries(s.sessionLastActivity).filter(([sessionKey]) => sessionKey !== key)),
+      sessionRunningState: clearSessionEntryFromMap(s.sessionRunningState ?? {}, key),
     }));
+  },
+
+  restoreSession: async (key: string) => {
+    await hostApiFetch<{ success: boolean; archived: boolean }>('/api/sessions/archive', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKey: key, archived: false }),
+    });
+
+    await get().loadSessions();
+    get().switchSession(key);
   },
 
   cleanupEmptySession: () => {
