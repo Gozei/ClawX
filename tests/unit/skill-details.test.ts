@@ -321,6 +321,70 @@ metadata:
     }));
   });
 
+  it('re-reads updated SKILL.md content without relying on a cached spec', async () => {
+    const skillDir = join(testRoot, 'mineru');
+    await mkdir(skillDir, { recursive: true });
+    const skillFile = join(skillDir, 'SKILL.md');
+    await writeFile(skillFile, `---
+name: mineru
+description: MinerU
+metadata:
+  openclaw:
+    requires:
+      bins: [mineru-open-api]
+---
+
+# MinerU
+`, 'utf8');
+
+    getAllSkillConfigsMock.mockResolvedValue({});
+
+    const { getSkillDetail } = await import('@electron/utils/skill-details');
+    const gatewayManager = {
+      rpc: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            skillKey: 'mineru',
+            name: 'MinerU',
+            description: 'MinerU',
+            disabled: false,
+            eligible: false,
+            missing: { bins: ['mineru-open-api'], anyBins: [], env: [], config: [], os: [] },
+            baseDir: skillDir,
+            filePath: skillFile,
+          },
+        ],
+      }),
+    };
+
+    const initialDetail = await getSkillDetail(gatewayManager as never, 'mineru');
+    expect(initialDetail?.requirements.primaryEnv).toBeUndefined();
+    expect(initialDetail?.configuration.credentials).toHaveLength(0);
+
+    await writeFile(skillFile, `---
+name: mineru
+description: MinerU
+metadata:
+  openclaw:
+    requires:
+      bins: [mineru-open-api]
+      env: [MINERU_TOKEN]
+    primaryEnv: MINERU_TOKEN
+---
+
+# MinerU
+`, 'utf8');
+
+    const refreshedDetail = await getSkillDetail(gatewayManager as never, 'mineru');
+    expect(refreshedDetail?.requirements.primaryEnv).toBe('MINERU_TOKEN');
+    expect(refreshedDetail?.configuration.credentials).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'MINERU_TOKEN',
+        source: 'apiKey',
+      }),
+    ]));
+  });
+
   it('parses top-level clawdbot metadata without a metadata wrapper', async () => {
     const skillDir = join(testRoot, 'top-level-desearch');
     await mkdir(skillDir, { recursive: true });

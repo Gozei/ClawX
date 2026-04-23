@@ -1,5 +1,5 @@
 import { basename, dirname, join } from 'path';
-import { access, mkdir, readFile, rm, stat, writeFile } from 'fs/promises';
+import { access, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { constants } from 'fs';
 import type { GatewayManager } from '../gateway/manager';
 import { getAllSkillConfigs, updateSkillConfig } from './skill-config';
@@ -175,12 +175,6 @@ type LocalSkillFiles = {
   configFilePath?: string;
   config?: Record<string, unknown>;
 };
-type CachedSkillSpec = {
-  mtimeMs: number;
-  spec: ParsedSkillSpec;
-};
-
-const skillSpecCache = new Map<string, CachedSkillSpec>();
 function mapSkillStatus(skill: GatewaySkillStatus): SkillListItem {
   return {
     id: skill.skillKey,
@@ -610,19 +604,8 @@ async function readSkillSpec(filePath: string | undefined, baseDir: string | und
   }
 
   try {
-    const fileStat = await stat(skillFile);
-    const cached = skillSpecCache.get(skillFile);
-    if (cached && cached.mtimeMs === fileStat.mtimeMs) {
-      return cached.spec;
-    }
-
     const raw = await readFile(skillFile, 'utf8');
-    const spec = parseSkillSpec(raw);
-    skillSpecCache.set(skillFile, {
-      mtimeMs: fileStat.mtimeMs,
-      spec,
-    });
-    return spec;
+    return parseSkillSpec(raw);
   } catch (error) {
     return { parseError: String(error) };
   }
@@ -749,7 +732,6 @@ async function resolveLocalSkillFiles(baseDir: string | undefined, rawMarkdown: 
 
   let envFilePath: string | undefined;
   for (const candidate of envCandidates) {
-    // eslint-disable-next-line no-await-in-loop
     if (await pathExists(candidate)) {
       envFilePath = candidate;
       break;
