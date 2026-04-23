@@ -522,7 +522,7 @@ function inferPrimaryEnv(explicitPrimaryEnv: string | undefined, requiredEnv: st
 }
 
 function parseSkillSpec(raw: string): ParsedSkillSpec {
-  const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
+  const frontmatterMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?([\s\S]*)$/);
   if (!frontmatterMatch) {
     return {
       rawMarkdown: raw,

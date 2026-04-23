@@ -385,6 +385,61 @@ metadata:
     ]));
   });
 
+  it('parses inline metadata on the last CRLF frontmatter line before closing delimiter', async () => {
+    const skillDir = join(testRoot, 'extract-tables-from-pdf');
+    await mkdir(skillDir, { recursive: true });
+    const skillFile = join(skillDir, 'SKILL.md');
+    await writeFile(skillFile, [
+      '---',
+      'name: extract-tables-from-pdf',
+      'description: "Extract tables from PDF via MinerU."',
+      'homepage: https://mineru.net',
+      'metadata: {"openclaw": {"emoji": "📄", "requires": {"bins": ["mineru-open-api"], "env": ["MINERU_TOKEN"]}, "primaryEnv": "MINERU_TOKEN"}}',
+      '---',
+      '',
+      '# Extract Tables From Pdf',
+      '',
+      'Convert and extract content from .pdf using MinerU.',
+      '',
+    ].join('\r\n'), 'utf8');
+
+    getAllSkillConfigsMock.mockResolvedValue({});
+
+    const { getSkillDetail } = await import('@electron/utils/skill-details');
+    const gatewayManager = {
+      rpc: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            skillKey: 'extract-tables-from-pdf',
+            name: 'Extract Tables from PDF',
+            description: 'Extract tables from PDF via MinerU.',
+            disabled: false,
+            eligible: false,
+            missing: { bins: ['mineru-open-api'], anyBins: [], env: ['MINERU_TOKEN'], config: [], os: [] },
+            baseDir: skillDir,
+            filePath: skillFile,
+          },
+        ],
+      }),
+    };
+
+    const detail = await getSkillDetail(gatewayManager as never, 'extract-tables-from-pdf');
+
+    expect(detail?.requirements).toEqual(expect.objectContaining({
+      primaryEnv: 'MINERU_TOKEN',
+      requires: expect.objectContaining({
+        env: ['MINERU_TOKEN'],
+        bins: ['mineru-open-api'],
+      }),
+    }));
+    expect(detail?.configuration.credentials).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'MINERU_TOKEN',
+        source: 'apiKey',
+      }),
+    ]));
+  });
+
   it('parses top-level clawdbot metadata without a metadata wrapper', async () => {
     const skillDir = join(testRoot, 'top-level-desearch');
     await mkdir(skillDir, { recursive: true });
