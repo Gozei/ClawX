@@ -54,6 +54,8 @@ export interface AppSettings {
   hideInternalRoutineProcesses: boolean;
   assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
+  userUploadBaseDir: string;
+  assistantOutputBaseDir: string;
   machineId: string;
   hasReportedInstall: boolean;
 
@@ -116,6 +118,8 @@ function createDefaultSettings(): AppSettings {
     hideInternalRoutineProcesses: true,
     assistantMessageStyle: 'bubble',
     chatFontScale: 100,
+    userUploadBaseDir: '',
+    assistantOutputBaseDir: '',
     machineId: '',
     hasReportedInstall: false,
 

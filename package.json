@@ -1,6 +1,6 @@
 {
     "name": "deep-ai-worker",
-    "version": "0.6.2",
+    "version": "0.6.4",
     "pnpm": {
         "onlyBuiltDependencies": [
             "@discordjs/opus",
@@ -138,7 +138,7 @@
         "i18next": "^25.8.11",
         "jsdom": "^28.1.0",
         "lucide-react": "^0.563.0",
-        "openclaw": "npm:@gozei/deepclaw@2026.4.15",
+        "openclaw": "npm:@gozei/deepclaw@2026.4.16",
         "png2icons": "^2.0.1",
         "postcss": "^8.5.6",
         "react": "^19.2.4",

@@ -44,6 +44,8 @@ interface SettingsState {
   hideInternalRoutineProcesses: boolean;
   assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
+  userUploadBaseDir: string;
+  assistantOutputBaseDir: string;
 
   // Gateway
   gatewayAutoStart: boolean;
@@ -88,6 +90,8 @@ interface SettingsState {
   setHideInternalRoutineProcesses: (value: boolean) => void;
   setAssistantMessageStyle: (value: AssistantMessageStyle) => void;
   setChatFontScale: (value: number) => void;
+  setUserUploadBaseDir: (value: string) => void;
+  setAssistantOutputBaseDir: (value: string) => void;
   setGatewayAutoStart: (value: boolean) => void;
   setGatewayPort: (port: number) => void;
   setProxyEnabled: (value: boolean) => void;
@@ -124,6 +128,8 @@ const defaultSettings = {
   hideInternalRoutineProcesses: true,
   assistantMessageStyle: 'bubble' as AssistantMessageStyle,
   chatFontScale: 100,
+  userUploadBaseDir: '',
+  assistantOutputBaseDir: '',
   gatewayAutoStart: true,
   gatewayPort: 18789,
   proxyEnabled: false,
@@ -267,6 +273,22 @@ export const useSettingsStore = create<SettingsState>()(
         const normalized = Math.max(85, Math.min(120, Math.round(chatFontScale)));
         set({ chatFontScale: normalized });
         void hostApiFetch('/api/settings/chatFontScale', {
+          method: 'PUT',
+          body: JSON.stringify({ value: normalized }),
+        }).catch(() => { });
+      },
+      setUserUploadBaseDir: (userUploadBaseDir) => {
+        const normalized = userUploadBaseDir.trim();
+        set({ userUploadBaseDir: normalized });
+        void hostApiFetch('/api/settings/userUploadBaseDir', {
+          method: 'PUT',
+          body: JSON.stringify({ value: normalized }),
+        }).catch(() => { });
+      },
+      setAssistantOutputBaseDir: (assistantOutputBaseDir) => {
+        const normalized = assistantOutputBaseDir.trim();
+        set({ assistantOutputBaseDir: normalized });
+        void hostApiFetch('/api/settings/assistantOutputBaseDir', {
           method: 'PUT',
           body: JSON.stringify({ value: normalized }),
         }).catch(() => { });
