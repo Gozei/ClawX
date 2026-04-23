@@ -4,9 +4,37 @@ import { join } from 'node:path';
 import { closeElectronApp, expect, getStableWindow, test } from './fixtures/electron';
 
 const SESSION_KEY = 'agent:main:session-preview-e2e';
-const PREVIEW_TEXT = 'Session preview title from transcript';
+const PREVIEW_TEXT = 'Only this sentence should be shown in chat.';
 const AUTO_LABEL_MAX_CHARS = 30;
 const PERSISTED_PREVIEW_LABEL = Array.from(PREVIEW_TEXT).slice(0, AUTO_LABEL_MAX_CHARS).join('');
+
+function buildInjectedPreludeMessage(): string {
+  return [
+    '# AGENTS.md instructions for D:/AI/Deep AI Worker/ClawX',
+    '',
+    '<INSTRUCTIONS>',
+    'Use the repository playbook before responding.',
+    '</INSTRUCTIONS>',
+    '<environment_context>',
+    '  <cwd>D:/AI/Deep AI Worker/ClawX</cwd>',
+    '  <shell>powershell</shell>',
+    '</environment_context>',
+    'To send an image back, prefer the message tool (media/path/filePath). If you must inline, use MEDIA:https://example.com/image.jpg (spaces ok, quote if needed) or a safe relative path like MEDIA:./image.jpg. Absolute and ~ paths only work when they stay inside your allowed file-read boundary; host file:// URLs are blocked. Keep caption in the text body.',
+    'Only the files listed in the current attachment note for this turn are newly uploaded inputs for this request. Do not automatically inspect older uploaded files, prior-turn attachments, or unrelated workspace files unless the user explicitly asks for them or the current file directly points to them.',
+    'When the current turn includes uploaded attachments, resolve references like "this", "this file", "this output", "这个", "这个文件", and "这个输出" against the current turn attachment set first. Do not default those references to prior assistant outputs, earlier uploaded files, or historical workspace artifacts.',
+    'This turn has exactly one uploaded attachment, so answer about that file unless the user explicitly names another file. Do not summarize prior assistant outputs when the current turn attachment set is present unless the user explicitly asks for that earlier output.',
+    '',
+    '[Wed 2026-04-22 19:54 GMT+8] Conversation info (untrusted metadata): ```json',
+    '{"agent":{"id":"main","name":"Main Role","preferredModel":"custom-custombc/qwen3.5-plus"}}',
+    '```',
+    'Execution playbook:',
+    '- You are currently acting as "Main Role" (ID: main).',
+    '- Preferred model: custom-custombc/qwen3.5-plus',
+    '- If tools are unavailable, explain the block instead of fabricating.',
+    '',
+    PREVIEW_TEXT,
+  ].join('\n');
+}
 
 async function seedSessions(homeDir: string): Promise<void> {
   const sessionsDir = join(homeDir, '.openclaw', 'agents', 'main', 'sessions');
@@ -44,7 +72,7 @@ async function seedSessions(homeDir: string): Promise<void> {
           content: [
             {
               type: 'text',
-              text: PREVIEW_TEXT,
+              text: buildInjectedPreludeMessage(),
             },
           ],
         },
@@ -131,6 +159,12 @@ test.describe('Session preview labels', () => {
         const stored = JSON.parse(await readFile(sessionsJsonPath, 'utf8')) as Record<string, { label?: string }>;
         return stored[SESSION_KEY]?.label ?? null;
       }).toBe(PERSISTED_PREVIEW_LABEL);
+
+      await sessionRow.locator('button').first().click();
+      const userMessage = page.getByTestId('chat-message-content-user').first();
+      await expect(userMessage).toContainText(PREVIEW_TEXT, { timeout: 60_000 });
+      await expect(userMessage).not.toContainText('AGENTS.md instructions');
+      await expect(userMessage).not.toContainText('Execution playbook:');
     } finally {
       try {
         const page = await getStableWindow(app);

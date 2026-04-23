@@ -375,4 +375,77 @@ describe('gateway store event wiring', () => {
       }),
     ]);
   });
+
+  it('marks streamed tool_result blocks as completed before history refresh catches up', async () => {
+    hostApiFetchMock.mockResolvedValue({ state: 'running', port: 18789 });
+
+    const handlers = new Map<string, (payload: unknown) => void>();
+    subscribeHostEventMock.mockImplementation((eventName: string, handler: (payload: unknown) => void) => {
+      handlers.set(eventName, handler);
+      return () => {};
+    });
+
+    const { useChatStore } = await import('../../src/stores/chat');
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      sessions: [{ key: 'agent:main:main' }],
+      sending: true,
+      activeRunId: 'run-live-tool-result',
+      pendingFinal: false,
+      error: null,
+      messages: [
+        {
+          id: 'user-live-tool-result-1',
+          role: 'user',
+          content: 'Update the script and keep going.',
+          timestamp: Math.floor(Date.now() / 1000) - 10,
+        },
+      ],
+      streamingTools: [],
+    } as never);
+
+    const { useGatewayStore } = await import('@/stores/gateway');
+    await useGatewayStore.getState().init();
+
+    handlers.get('gateway:notification')?.({
+      method: 'agent',
+      params: {
+        runId: 'run-live-tool-result',
+        sessionKey: 'agent:main:main',
+        state: 'delta',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'write-live-1',
+              name: 'write',
+              input: {
+                path: 'D:/AI/Deep AI Worker/ClawX/tmp-script.py',
+              },
+            },
+            {
+              type: 'tool_result',
+              id: 'write-live-1',
+              name: 'write',
+              content: 'Successfully wrote 149 bytes to D:/AI/Deep AI Worker/ClawX/tmp-script.py',
+            },
+          ],
+        },
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(useChatStore.getState().sending).toBe(true);
+    expect(useChatStore.getState().streamingTools).toEqual([
+      expect.objectContaining({
+        toolCallId: 'write-live-1',
+        name: 'write',
+        status: 'completed',
+      }),
+    ]);
+  });
 });

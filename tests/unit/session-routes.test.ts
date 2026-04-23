@@ -4,6 +4,8 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+const FULLY_INJECTED_PREVIEW_TEXT = 'Only this sentence should be shown in the preview.';
+
 const parseJsonBodyMock = vi.fn();
 const sendJsonMock = vi.fn();
 const getOpenClawConfigDirMock = vi.fn();
@@ -428,6 +430,84 @@ describe('handleSessionRoutes', () => {
     });
   });
 
+  it('strips AGENTS, attachment, and execution preludes from preview labels', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      JSON.stringify({
+        sessions: [
+          {
+            key: 'agent:main:session-injected-preview',
+            file: 'session-injected-preview.jsonl',
+            updatedAt: 1,
+          },
+        ],
+      }, null, 2),
+      'utf8',
+    );
+    await writeFile(
+      join(sessionsDir, 'session-injected-preview.jsonl'),
+      [
+        JSON.stringify({
+          message: {
+            role: 'user',
+            content: [{
+              type: 'text',
+              text: [
+                '# AGENTS.md instructions for D:/AI/Deep AI Worker/ClawX',
+                '',
+                '<INSTRUCTIONS>',
+                'Use the repository playbook before responding.',
+                '</INSTRUCTIONS>',
+                '<environment_context>',
+                '  <cwd>D:/AI/Deep AI Worker/ClawX</cwd>',
+                '  <shell>powershell</shell>',
+                '</environment_context>',
+                'To send an image back, prefer the message tool (media/path/filePath). If you must inline, use MEDIA:https://example.com/image.jpg (spaces ok, quote if needed) or a safe relative path like MEDIA:./image.jpg. Absolute and ~ paths only work when they stay inside your allowed file-read boundary; host file:// URLs are blocked. Keep caption in the text body.',
+                'Only the files listed in the current attachment note for this turn are newly uploaded inputs for this request. Do not automatically inspect older uploaded files, prior-turn attachments, or unrelated workspace files unless the user explicitly asks for them or the current file directly points to them.',
+                'When the current turn includes uploaded attachments, resolve references like "this", "this file", "this output", "这个", "这个文件", and "这个输出" against the current turn attachment set first. Do not default those references to prior assistant outputs, earlier uploaded files, or historical workspace artifacts.',
+                'This turn has exactly one uploaded attachment, so answer about that file unless the user explicitly names another file. Do not summarize prior assistant outputs when the current turn attachment set is present unless the user explicitly asks for that earlier output.',
+                '',
+                '[Wed 2026-04-22 19:54 GMT+8] Conversation info (untrusted metadata): ```json',
+                '{"agent":{"id":"main","name":"Main Role","preferredModel":"custom-custombc/qwen3.5-plus"}}',
+                '```',
+                'Execution playbook:',
+                '- You are currently acting as "Main Role" (ID: main).',
+                '- Preferred model: custom-custombc/qwen3.5-plus',
+                '- If tools are unavailable, explain the block instead of fabricating.',
+                '',
+                FULLY_INJECTED_PREVIEW_TEXT,
+              ].join('\n'),
+            }],
+          },
+        }),
+      ].join('\n'),
+      'utf8',
+    );
+    parseJsonBodyMock.mockResolvedValueOnce({
+      sessionKeys: ['agent:main:session-injected-preview'],
+    });
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    const handled = await handleSessionRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/previews'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
+      success: true,
+      previews: {
+        'agent:main:session-injected-preview': {
+          firstUserMessage: FULLY_INJECTED_PREVIEW_TEXT,
+        },
+      },
+    });
+  });
+
   it('lists recoverable sessions even when sessions.json contains a malformed entry', async () => {
     const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
     await mkdir(sessionsDir, { recursive: true });
@@ -473,14 +553,18 @@ describe('handleSessionRoutes', () => {
       sessions: [
         {
           key: 'agent:main:session-new',
+          createdAt: expect.any(Number),
           updatedAt: 2000,
+          archived: undefined,
           pinned: undefined,
           pinOrder: undefined,
         },
         {
           key: 'agent:main:session-old',
           label: 'Older session',
+          createdAt: expect.any(Number),
           updatedAt: 1000,
+          archived: undefined,
           pinned: undefined,
           pinOrder: undefined,
         },

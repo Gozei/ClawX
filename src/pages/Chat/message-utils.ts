@@ -4,6 +4,7 @@
  * message content formats returned by the Gateway.
  */
 import type { RawMessage, ContentBlock } from '@/stores/chat';
+import { stripInjectedInboundPrelude } from '../../../shared/inbound-user-text';
 
 /** 不参与正文回退拼接的工具/思考类块（避免重复与噪音） */
 function isNonBodyAssistantBlockType(type: string | undefined): boolean {
@@ -19,9 +20,6 @@ function isNonBodyAssistantBlockType(type: string | undefined): boolean {
 
 const SYSTEM_LINE_RE = /^System(?: \(untrusted\))?:\s*(?:\[[^\]]+\]\s*)?(.*)$/i;
 const EXEC_SYSTEM_RE = /^Exec (?:completed|finished)\s*\(([^)]*)\)(?:\s*::\s*([\s\S]*))?$/i;
-const SENDER_METADATA_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*```[a-z]*\s*[\s\S]*?```\s*/i;
-const SENDER_METADATA_JSON_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*\{[\s\S]*?\}\s*/i;
-const GATEWAY_TIMESTAMP_PREFIX_RE = /^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i;
 const HEARTBEAT_PROMPT_FALLBACK_RE =
   /^(?:如果存在 HEARTBEAT\.md|读取 HEARTBEAT\.md 时|当前时间[:：]|Read HEARTBEAT\.md if it exists|When reading HEARTBEAT\.md|Current time:)/i;
 const HEARTBEAT_PROMPT_LINE_RE =
@@ -134,65 +132,17 @@ function isHeartbeatMaintenanceOnlyText(text: string): boolean {
   return sawHeartbeatDirective;
 }
 
-function stripLeadingInjectedSystemLines(text: string, allow: boolean): string {
-  if (!allow) return text;
-
-  const lines = text.split(/\r?\n/);
-  let index = 0;
-  let sawSystemLine = false;
-
-  while (index < lines.length) {
-    const line = lines[index].trim();
-    if (!line) {
-      index += 1;
-      continue;
-    }
-    if (SYSTEM_LINE_RE.test(line)) {
-      sawSystemLine = true;
-      index += 1;
-      continue;
-    }
-    break;
-  }
-
-  if (!sawSystemLine) return text;
-
-  const remainder = lines.slice(index).join('\n').trimStart();
-  return remainder || text;
-}
-
-function stripInjectedConversationInfo(text: string): string {
-  const hasStructuredInjection = /Conversation info\s*\([^)]*\):|Execution playbook:|Sender(?: \(untrusted metadata\))?:/i.test(text);
-  const withoutLeadingSystemLines = stripLeadingInjectedSystemLines(text, hasStructuredInjection);
-  const withoutConversationInfo = withoutLeadingSystemLines
-    .replace(/^Conversation info\s*\([^)]*\):\s*```[a-z]*\n[\s\S]*?```\s*/i, '')
-    .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '');
-
-  return withoutConversationInfo.replace(/^Execution playbook:\s*(?:\r?\n- .*)+\s*/i, '');
-}
-
 /**
  * Clean Gateway metadata from user message text for display.
  * Strips: [media attached: ... | ...], [message_id: ...],
  * and the timestamp prefix [Day Date Time Timezone].
  */
 function cleanUserText(text: string): string {
-  const hadStructuredInjection = /Conversation info\s*\([^)]*\):|Execution playbook:|Sender(?: \(untrusted metadata\))?:/i.test(text);
-
-  const cleaned = stripLeadingInjectedSystemLines(stripInjectedConversationInfo(text
-    // Remove sender metadata blocks injected by bridge/gateway
-    .replace(SENDER_METADATA_PREFIX_RE, '')
-    .replace(SENDER_METADATA_JSON_PREFIX_RE, '')
+  const cleaned = stripInjectedInboundPrelude(text
     // Remove [media attached: path (mime) | path] references
     .replace(/\s*\[media attached:[^\]]*\]/g, '')
     // Remove [message_id: uuid]
-    .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')
-    // Remove Gateway-injected "Conversation info (untrusted metadata): ```json...```" block
-    .replace(/^Conversation info\s*\([^)]*\):\s*```[a-z]*\n[\s\S]*?```\s*/i, '')
-    // Fallback: remove "Conversation info (...): {...}" without code block wrapper
-    .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '')
-    // Remove Gateway timestamp prefix like [Fri 2026-02-13 22:39 GMT+8]
-    .replace(GATEWAY_TIMESTAMP_PREFIX_RE, '')), hadStructuredInjection)
+    .replace(/\s*\[message_id:\s*[^\]]+\]/g, ''))
     .trim();
 
   if (isPreCompactionMemoryFlushPrompt(cleaned)) {
@@ -233,12 +183,9 @@ export function isInternalMaintenanceTurnUserMessage(message: RawMessage | unkno
   const rawText = extractRawText(message);
   if (!rawText.trim()) return false;
 
-  const normalized = stripInjectedConversationInfo(rawText
-    .replace(SENDER_METADATA_PREFIX_RE, '')
-    .replace(SENDER_METADATA_JSON_PREFIX_RE, '')
+  const normalized = stripInjectedInboundPrelude(rawText
     .replace(/\s*\[media attached:[^\]]*\]/g, '')
-    .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')
-    .replace(GATEWAY_TIMESTAMP_PREFIX_RE, ''))
+    .replace(/\s*\[message_id:\s*[^\]]+\]/g, ''))
     .trim();
 
   return isPreCompactionMemoryFlushPrompt(normalized) || isHeartbeatMaintenanceOnlyText(normalized);

@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { join } from 'node:path';
+import { stripInjectedInboundPrelude } from '../../../shared/inbound-user-text';
 import { getOpenClawConfigDir } from '../../utils/paths';
 import { logger } from '../../utils/logger';
 import type { HostApiContext } from '../context';
@@ -8,11 +9,6 @@ import { parseJsonBody, sendJson } from '../route-utils';
 const SESSION_NAME_MAX_CHARS = 30;
 const TRANSCRIPT_TAIL_CHUNK_BYTES = 64 * 1024;
 const SESSION_HISTORY_MAX_LIMIT = 1_000;
-const CONVERSATION_INFO_PREFIX_RE = /^Conversation info\s*\([^)]*\):/i;
-const SENDER_METADATA_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*```[a-z]*\s*[\s\S]*?```\s*/i;
-const SENDER_METADATA_JSON_PREFIX_RE = /^Sender(?: \(untrusted metadata\))?:\s*\{[\s\S]*?\}\s*/i;
-const GATEWAY_TIMESTAMP_PREFIX_RE = /^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i;
-
 function isPreCompactionMemoryFlushPrompt(text: string): boolean {
   const normalized = text.trim();
   return /^Pre-compaction memory flush\./i.test(normalized)
@@ -754,25 +750,10 @@ async function resolveSessionCreatedAt(
   }
 }
 
-function stripInjectedConversationInfo(text: string): string {
-  if (!CONVERSATION_INFO_PREFIX_RE.test(text)) {
-    return text;
-  }
-
-  const withoutConversationInfo = text
-    .replace(/^Conversation info\s*\([^)]*\):\s*```[a-z]*\n[\s\S]*?```\s*/i, '')
-    .replace(/^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i, '');
-
-  return withoutConversationInfo.replace(/^Execution playbook:\s*(?:\r?\n- .*)+\s*/i, '');
-}
-
 function cleanUserMessageText(text: string): string {
-  const cleaned = stripInjectedConversationInfo(text
-    .replace(SENDER_METADATA_PREFIX_RE, '')
-    .replace(SENDER_METADATA_JSON_PREFIX_RE, '')
+  const cleaned = stripInjectedInboundPrelude(text
     .replace(/\s*\[media attached:[^\]]*\]/g, '')
-    .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')
-    .replace(GATEWAY_TIMESTAMP_PREFIX_RE, ''))
+    .replace(/\s*\[message_id:\s*[^\]]+\]/g, ''))
     .trim();
 
   return isPreCompactionMemoryFlushPrompt(cleaned) ? '' : cleaned;

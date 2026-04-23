@@ -270,6 +270,95 @@ describe('chat store session resume', () => {
     expect(next.sessionRunningState).toEqual({});
   });
 
+  it('auto-finalizes shortly after history reveals the final assistant reply during the live-turn guard window', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [
+            { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+            {
+              id: 'assistant-final',
+              role: 'assistant',
+              content: 'Final answer from history',
+              timestamp: assistantTimestampSeconds,
+            },
+          ],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: { 'agent:main:main': true },
+      sending: true,
+      activeRunId: 'run-final-guarded',
+      streamingText: '',
+      streamingMessage: {
+        id: 'assistant-streaming',
+        role: 'assistant',
+        content: 'Still wrapping up...',
+        timestamp: assistantTimestampSeconds - 1,
+      },
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: 'running',
+    });
+
+    useChatStore.getState().handleChatEvent({
+      state: 'delta',
+      runId: 'run-final-guarded',
+      sessionKey: 'agent:main:main',
+      message: {
+        id: 'assistant-streaming',
+        role: 'assistant',
+        content: 'Still wrapping up...',
+        timestamp: assistantTimestampSeconds - 1,
+      },
+    });
+    await vi.advanceTimersByTimeAsync(20);
+
+    await useChatStore.getState().loadHistory(true);
+
+    const duringGuard = useChatStore.getState();
+    expect(duringGuard.messages.map((message) => message.id)).toEqual([
+      'user-1',
+    ]);
+    expect(duringGuard.sending).toBe(true);
+    expect(duringGuard.pendingFinal).toBe(true);
+    expect(duringGuard.sessionRunningState).toEqual({ 'agent:main:main': true });
+
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual([
+      'user-1',
+      'assistant-final',
+    ]);
+    expect(next.sending).toBe(false);
+    expect(next.activeRunId).toBeNull();
+    expect(next.pendingFinal).toBe(false);
+    expect(next.sendStage).toBeNull();
+    expect(next.sessionRunningState).toEqual({});
+  });
+
   it('hydrates stale streaming output from history even when streamingMessage is still present', async () => {
     const currentUserTimestampSeconds = Math.floor(Date.now() / 1000);
     const currentAssistantTimestampSeconds = currentUserTimestampSeconds + 1;
@@ -1315,10 +1404,6 @@ describe('chat store session resume', () => {
       })
       .mockResolvedValueOnce({
         success: true,
-        metadata: {},
-      })
-      .mockResolvedValueOnce({
-        success: true,
         previews: {
           'agent:main:session-preview': {
             firstUserMessage: 'Preview from host route',
@@ -1360,16 +1445,12 @@ describe('chat store session resume', () => {
     await Promise.resolve();
 
     expect(gatewayRpcMock).not.toHaveBeenCalled();
-    expect(hostApiFetchMock).toHaveBeenNthCalledWith(1, '/api/sessions/list');
-    expect(hostApiFetchMock).toHaveBeenNthCalledWith(2, '/api/sessions/metadata', {
-      method: 'POST',
-      body: JSON.stringify({ sessionKeys: ['agent:main:main', 'agent:main:session-preview'] }),
-    });
-    expect(hostApiFetchMock).toHaveBeenNthCalledWith(3, '/api/sessions/previews', {
+    expect(hostApiFetchMock).toHaveBeenNthCalledWith(1, '/api/sessions/catalog');
+    expect(hostApiFetchMock).toHaveBeenNthCalledWith(2, '/api/sessions/previews', {
       method: 'POST',
       body: JSON.stringify({ sessionKeys: ['agent:main:session-preview'] }),
     });
-    expect(hostApiFetchMock).toHaveBeenNthCalledWith(4, '/api/sessions/auto-label', {
+    expect(hostApiFetchMock).toHaveBeenNthCalledWith(3, '/api/sessions/auto-label', {
       method: 'POST',
       body: JSON.stringify({ sessionKey: 'agent:main:session-preview', label: 'Preview from host route' }),
     });
