@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useState } from 'react';
 
 type CallbackRef<T extends HTMLElement> = ((node: T | null) => void) & { current: T | null };
 
@@ -15,12 +15,12 @@ function createCallbackRef<T extends HTMLElement>(): CallbackRef<T> {
  * message-list engine, so callers should migrate away from this hook.
  */
 export function useStickToBottomInstant() {
-  const scrollRef = useRef(createCallbackRef<HTMLElement>()).current;
-  const contentRef = useRef(createCallbackRef<HTMLElement>()).current;
+  const [scrollRef] = useState(() => createCallbackRef<HTMLElement>());
+  const [contentRef] = useState(() => createCallbackRef<HTMLElement>());
 
-  return useMemo(() => ({
+  return {
     scrollRef,
     contentRef,
     stopScroll: () => {},
-  }), [contentRef, scrollRef]);
+  };
 }

@@ -553,14 +553,18 @@ describe('handleSessionRoutes', () => {
       sessions: [
         {
           key: 'agent:main:session-new',
+          createdAt: expect.any(Number),
           updatedAt: 2000,
+          archived: undefined,
           pinned: undefined,
           pinOrder: undefined,
         },
         {
           key: 'agent:main:session-old',
           label: 'Older session',
+          createdAt: expect.any(Number),
           updatedAt: 1000,
+          archived: undefined,
           pinned: undefined,
           pinOrder: undefined,
         },
