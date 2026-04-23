@@ -45,12 +45,6 @@ async function seedConfiguredModels(page: Parameters<typeof completeSetup>[0]): 
   }, { accountId: SEEDED_ACCOUNT_ID });
 }
 
-async function setLanguage(page: Parameters<typeof completeSetup>[0], language: string): Promise<void> {
-  await page.evaluate(async (nextLanguage) => {
-    await window.electron.ipcRenderer.invoke('settings:set', 'language', nextLanguage);
-  }, language);
-}
-
 test.describe('Chat composer actions', () => {
   test('keeps the current draft text and attachment after navigating away and back', async ({ launchElectronApp, homeDir }) => {
     const attachmentPath = join(homeDir, 'composer-draft-persist.txt');

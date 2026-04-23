@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -778,31 +778,12 @@ const ProcessEventRow = memo(function ProcessEventRow({
   onInteractionStart?: () => void;
 }) {
   const canExpand = !!item.detail;
-  const [expanded, setExpanded] = useState(() => expandedByDefault && canExpand);
-  const autoExpandedRef = useRef(expandedByDefault && canExpand);
+  const [expanded, setExpanded] = useState(false);
   const durationLabel = formatDuration(item.durationMs);
   const summaryLabel = formatEventStatusLabel(item, language);
   const previewLabel = formatEventPreviewLabel(item, language);
   const isActive = isActiveProcessItem(item);
-
-  useEffect(() => {
-    if (!canExpand) {
-      autoExpandedRef.current = false;
-      setExpanded(false);
-      return;
-    }
-
-    if (expandedByDefault) {
-      autoExpandedRef.current = true;
-      setExpanded(true);
-      return;
-    }
-
-    if (autoExpandedRef.current) {
-      autoExpandedRef.current = false;
-      setExpanded(false);
-    }
-  }, [canExpand, expandedByDefault]);
+  const isExpanded = canExpand && (expandedByDefault || expanded);
 
   return (
     <div data-testid="chat-process-event-row" className="group py-0.5">
@@ -841,7 +822,7 @@ const ProcessEventRow = memo(function ProcessEventRow({
                 ({durationLabel})
               </span>
             )}
-            {!expanded && previewLabel && (
+            {!isExpanded && previewLabel && (
               <span
                 data-testid="chat-process-event-preview"
                 className={cn('min-w-0 flex-1 truncate pr-2 text-[13px] leading-6', ACTIVE_PROCESS_EVENT_PREVIEW_CLASS)}
@@ -861,7 +842,7 @@ const ProcessEventRow = memo(function ProcessEventRow({
                   {durationLabel}
                 </span>
               )}
-              {!expanded && previewLabel && (
+              {!isExpanded && previewLabel && (
                 <span
                   data-testid="chat-process-event-preview"
                   className={cn('min-w-0 flex-1 truncate pr-2 text-[12px] leading-5', PROCESS_EVENT_TEXT_CLASS)}
@@ -873,7 +854,7 @@ const ProcessEventRow = memo(function ProcessEventRow({
           </div>
         )}
         {canExpand && !expandedByDefault && (
-          expanded ? (
+          isExpanded ? (
             <ChevronDown
               data-testid="chat-process-event-toggle-icon"
               className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-100"
@@ -890,7 +871,7 @@ const ProcessEventRow = memo(function ProcessEventRow({
         )}
       </button>
 
-      {canExpand && expanded && (
+      {canExpand && isExpanded && (
         <div
           data-testid="chat-process-event-detail-panel"
           className={cn('min-w-0 pl-1.5', isActive ? 'mt-1.5' : 'mt-1')}

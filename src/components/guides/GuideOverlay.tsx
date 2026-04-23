@@ -284,7 +284,6 @@ export function GuideOverlay() {
 
   useEffect(() => {
     if (!step) {
-      setTargetRect(null);
       return;
     }
     if (step.route !== location.pathname) {

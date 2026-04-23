@@ -527,8 +527,7 @@ describe('sanitizeOpenClawConfig', () => {
 
     const result = await readOpenClawJson();
     const plugins = result.plugins as Record<string, unknown>;
-    expect(plugins.allow).toEqual(expect.arrayContaining(['customPlugin', 'device-pair']));
-    expect(plugins.allow).not.toContain('browser');
+    expect(plugins.allow).toEqual(expect.arrayContaining(['customPlugin', 'device-pair', 'browser']));
     expect((plugins.entries as Record<string, unknown>).customPlugin).toEqual({ enabled: true });
   });
 });

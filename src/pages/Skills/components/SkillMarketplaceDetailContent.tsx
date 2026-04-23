@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   BadgeCheck,
   Download,
@@ -46,7 +46,10 @@ export function SkillMarketplaceDetailContent({
   const enableSkill = useSkillsStore((state) => state.enableSkill);
   const language = i18n?.resolvedLanguage || i18n?.language || 'en';
 
-  const formatInteger = (value: number) => new Intl.NumberFormat(language).format(value);
+  const formatInteger = useCallback(
+    (value: number) => new Intl.NumberFormat(language).format(value),
+    [language],
+  );
   const formatDateTime = (value: number) => new Intl.DateTimeFormat(language, {
     dateStyle: 'medium',
     timeStyle: 'short',

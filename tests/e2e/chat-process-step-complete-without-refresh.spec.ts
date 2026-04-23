@@ -152,7 +152,7 @@ test.describe('Chat process step completion', () => {
                         name: 'write',
                         input: {
                           path: toolPath,
-                          content: 'print(\"draft\")',
+                          content: 'print("draft")',
                         },
                       },
                     ],
@@ -178,7 +178,7 @@ test.describe('Chat process step completion', () => {
                         name: 'write',
                         input: {
                           path: toolPath,
-                          content: 'print(\"draft\")',
+                          content: 'print("draft")',
                         },
                       },
                       {
