@@ -204,11 +204,6 @@ export function Sidebar() {
 
   const sessions = useChatStore((s) => s.sessions);
   const currentSessionKey = useChatStore((s) => s.currentSessionKey);
-  const sending = useChatStore((s) => s.sending);
-  const pendingFinal = useChatStore((s) => s.pendingFinal);
-  const sendStage = useChatStore((s) => s.sendStage);
-  const streamingMessage = useChatStore((s) => s.streamingMessage);
-  const streamingTools = useChatStore((s) => s.streamingTools);
   const sessionRunningState = useChatStore((s) => s.sessionRunningState ?? {});
   const sessionLabels = useChatStore((s) => s.sessionLabels);
   const sessionLastActivity = useChatStore((s) => s.sessionLastActivity);
@@ -222,6 +217,14 @@ export function Sidebar() {
   const loadHistory = useChatStore((s) => s.loadHistory);
   const agents = useAgentsStore((s) => s.agents);
   const fetchAgents = useAgentsStore((s) => s.fetchAgents);
+  const currentSessionIsRunning = useChatStore((s) => isSessionRunning(s.currentSessionKey, s.sessionRunningState, {
+    currentSessionKey: s.currentSessionKey,
+    sending: s.sending,
+    pendingFinal: s.pendingFinal,
+    sendStage: s.sendStage,
+    streamingMessage: s.streamingMessage,
+    streamingTools: s.streamingTools,
+  }));
 
   const gatewayStatus = useGatewayStore((s) => s.status);
   const isGatewayRunning = gatewayStatus.state === 'running';
@@ -440,15 +443,6 @@ export function Sidebar() {
   const gatewayRestartElapsedLabel = showGatewayStatusElapsed
     ? formatGatewayRestartElapsed(gatewayRestartElapsedSeconds, isChinese)
     : '';
-  const currentSessionRunSnapshot = useMemo(() => ({
-    currentSessionKey,
-    sending,
-    pendingFinal,
-    sendStage,
-    streamingMessage,
-    streamingTools,
-  }), [currentSessionKey, pendingFinal, sending, sendStage, streamingMessage, streamingTools]);
-
   const startRenamingSession = (sessionKey: string, currentLabel: string) => {
     isSubmittingRenameRef.current = false;
     setEditingSessionKey(sessionKey);
@@ -514,7 +508,9 @@ export function Sidebar() {
     const sessionLabel = getSessionLabel(s.key, s.displayName, s.label);
     const isEditing = editingSessionKey === s.key;
     const isMenuOpen = openSessionMenuKey === s.key;
-    const isSessionRunningNow = isSessionRunning(s.key, sessionRunningState, currentSessionRunSnapshot);
+    const isSessionRunningNow = s.key === currentSessionKey
+      ? currentSessionIsRunning
+      : Boolean(sessionRunningState[s.key]);
 
     return (
       <div key={s.key} className="group relative flex items-center" data-testid={`sidebar-session-${s.key}`}>
@@ -662,17 +658,17 @@ export function Sidebar() {
     );
   };
 
-  const pinnedSessions = [...sessions]
+  const pinnedSessions = useMemo(() => [...sessions]
     .filter((session) => session.pinned)
     .sort((a, b) => {
       const pinOrderDiff = (a.pinOrder ?? Number.MAX_SAFE_INTEGER) - (b.pinOrder ?? Number.MAX_SAFE_INTEGER);
       if (pinOrderDiff !== 0) return pinOrderDiff;
       return (sessionLastActivity[b.key] ?? 0) - (sessionLastActivity[a.key] ?? 0);
-    });
+    }), [sessionLastActivity, sessions]);
 
-  const unpinnedSessions = [...sessions]
+  const unpinnedSessions = useMemo(() => [...sessions]
     .filter((session) => !session.pinned)
-    .sort((a, b) => (sessionLastActivity[b.key] ?? 0) - (sessionLastActivity[a.key] ?? 0));
+    .sort((a, b) => (sessionLastActivity[b.key] ?? 0) - (sessionLastActivity[a.key] ?? 0)), [sessionLastActivity, sessions]);
 
   const renderedSidebarWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : sidebarWidth;
   const activeSessionMenuSession = openSessionMenuKey
