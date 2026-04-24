@@ -21,8 +21,9 @@ test.describe('Dream mode gating', () => {
 
       await expect(page.getByTestId('sidebar-nav-dream')).toBeVisible();
       await openSettingsHub(page);
-      await expect(page.getByTestId('settings-hub-menu-dream')).toBeVisible();
-      await page.getByTestId('settings-hub-menu-dream').click({ force: true });
+      await expect(page.getByTestId('settings-hub-menu-dream')).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await page.getByTestId('sidebar-nav-dream').click({ force: true });
       await expect(page.getByTestId('dream-page')).toBeVisible();
     } finally {
       await closeElectronApp(app);
