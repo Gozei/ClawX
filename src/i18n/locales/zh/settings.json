@@ -75,9 +75,9 @@
   },
   "storage": {
     "userUploadDir": "上传文件目录",
-    "userUploadDirDesc": "ClawX 会先把你附加的文件复制到这里，再按会话自动分文件夹管理。",
+    "userUploadDirDesc": "Deep AI Worker 会先把你附加的文件复制到这里，再按会话自动分文件夹管理。",
     "assistantOutputDir": "模型输出目录",
-    "assistantOutputDirDesc": "当助手产出文件时，ClawX 会把识别到的输出复制到这里，并按会话自动分文件夹管理。",
+    "assistantOutputDirDesc": "当助手产出文件时，Deep AI Worker 会把识别到的输出复制到这里，并按会话自动分文件夹管理。",
     "chooseFolder": "选择文件夹",
     "clearFolder": "使用默认目录",
     "defaultPlaceholder": "默认：{{path}}",

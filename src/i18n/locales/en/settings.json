@@ -75,9 +75,9 @@
   },
   "storage": {
     "userUploadDir": "Uploaded file directory",
-    "userUploadDirDesc": "ClawX copies files you attach here and then groups them by session automatically.",
+    "userUploadDirDesc": "Deep AI Worker copies files you attach here and then groups them by session automatically.",
     "assistantOutputDir": "Assistant output directory",
-    "assistantOutputDirDesc": "When the assistant produces files, ClawX copies the detected outputs here and groups them by session automatically.",
+    "assistantOutputDirDesc": "When the assistant produces files, Deep AI Worker copies the detected outputs here and groups them by session automatically.",
     "chooseFolder": "Choose Folder",
     "clearFolder": "Use Default",
     "defaultPlaceholder": "Default: {{path}}",

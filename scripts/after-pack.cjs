@@ -47,7 +47,7 @@ function cleanupUnnecessaryFiles(dir) {
   let removedCount = 0;
 
   const REMOVE_DIRS = new Set([
-    'test', 'tests', '__tests__', '.github', 'examples', 'example',
+    'test', 'tests', '__tests__', '.github', 'examples', 'example', '__image_snapshots__',
   ]);
   const REMOVE_FILE_EXTS = ['.d.ts', '.d.ts.map', '.js.map', '.mjs.map', '.ts.map', '.markdown', '.o'];
   const REMOVE_FILE_NAMES = new Set([
