@@ -1,6 +1,6 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Agents } from '../../src/pages/Agents/index';
 
 const navigateMock = vi.fn();
@@ -9,6 +9,7 @@ const subscribeHostEventMock = vi.fn();
 const fetchAgentsMock = vi.fn();
 const updateAgentMock = vi.fn();
 const updateAgentModelMock = vi.fn();
+const deleteAgentMock = vi.fn();
 const refreshProviderSnapshotMock = vi.fn();
 const fetchSkillsMock = vi.fn();
 const gatewayRpcMock = vi.fn();
@@ -57,7 +58,7 @@ vi.mock('@/stores/agents', () => ({
     updateAgent: typeof updateAgentMock;
     updateAgentModel: typeof updateAgentModelMock;
     createAgent: ReturnType<typeof vi.fn>;
-    deleteAgent: ReturnType<typeof vi.fn>;
+    deleteAgent: typeof deleteAgentMock;
   }) => unknown) => {
     const state = {
       ...agentsState,
@@ -65,7 +66,7 @@ vi.mock('@/stores/agents', () => ({
       updateAgent: updateAgentMock,
       updateAgentModel: updateAgentModelMock,
       createAgent: vi.fn(),
-      deleteAgent: vi.fn(),
+      deleteAgent: deleteAgentMock,
     };
     return typeof selector === 'function' ? selector(state) : state;
   },
@@ -132,6 +133,7 @@ describe('Agents page status refresh', () => {
     fetchAgentsMock.mockResolvedValue(undefined);
     updateAgentMock.mockResolvedValue(undefined);
     updateAgentModelMock.mockResolvedValue(undefined);
+    deleteAgentMock.mockResolvedValue(undefined);
     refreshProviderSnapshotMock.mockResolvedValue(undefined);
     fetchSkillsMock.mockResolvedValue(undefined);
     gatewayRpcMock.mockResolvedValue({ sessions: [] });
@@ -249,6 +251,43 @@ describe('Agents page status refresh', () => {
     expect(updateAgentModelMock).not.toHaveBeenCalled();
     expect((modelIdInput as HTMLInputElement).value).toBe('anthropic/claude-opus-4.6');
     expect(useDefaultButton).toBeDisabled();
+  });
+
+  it('allows deleting a non-default role from its card actions', async () => {
+    agentsState.agents = [
+      {
+        id: 'writer',
+        name: 'Writer',
+        isDefault: false,
+        modelDisplay: 'gpt-5',
+        modelRef: 'openai/gpt-5',
+        overrideModelRef: null,
+        inheritedModel: true,
+        workspace: '~/.openclaw/workspace-writer',
+        agentDir: '~/.openclaw/agents/writer/agent',
+        mainSessionKey: 'agent:writer:main',
+        channelTypes: [],
+      },
+    ];
+
+    render(<Agents />);
+
+    await waitFor(() => {
+      expect(fetchAgentsMock).toHaveBeenCalledTimes(1);
+    });
+
+    const card = screen.getByTestId('agent-overview-card');
+    fireEvent.mouseEnter(card);
+
+    const deleteButton = screen.getByTitle('deleteAgent');
+    fireEvent.click(deleteButton);
+
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getAllByRole('button')[1]);
+
+    await waitFor(() => {
+      expect(deleteAgentMock).toHaveBeenCalledWith('writer');
+    });
   });
 
   it('keeps the last agent snapshot visible while a refresh is in flight', async () => {

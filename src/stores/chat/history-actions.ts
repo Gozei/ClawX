@@ -306,7 +306,7 @@ export function createHistoryActions(
         }
 
         // Async: load missing image previews from disk (updates in background)
-        loadMissingPreviews(finalMessages).then((updated) => {
+        loadMissingPreviews(finalMessages, currentSessionKey).then((updated) => {
           if (!isCurrentSession()) return;
           if (updated) {
             set((state) => ({

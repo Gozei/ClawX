@@ -1722,11 +1722,6 @@ function ProcessSection({
     }, 1000);
     return () => clearInterval(timer);
   }, [phase]);
-  useEffect(() => {
-    if (!isCollapsible) {
-      setCollapsed(false);
-    }
-  }, [isCollapsible]);
 
   if (!hasSection) return null;
 
@@ -1745,6 +1740,7 @@ function ProcessSection({
   const usesStreamProcessStyle = assistantMessageStyle === 'stream';
   const showsHeaderBrand = true;
   const expandAllEvents = phase === 'working';
+  const effectiveCollapsed = isCollapsible ? collapsed : false;
   const activitySourceMessage = effectiveProcessStreamingMessage ?? visibleMessages[visibleMessages.length - 1] ?? null;
   const activityLabel = getProcessActivityLabel(
     activitySourceMessage,
@@ -1759,36 +1755,37 @@ function ProcessSection({
   const lastChatEventAgeMs = phase === 'working' && lastChatEventAt > 0
     ? Math.max(0, nowMs - lastChatEventAt)
     : 0;
-  const activityDetail = useMemo(() => {
-    if (phase !== 'working') return null;
-    const isZh = language?.startsWith('zh');
-    if (retryingTool) {
-      const retries = retryingTool.retries ?? 0;
-      if (isZh) {
-        return retries > 0
-          ? `当前步骤已自动重试 ${retries} 次，正在等待新的结果`
-          : '当前步骤正在自动重试，正在等待新的结果';
-      }
-      return retries > 0
-        ? `This step has retried ${retries} time${retries === 1 ? '' : 's'} and is waiting for the next result`
-        : 'This step is retrying and waiting for the next result';
-    }
-    if (lastChatEventAgeMs >= PROCESS_ACTIVITY_LONG_STALL_MS) {
-      return isZh
-        ? '处理时间较长，仍在等待工具或模型返回结果'
-        : 'This is taking longer than usual and is still waiting for a tool or model result';
-    }
-    if (lastChatEventAgeMs >= PROCESS_ACTIVITY_SOFT_STALL_MS) {
-      return isZh
-        ? '暂时没有新的输出，仍在继续处理'
-        : 'No new output yet, but the current step is still running';
-    }
-    return null;
-  }, [language, lastChatEventAgeMs, phase, retryingTool]);
+  const activityDetail = phase !== 'working'
+    ? null
+    : (() => {
+        const isZh = language?.startsWith('zh');
+        if (retryingTool) {
+          const retries = retryingTool.retries ?? 0;
+          if (isZh) {
+            return retries > 0
+              ? `当前步骤已自动重试 ${retries} 次，正在等待新的结果`
+              : '当前步骤正在自动重试，正在等待新的结果';
+          }
+          return retries > 0
+            ? `This step has retried ${retries} time${retries === 1 ? '' : 's'} and is waiting for the next result`
+            : 'This step is retrying and waiting for the next result';
+        }
+        if (lastChatEventAgeMs >= PROCESS_ACTIVITY_LONG_STALL_MS) {
+          return isZh
+            ? '处理时间较长，仍在等待工具或模型返回结果'
+            : 'This is taking longer than usual and is still waiting for a tool or model result';
+        }
+        if (lastChatEventAgeMs >= PROCESS_ACTIVITY_SOFT_STALL_MS) {
+          return isZh
+            ? '暂时没有新的输出，仍在继续处理'
+            : 'No new output yet, but the current step is still running';
+        }
+        return null;
+      })();
 
   const handleToggle = () => {
     if (!isCollapsible) return;
-    if (collapsed) {
+    if (effectiveCollapsed) {
       onExpandStart?.();
     }
     setCollapsed((current) => !current);
@@ -1801,7 +1798,7 @@ function ProcessSection({
       data-testid="chat-process-toggle"
     >
       <span data-testid="chat-process-status">{statusLabel}</span>
-      {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+      {effectiveCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
     </button>
   ) : (
     <div
@@ -1841,7 +1838,7 @@ function ProcessSection({
         {headerStatusControl}
       </div>
 
-      {!collapsed && (
+      {!effectiveCollapsed && (
         <div
           className={cn(
             'min-w-0',
@@ -2251,10 +2248,6 @@ function useRotatingProcessActivityCopy() {
     t('process.preOutputComposing', 'Composing the reply'),
   ]), [language, t]);
   const [phraseIndex, setPhraseIndex] = useState(0);
-
-  useEffect(() => {
-    setPhraseIndex(0);
-  }, [activityPhrases]);
 
   useEffect(() => {
     const timer = setInterval(() => {

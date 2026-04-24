@@ -16,6 +16,12 @@ import type {
 } from '@xmldom/xmldom';
 import type { HostApiContext } from '../context';
 import { parseJsonBody, sendJson } from '../route-utils';
+import {
+  materializeAssistantOutputFiles,
+  resolveAssistantOutputStorageDir,
+  resolveUserUploadStorageDir,
+  resolveStagedUploadFilePath,
+} from '../../utils/session-file-storage';
 
 const EXT_MIME_MAP: Record<string, string> = {
   '.png': 'image/png',
@@ -1335,7 +1341,6 @@ function addDocxHeadingAnchors(html: string): {
     outline,
   };
 }
-
 async function generateImagePreview(filePath: string, mimeType: string): Promise<string | null> {
   try {
     const img = nativeImage.createFromPath(filePath);
@@ -1658,16 +1663,17 @@ export async function handleFileRoutes(
 ): Promise<boolean> {
   if (url.pathname === '/api/files/stage-paths' && req.method === 'POST') {
     try {
-      const body = await parseJsonBody<{ filePaths: string[] }>(req);
+      const body = await parseJsonBody<{ filePaths: string[]; sessionKey?: string }>(req);
       const fsP = await import('node:fs/promises');
-      await fsP.mkdir(OUTBOUND_DIR, { recursive: true });
+      const targetDir = await resolveUserUploadStorageDir(body.sessionKey);
+      await fsP.mkdir(targetDir, { recursive: true });
       const results = [];
       for (const filePath of body.filePaths) {
         const id = crypto.randomUUID();
-        const ext = extname(filePath);
-        const stagedPath = join(OUTBOUND_DIR, `${id}${ext}`);
+        const stagedPath = await resolveStagedUploadFilePath(targetDir, filePath);
         await fsP.copyFile(filePath, stagedPath);
         const s = await fsP.stat(stagedPath);
+        const ext = extname(stagedPath);
         const mimeType = getMimeType(ext);
         const fileName = basename(filePath) || 'file';
         const preview = mimeType.startsWith('image/')
@@ -1685,14 +1691,20 @@ export async function handleFileRoutes(
 
   if (url.pathname === '/api/files/stage-buffer' && req.method === 'POST') {
     try {
-      const body = await parseJsonBody<{ base64: string; fileName: string; mimeType: string }>(req);
+      const body = await parseJsonBody<{
+        base64: string;
+        fileName: string;
+        mimeType: string;
+        sessionKey?: string;
+      }>(req);
       const fsP = await import('node:fs/promises');
-      await fsP.mkdir(OUTBOUND_DIR, { recursive: true });
+      const targetDir = await resolveUserUploadStorageDir(body.sessionKey);
+      await fsP.mkdir(targetDir, { recursive: true });
       const id = crypto.randomUUID();
-      const ext = extname(body.fileName) || mimeToExt(body.mimeType);
-      const stagedPath = join(OUTBOUND_DIR, `${id}${ext}`);
+      const stagedPath = await resolveStagedUploadFilePath(targetDir, body.fileName);
       const buffer = Buffer.from(body.base64, 'base64');
       await fsP.writeFile(stagedPath, buffer);
+      const ext = extname(stagedPath) || mimeToExt(body.mimeType);
       const mimeType = body.mimeType || getMimeType(ext);
       const preview = mimeType.startsWith('image/')
         ? await generateImagePreview(stagedPath, mimeType)
@@ -1857,6 +1869,26 @@ export async function handleFileRoutes(
         base64: body.base64,
       });
       sendJson(res, result.error ? 400 : 200, result);
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === '/api/files/materialize-outputs' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{
+        sessionKey?: string;
+        filePaths?: string[];
+      }>(req);
+      const targetDir = await resolveAssistantOutputStorageDir(body.sessionKey);
+      if (!targetDir) {
+        sendJson(res, 200, { success: true, enabled: false, results: [] });
+        return true;
+      }
+
+      const results = await materializeAssistantOutputFiles(body.sessionKey, body.filePaths ?? []);
+      sendJson(res, 200, { success: true, enabled: true, targetDir, results });
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
     }

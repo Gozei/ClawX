@@ -6,6 +6,7 @@
 import { useState, useCallback, useEffect, useMemo, memo } from 'react';
 import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { FileTypeIcon } from './file-icon';
+import { getFileVisual } from './file-visual';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -848,16 +849,40 @@ function formatFileSize(bytes: number): string {
 }
 
 function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () => void }) {
+  const visual = getFileVisual(file.mimeType, file.fileName);
   const { t } = useTranslation(['chat', 'common']);
-  const handleOpen = useCallback(() => {
+  const handleOpen = useCallback(async () => {
     if (onPreview) {
       onPreview();
       return;
     }
     if (file.filePath) {
-      invokeIpc('shell:openPath', file.filePath);
+      try {
+        const result = await invokeIpc<string>('shell:openPath', file.filePath);
+        if (typeof result === 'string' && result.trim()) {
+          const normalized = result.trim().toLowerCase();
+          if (
+            normalized.includes('file not found:')
+            || normalized.includes('does not exist')
+            || normalized.includes('not found')
+            || normalized.includes('no such file')
+          ) {
+            toast.error(t('attachments.fileMissing', { fileName: file.fileName }));
+            return;
+          }
+          toast.error(t('attachments.fileOpenFailed', {
+            fileName: file.fileName,
+            error: result.trim(),
+          }));
+        }
+      } catch (error) {
+        toast.error(t('attachments.fileOpenFailed', {
+          fileName: file.fileName,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      }
     }
-  }, [file.filePath, onPreview]);
+  }, [file.fileName, file.filePath, onPreview, t]);
   const handleRevealInFolder = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     if (!file.filePath) return;
@@ -884,7 +909,7 @@ function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () 
         <div className="min-w-0 flex-1 overflow-hidden leading-tight flex flex-col justify-center">
           <ClampedFileName
             text={file.fileName}
-            metaText={file.fileSize > 0 ? formatFileSize(file.fileSize) : '...'}
+            metaText={file.fileSize > 0 ? `${visual.label} | ${formatFileSize(file.fileSize)}` : visual.label}
             containerClassName="h-8"
             textClassName="text-[13px] font-semibold leading-[1.25] tracking-[-0.01em]"
             metaClassName="text-[11px] leading-[1.25]"

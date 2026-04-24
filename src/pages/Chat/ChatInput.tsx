@@ -570,7 +570,10 @@ export function ChatInput({
         preview: string | null;
       }>>('/api/files/stage-paths', {
         method: 'POST',
-        body: JSON.stringify({ filePaths: nextFilePaths }),
+        body: JSON.stringify({
+          filePaths: nextFilePaths,
+          sessionKey: activeComposerSessionKey,
+        }),
       });
       console.log('[pickFiles] Stage result:', staged?.map(s => ({ id: s?.id, fileName: s?.fileName, mimeType: s?.mimeType, fileSize: s?.fileSize, stagedPath: s?.stagedPath, hasPreview: !!s?.preview })));
       const stagedItems = Array.isArray(staged) ? staged : [];
@@ -614,7 +617,7 @@ export function ChatInput({
         )),
       }));
     }
-  }, [attachmentKeys, canEditDraft, currentSessionKey, updateComposerDraftForSession]);
+  }, [activeComposerSessionKey, attachmentKeys, canEditDraft, currentSessionKey, updateComposerDraftForSession]);
 
   // ── Stage browser File objects (paste / drag-drop) ─────────────
 
@@ -669,6 +672,7 @@ export function ChatInput({
             base64,
             fileName: file.name,
             mimeType: file.type || 'application/octet-stream',
+            sessionKey: activeComposerSessionKey,
           }),
         });
         console.log(`[stageBuffer] Staged: id=${staged?.id}, path=${staged?.stagedPath}, size=${staged?.fileSize}`);
@@ -692,7 +696,7 @@ export function ChatInput({
         }));
       }
     }
-  }, [attachmentKeys, canEditDraft, currentSessionKey, updateComposerDraftForSession]);
+  }, [activeComposerSessionKey, attachmentKeys, canEditDraft, currentSessionKey, updateComposerDraftForSession]);
 
   // ── Attachment management ──────────────────────────────────────
 

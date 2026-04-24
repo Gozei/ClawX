@@ -145,7 +145,6 @@ vi.mock('react-virtuoso', async () => {
   );
 
   const Virtuoso = React.forwardRef<any, Record<string, unknown>>(function MockVirtuoso(props, ref) {
-    virtuosoState.lastProps = props;
     const {
       data = [],
       itemContent,
@@ -197,6 +196,10 @@ vi.mock('react-virtuoso', async () => {
         }
       },
     }), []);
+
+    React.useEffect(() => {
+      virtuosoState.lastProps = props;
+    }, [props]);
 
     React.useEffect(() => {
       scrollerRef?.(scrollerNodeRef.current);

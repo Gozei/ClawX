@@ -10,7 +10,7 @@ function getModelSwitch(): HTMLButtonElement {
   return button;
 }
 
-const { agentsState, chatState, gatewayState, providerState, hostApiFetchMock, invokeIpcMock, toastWarningMock, toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
+const { agentsState, chatState, chatListeners, gatewayState, providerState, hostApiFetchMock, invokeIpcMock, toastWarningMock, toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
   agentsState: {
     agents: [] as Array<Record<string, unknown>>,
     defaultModelRef: 'openai/gpt-5.4',
@@ -22,7 +22,11 @@ const { agentsState, chatState, gatewayState, providerState, hostApiFetchMock, i
     currentSessionKey: 'agent:main:main',
     sessions: [] as Array<Record<string, unknown>>,
     sessionModels: {} as Record<string, string>,
+    composerDrafts: {} as Record<string, { text: string; attachments: Array<Record<string, unknown>>; targetAgentId: string | null }>,
+    setComposerDraft: (_sessionKey: string, _update: Record<string, unknown>) => undefined,
+    clearComposerDraft: (_sessionKey?: string) => undefined,
   },
+  chatListeners: new Set<() => void>(),
   gatewayState: {
     status: { state: 'running', port: 18789 },
   },
@@ -51,15 +55,90 @@ vi.mock('@/stores/agents', () => ({
 }));
 
 vi.mock('@/stores/chat', () => ({
-  useChatStore: Object.assign(
-    (selector: (state: typeof chatState) => unknown) => selector(chatState),
-    {
-      setState: (partial: Partial<typeof chatState> | ((state: typeof chatState) => Partial<typeof chatState>)) => {
-        const patch = typeof partial === 'function' ? partial(chatState) : partial;
-        Object.assign(chatState, patch);
+  useChatStore: (() => {
+    const notify = () => {
+      for (const listener of chatListeners) {
+        listener();
+      }
+    };
+
+    const setState = (partial: Partial<typeof chatState> | ((state: typeof chatState) => Partial<typeof chatState>)) => {
+      const patch = typeof partial === 'function' ? partial(chatState) : partial;
+      Object.assign(chatState, patch);
+      notify();
+    };
+
+    chatState.setComposerDraft = (
+      sessionKey: string,
+      update:
+        | { text: string; attachments: Array<Record<string, unknown>>; targetAgentId: string | null }
+        | null
+        | ((draft: { text: string; attachments: Array<Record<string, unknown>>; targetAgentId: string | null }) => {
+          text: string;
+          attachments: Array<Record<string, unknown>>;
+          targetAgentId: string | null;
+        } | null),
+    ) => {
+      const currentDraft = chatState.composerDrafts[sessionKey] ?? {
+        text: '',
+        attachments: [],
+        targetAgentId: null,
+      };
+      const resolvedDraft = typeof update === 'function'
+        ? update({
+          text: currentDraft.text,
+          attachments: [...currentDraft.attachments],
+          targetAgentId: currentDraft.targetAgentId,
+        })
+        : update;
+      if (!resolvedDraft) {
+        const nextDrafts = { ...chatState.composerDrafts };
+        delete nextDrafts[sessionKey];
+        chatState.composerDrafts = nextDrafts;
+        notify();
+        return;
+      }
+      chatState.composerDrafts = {
+        ...chatState.composerDrafts,
+        [sessionKey]: {
+          text: resolvedDraft.text ?? '',
+          attachments: Array.isArray(resolvedDraft.attachments) ? resolvedDraft.attachments : [],
+          targetAgentId: resolvedDraft.targetAgentId ?? null,
+        },
+      };
+      notify();
+    };
+
+    chatState.clearComposerDraft = (sessionKey?: string) => {
+      const key = sessionKey ?? chatState.currentSessionKey;
+      if (!chatState.composerDrafts[key]) return;
+      const nextDrafts = { ...chatState.composerDrafts };
+      delete nextDrafts[key];
+      chatState.composerDrafts = nextDrafts;
+      notify();
+    };
+
+    return Object.assign(
+      (selector: (state: typeof chatState) => unknown) => {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { useSyncExternalStore } = require('react') as typeof import('react');
+        return useSyncExternalStore(
+          (listener) => {
+            chatListeners.add(listener);
+            return () => {
+              chatListeners.delete(listener);
+            };
+          },
+          () => selector(chatState),
+          () => selector(chatState),
+        );
       },
-    },
-  ),
+      {
+        getState: () => chatState,
+        setState,
+      },
+    );
+  })(),
 }));
 
 vi.mock('@/stores/gateway', () => ({
@@ -151,6 +230,8 @@ describe('ChatInput agent targeting', () => {
     chatState.currentSessionKey = 'agent:main:main';
     chatState.sessions = [];
     chatState.sessionModels = {};
+    chatState.composerDrafts = {};
+    chatListeners.clear();
     gatewayState.status = { state: 'running', port: 18789 };
     providerState.accounts = [];
     providerState.statuses = [];

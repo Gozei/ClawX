@@ -130,6 +130,10 @@
         "success": "Archived successfully. You can find archived tasks in Settings - Session Archive.",
         "error": "Failed to archive"
     },
+    "attachments": {
+        "fileMissing": "\"{{fileName}}\" was deleted or could not be found.",
+        "fileOpenFailed": "Failed to open \"{{fileName}}\": {{error}}"
+    },
     "historyBuckets": {
         "today": "Today",
         "yesterday": "Yesterday",

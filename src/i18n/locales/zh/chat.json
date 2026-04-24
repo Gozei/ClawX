@@ -131,6 +131,10 @@
         "success": "归档成功，可在「系统设置-会话归档」中查看已归档任务",
         "error": "归档失败"
     },
+    "attachments": {
+        "fileMissing": "文件“{{fileName}}”已被删除或找不到。",
+        "fileOpenFailed": "打开文件“{{fileName}}”失败：{{error}}"
+    },
     "historyBuckets": {
         "today": "今天",
         "yesterday": "昨天",

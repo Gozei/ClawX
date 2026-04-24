@@ -88,7 +88,7 @@ export class AppUpdater extends EventEmitter {
   private updaterModulePromise: Promise<ElectronUpdaterModule | null> | null = null;
   private updaterModule: ElectronUpdaterModule | null = null;
   private updaterListenersReady = false;
-  private preferredChannel: string;
+  private preferredChannel = 'latest';
   private preferredAutoDownload = false;
 
   /** Delay (in seconds) before auto-installing a downloaded update. */

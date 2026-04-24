@@ -5,6 +5,7 @@ import {
   stripLeadingInternalHeartbeatMaintenance,
 } from '../../../shared/inbound-user-text';
 import { getOpenClawConfigDir } from '../../utils/paths';
+import { logger } from '../../utils/logger';
 import type { HostApiContext } from '../context';
 import { parseJsonBody, sendJson } from '../route-utils';
 
@@ -46,6 +47,101 @@ type SessionStoreIndex = {
   raw: string;
   recoveredFromMalformed: boolean;
 };
+
+type CacheCounter = {
+  hits: number;
+  misses: number;
+  rebuilds: number;
+};
+
+type CatalogDependency = {
+  path: string;
+  mtimeMs: number | null;
+};
+
+type CatalogCacheEntry = {
+  includeArchived: boolean;
+  includePreviews: boolean;
+  rootDependency: CatalogDependency;
+  dependencies: CatalogDependency[];
+  result: LocalSessionCatalog;
+};
+
+type HistoryTailCacheEntry = {
+  transcriptPath: string;
+  transcriptMtimeMs: number | null;
+  limit: number;
+  initialThinkingLevel: string | null;
+  expiresAt: number;
+  result: { messages: Array<Record<string, unknown>>; thinkingLevel: string | null };
+};
+
+const SESSION_CATALOG_CACHE = new Map<string, CatalogCacheEntry>();
+const SESSION_HISTORY_TAIL_CACHE = new Map<string, HistoryTailCacheEntry>();
+const SESSION_HISTORY_TAIL_CACHE_TTL_MS = 15_000;
+const SESSION_CACHE_STATS: Record<'catalog' | 'historyTail', CacheCounter> = {
+  catalog: { hits: 0, misses: 0, rebuilds: 0 },
+  historyTail: { hits: 0, misses: 0, rebuilds: 0 },
+};
+
+function getCacheHitRate(counter: CacheCounter): string {
+  const total = counter.hits + counter.misses;
+  if (total <= 0) return '0.0%';
+  return `${((counter.hits / total) * 100).toFixed(1)}%`;
+}
+
+function logCacheHit(cacheName: 'catalog' | 'historyTail', detail: string): void {
+  const counter = SESSION_CACHE_STATS[cacheName];
+  counter.hits += 1;
+  logger.info(
+    `[SessionsCache] ${cacheName} hit (${detail}) hitRate=${getCacheHitRate(counter)} hits=${counter.hits} misses=${counter.misses} rebuilds=${counter.rebuilds}`,
+  );
+}
+
+function logCacheMiss(cacheName: 'catalog' | 'historyTail', detail: string): void {
+  const counter = SESSION_CACHE_STATS[cacheName];
+  counter.misses += 1;
+  logger.info(
+    `[SessionsCache] ${cacheName} miss (${detail}) hitRate=${getCacheHitRate(counter)} hits=${counter.hits} misses=${counter.misses} rebuilds=${counter.rebuilds}`,
+  );
+}
+
+function logCacheRebuild(cacheName: 'catalog' | 'historyTail', durationMs: number, detail: string): void {
+  const counter = SESSION_CACHE_STATS[cacheName];
+  counter.rebuilds += 1;
+  logger.info(
+    `[SessionsCache] ${cacheName} rebuilt (${detail}) durationMs=${durationMs} hitRate=${getCacheHitRate(counter)} hits=${counter.hits} misses=${counter.misses} rebuilds=${counter.rebuilds}`,
+  );
+}
+
+async function getPathMtimeMs(path: string): Promise<number | null> {
+  const fsP = await import('node:fs/promises');
+  try {
+    const stat = await fsP.stat(path);
+    return stat.mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+function invalidateSessionCatalogCache(reason: string): void {
+  if (SESSION_CATALOG_CACHE.size > 0) {
+    logger.info(`[SessionsCache] catalog invalidated (${reason}) entries=${SESSION_CATALOG_CACHE.size}`);
+    SESSION_CATALOG_CACHE.clear();
+  }
+}
+
+function invalidateHistoryTailCache(predicate: (entry: HistoryTailCacheEntry) => boolean, reason: string): void {
+  let removed = 0;
+  for (const [key, entry] of SESSION_HISTORY_TAIL_CACHE.entries()) {
+    if (!predicate(entry)) continue;
+    SESSION_HISTORY_TAIL_CACHE.delete(key);
+    removed += 1;
+  }
+  if (removed > 0) {
+    logger.info(`[SessionsCache] historyTail invalidated (${reason}) entries=${removed}`);
+  }
+}
 
 function skipJsonWhitespace(raw: string, index: number): number {
   let cursor = index;
@@ -277,6 +373,7 @@ async function writeSessionStoreDocument(
       // ignore temp cleanup failures after fallback write
     }
   }
+  invalidateSessionCatalogCache(`session-store-write:${sessionsJsonPath}`);
 }
 
 async function repairRecoveredSessionStore(
@@ -462,6 +559,177 @@ function buildLocalSessionRow(sessionKey: string, entry: Record<string, unknown>
   };
 }
 
+type LocalSessionCatalog = {
+  sessions: Array<Record<string, unknown>>;
+  previews: Record<string, { firstUserMessage: string | null }>;
+};
+
+function getCatalogCacheKey(includeArchived: boolean, includePreviews: boolean): string {
+  return `${includeArchived ? 'archived' : 'visible'}:${includePreviews ? 'with-previews' : 'no-previews'}`;
+}
+
+function getStoredSessionPreview(entry: Record<string, unknown>): string | null {
+  const preview = typeof entry.firstUserMessagePreview === 'string'
+    ? entry.firstUserMessagePreview.trim()
+    : '';
+  return preview || null;
+}
+
+async function isCatalogCacheEntryValid(entry: CatalogCacheEntry): Promise<boolean> {
+  const currentRootMtime = await getPathMtimeMs(entry.rootDependency.path);
+  if (currentRootMtime !== entry.rootDependency.mtimeMs) {
+    return false;
+  }
+
+  for (const dependency of entry.dependencies) {
+    const currentMtime = await getPathMtimeMs(dependency.path);
+    if (currentMtime !== dependency.mtimeMs) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+async function collectLocalSessionsCatalog(options?: {
+  includeArchived?: boolean;
+  includePreviews?: boolean;
+}): Promise<LocalSessionCatalog> {
+  const includeArchived = options?.includeArchived === true;
+  const includePreviews = options?.includePreviews === true;
+  const cacheKey = getCatalogCacheKey(includeArchived, includePreviews);
+  const cached = SESSION_CATALOG_CACHE.get(cacheKey);
+  if (cached && await isCatalogCacheEntryValid(cached)) {
+    logCacheHit('catalog', cacheKey);
+    return {
+      sessions: cached.result.sessions.map((session) => ({ ...session })),
+      previews: Object.fromEntries(
+        Object.entries(cached.result.previews).map(([key, value]) => [key, { ...value }]),
+      ),
+    };
+  }
+
+  logCacheMiss('catalog', cacheKey);
+  const startedAt = Date.now();
+  const fsP = await import('node:fs/promises');
+  const agentsRoot = join(getOpenClawConfigDir(), 'agents');
+  const sessions = new Map<string, Record<string, unknown>>();
+  const previews: Record<string, { firstUserMessage: string | null }> = {};
+  const dependencies: CatalogDependency[] = [];
+  const rootDependency: CatalogDependency = {
+    path: agentsRoot,
+    mtimeMs: await getPathMtimeMs(agentsRoot),
+  };
+
+  const agentDirs = await fsP.readdir(agentsRoot, { withFileTypes: true }) as Array<{
+    name: string;
+    isDirectory: () => boolean;
+  }>;
+
+  for (const agentDir of agentDirs) {
+    if (!agentDir.isDirectory()) continue;
+    const sessionsDir = join(agentsRoot, agentDir.name, 'sessions');
+    const sessionsJsonPath = join(sessionsDir, 'sessions.json');
+    dependencies.push({
+      path: sessionsJsonPath,
+      mtimeMs: await getPathMtimeMs(sessionsJsonPath),
+    });
+    const index = await loadSessionStoreIndex(sessionsJsonPath, { repairRecovered: true });
+    for (const [sessionKey, entry] of Object.entries(index.entries)) {
+      const transcriptPath = resolveSessionTranscriptPathFromEntry(sessionsDir, entry);
+      let transcriptExists = false;
+      let transcriptCreatedAt: number | undefined;
+
+      if (transcriptPath) {
+        try {
+          const transcriptStat = await fsP.stat(transcriptPath);
+          transcriptExists = true;
+          transcriptCreatedAt = transcriptStat.birthtimeMs || transcriptStat.ctimeMs || undefined;
+          dependencies.push({
+            path: transcriptPath,
+            mtimeMs: transcriptStat.mtimeMs,
+          });
+        } catch {
+          const deletedTranscriptPath = transcriptPath.endsWith('.jsonl')
+            ? transcriptPath.replace(/\.jsonl$/i, '.deleted.jsonl')
+            : `${transcriptPath}.deleted.jsonl`;
+          try {
+            const deletedStat = await fsP.stat(deletedTranscriptPath);
+            dependencies.push({
+              path: deletedTranscriptPath,
+              mtimeMs: deletedStat.mtimeMs,
+            });
+            continue;
+          } catch {
+            // Keep the session row if the transcript is simply missing.
+            dependencies.push({
+              path: transcriptPath,
+              mtimeMs: null,
+            });
+          }
+        }
+      }
+
+      const storedPreview = getStoredSessionPreview(entry);
+      const derivedCreatedAt = normalizeSessionUpdatedAt(entry.createdAt) ?? transcriptCreatedAt;
+
+      let resolvedPreview = storedPreview;
+      if (
+        includePreviews
+        && transcriptExists
+        && !sessionKey.endsWith(':main')
+        && !(typeof entry.label === 'string' && entry.label.trim())
+        && !resolvedPreview
+      ) {
+        try {
+          resolvedPreview = await readFirstUserMessagePreview(transcriptPath!);
+        } catch {
+          resolvedPreview = null;
+        }
+      }
+
+      const row = buildLocalSessionRow(sessionKey, {
+        ...entry,
+        ...(typeof derivedCreatedAt === 'number' ? { createdAt: derivedCreatedAt } : {}),
+      });
+      if (!includeArchived && row.archived === true) {
+        continue;
+      }
+      sessions.set(sessionKey, row);
+
+      if (includePreviews && resolvedPreview !== null) {
+        previews[sessionKey] = {
+          firstUserMessage: resolvedPreview,
+        };
+      }
+    }
+  }
+
+  const result: LocalSessionCatalog = {
+    sessions: Array.from(sessions.values()).sort((left, right) => {
+      const leftUpdatedAt = normalizeSessionUpdatedAt(left.updatedAt) ?? 0;
+      const rightUpdatedAt = normalizeSessionUpdatedAt(right.updatedAt) ?? 0;
+      return rightUpdatedAt - leftUpdatedAt;
+    }),
+    previews,
+  };
+
+  SESSION_CATALOG_CACHE.set(cacheKey, {
+    includeArchived,
+    includePreviews,
+    rootDependency,
+    dependencies,
+    result,
+  });
+  logCacheRebuild('catalog', Date.now() - startedAt, cacheKey);
+  return {
+    sessions: result.sessions.map((session) => ({ ...session })),
+    previews: Object.fromEntries(
+      Object.entries(result.previews).map(([key, value]) => [key, { ...value }]),
+    ),
+  };
+}
+
 async function resolveSessionCreatedAt(
   sessionsDir: string,
   entry: Record<string, unknown>,
@@ -630,7 +898,7 @@ function trimCarriageReturn(buffer: Buffer): Buffer {
     : buffer;
 }
 
-async function readSessionHistoryTail(
+async function readSessionHistoryTailUncached(
   filePath: string,
   limit: number,
   initialThinkingLevel: string | null,
@@ -713,6 +981,49 @@ async function readSessionHistoryTail(
   } finally {
     await handle.close();
   }
+}
+
+async function readSessionHistoryTailCached(
+  sessionKey: string,
+  filePath: string,
+  limit: number,
+  initialThinkingLevel: string | null,
+): Promise<{ messages: Array<Record<string, unknown>>; thinkingLevel: string | null }> {
+  const cacheKey = `${sessionKey}::${limit}::${initialThinkingLevel ?? 'null'}`;
+  const transcriptMtimeMs = await getPathMtimeMs(filePath);
+  const cached = SESSION_HISTORY_TAIL_CACHE.get(cacheKey);
+
+  if (
+    cached
+    && cached.transcriptPath === filePath
+    && cached.limit === limit
+    && cached.initialThinkingLevel === initialThinkingLevel
+    && cached.transcriptMtimeMs === transcriptMtimeMs
+    && cached.expiresAt > Date.now()
+  ) {
+    logCacheHit('historyTail', cacheKey);
+    return {
+      messages: cached.result.messages.map((message) => ({ ...message })),
+      thinkingLevel: cached.result.thinkingLevel,
+    };
+  }
+
+  logCacheMiss('historyTail', cacheKey);
+  const startedAt = Date.now();
+  const result = await readSessionHistoryTailUncached(filePath, limit, initialThinkingLevel);
+  SESSION_HISTORY_TAIL_CACHE.set(cacheKey, {
+    transcriptPath: filePath,
+    transcriptMtimeMs,
+    limit,
+    initialThinkingLevel,
+    expiresAt: Date.now() + SESSION_HISTORY_TAIL_CACHE_TTL_MS,
+    result,
+  });
+  logCacheRebuild('historyTail', Date.now() - startedAt, cacheKey);
+  return {
+    messages: result.messages.map((message) => ({ ...message })),
+    thinkingLevel: result.thinkingLevel,
+  };
 }
 
 function resolveSessionMetadataEntry(
@@ -1042,54 +1353,26 @@ export async function handleSessionRoutes(
 
   if (url.pathname === '/api/sessions/list' && req.method === 'GET') {
     try {
-      const fsP = await import('node:fs/promises');
-      const agentsRoot = join(getOpenClawConfigDir(), 'agents');
-      const sessions = new Map<string, Record<string, unknown>>();
-
-      try {
-        const agentDirs = await fsP.readdir(agentsRoot, { withFileTypes: true }) as Array<{
-          name: string;
-          isDirectory: () => boolean;
-        }>;
-        for (const agentDir of agentDirs) {
-          if (!agentDir.isDirectory()) continue;
-          const sessionsDir = join(agentsRoot, agentDir.name, 'sessions');
-          const sessionsJsonPath = join(sessionsDir, 'sessions.json');
-          const index = await loadSessionStoreIndex(sessionsJsonPath, { repairRecovered: true });
-
-          for (const [sessionKey, entry] of Object.entries(index.entries)) {
-            const transcriptPath = resolveSessionTranscriptPathFromEntry(sessionsDir, entry);
-            if (transcriptPath) {
-              try {
-                await fsP.access(transcriptPath);
-              } catch {
-                const deletedTranscriptPath = transcriptPath.endsWith('.jsonl')
-                  ? transcriptPath.replace(/\.jsonl$/i, '.deleted.jsonl')
-                  : `${transcriptPath}.deleted.jsonl`;
-                try {
-                  await fsP.access(deletedTranscriptPath);
-                  continue;
-                } catch {
-                  // Keep the session row if the transcript is simply missing.
-                }
-              }
-            }
-
-            sessions.set(sessionKey, buildLocalSessionRow(sessionKey, entry));
-          }
-        }
-      } catch {
-        sendJson(res, 200, { success: true, sessions: [] });
-        return true;
-      }
-
+      const catalog = await collectLocalSessionsCatalog();
       sendJson(res, 200, {
         success: true,
-        sessions: Array.from(sessions.values()).sort((left, right) => {
-          const leftUpdatedAt = normalizeSessionUpdatedAt(left.updatedAt) ?? 0;
-          const rightUpdatedAt = normalizeSessionUpdatedAt(right.updatedAt) ?? 0;
-          return rightUpdatedAt - leftUpdatedAt;
-        }),
+        sessions: catalog.sessions,
+      });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === '/api/sessions/catalog' && req.method === 'GET') {
+    try {
+      const catalog = await collectLocalSessionsCatalog({
+        includePreviews: true,
+      });
+      sendJson(res, 200, {
+        success: true,
+        sessions: catalog.sessions,
+        previews: catalog.previews,
       });
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
@@ -1212,6 +1495,13 @@ export async function handleSessionRoutes(
         const index = await loadSessionStoreIndex(sessionsJsonPath, { repairRecovered: true });
 
         for (const sessionKey of keys) {
+          const storedPreview = getStoredSessionPreview(index.entries[sessionKey] ?? {});
+          if (storedPreview) {
+            previews[sessionKey] = {
+              firstUserMessage: storedPreview,
+            };
+            continue;
+          }
           const transcriptPath = resolveSessionTranscriptPathFromEntry(sessionsDir, index.entries[sessionKey] ?? null);
           if (!transcriptPath) continue;
           try {
@@ -1281,7 +1571,7 @@ export async function handleSessionRoutes(
       const initialThinkingLevel = typeof sessionEntry?.thinkingLevel === 'string'
         ? sessionEntry.thinkingLevel
         : null;
-      const history = await readSessionHistoryTail(transcriptPath, limit, initialThinkingLevel);
+      const history = await readSessionHistoryTailCached(sessionKey, transcriptPath, limit, initialThinkingLevel);
 
       sendJson(res, 200, {
         success: true,
@@ -1351,6 +1641,10 @@ export async function handleSessionRoutes(
       try {
         await fsP.access(resolvedSrcPath);
         await fsP.rename(resolvedSrcPath, dstPath);
+        invalidateHistoryTailCache(
+          (entry) => entry.transcriptPath === resolvedSrcPath || entry.transcriptPath === dstPath,
+          `session-delete:${sessionKey}`,
+        );
       } catch {
         // Non-fatal; still try to update sessions.json.
       }

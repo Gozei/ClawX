@@ -103,6 +103,7 @@ When you target another agent with `@agent`, Deep AI Worker switches into that a
 Each agent can also override its own `provider/model` runtime setting; agents without overrides continue inheriting the global default model.
 Sessions can now be archived from the sidebar and reviewed later in **Settings → Session Archive** without deleting messages, files, or conversation state.
 Chat attachments and generated files can now preview directly inside the conversation with inline support for common documents, PDFs, images, code, spreadsheets, and presentations. Word previews now use a higher-fidelity DOCX renderer so theme fonts, heading colors, and table styling survive inside chat instead of flattening to plain semantic HTML. When you expand a preview, it opens in its own larger detachable window so you can drag it onto another screen while keeping the main chat visible, but it no longer defaults to filling the entire screen. Presentation previews also use a roomier file-size cap than the generic preview fallback, render visually as continuous vertically scrollable slide pages when slide extraction succeeds, and persist cached slide renders so reopening the same `.pptx` is much faster. On Windows, Deep AI Worker now prefers exporting PPT slides through the locally installed PowerPoint app for higher-fidelity preview images, then falls back to HTML slide rendering only when that export path is unavailable.
+In **Settings → General**, you can now choose a dedicated upload directory for files you attach in chat; ClawX stages those files into agent/session-specific `uploads` folders instead of mixing everything into one shared location. You can also choose a separate assistant output directory, and detected model-generated files will be copied into agent/session-specific `outputs` folders for easier session-based organization.
 
 ### 📡 Multi-Channel Management
 Configure and monitor multiple AI channels simultaneously. Each channel operates independently, allowing you to run specialized agents for different tasks.
@@ -484,4 +485,3 @@ Deep AI Worker is released under the [MIT License](LICENSE). You're free to use,
 <p align="center">
   <sub>Built with ❤️ by the ValueCell Team</sub>
 </p>
-

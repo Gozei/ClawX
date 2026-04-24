@@ -18,6 +18,7 @@ import { useProviderStore } from '@/stores/providers';
 import { useSkillsStore } from '@/stores/skills';
 import { useChatStore } from '@/stores/chat';
 import { hostApiFetch } from '@/lib/host-api';
+import { useBranding } from '@/lib/branding';
 import { buildProviderListItems } from '@/lib/provider-accounts';
 import { subscribeHostEvent } from '@/lib/host-events';
 import { CHANNEL_ICONS, CHANNEL_NAMES, type ChannelType } from '@/types/channel';
@@ -277,6 +278,7 @@ function buildRuntimeProviderOptions(
 
 export function Agents() {
   const { t } = useTranslation('agents');
+  const branding = useBranding();
   const gatewayStatus = useGatewayStore((state) => state.status);
   const refreshProviderSnapshot = useProviderStore((state) => state.refreshProviderSnapshot);
   const lastGatewayStateRef = useRef(gatewayStatus.state);
@@ -448,7 +450,10 @@ export function Agents() {
       <ConfirmDialog
         open={!!agentToDelete}
         title={t('deleteDialog.title')}
-        message={agentToDelete ? t('deleteDialog.message', { name: agentToDelete.name }) : ''}
+        message={agentToDelete ? t('deleteDialog.message', {
+          name: agentToDelete.name,
+          appName: branding.productName,
+        }) : ''}
         confirmLabel={t('common:actions.delete')}
         cancelLabel={t('common:actions.cancel')}
         variant="destructive"
@@ -507,7 +512,8 @@ function AgentOverviewCard({
         <Button
           variant="ghost"
           size="icon"
-          className="pointer-events-none absolute right-4 top-4 h-9 w-9 shrink-0 rounded-xl text-muted-foreground opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+          data-testid="agent-delete-button"
+          className="absolute right-4 top-4 z-10 h-9 w-9 shrink-0 rounded-xl text-muted-foreground opacity-0 transition-all duration-200 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
           onClick={onDelete}
           title={t('deleteAgent')}
         >
@@ -562,7 +568,7 @@ function AgentOverviewCard({
         variant="outline"
         onClick={onOpenSettings}
         title={t('settings')}
-        className="pointer-events-none mt-auto h-10 w-full rounded-lg border-black/10 bg-white/70 text-[13px] font-medium text-foreground opacity-0 shadow-none transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100 hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08]"
+        className="mt-auto h-10 w-full rounded-lg border-black/10 bg-white/70 text-[13px] font-medium text-foreground opacity-0 shadow-none transition-all duration-200 group-hover:opacity-100 hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08]"
       >
         <Settings2 className="mr-2 h-4 w-4" />
         {t('settings')}
