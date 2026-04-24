@@ -950,12 +950,17 @@ export class GatewayManager extends EventEmitter {
         this.setStatus({ pid });
       },
       onExit: (exitedChild, code) => {
+        if (this.process !== exitedChild) {
+          logger.debug(
+            `Ignoring stale Gateway process exit (pid=${exitedChild.pid ?? 'unknown'}, code=${code})`,
+          );
+          return;
+        }
+
         this.processExitCode = code;
         this.ownsProcess = false;
         this.connectionMonitor.clear();
-        if (this.process === exitedChild) {
-          this.process = null;
-        }
+        this.process = null;
         this.emit('exit', code);
 
         if (this.status.state === 'running') {
@@ -975,10 +980,13 @@ export class GatewayManager extends EventEmitter {
         this.scheduleReconnect();
       },
       onError: () => {
-        this.ownsProcess = false;
-        if (this.process === child) {
-          this.process = null;
+        if (this.process !== child) {
+          logger.debug(`Ignoring stale Gateway process error (pid=${child.pid ?? 'unknown'})`);
+          return;
         }
+
+        this.ownsProcess = false;
+        this.process = null;
       },
     });
 
