@@ -44,6 +44,7 @@ interface SettingsState {
   hideInternalRoutineProcesses: boolean;
   assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
+  dreamModeEnabled: boolean;
   fileStorageBaseDir: string;
 
   // Gateway
@@ -89,6 +90,7 @@ interface SettingsState {
   setHideInternalRoutineProcesses: (value: boolean) => void;
   setAssistantMessageStyle: (value: AssistantMessageStyle) => void;
   setChatFontScale: (value: number) => void;
+  setDreamModeEnabled: (value: boolean) => void;
   setFileStorageBaseDir: (value: string) => void;
   setGatewayAutoStart: (value: boolean) => void;
   setGatewayPort: (port: number) => void;
@@ -126,6 +128,7 @@ const defaultSettings = {
   hideInternalRoutineProcesses: true,
   assistantMessageStyle: 'bubble' as AssistantMessageStyle,
   chatFontScale: 100,
+  dreamModeEnabled: false,
   fileStorageBaseDir: '',
   gatewayAutoStart: true,
   gatewayPort: 18789,
@@ -285,6 +288,13 @@ export const useSettingsStore = create<SettingsState>()(
         void hostApiFetch('/api/settings/chatFontScale', {
           method: 'PUT',
           body: JSON.stringify({ value: normalized }),
+        }).catch(() => { });
+      },
+      setDreamModeEnabled: (dreamModeEnabled) => {
+        set({ dreamModeEnabled });
+        void hostApiFetch('/api/settings/dreamModeEnabled', {
+          method: 'PUT',
+          body: JSON.stringify({ value: dreamModeEnabled }),
         }).catch(() => { });
       },
       setFileStorageBaseDir: (fileStorageBaseDir) => {

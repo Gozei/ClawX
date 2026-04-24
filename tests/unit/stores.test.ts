@@ -22,6 +22,7 @@ describe('Settings Store', () => {
       startMinimized: false,
       launchAtStartup: false,
       telemetryEnabled: true,
+      dreamModeEnabled: false,
       logLevel: 'debug',
       auditEnabled: true,
       auditMode: 'minimal',
@@ -37,6 +38,7 @@ describe('Settings Store', () => {
     expect(state.theme).toBe('system');
     expect(state.sidebarCollapsed).toBe(false);
     expect(state.gatewayAutoStart).toBe(true);
+    expect(state.dreamModeEnabled).toBe(false);
     expect(state.logLevel).toBe('debug');
     expect(state.auditEnabled).toBe(true);
     expect(state.appLogRetentionDays).toBe(14);
@@ -111,6 +113,30 @@ describe('Settings Store', () => {
       'hostapi:fetch',
       expect.objectContaining({
         path: '/api/settings/launchAtStartup',
+        method: 'PUT',
+      }),
+    );
+  });
+
+  it('should persist dream mode setting through host api', () => {
+    const invoke = vi.mocked(window.electron.ipcRenderer.invoke);
+    invoke.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 200,
+        ok: true,
+        json: { success: true },
+      },
+    });
+
+    const { setDreamModeEnabled } = useSettingsStore.getState();
+    setDreamModeEnabled(true);
+
+    expect(useSettingsStore.getState().dreamModeEnabled).toBe(true);
+    expect(invoke).toHaveBeenCalledWith(
+      'hostapi:fetch',
+      expect.objectContaining({
+        path: '/api/settings/dreamModeEnabled',
         method: 'PUT',
       }),
     );

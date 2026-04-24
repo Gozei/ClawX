@@ -55,6 +55,7 @@ export interface AppSettings {
   assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
   fileStorageBaseDir: string;
+  dreamModeEnabled: boolean;
   userUploadBaseDir: string;
   assistantOutputBaseDir: string;
   machineId: string;
@@ -120,6 +121,7 @@ function createDefaultSettings(): AppSettings {
     assistantMessageStyle: 'bubble',
     chatFontScale: 100,
     fileStorageBaseDir: '',
+    dreamModeEnabled: false,
     userUploadBaseDir: '',
     assistantOutputBaseDir: '',
     machineId: '',

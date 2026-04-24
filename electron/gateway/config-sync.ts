@@ -24,6 +24,7 @@ import { cleanupDanglingWeChatPluginState, listConfiguredChannels, readOpenClawC
 import { syncGatewayTokenToConfig, syncBrowserConfigToOpenClaw, syncSessionIdleMinutesToOpenClaw, sanitizeOpenClawConfig } from '../utils/openclaw-auth';
 import { buildProxyEnv, resolveProxySettings } from '../utils/proxy';
 import { syncProxyConfigToOpenClaw } from '../utils/openclaw-proxy';
+import { syncDreamModeToOpenClawConfig } from '../utils/dream-mode';
 import { logger } from '../utils/logger';
 import { prependPathEntry } from '../utils/env-path';
 import { copyPluginFromNodeModules, fixupPluginManifest, cpSyncSafe } from '../utils/plugin-install';
@@ -271,6 +272,7 @@ export async function syncGatewayConfigBeforeLaunch(
   appSettings: Awaited<ReturnType<typeof getAllSettings>>,
 ): Promise<void> {
   await syncProxyConfigToOpenClaw(appSettings, { preserveExistingWhenDisabled: true });
+  await syncDreamModeToOpenClawConfig(appSettings.dreamModeEnabled);
 
   try {
     await sanitizeOpenClawConfig();

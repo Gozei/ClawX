@@ -13,7 +13,8 @@
       "language": "语言",
       "checkUpdates": "检查更新",
       "settings": "设置",
-      "console": ">_ OpenClaw 控制台"
+      "console": ">_ OpenClaw 控制台",
+      "dream": "梦境"
     },
     "theme": {
       "light": "浅色",
@@ -422,7 +423,9 @@
       "hidden": "全部隐藏"
     },
     "telemetry": "匿名使用数据",
-    "telemetryDesc": "允许提供匿名的基础使用数据，用于改进 {{appName}}"
+    "telemetryDesc": "允许提供匿名的基础使用数据，用于改进 {{appName}}",
+    "dreamMode": "梦境模式",
+    "dreamModeDesc": "同步 OpenClaw 记忆梦境能力，并显示梦境工作区。"
   },
   "developer": {
     "title": "开发者",
@@ -512,5 +515,50 @@
     "docs": "官网",
     "github": "GitHub",
     "faq": "常见问题"
+  },
+  "dream": {
+    "title": "梦境",
+    "subtitle": "{{appName}} 记忆整理",
+    "gatewayStopped": "网关未启动",
+    "gatewayStoppedDesc": "启动 OpenClaw Gateway 后可查看梦境状态。",
+    "startGateway": "启动网关",
+    "actionDone": "{{action}}已完成（{{count}}）",
+    "metrics": {
+      "shortTerm": "短期记忆",
+      "signals": "信号",
+      "grounded": "回放",
+      "promotedToday": "今日提升"
+    },
+    "status": {
+      "enabled": "梦境已开启",
+      "disabled": "梦境已关闭",
+      "schedule": "计划",
+      "timezone": "时区",
+      "nextRun": "下次运行"
+    },
+    "phase": {
+      "light": "浅睡",
+      "deep": "深睡",
+      "rem": "REM"
+    },
+    "diary": {
+      "title": "梦境日志",
+      "empty": "暂无梦境日志。"
+    },
+    "actions": {
+      "title": "维护",
+      "backfill": "回填日志",
+      "dedupe": "日志去重",
+      "clearGrounded": "清空回放",
+      "repair": "修复缓存"
+    },
+    "lists": {
+      "waiting": "等待中",
+      "strongest": "最强信号",
+      "promoted": "已提升",
+      "signals": "信号",
+      "phaseHits": "阶段命中",
+      "empty": "暂无条目"
+    }
   }
 }
