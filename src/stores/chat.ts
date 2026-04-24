@@ -1212,12 +1212,78 @@ function enrichWithCachedImages(messages: RawMessage[]): RawMessage[] {
   });
 }
 
+async function materializeAssistantOutputs(
+  messages: RawMessage[],
+  sessionKey?: string,
+): Promise<boolean> {
+  const normalizedSessionKey = typeof sessionKey === 'string' ? sessionKey.trim() : '';
+  if (!normalizedSessionKey) return false;
+
+  const filePaths = Array.from(new Set(
+    messages
+      .filter((message) => message.role === 'assistant')
+      .flatMap((message) => (message._attachedFiles || []).map((file) => file.filePath).filter(Boolean) as string[]),
+  ));
+
+  if (filePaths.length === 0) return false;
+
+  try {
+    const response = await hostApiFetch<{
+      success: boolean;
+      enabled?: boolean;
+      results?: Array<{
+        sourcePath: string;
+        materializedPath: string;
+        fileName: string;
+        fileSize: number;
+      }>;
+    }>('/api/files/materialize-outputs', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionKey: normalizedSessionKey,
+        filePaths,
+      }),
+    });
+
+    if (!response.success || response.enabled === false || !Array.isArray(response.results) || response.results.length === 0) {
+      return false;
+    }
+
+    const resultMap = new Map(response.results.map((entry) => [entry.sourcePath, entry]));
+    let updated = false;
+    for (const message of messages) {
+      if (message.role !== 'assistant' || !message._attachedFiles) continue;
+      for (const file of message._attachedFiles) {
+        const sourcePath = file.filePath;
+        if (!sourcePath) continue;
+        const materialized = resultMap.get(sourcePath);
+        if (!materialized) continue;
+        if (file.filePath !== materialized.materializedPath) {
+          file.filePath = materialized.materializedPath;
+          file.fileName = materialized.fileName;
+          file.fileSize = materialized.fileSize;
+          updated = true;
+        } else if (materialized.fileSize > 0 && file.fileSize !== materialized.fileSize) {
+          file.fileSize = materialized.fileSize;
+          updated = true;
+        }
+      }
+    }
+
+    return updated;
+  } catch (error) {
+    console.warn('[materializeAssistantOutputs] Failed:', error);
+    return false;
+  }
+}
+
 /**
  * Async: load missing previews from disk via IPC for messages that have
  * _attachedFiles with null previews. Updates messages in-place and triggers re-render.
  * Handles both [media attached: ...] patterns and raw filePath entries.
  */
-async function loadMissingPreviews(messages: RawMessage[]): Promise<boolean> {
+async function loadMissingPreviews(messages: RawMessage[], sessionKey?: string): Promise<boolean> {
+  const materialized = await materializeAssistantOutputs(messages, sessionKey);
   // Collect all image paths that need previews
   const needPreview: Array<{ filePath: string; mimeType: string }> = [];
   const seenPaths = new Set<string>();
@@ -1256,7 +1322,7 @@ async function loadMissingPreviews(messages: RawMessage[]): Promise<boolean> {
     }
   }
 
-  if (needPreview.length === 0) return false;
+  if (needPreview.length === 0) return materialized;
 
   try {
     const thumbnails = await hostApiFetch<Record<string, { preview: string | null; fileSize: number }>>(
@@ -1303,10 +1369,10 @@ async function loadMissingPreviews(messages: RawMessage[]): Promise<boolean> {
       }
     }
     if (updated) saveImageCache(_imageCache);
-    return updated;
+    return updated || materialized;
   } catch (err) {
     console.warn('[loadMissingPreviews] Failed:', err);
-    return false;
+    return materialized;
   }
 }
 
@@ -2336,6 +2402,31 @@ function hasLiveTurnSignal(state: Pick<
   return false;
 }
 
+function shouldRecomputeActiveTurnBuffer(
+  prevState: Pick<
+    ChatState,
+    | 'messages'
+    | 'sending'
+    | 'streamingMessage'
+    | 'streamingText'
+    | 'lastUserMessageAt'
+  >,
+  nextState: Pick<
+    ChatState,
+    | 'messages'
+    | 'sending'
+    | 'streamingMessage'
+    | 'streamingText'
+    | 'lastUserMessageAt'
+  >,
+): boolean {
+  return prevState.messages !== nextState.messages
+    || prevState.sending !== nextState.sending
+    || prevState.streamingMessage !== nextState.streamingMessage
+    || prevState.streamingText !== nextState.streamingText
+    || prevState.lastUserMessageAt !== nextState.lastUserMessageAt;
+}
+
 // ── Store ────────────────────────────────────────────────────────
 
 export const useChatStore = create<ChatState>((baseSet, get) => {
@@ -2345,7 +2436,9 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       const nextState = { ...state, ...patch } as ChatState;
       return {
         ...patch,
-        activeTurnBuffer: deriveActiveTurnBuffer(nextState),
+        activeTurnBuffer: shouldRecomputeActiveTurnBuffer(state, nextState)
+          ? deriveActiveTurnBuffer(nextState)
+          : state.activeTurnBuffer,
       };
     }, replace);
   };
@@ -2466,16 +2559,35 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     _loadSessionsInFlight = (async () => {
       try {
         let data: Record<string, unknown> | null = null;
+        let aggregatedPreviews: Record<string, { firstUserMessage: string | null }> = {};
+        let usedLocalCatalog = false;
         try {
-          const localList = await hostApiFetch<{
+          const localCatalog = await hostApiFetch<{
             success: boolean;
             sessions?: Array<Record<string, unknown>>;
-          }>('/api/sessions/list');
-          if (localList?.success && Array.isArray(localList.sessions)) {
-            data = { sessions: localList.sessions };
+            previews?: Record<string, { firstUserMessage: string | null }>;
+          }>('/api/sessions/catalog');
+          if (localCatalog?.success && Array.isArray(localCatalog.sessions)) {
+            data = { sessions: localCatalog.sessions };
+            aggregatedPreviews = localCatalog.previews ?? {};
+            usedLocalCatalog = true;
           }
         } catch {
-          // Fall back to gateway enumeration when the host route is unavailable.
+          // Fall back to the split local routes when the aggregate route is unavailable.
+        }
+
+        if (!data) {
+          try {
+            const localList = await hostApiFetch<{
+              success: boolean;
+              sessions?: Array<Record<string, unknown>>;
+            }>('/api/sessions/list');
+            if (localList?.success && Array.isArray(localList.sessions)) {
+              data = { sessions: localList.sessions };
+            }
+          } catch {
+            // Fall back to gateway enumeration when local routes are unavailable.
+          }
         }
 
         if (!data) {
@@ -2488,7 +2600,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             .filter(Boolean);
 
           let persistedMetadata: Record<string, { pinned?: boolean; pinOrder?: number; archived?: boolean; archivedAt?: number; createdAt?: number }> = {};
-          if (sessionKeys.length > 0) {
+          if (sessionKeys.length > 0 && !usedLocalCatalog) {
             try {
               const metadataResult = await hostApiFetch<{
                 success: boolean;
@@ -2620,41 +2732,76 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           const shouldUseGatewayHistoryLabelPrefetch = false;
           if (sessionsToLabel.length > 0) {
             const labelsToPersist: Array<{ sessionKey: string; label: string }> = [];
-            void hostApiFetch<{
-              success: boolean;
-              previews?: Record<string, { firstUserMessage: string | null }>;
-            }>('/api/sessions/previews', {
-              method: 'POST',
-              body: JSON.stringify({ sessionKeys: sessionsToLabel.map((session) => session.key) }),
-            }).then((result) => {
-              if (!result?.success || !result.previews) return;
-              set((s) => {
-                let nextSessionLabels = s.sessionLabels;
-                let changed = false;
+            const missingPreviewSessionKeys = new Set<string>();
 
-                for (const session of sessionsToLabel) {
-                  const labelText = result.previews?.[session.key]?.firstUserMessage?.trim();
-                  const autoLabel = labelText ? truncateAutoSessionLabel(labelText) : '';
-                  if (!autoLabel || s.sessionLabels[session.key] || hasStoredSessionLabel(s.sessions, session.key)) {
-                    continue;
-                  }
-                  if (!changed) {
-                    nextSessionLabels = { ...s.sessionLabels };
-                    changed = true;
-                  }
-                  nextSessionLabels[session.key] = autoLabel;
-                  labelsToPersist.push({ sessionKey: session.key, label: autoLabel });
+            set((s) => {
+              let nextSessionLabels = s.sessionLabels;
+              let changed = false;
+
+              for (const session of sessionsToLabel) {
+                const labelText = aggregatedPreviews[session.key]?.firstUserMessage?.trim();
+                const autoLabel = labelText ? truncateAutoSessionLabel(labelText) : '';
+                if (!autoLabel) {
+                  missingPreviewSessionKeys.add(session.key);
+                  continue;
                 }
-
-                return changed ? { sessionLabels: nextSessionLabels } : {};
-              });
-            }).catch(() => {
-              // ignore preview prefetch errors
-            }).finally(() => {
-              for (const { sessionKey, label } of labelsToPersist) {
-                queueAutoSessionLabelPersistence(set, sessionKey, label);
+                if (s.sessionLabels[session.key] || hasStoredSessionLabel(s.sessions, session.key)) {
+                  continue;
+                }
+                if (!changed) {
+                  nextSessionLabels = { ...s.sessionLabels };
+                  changed = true;
+                }
+                nextSessionLabels[session.key] = autoLabel;
+                labelsToPersist.push({ sessionKey: session.key, label: autoLabel });
               }
+
+              return changed ? { sessionLabels: nextSessionLabels } : {};
             });
+
+            for (const { sessionKey, label } of labelsToPersist) {
+              queueAutoSessionLabelPersistence(set, sessionKey, label);
+            }
+
+            if (missingPreviewSessionKeys.size > 0) {
+              const fallbackSessions = sessionsToLabel.filter((session) => missingPreviewSessionKeys.has(session.key));
+              const fallbackLabelsToPersist: Array<{ sessionKey: string; label: string }> = [];
+              void hostApiFetch<{
+                success: boolean;
+                previews?: Record<string, { firstUserMessage: string | null }>;
+              }>('/api/sessions/previews', {
+                method: 'POST',
+                body: JSON.stringify({ sessionKeys: fallbackSessions.map((session) => session.key) }),
+              }).then((result) => {
+                if (!result?.success || !result.previews) return;
+                set((s) => {
+                  let nextSessionLabels = s.sessionLabels;
+                  let changed = false;
+
+                  for (const session of fallbackSessions) {
+                    const labelText = result.previews?.[session.key]?.firstUserMessage?.trim();
+                    const autoLabel = labelText ? truncateAutoSessionLabel(labelText) : '';
+                    if (!autoLabel || s.sessionLabels[session.key] || hasStoredSessionLabel(s.sessions, session.key)) {
+                      continue;
+                    }
+                    if (!changed) {
+                      nextSessionLabels = { ...s.sessionLabels };
+                      changed = true;
+                    }
+                    nextSessionLabels[session.key] = autoLabel;
+                    fallbackLabelsToPersist.push({ sessionKey: session.key, label: autoLabel });
+                  }
+
+                  return changed ? { sessionLabels: nextSessionLabels } : {};
+                });
+              }).catch(() => {
+                // ignore preview prefetch errors
+              }).finally(() => {
+                for (const { sessionKey, label } of fallbackLabelsToPersist) {
+                  queueAutoSessionLabelPersistence(set, sessionKey, label);
+                }
+              });
+            }
           }
           if (shouldUseGatewayHistoryLabelPrefetch && sessionsToLabel.length > 0) {
             void Promise.all(
@@ -3459,7 +3606,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       }
 
       // Async: load missing image previews from disk (updates in background)
-      loadMissingPreviews(mergedMessagesForActiveSend).then((updated) => {
+      loadMissingPreviews(mergedMessagesForActiveSend, currentSessionKey).then((updated) => {
         if (!isCurrentSession()) return;
         if (updated) {
           set((state) => ({

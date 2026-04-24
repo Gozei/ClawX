@@ -185,12 +185,6 @@ export function Skills() {
   }, [fetchMarketInstalledSkills, installOpen]);
 
   useEffect(() => {
-    if (!installOpen) {
-      setSelectedMarketplaceSkill(null);
-    }
-  }, [installOpen]);
-
-  useEffect(() => {
     if (!installOpen || !selectedMarketplaceSkill) return;
     void fetchMarketplaceSkillDetail(
       selectedMarketplaceSkill.slug,

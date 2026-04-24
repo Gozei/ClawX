@@ -20,6 +20,8 @@ import { buildProviderListItems } from '@/lib/provider-accounts';
 import { extractText, extractThinking, extractImages, extractToolUse, formatTimestamp } from './message-utils';
 import { StreamingMarkdownPreview } from './StreamingMarkdownPreview';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 
 interface ChatMessageProps {
   message: RawMessage;
@@ -834,15 +836,39 @@ function formatFileSize(bytes: number): string {
 
 function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () => void }) {
   const visual = getFileVisual(file.mimeType, file.fileName);
-  const handleOpen = useCallback(() => {
+  const { t } = useTranslation('chat');
+  const handleOpen = useCallback(async () => {
     if (onPreview) {
       onPreview();
       return;
     }
     if (file.filePath) {
-      invokeIpc('shell:openPath', file.filePath);
+      try {
+        const result = await invokeIpc<string>('shell:openPath', file.filePath);
+        if (typeof result === 'string' && result.trim()) {
+          const normalized = result.trim().toLowerCase();
+          if (
+            normalized.includes('file not found:')
+            || normalized.includes('does not exist')
+            || normalized.includes('not found')
+            || normalized.includes('no such file')
+          ) {
+            toast.error(t('attachments.fileMissing', { fileName: file.fileName }));
+            return;
+          }
+          toast.error(t('attachments.fileOpenFailed', {
+            fileName: file.fileName,
+            error: result.trim(),
+          }));
+        }
+      } catch (error) {
+        toast.error(t('attachments.fileOpenFailed', {
+          fileName: file.fileName,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      }
     }
-  }, [file.filePath, onPreview]);
+  }, [file.fileName, file.filePath, onPreview, t]);
 
   return (
     <div

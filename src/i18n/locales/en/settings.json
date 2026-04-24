@@ -73,6 +73,24 @@
     "launchAtStartup": "Launch at system startup",
     "launchAtStartupDesc": "Automatically launch {{appName}} when you log in"
   },
+  "storage": {
+    "userUploadDir": "Uploaded file directory",
+    "userUploadDirDesc": "ClawX copies files you attach here and then groups them by session automatically.",
+    "assistantOutputDir": "Assistant output directory",
+    "assistantOutputDirDesc": "When the assistant produces files, ClawX copies the detected outputs here and groups them by session automatically.",
+    "chooseFolder": "Choose Folder",
+    "clearFolder": "Use Default",
+    "defaultPlaceholder": "Default: {{path}}",
+    "outputDefaultPlaceholder": "Disabled until you choose a folder",
+    "sessionLayoutHint": "Files are stored as <selected folder>/<agent>/<session>/uploads.",
+    "outputSessionLayoutHint": "Assistant outputs are stored as <selected folder>/<agent>/<session>/outputs.",
+    "saved": "Uploaded file directory updated",
+    "saveFailed": "Failed to update uploaded file directory",
+    "reset": "Using the default uploaded file directory",
+    "outputSaved": "Assistant output directory updated",
+    "outputSaveFailed": "Failed to update assistant output directory",
+    "outputReset": "Assistant output directory disabled"
+  },
   "aiProviders": {
     "title": "AI Providers",
     "description": "Configure your AI model providers and API keys",

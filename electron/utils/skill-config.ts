@@ -60,7 +60,7 @@ async function setSkillsEnabled(skillKeys: string[], enabled: boolean): Promise<
         const managedState = await readManagedSkillsState();
         const nextEntries = { ...managedState.entries };
         for (const skillKey of skillKeys) {
-            const entry = nextEntries[skillKey] || {};
+            const entry: SkillEntry = nextEntries[skillKey] || {};
             entry.enabled = enabled;
             nextEntries[skillKey] = entry;
         }
@@ -87,7 +87,7 @@ export async function updateSkillConfig(
     try {
         return await withConfigLock(async () => {
             const managedState = await readManagedSkillsState();
-            const nextEntries = { ...managedState.entries };
+            const nextEntries: Record<string, SkillEntry> = { ...managedState.entries };
 
             // Get or create skill entry
             const entry = nextEntries[skillKey] || {};

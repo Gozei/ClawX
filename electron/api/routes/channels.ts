@@ -626,21 +626,26 @@ async function listSessionDerivedTargetOptions(params: {
   const q = params.query?.trim().toLowerCase() || '';
   const candidates: Array<ChannelTargetOptionView & { updatedAt: number }> = [];
   const seen = new Set<string>();
+  const sessionStores = await Promise.all(agentDirs
+    .filter((entry) => entry.isDirectory())
+    .map(async (entry) => {
+      const sessionsPath = join(agentsDir, entry.name, 'sessions', 'sessions.json');
+      const raw = await readFile(sessionsPath, 'utf8').catch(() => '');
+      if (!raw.trim()) {
+        return null;
+      }
 
-  for (const entry of agentDirs) {
-    if (!entry.isDirectory()) continue;
-    const sessionsPath = join(agentsDir, entry.name, 'sessions', 'sessions.json');
-    const raw = await readFile(sessionsPath, 'utf8').catch(() => '');
-    if (!raw.trim()) continue;
+      try {
+        return extractSessionRecords(JSON.parse(raw) as JsonRecord);
+      } catch {
+        return null;
+      }
+    }));
 
-    let parsed: JsonRecord;
-    try {
-      parsed = JSON.parse(raw) as JsonRecord;
-    } catch {
-      continue;
-    }
+  for (const store of sessionStores) {
+    if (!store) continue;
 
-    for (const session of extractSessionRecords(parsed)) {
+    for (const session of store) {
       const deliveryContext = session.deliveryContext && typeof session.deliveryContext === 'object'
         ? session.deliveryContext as JsonRecord
         : undefined;
@@ -705,26 +710,28 @@ async function listWeComReqIdTargetOptions(accountId?: string, query?: string): 
   const q = query?.trim().toLowerCase() || '';
   const options: ChannelTargetOptionView[] = [];
   const seen = new Set<string>();
+  const reqIdMaps = await Promise.all(files
+    .filter((file) => file.isFile() && file.name.startsWith('reqid-map-') && file.name.endsWith('.json'))
+    .map(async (file) => {
+      const resolvedAccountId = file.name.slice('reqid-map-'.length, -'.json'.length);
+      if (accountId && resolvedAccountId !== accountId) {
+        return null;
+      }
 
-  for (const file of files) {
-    if (!file.isFile() || !file.name.startsWith('reqid-map-') || !file.name.endsWith('.json')) {
-      continue;
-    }
+      const raw = await readFile(join(wecomDir, file.name), 'utf8').catch(() => '');
+      if (!raw.trim()) {
+        return null;
+      }
 
-    const resolvedAccountId = file.name.slice('reqid-map-'.length, -'.json'.length);
-    if (accountId && resolvedAccountId !== accountId) {
-      continue;
-    }
+      try {
+        return JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    }));
 
-    const raw = await readFile(join(wecomDir, file.name), 'utf8').catch(() => '');
-    if (!raw.trim()) continue;
-
-    let records: Record<string, unknown>;
-    try {
-      records = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
+  for (const records of reqIdMaps) {
+    if (!records) continue;
 
     for (const chatId of Object.keys(records)) {
       const trimmedChatId = chatId.trim();

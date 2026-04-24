@@ -1,6 +1,7 @@
 import i18n from '@/i18n';
 import { invokeIpc } from '@/lib/api-client';
 import { normalizeAppError } from '@/lib/error-model';
+import { hostApiFetch } from '@/lib/host-api';
 import type { AttachedFileMeta, ChatComposerDraft, ChatSession, ContentBlock, RawMessage, ToolStatus } from './types';
 
 export const CHAT_HISTORY_RPC_TIMEOUT_MS = 60_000;
@@ -631,12 +632,78 @@ function enrichWithCachedImages(messages: RawMessage[]): RawMessage[] {
   });
 }
 
+async function materializeAssistantOutputs(
+  messages: RawMessage[],
+  sessionKey?: string,
+): Promise<boolean> {
+  const normalizedSessionKey = typeof sessionKey === 'string' ? sessionKey.trim() : '';
+  if (!normalizedSessionKey) return false;
+
+  const filePaths = Array.from(new Set(
+    messages
+      .filter((message) => message.role === 'assistant')
+      .flatMap((message) => (message._attachedFiles || []).map((file) => file.filePath).filter(Boolean) as string[]),
+  ));
+
+  if (filePaths.length === 0) return false;
+
+  try {
+    const response = await hostApiFetch<{
+      success: boolean;
+      enabled?: boolean;
+      results?: Array<{
+        sourcePath: string;
+        materializedPath: string;
+        fileName: string;
+        fileSize: number;
+      }>;
+    }>('/api/files/materialize-outputs', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionKey: normalizedSessionKey,
+        filePaths,
+      }),
+    });
+
+    if (!response.success || response.enabled === false || !Array.isArray(response.results) || response.results.length === 0) {
+      return false;
+    }
+
+    const resultMap = new Map(response.results.map((entry) => [entry.sourcePath, entry]));
+    let updated = false;
+    for (const message of messages) {
+      if (message.role !== 'assistant' || !message._attachedFiles) continue;
+      for (const file of message._attachedFiles) {
+        const sourcePath = file.filePath;
+        if (!sourcePath) continue;
+        const materialized = resultMap.get(sourcePath);
+        if (!materialized) continue;
+        if (file.filePath !== materialized.materializedPath) {
+          file.filePath = materialized.materializedPath;
+          file.fileName = materialized.fileName;
+          file.fileSize = materialized.fileSize;
+          updated = true;
+        } else if (materialized.fileSize > 0 && file.fileSize !== materialized.fileSize) {
+          file.fileSize = materialized.fileSize;
+          updated = true;
+        }
+      }
+    }
+
+    return updated;
+  } catch (error) {
+    console.warn('[materializeAssistantOutputs] Failed:', error);
+    return false;
+  }
+}
+
 /**
  * Async: load missing previews from disk via IPC for messages that have
  * _attachedFiles with null previews. Updates messages in-place and triggers re-render.
  * Handles both [media attached: ...] patterns and raw filePath entries.
  */
-async function loadMissingPreviews(messages: RawMessage[]): Promise<boolean> {
+async function loadMissingPreviews(messages: RawMessage[], sessionKey?: string): Promise<boolean> {
+  const materialized = await materializeAssistantOutputs(messages, sessionKey);
   // Collect all image paths that need previews
   const needPreview: Array<{ filePath: string; mimeType: string }> = [];
   const seenPaths = new Set<string>();
@@ -675,7 +742,7 @@ async function loadMissingPreviews(messages: RawMessage[]): Promise<boolean> {
     }
   }
 
-  if (needPreview.length === 0) return false;
+  if (needPreview.length === 0) return materialized;
 
   try {
     const thumbnails = await invokeIpc(
@@ -719,10 +786,10 @@ async function loadMissingPreviews(messages: RawMessage[]): Promise<boolean> {
       }
     }
     if (updated) saveImageCache(_imageCache);
-    return updated;
+    return updated || materialized;
   } catch (err) {
     console.warn('[loadMissingPreviews] Failed:', err);
-    return false;
+    return materialized;
   }
 }
 

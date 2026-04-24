@@ -73,6 +73,24 @@
     "launchAtStartup": "开机自动启动",
     "launchAtStartupDesc": "登录系统后自动启动 {{appName}}"
   },
+  "storage": {
+    "userUploadDir": "上传文件目录",
+    "userUploadDirDesc": "ClawX 会先把你附加的文件复制到这里，再按会话自动分文件夹管理。",
+    "assistantOutputDir": "模型输出目录",
+    "assistantOutputDirDesc": "当助手产出文件时，ClawX 会把识别到的输出复制到这里，并按会话自动分文件夹管理。",
+    "chooseFolder": "选择文件夹",
+    "clearFolder": "使用默认目录",
+    "defaultPlaceholder": "默认：{{path}}",
+    "outputDefaultPlaceholder": "未启用，选择目录后生效",
+    "sessionLayoutHint": "文件会按 <所选目录>/<agent>/<session>/uploads 结构存放。",
+    "outputSessionLayoutHint": "模型输出会按 <所选目录>/<agent>/<session>/outputs 结构存放。",
+    "saved": "上传文件目录已更新",
+    "saveFailed": "更新上传文件目录失败",
+    "reset": "已恢复使用默认上传目录",
+    "outputSaved": "模型输出目录已更新",
+    "outputSaveFailed": "更新模型输出目录失败",
+    "outputReset": "已关闭模型输出目录"
+  },
   "aiProviders": {
     "title": "AI 模型提供商",
     "description": "配置 AI 模型提供商和 API 密钥",

@@ -44,7 +44,8 @@ interface SettingsState {
   hideInternalRoutineProcesses: boolean;
   assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
-  dreamModeEnabled: boolean;
+  userUploadBaseDir: string;
+  assistantOutputBaseDir: string;
 
   // Gateway
   gatewayAutoStart: boolean;
@@ -89,7 +90,8 @@ interface SettingsState {
   setHideInternalRoutineProcesses: (value: boolean) => void;
   setAssistantMessageStyle: (value: AssistantMessageStyle) => void;
   setChatFontScale: (value: number) => void;
-  setDreamModeEnabled: (value: boolean) => void;
+  setUserUploadBaseDir: (value: string) => void;
+  setAssistantOutputBaseDir: (value: string) => void;
   setGatewayAutoStart: (value: boolean) => void;
   setGatewayPort: (port: number) => void;
   setProxyEnabled: (value: boolean) => void;
@@ -126,7 +128,8 @@ const defaultSettings = {
   hideInternalRoutineProcesses: true,
   assistantMessageStyle: 'bubble' as AssistantMessageStyle,
   chatFontScale: 100,
-  dreamModeEnabled: false,
+  userUploadBaseDir: '',
+  assistantOutputBaseDir: '',
   gatewayAutoStart: true,
   gatewayPort: 18789,
   proxyEnabled: false,
@@ -274,11 +277,20 @@ export const useSettingsStore = create<SettingsState>()(
           body: JSON.stringify({ value: normalized }),
         }).catch(() => { });
       },
-      setDreamModeEnabled: (dreamModeEnabled) => {
-        set({ dreamModeEnabled });
-        void hostApiFetch('/api/settings/dreamModeEnabled', {
+      setUserUploadBaseDir: (userUploadBaseDir) => {
+        const normalized = userUploadBaseDir.trim();
+        set({ userUploadBaseDir: normalized });
+        void hostApiFetch('/api/settings/userUploadBaseDir', {
           method: 'PUT',
-          body: JSON.stringify({ value: dreamModeEnabled }),
+          body: JSON.stringify({ value: normalized }),
+        }).catch(() => { });
+      },
+      setAssistantOutputBaseDir: (assistantOutputBaseDir) => {
+        const normalized = assistantOutputBaseDir.trim();
+        set({ assistantOutputBaseDir: normalized });
+        void hostApiFetch('/api/settings/assistantOutputBaseDir', {
+          method: 'PUT',
+          body: JSON.stringify({ value: normalized }),
         }).catch(() => { });
       },
       setGatewayAutoStart: (gatewayAutoStart) => {

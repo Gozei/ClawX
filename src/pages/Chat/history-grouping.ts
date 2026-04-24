@@ -42,7 +42,6 @@ function shouldRenderAssistantAsProcessTurn(message: RawMessage | undefined): bo
 
 export function groupMessagesForDisplay(messages: RawMessage[]): HistoryDisplayItem[] {
   const items: HistoryDisplayItem[] = [];
-
   for (let index = 0; index < messages.length; index += 1) {
     const currentMessage = messages[index];
 
@@ -68,9 +67,9 @@ export function groupMessagesForDisplay(messages: RawMessage[]): HistoryDisplayI
       continue;
     }
 
-    const turnMessages = messages.slice(index + 1, nextUserIndex);
-    const assistantMessages = turnMessages.filter((message) => isAssistantMessage(message));
-
+    const assistantMessages = messages
+      .slice(index + 1, nextUserIndex)
+      .filter((message) => isAssistantMessage(message));
     const shouldGroupAsTurn = assistantMessages.length > 1
       || (assistantMessages.length === 1 && shouldRenderAssistantAsProcessTurn(assistantMessages[0]));
 
@@ -89,7 +88,6 @@ export function groupMessagesForDisplay(messages: RawMessage[]): HistoryDisplayI
         key: currentMessage.id || `message-${index}`,
         message: currentMessage,
       });
-
       if (assistantMessages.length === 1) {
         const assistantMessage = assistantMessages[0];
         items.push({
@@ -99,10 +97,8 @@ export function groupMessagesForDisplay(messages: RawMessage[]): HistoryDisplayI
         });
       }
     }
-
     index = nextUserIndex - 1;
   }
-
   return items;
 }
 

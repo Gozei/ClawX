@@ -29,6 +29,9 @@ importers:
       electron-updater:
         specifier: ^6.8.3
         version: 6.8.3
+      fast-string-truncated-width:
+        specifier: 1.2.1
+        version: 1.2.1
       lru-cache:
         specifier: ^11.2.6
         version: 11.2.7
@@ -53,7 +56,7 @@ importers:
         version: 10.0.1(eslint@10.1.0(jiti@1.21.7))
       '@larksuite/openclaw-lark':
         specifier: 2026.4.7
-        version: 2026.4.7(@gozei/deepclaw@2026.4.15(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))
+        version: 2026.4.7(@gozei/deepclaw@2026.4.16(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))
       '@playwright/test':
         specifier: ^1.56.1
         version: 1.59.0
@@ -95,7 +98,7 @@ importers:
         version: 1.2.8(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@soimy/dingtalk':
         specifier: ^3.5.3
-        version: 3.5.3(@gozei/deepclaw@2026.4.15(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))
+        version: 3.5.3(@gozei/deepclaw@2026.4.16(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))
       '@tencent-weixin/openclaw-weixin':
         specifier: ^2.1.7
         version: 2.1.7
@@ -172,8 +175,8 @@ importers:
         specifier: ^0.563.0
         version: 0.563.0(react@19.2.4)
       openclaw:
-        specifier: npm:@gozei/deepclaw@2026.4.15
-        version: '@gozei/deepclaw@2026.4.15(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)'
+        specifier: npm:@gozei/deepclaw@2026.4.16
+        version: '@gozei/deepclaw@2026.4.16(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)'
       png2icons:
         specifier: ^2.0.1
         version: 2.0.1
@@ -897,8 +900,8 @@ packages:
       '@modelcontextprotocol/sdk':
         optional: true
 
-  '@gozei/deepclaw@2026.4.15':
-    resolution: {integrity: sha512-u+vz4Lw7kA140LKgevEzz1b7exoZEQ3xbl5vAJxP5LZTaAotPOQMU79miVfqzDMhnQyU0KJWAW3vGNwQhUpbhw==}
+  '@gozei/deepclaw@2026.4.16':
+    resolution: {integrity: sha512-FoPYWq4R5nJxgF4iiXIc5r/QcG3UHN2QXV7VGx6unn5RG7GedAY5dw6yOz0x6hn0MY8WZTlRvSobzhlM1NoD8Q==}
     engines: {node: '>=22.14.0'}
     hasBin: true
     peerDependencies:
@@ -8180,7 +8183,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@gozei/deepclaw@2026.4.15(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)':
+  '@gozei/deepclaw@2026.4.16(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)':
     dependencies:
       '@agentclientprotocol/sdk': 0.18.2(zod@4.3.6)
       '@anthropic-ai/vertex-sdk': 0.15.0(encoding@0.1.13)(zod@4.3.6)
@@ -8715,14 +8718,14 @@ snapshots:
       '@lancedb/lancedb-win32-arm64-msvc': 0.27.2
       '@lancedb/lancedb-win32-x64-msvc': 0.27.2
 
-  '@larksuite/openclaw-lark@2026.4.7(@gozei/deepclaw@2026.4.15(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))':
+  '@larksuite/openclaw-lark@2026.4.7(@gozei/deepclaw@2026.4.16(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))':
     dependencies:
       '@larksuiteoapi/node-sdk': 1.60.0
       '@sinclair/typebox': 0.34.48
       image-size: 2.0.2
       zod: 4.3.6
     optionalDependencies:
-      openclaw: '@gozei/deepclaw@2026.4.15(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)'
+      openclaw: '@gozei/deepclaw@2026.4.16(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)'
     transitivePeerDependencies:
       - bufferutil
       - debug
@@ -10149,7 +10152,7 @@ snapshots:
       - '@emnapi/runtime'
     optional: true
 
-  '@soimy/dingtalk@3.5.3(@gozei/deepclaw@2026.4.15(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))':
+  '@soimy/dingtalk@3.5.3(@gozei/deepclaw@2026.4.16(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))':
     dependencies:
       axios: 1.13.6(debug@4.4.3)
       dingtalk-stream: 2.1.5
@@ -10158,7 +10161,7 @@ snapshots:
       pdf-parse: 2.4.5
       zod: 4.3.6
     optionalDependencies:
-      openclaw: '@gozei/deepclaw@2026.4.15(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)'
+      openclaw: '@gozei/deepclaw@2026.4.16(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)'
     transitivePeerDependencies:
       - bufferutil
       - debug

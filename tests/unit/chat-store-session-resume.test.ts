@@ -1404,10 +1404,6 @@ describe('chat store session resume', () => {
       })
       .mockResolvedValueOnce({
         success: true,
-        metadata: {},
-      })
-      .mockResolvedValueOnce({
-        success: true,
         previews: {
           'agent:main:session-preview': {
             firstUserMessage: 'Preview from host route',
@@ -1449,16 +1445,12 @@ describe('chat store session resume', () => {
     await Promise.resolve();
 
     expect(gatewayRpcMock).not.toHaveBeenCalled();
-    expect(hostApiFetchMock).toHaveBeenNthCalledWith(1, '/api/sessions/list');
-    expect(hostApiFetchMock).toHaveBeenNthCalledWith(2, '/api/sessions/metadata', {
-      method: 'POST',
-      body: JSON.stringify({ sessionKeys: ['agent:main:main', 'agent:main:session-preview'] }),
-    });
-    expect(hostApiFetchMock).toHaveBeenNthCalledWith(3, '/api/sessions/previews', {
+    expect(hostApiFetchMock).toHaveBeenNthCalledWith(1, '/api/sessions/catalog');
+    expect(hostApiFetchMock).toHaveBeenNthCalledWith(2, '/api/sessions/previews', {
       method: 'POST',
       body: JSON.stringify({ sessionKeys: ['agent:main:session-preview'] }),
     });
-    expect(hostApiFetchMock).toHaveBeenNthCalledWith(4, '/api/sessions/auto-label', {
+    expect(hostApiFetchMock).toHaveBeenNthCalledWith(3, '/api/sessions/auto-label', {
       method: 'POST',
       body: JSON.stringify({ sessionKey: 'agent:main:session-preview', label: 'Preview from host route' }),
     });

@@ -16,6 +16,10 @@ import { getOpenClawStatus, getOpenClawDir, getOpenClawConfigDir, getOpenClawSki
 import { getOpenClawCliCommand } from '../utils/openclaw-cli';
 import { getAllSettings, getSetting, resetSettings, setSetting, type AppSettings } from '../utils/store';
 import {
+  resolveUserUploadStorageDir,
+  resolveStagedUploadFilePath,
+} from '../utils/session-file-storage';
+import {
   saveProviderKeyToOpenClaw,
   removeProviderFromOpenClaw,
 } from '../utils/openclaw-auth';
@@ -2008,6 +2012,9 @@ function registerShellHandlers(): void {
 
   // Open path
   ipcMain.handle('shell:openPath', async (_, path: string) => {
+    if (!path || !existsSync(path)) {
+      return `File not found: ${path}`;
+    }
     return await shell.openPath(path);
   });
 }
@@ -2283,8 +2290,6 @@ function mimeToExt(mimeType: string): string {
   return '';
 }
 
-const OUTBOUND_DIR = join(homedir(), '.openclaw', 'media', 'outbound');
-
 /**
  * Generate a preview data URL for image files.
  * Resizes large images while preserving aspect ratio (only constrain the
@@ -2319,18 +2324,24 @@ async function generateImagePreview(filePath: string, mimeType: string): Promise
  */
 function registerFileHandlers(): void {
   // Stage files from real disk paths (used with dialog:open)
-  ipcMain.handle('file:stage', async (_, filePaths: string[]) => {
+  ipcMain.handle('file:stage', async (_, payload: string[] | {
+    filePaths: string[];
+    sessionKey?: string;
+  }) => {
     const fsP = await import('fs/promises');
-    await fsP.mkdir(OUTBOUND_DIR, { recursive: true });
+    const filePaths = Array.isArray(payload) ? payload : payload.filePaths;
+    const sessionKey = Array.isArray(payload) ? undefined : payload.sessionKey;
+    const targetDir = await resolveUserUploadStorageDir(sessionKey);
+    await fsP.mkdir(targetDir, { recursive: true });
 
     const results = [];
     for (const filePath of filePaths) {
       const id = crypto.randomUUID();
-      const ext = extname(filePath);
-      const stagedPath = join(OUTBOUND_DIR, `${id}${ext}`);
+      const stagedPath = await resolveStagedUploadFilePath(targetDir, filePath);
       await fsP.copyFile(filePath, stagedPath);
 
       const s = await fsP.stat(stagedPath);
+      const ext = extname(stagedPath);
       const mimeType = getMimeType(ext);
       const fileName = basename(filePath);
 
@@ -2350,16 +2361,18 @@ function registerFileHandlers(): void {
     base64: string;
     fileName: string;
     mimeType: string;
+    sessionKey?: string;
   }) => {
     const fsP = await import('fs/promises');
-    await fsP.mkdir(OUTBOUND_DIR, { recursive: true });
+    const targetDir = await resolveUserUploadStorageDir(payload.sessionKey);
+    await fsP.mkdir(targetDir, { recursive: true });
 
     const id = crypto.randomUUID();
-    const ext = extname(payload.fileName) || mimeToExt(payload.mimeType);
-    const stagedPath = join(OUTBOUND_DIR, `${id}${ext}`);
+    const stagedPath = await resolveStagedUploadFilePath(targetDir, payload.fileName);
     const buffer = Buffer.from(payload.base64, 'base64');
     await fsP.writeFile(stagedPath, buffer);
 
+    const ext = extname(stagedPath) || mimeToExt(payload.mimeType);
     const mimeType = payload.mimeType || getMimeType(ext);
     const fileSize = buffer.length;
 
