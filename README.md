@@ -102,7 +102,7 @@ Communicate with AI agents through a modern chat experience. Support for multipl
 When you target another agent with `@agent`, Deep AI Worker switches into that agent's own conversation context directly instead of relaying through the default agent. Agent workspaces stay separate by default, and stronger isolation depends on OpenClaw sandbox settings.
 Each agent can also override its own `provider/model` runtime setting; agents without overrides continue inheriting the global default model.
 Sessions can now be archived from the sidebar and reviewed later in **Settings → Session Archive** without deleting messages, files, or conversation state.
-In **Settings → General**, you can now choose a dedicated upload directory for files you attach in chat; ClawX stages those files into agent/session-specific `uploads` folders instead of mixing everything into one shared location. You can also choose a separate assistant output directory, and detected model-generated files will be copied into agent/session-specific `outputs` folders for easier session-based organization.
+In **Settings → General**, you can now choose one shared file storage directory for chat attachments and assistant outputs. Deep AI Worker organizes those files into agent/session-specific `uploads` and `outputs` folders automatically instead of mixing everything into one shared location.
 
 ### 📡 Multi-Channel Management
 Configure and monitor multiple AI channels simultaneously. Each channel operates independently, allowing you to run specialized agents for different tasks.

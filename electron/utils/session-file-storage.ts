@@ -88,7 +88,10 @@ export function resolveUserUploadStorageDirForBase(
 }
 
 export async function resolveUserUploadStorageDir(sessionKey?: string | null): Promise<string> {
-  const configuredBaseDir = (await getSetting('userUploadBaseDir')).trim();
+  const configuredBaseDir = (
+    (await getSetting('fileStorageBaseDir')).trim()
+    || (await getSetting('userUploadBaseDir')).trim()
+  );
   return resolveUserUploadStorageDirForBase(configuredBaseDir, sessionKey);
 }
 
@@ -112,7 +115,11 @@ export function resolveAssistantOutputStorageDirForBase(
 }
 
 export async function resolveAssistantOutputStorageDir(sessionKey?: string | null): Promise<string> {
-  const configuredBaseDir = (await getSetting('assistantOutputBaseDir')).trim();
+  const configuredBaseDir = (
+    (await getSetting('fileStorageBaseDir')).trim()
+    || (await getSetting('assistantOutputBaseDir')).trim()
+    || (await getSetting('userUploadBaseDir')).trim()
+  );
   return resolveAssistantOutputStorageDirForBase(configuredBaseDir, sessionKey);
 }
 
@@ -199,7 +206,11 @@ export async function materializeAssistantOutputFiles(
   sessionKey: string | null | undefined,
   filePaths: string[],
 ): Promise<Array<{ sourcePath: string; materializedPath: string; fileName: string; fileSize: number }>> {
-  const configuredBaseDir = (await getSetting('assistantOutputBaseDir')).trim();
+  const configuredBaseDir = (
+    (await getSetting('fileStorageBaseDir')).trim()
+    || (await getSetting('assistantOutputBaseDir')).trim()
+    || (await getSetting('userUploadBaseDir')).trim()
+  );
   return materializeAssistantOutputFilesForBase(configuredBaseDir, sessionKey, filePaths);
 }
 

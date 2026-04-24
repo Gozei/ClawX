@@ -16,7 +16,10 @@ import { setQuitting } from './app-state';
 const OSS_BASE_URL = 'https://deep-ai-worker-1253696187.cos.ap-guangzhou.myqcloud.com/deepclaw';
 
 type ElectronUpdaterModule = typeof import('electron-updater');
-type AutoUpdaterInstance = ElectronUpdaterModule['autoUpdater'];
+type AutoUpdaterInstance = NonNullable<ElectronUpdaterModule['autoUpdater']>;
+type ElectronUpdaterModuleShape = Partial<ElectronUpdaterModule> & {
+  default?: Partial<ElectronUpdaterModule>;
+};
 
 export interface UpdateStatus {
   status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'installing' | 'error';
@@ -80,6 +83,10 @@ function isMissingUpdateMetadataError(error: unknown): boolean {
   );
 }
 
+export function resolveElectronAutoUpdater(module: ElectronUpdaterModuleShape): AutoUpdaterInstance | null {
+  return (module.autoUpdater ?? module.default?.autoUpdater ?? null) as AutoUpdaterInstance | null;
+}
+
 export class AppUpdater extends EventEmitter {
   private mainWindow: BrowserWindow | null = null;
   private status: UpdateStatus = { status: 'idle' };
@@ -87,6 +94,7 @@ export class AppUpdater extends EventEmitter {
   private autoInstallCountdown = 0;
   private updaterModulePromise: Promise<ElectronUpdaterModule | null> | null = null;
   private updaterModule: ElectronUpdaterModule | null = null;
+  private autoUpdater: AutoUpdaterInstance | null = null;
   private updaterListenersReady = false;
   private preferredChannel = 'latest';
   private preferredAutoDownload = false;
@@ -180,13 +188,17 @@ export class AppUpdater extends EventEmitter {
     }
 
     if (this.updaterModule) {
-      return this.updaterModule.autoUpdater;
+      return this.autoUpdater;
     }
 
     if (!this.updaterModulePromise) {
       this.updaterModulePromise = import('electron-updater')
         .then((module) => {
-          const autoUpdater = module.autoUpdater;
+          const autoUpdater = resolveElectronAutoUpdater(module);
+          if (!autoUpdater) {
+            throw new Error('electron-updater did not expose autoUpdater');
+          }
+
           autoUpdater.autoDownload = this.preferredAutoDownload;
           autoUpdater.autoInstallOnAppQuit = true;
           autoUpdater.logger = {
@@ -208,6 +220,7 @@ export class AppUpdater extends EventEmitter {
           }
 
           this.updaterModule = module;
+          this.autoUpdater = autoUpdater;
           return module;
         })
         .catch((error) => {
@@ -217,7 +230,7 @@ export class AppUpdater extends EventEmitter {
     }
 
     const module = await this.updaterModulePromise;
-    return module?.autoUpdater ?? null;
+    return module ? resolveElectronAutoUpdater(module) : null;
   }
 
   /**
@@ -372,8 +385,8 @@ export class AppUpdater extends EventEmitter {
       this.mainWindow.hide();
     }
     setQuitting(true, 'update-install');
-    if (this.updaterModule) {
-      this.updaterModule.autoUpdater.quitAndInstall();
+    if (this.autoUpdater) {
+      this.autoUpdater.quitAndInstall();
       return;
     }
     logger.warn('[Updater] quitAndInstall ignored because updater is not loaded');
@@ -416,8 +429,8 @@ export class AppUpdater extends EventEmitter {
    */
   setChannel(channel: 'stable' | 'beta' | 'dev'): void {
     this.preferredChannel = channel;
-    if (this.updaterModule) {
-      this.updaterModule.autoUpdater.channel = channel;
+    if (this.autoUpdater) {
+      this.autoUpdater.channel = channel;
     }
   }
 
@@ -426,8 +439,8 @@ export class AppUpdater extends EventEmitter {
    */
   setAutoDownload(enable: boolean): void {
     this.preferredAutoDownload = enable;
-    if (this.updaterModule) {
-      this.updaterModule.autoUpdater.autoDownload = enable;
+    if (this.autoUpdater) {
+      this.autoUpdater.autoDownload = enable;
     }
   }
 
