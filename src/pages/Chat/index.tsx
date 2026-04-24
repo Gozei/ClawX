@@ -29,6 +29,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useBranding } from '@/lib/branding';
 import { isWithinCompletedTurnProcessGrace } from '@/lib/chat-turn-grace';
+import { hostApiFetch } from '@/lib/host-api';
 import { cn } from '@/lib/utils';
 import { useMinLoading } from '@/hooks/use-min-loading';
 import { useSettingsStore, type AssistantMessageStyle, type ChatProcessDisplayMode } from '@/stores/settings';
@@ -36,6 +37,7 @@ import { isSessionRunning } from '@/stores/chat/session-running';
 import { getLastChatEventAt } from '@/stores/chat/helpers';
 import { groupMessagesForDisplay, splitFinalMessageForTurnDisplay, type HistoryDisplayItem } from './history-grouping';
 import { getProcessActivityLabel, getProcessEventItems, ProcessEventMessage, ProcessFinalDivider } from './process-events-next';
+import { LibreOfficeDownloadDialog, type LibreOfficeRuntimeStatusPayload } from './LibreOfficeDownloadDialog';
 
 const EMPTY_MESSAGES: RawMessage[] = [];
 const ACTIVE_TURN_BOTTOM_OFFSET_PX = 16;
@@ -52,10 +54,37 @@ const CHAT_CONTENT_COLUMN_WIDTH_CSS = 'min(calc(100% - 1rem), 54rem)';
 const CHAT_PREVIEW_DEFAULT_WIDTH_PERCENT = 50;
 const CHAT_PREVIEW_MIN_WIDTH_PERCENT = 25;
 const CHAT_PREVIEW_MAX_WIDTH_PERCENT = 75;
+const LIBREOFFICE_BACKED_PREVIEW_EXTENSIONS = new Set(['.pptx', '.docx', '.xlsx', '.xls', '.csv']);
 type ActiveTurnAutoScrollMode = 'idle' | 'follow-bottom';
+
+type LibreOfficeDownloadPrompt = {
+  file: AttachedFileMeta;
+  openPreviewAfterDownload: boolean;
+};
 
 function clampPreviewPaneWidth(widthPercent: number): number {
   return Math.max(CHAT_PREVIEW_MIN_WIDTH_PERCENT, Math.min(CHAT_PREVIEW_MAX_WIDTH_PERCENT, widthPercent));
+}
+
+function getAttachmentFileExtension(file: AttachedFileMeta): string {
+  const source = file.fileName || file.filePath || '';
+  const name = source.split(/[\\/]/).pop() ?? source;
+  const dotIndex = name.lastIndexOf('.');
+  return dotIndex >= 0 ? name.slice(dotIndex).toLowerCase() : '';
+}
+
+function isLibreOfficeBackedPreviewFile(file: AttachedFileMeta): boolean {
+  const extension = getAttachmentFileExtension(file);
+  if (LIBREOFFICE_BACKED_PREVIEW_EXTENSIONS.has(extension)) {
+    return true;
+  }
+
+  const mimeType = file.mimeType.toLowerCase();
+  return mimeType === 'text/csv'
+    || mimeType === 'application/vnd.ms-excel'
+    || mimeType.includes('presentationml.presentation')
+    || mimeType.includes('wordprocessingml.document')
+    || mimeType.includes('spreadsheetml.sheet');
 }
 
 type ChatListItem =
@@ -215,6 +244,7 @@ export function Chat() {
   const loading = useChatStore((s) => s.loading);
   const rawSending = useChatStore((s) => s.sending);
   const error = useChatStore((s) => s.error);
+  const sessionNotice = useChatStore((s) => s.sessionNotice);
   const showThinking = useChatStore((s) => s.showThinking);
   const chatProcessDisplayMode = useSettingsStore((s) => s.chatProcessDisplayMode);
   const hideInternalRoutineProcesses = useSettingsStore((s) => s.hideInternalRoutineProcesses);
@@ -234,7 +264,7 @@ export function Chat() {
   const clearQueuedMessage = useChatStore((s) => s.clearQueuedMessage);
   const loadHistory = useChatStore((s) => s.loadHistory);
   const abortRun = useChatStore((s) => s.abortRun);
-  const clearError = useChatStore((s) => s.clearError);
+  const clearSessionFeedback = useChatStore((s) => s.clearSessionFeedback);
   const fetchAgents = useAgentsStore((s) => s.fetchAgents);
   const queuedMessages = useChatStore((s) => s.queuedMessages[s.currentSessionKey]);
   const queuedMessage = queuedMessages?.[0] ?? null;
@@ -261,17 +291,27 @@ export function Chat() {
   const activeTurnAutoScrollTargetRef = useRef(0);
   const activeTurnAutoScrollFrameRef = useRef<number | null>(null);
   const activeTurnAutoScrollAnimationRef = useRef<{ startTop: number; targetTop: number; startedAt: number } | null>(null);
+  const bottomStateProgrammaticGuardUntilRef = useRef(0);
+  const followLatestRef = useRef(true);
+  const detachedViewportScrollTopRef = useRef<number | null>(null);
+  const detachedViewportSignatureRef = useRef<string | null>(null);
+  const latestTranscriptActivitySignatureRef = useRef<string | null>(null);
+  const isAtBottomRef = useRef(true);
   const previewResizeStartXRef = useRef<number | null>(null);
   const previewResizeStartWidthRef = useRef(CHAT_PREVIEW_DEFAULT_WIDTH_PERCENT);
   const previewAutoCollapsedSidebarRef = useRef(false);
   const previewPaneOpenRef = useRef(false);
+  const libreOfficePromptRequestRef = useRef(0);
   const sidebarCollapsedRef = useRef(sidebarCollapsed);
   const hadPreviewOpenRef = useRef(false);
   const [activeTurnUserInterruptVersion, setActiveTurnUserInterruptVersion] = useState(0);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [hasDetachedNewContent, setHasDetachedNewContent] = useState(false);
   const [composerShellPadding, setComposerShellPadding] = useState({ left: 16, right: 16 });
   const [scrollContainerNode, setScrollContainerNodeState] = useState<HTMLDivElement | null>(null);
   const [contentColumnHorizontalOffsetPx, setContentColumnHorizontalOffsetPx] = useState(0);
   const [selectedPreviewFile, setSelectedPreviewFile] = useState<AttachedFileMeta | null>(null);
+  const [libreOfficeDownloadPrompt, setLibreOfficeDownloadPrompt] = useState<LibreOfficeDownloadPrompt | null>(null);
   const [previewPaneWidthPercent, setPreviewPaneWidthPercent] = useState(CHAT_PREVIEW_DEFAULT_WIDTH_PERCENT);
   const lastConsumedLocationKeyRef = useRef<string | null>(null);
 
@@ -290,6 +330,10 @@ export function Chat() {
     })
   ), [currentSessionKey, pendingFinal, rawSending, rawStreamingMessage, sendStage, sessionRunningState, streamingTools]);
   const showQueuedMessageNotice = queuedMessageCount > 0 && isGatewayRunning && !sending;
+  const sessionBanner = error
+    ? { message: error, tone: 'warning' as const }
+    : sessionNotice;
+  const sessionBannerIsWarning = sessionBanner?.tone !== 'info';
   const showQueuedMessageCard = queuedMessageCount > 0 && (!isGatewayRunning || sending);
   const canSendQueuedDraftNow = isGatewayRunning && !sending;
   const minLoading = useMinLoading(loading && safeMessages.length > 0);
@@ -327,6 +371,7 @@ export function Chat() {
   useEffect(() => {
     restoreAutoCollapsedSidebar();
     setSelectedPreviewFile(null);
+    setLibreOfficeDownloadPrompt(null);
   }, [currentSessionKey, restoreAutoCollapsedSidebar]);
 
   useLayoutEffect(() => {
@@ -587,14 +632,99 @@ export function Chat() {
     sending,
     shouldHideActiveTurn,
   ]);
+  const latestTranscriptActivitySignature = useMemo(() => {
+    const toolStatusSignature = streamingTools
+      .map((tool) => `${tool.id ?? tool.toolCallId ?? tool.name}:${tool.status}:${tool.updatedAt}`)
+      .join('|');
+    return [
+      currentSessionKey,
+      chatListItems.length,
+      chatListItems[chatListItems.length - 1]?.key ?? '',
+      displayHistoryItems[displayHistoryItems.length - 1]?.key ?? '',
+      activeTurnScrollKey ?? '',
+      activeTurnUserMessage ? buildMessageDisplayKey(activeTurnUserMessage) : '',
+      activeTurnProcessStreamingMessage ? buildMessageDisplayKey(activeTurnProcessStreamingMessage) : '',
+      activeTurnFinalStreamingMessage ? buildMessageDisplayKey(activeTurnFinalStreamingMessage) : '',
+      resolvedPersistedFinalMessage ? buildMessageDisplayKey(resolvedPersistedFinalMessage) : '',
+      sending ? 'sending' : 'idle',
+      pendingFinal ? 'pending-final' : 'steady',
+      toolStatusSignature,
+    ].join('::');
+  }, [
+    activeTurnFinalStreamingMessage,
+    activeTurnProcessStreamingMessage,
+    activeTurnScrollKey,
+    activeTurnUserMessage,
+    chatListItems,
+    currentSessionKey,
+    displayHistoryItems,
+    pendingFinal,
+    resolvedPersistedFinalMessage,
+    sending,
+    streamingTools,
+  ]);
 
   const isEmpty = safeMessages.length === 0 && !sending;
   const showSessionLoadingState = loading && safeMessages.length === 0 && !sending;
   const isZh = (i18n.resolvedLanguage || i18n.language || '').startsWith('zh');
+  const jumpToLatestButtonTemporarilyDisabled = true;
+  const showScrollToLatestButton = !showSessionLoadingState && !isEmpty && !isAtBottom;
+  const scrollToLatestButtonBottomPx = showQueuedMessageCard
+    ? 180
+    : showQueuedMessageNotice
+      ? 124
+      : 92;
   const setScrollContainerNode = useCallback((node: HTMLDivElement | null) => {
     scrollContainerRef.current = node;
     setScrollContainerNodeState((current) => (current === node ? current : node));
   }, []);
+  const captureDetachedViewport = useCallback(() => {
+    const scrollElement = scrollContainerRef.current;
+    if (!scrollElement) return;
+    detachedViewportScrollTopRef.current = scrollElement.scrollTop;
+  }, []);
+  const resumeFollowingLatest = useCallback(() => {
+    followLatestRef.current = true;
+    detachedViewportScrollTopRef.current = null;
+    setHasDetachedNewContent(false);
+  }, []);
+  const pauseFollowingLatest = useCallback(() => {
+    followLatestRef.current = false;
+    captureDetachedViewport();
+  }, [captureDetachedViewport]);
+  const markProgrammaticScroll = useCallback((guardMs = ACTIVE_TURN_PROGRAMMATIC_SCROLL_GUARD_MS) => {
+    const nextGuardUntil = performance.now() + guardMs;
+    bottomStateProgrammaticGuardUntilRef.current = Math.max(
+      bottomStateProgrammaticGuardUntilRef.current,
+      nextGuardUntil,
+    );
+  }, []);
+  const getDistanceFromBottom = useCallback(() => {
+    const scrollElement = scrollContainerRef.current;
+    if (!scrollElement) return null;
+    return scrollElement.scrollHeight - scrollElement.clientHeight - scrollElement.scrollTop;
+  }, []);
+  const syncBottomState = useCallback((distanceOverride?: number | null) => {
+    const distanceFromBottom = distanceOverride ?? getDistanceFromBottom();
+    const nextAtBottom = distanceFromBottom == null
+      || distanceFromBottom <= ACTIVE_TURN_NEAR_BOTTOM_THRESHOLD_PX;
+    isAtBottomRef.current = nextAtBottom;
+    setIsAtBottom((current) => (current === nextAtBottom ? current : nextAtBottom));
+    if (nextAtBottom) {
+      setHasDetachedNewContent(false);
+    }
+    return nextAtBottom;
+  }, [getDistanceFromBottom]);
+  const isScrollNearBottom = useCallback(() => {
+    const distanceFromBottom = getDistanceFromBottom();
+    return distanceFromBottom != null && distanceFromBottom <= ACTIVE_TURN_NEAR_BOTTOM_THRESHOLD_PX;
+  }, [getDistanceFromBottom]);
+  const positionScrollNearBottom = useCallback((bottomOffsetPx: number) => {
+    const scrollElement = scrollContainerRef.current;
+    if (!scrollElement) return;
+    markProgrammaticScroll();
+    scrollElement.scrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight - bottomOffsetPx);
+  }, [markProgrammaticScroll]);
   useEffect(() => {
     const scrollElement = scrollContainerRef.current;
     if (!scrollElement || !pendingSessionEntryBottomRef.current) return;
@@ -618,6 +748,63 @@ export function Chat() {
       scrollElement.removeEventListener('keydown', handleKeyboardInterrupt);
     };
   }, [currentSessionKey, chatListItems.length, loading]);
+
+  useEffect(() => {
+    latestTranscriptActivitySignatureRef.current = null;
+    detachedViewportSignatureRef.current = null;
+    followLatestRef.current = true;
+    detachedViewportScrollTopRef.current = null;
+    isAtBottomRef.current = true;
+    setIsAtBottom(true);
+    setHasDetachedNewContent(false);
+  }, [currentSessionKey]);
+
+  useLayoutEffect(() => {
+    syncBottomState();
+  }, [scrollContainerNode, syncBottomState]);
+
+  useEffect(() => {
+    const scrollElement = scrollContainerNode;
+    if (!scrollElement) return;
+
+    let frameId = 0;
+    let resizeObserver: ResizeObserver | null = null;
+
+    const scheduleSync = () => {
+      cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        if (
+          followLatestRef.current
+          && performance.now() < bottomStateProgrammaticGuardUntilRef.current
+          && isAtBottomRef.current
+        ) {
+          syncBottomState(0);
+          return;
+        }
+        syncBottomState();
+      });
+    };
+
+    scrollElement.addEventListener('scroll', scheduleSync, { passive: true });
+    scheduleSync();
+
+    if (typeof ResizeObserver === 'function') {
+      resizeObserver = new ResizeObserver(() => {
+        scheduleSync();
+      });
+      resizeObserver.observe(scrollElement);
+      const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
+      if (contentColumn) {
+        resizeObserver.observe(contentColumn);
+      }
+    }
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      scrollElement.removeEventListener('scroll', scheduleSync);
+      resizeObserver?.disconnect();
+    };
+  }, [currentSessionKey, scrollContainerNode, syncBottomState]);
 
   useLayoutEffect(() => {
     if (!pendingSessionEntryBottomRef.current) return;
@@ -709,7 +896,7 @@ export function Chat() {
       }
       resizeObserver?.disconnect();
     };
-  }, [activeTurnScrollKey, chatListItems.length, loading, sending]);
+  }, [activeTurnScrollKey, chatListItems.length, loading, positionScrollNearBottom, sending]);
   useLayoutEffect(() => {
     const scrollElement = scrollContainerNode;
     if (!scrollElement) {
@@ -806,32 +993,84 @@ export function Chat() {
       observer.disconnect();
     };
   }, [contentColumnHorizontalOffsetPx, currentSessionKey, chatListItems.length, loading, scrollContainerNode, sending]);
-  const isScrollNearBottom = useCallback(() => {
+  useLayoutEffect(() => {
+    const previousSignature = detachedViewportSignatureRef.current;
+    detachedViewportSignatureRef.current = latestTranscriptActivitySignature;
+
+    if (previousSignature == null || previousSignature === latestTranscriptActivitySignature) return;
+    if (followLatestRef.current) return;
+
     const scrollElement = scrollContainerRef.current;
-    if (!scrollElement) return false;
-    const distanceFromBottom = scrollElement.scrollHeight - scrollElement.clientHeight - scrollElement.scrollTop;
-    return distanceFromBottom <= ACTIVE_TURN_NEAR_BOTTOM_THRESHOLD_PX;
-  }, []);
-  function positionScrollNearBottom(bottomOffsetPx: number) {
-    const scrollElement = scrollContainerRef.current;
-    if (!scrollElement) return;
-    scrollElement.scrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight - bottomOffsetPx);
-  }
+    const lockedScrollTop = detachedViewportScrollTopRef.current;
+    if (!scrollElement || lockedScrollTop == null) return;
+
+    const nextScrollTop = Math.min(
+      Math.max(0, lockedScrollTop),
+      Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight),
+    );
+    if (Math.abs(scrollElement.scrollTop - nextScrollTop) <= 1) return;
+
+    markProgrammaticScroll();
+    scrollElement.scrollTop = nextScrollTop;
+    syncBottomState(scrollElement.scrollHeight - scrollElement.clientHeight - nextScrollTop);
+  }, [latestTranscriptActivitySignature, markProgrammaticScroll, syncBottomState]);
+  useLayoutEffect(() => {
+    if (showSessionLoadingState || isEmpty || !scrollContainerRef.current) return;
+    if (sending && activeTurnScrollKey) return;
+    if (!followLatestRef.current) return;
+    if (!isAtBottomRef.current) return;
+
+    let frameId = 0;
+    frameId = requestAnimationFrame(() => {
+      positionScrollNearBottom(ACTIVE_TURN_BOTTOM_OFFSET_PX);
+      syncBottomState(0);
+    });
+
+    return () => {
+      cancelAnimationFrame(frameId);
+    };
+  }, [
+    activeTurnScrollKey,
+    isEmpty,
+    latestTranscriptActivitySignature,
+    positionScrollNearBottom,
+    sending,
+    showSessionLoadingState,
+    syncBottomState,
+  ]);
+  useEffect(() => {
+    const previousSignature = latestTranscriptActivitySignatureRef.current;
+    latestTranscriptActivitySignatureRef.current = latestTranscriptActivitySignature;
+
+    if (previousSignature == null || previousSignature === latestTranscriptActivitySignature) {
+      return;
+    }
+
+    if (followLatestRef.current || isScrollNearBottom()) {
+      setHasDetachedNewContent(false);
+      return;
+    }
+
+    setHasDetachedNewContent(true);
+  }, [isScrollNearBottom, latestTranscriptActivitySignature]);
   const handleActiveTurnUserInterrupt = useCallback(() => {
     if (activeTurnScrollKey) {
       suppressedAutoFollowTurnKeyRef.current = activeTurnScrollKey;
     }
+    pauseFollowingLatest();
     activeTurnAutoScrollModeRef.current = 'idle';
     activeTurnAutoScrollTargetRef.current = 0;
     activeTurnAutoScrollAnimationRef.current = null;
     setActiveTurnUserInterruptVersion((value) => value + 1);
-  }, [activeTurnScrollKey]);
+  }, [activeTurnScrollKey, pauseFollowingLatest]);
   const chatListContext = useMemo<ChatVirtuosoContext>(() => ({
-    disableOverflowAnchor: sending && !!activeTurnScrollKey,
+    // Preserve the browser's native scroll anchoring so partial stream updates
+    // don't tug the transcript around when the user is reading older content.
+    disableOverflowAnchor: false,
     horizontalOffsetPx: contentColumnHorizontalOffsetPx,
     scrollbarGutter: 'stable both-edges',
     setScrollElement: setScrollContainerNode,
-  }), [activeTurnScrollKey, contentColumnHorizontalOffsetPx, sending, setScrollContainerNode]);
+  }), [contentColumnHorizontalOffsetPx, setScrollContainerNode]);
 
   useEffect(() => {
     if (!hasMountedSessionRef.current) {
@@ -840,6 +1079,10 @@ export function Chat() {
       pendingSessionEntryUserInterruptedRef.current = false;
       if (sending && activeTurnScrollKey) {
         pendingLocalSendFollowBottomRef.current = true;
+        resumeFollowingLatest();
+      } else {
+        pendingSessionEntryBottomRef.current = true;
+        resumeFollowingLatest();
       }
       return;
     }
@@ -853,14 +1096,16 @@ export function Chat() {
     if (sending && activeTurnScrollKey) {
       pendingSessionEntryBottomRef.current = false;
       pendingLocalSendFollowBottomRef.current = true;
+      resumeFollowingLatest();
     } else {
       pendingSessionEntryBottomRef.current = true;
+      resumeFollowingLatest();
     }
     activeTurnAutoScrollModeRef.current = 'idle';
     activeTurnTrackedTurnKeyRef.current = null;
     suppressedAutoFollowTurnKeyRef.current = null;
     setActiveTurnUserInterruptVersion((value) => value + 1);
-  }, [activeTurnScrollKey, currentSessionKey, sending]);
+  }, [activeTurnScrollKey, currentSessionKey, resumeFollowingLatest, sending]);
 
   useEffect(() => {
     if (!sending || !activeTurnScrollKey) {
@@ -882,7 +1127,7 @@ export function Chat() {
     }
 
     const turnChanged = activeTurnTrackedTurnKeyRef.current !== activeTurnScrollKey;
-    const shouldFollowBottom = pendingLocalSendFollowBottomRef.current || isScrollNearBottom();
+    const shouldFollowBottom = pendingLocalSendFollowBottomRef.current || (followLatestRef.current && isScrollNearBottom());
     const nextMode: ActiveTurnAutoScrollMode = shouldFollowBottom ? 'follow-bottom' : 'idle';
     const modeChanged = activeTurnAutoScrollModeRef.current !== nextMode;
     if (!turnChanged && !modeChanged) {
@@ -1073,6 +1318,7 @@ export function Chat() {
     pendingSessionEntryBottomRef.current = false;
     pendingSessionEntryUserInterruptedRef.current = false;
     pendingLocalSendFollowBottomRef.current = true;
+    resumeFollowingLatest();
     void flushQueuedMessage(currentSessionKey, queuedId);
   };
   const handleSendMessage = useCallback((
@@ -1083,9 +1329,50 @@ export function Chat() {
     pendingSessionEntryBottomRef.current = false;
     pendingSessionEntryUserInterruptedRef.current = false;
     pendingLocalSendFollowBottomRef.current = true;
+    resumeFollowingLatest();
     void sendMessage(text, attachments, targetAgentId);
-  }, [sendMessage]);
-  const handleOpenAttachmentPreview = useCallback((file: AttachedFileMeta) => {
+  }, [resumeFollowingLatest, sendMessage]);
+  const handleJumpToLatest = useCallback(() => {
+    if (chatListItems.length === 0) return;
+
+    pendingSessionEntryBottomRef.current = false;
+    pendingSessionEntryUserInterruptedRef.current = false;
+    suppressedAutoFollowTurnKeyRef.current = null;
+    pendingLocalSendFollowBottomRef.current = true;
+    resumeFollowingLatest();
+
+    if (sending && activeTurnScrollKey) {
+      activeTurnTrackedTurnKeyRef.current = activeTurnScrollKey;
+      activeTurnAutoScrollModeRef.current = 'follow-bottom';
+      setActiveTurnUserInterruptVersion((value) => value + 1);
+    }
+
+    isAtBottomRef.current = true;
+    setIsAtBottom(true);
+    markProgrammaticScroll(ACTIVE_TURN_AUTO_SCROLL_DURATION_MS + 240);
+
+    chatListRef.current?.scrollToIndex?.({
+      index: Math.max(chatListItems.length - 1, 0),
+      align: 'end',
+      behavior: 'smooth',
+    });
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        positionScrollNearBottom(ACTIVE_TURN_BOTTOM_OFFSET_PX);
+        syncBottomState(0);
+      });
+    });
+  }, [
+    activeTurnScrollKey,
+    chatListItems.length,
+    markProgrammaticScroll,
+    positionScrollNearBottom,
+    resumeFollowingLatest,
+    sending,
+    syncBottomState,
+  ]);
+  const openAttachmentPreviewPane = useCallback((file: AttachedFileMeta) => {
     if (!previewPaneOpenRef.current) {
       previewAutoCollapsedSidebarRef.current = !sidebarCollapsedRef.current;
       if (!sidebarCollapsedRef.current) {
@@ -1094,6 +1381,59 @@ export function Chat() {
     }
     setSelectedPreviewFile(file);
   }, [setSidebarCollapsed]);
+
+  const handleOpenAttachmentPreview = useCallback((file: AttachedFileMeta) => {
+    const requestId = libreOfficePromptRequestRef.current + 1;
+    libreOfficePromptRequestRef.current = requestId;
+
+    if (!isLibreOfficeBackedPreviewFile(file)) {
+      setLibreOfficeDownloadPrompt(null);
+      openAttachmentPreviewPane(file);
+      return;
+    }
+
+    const openPreviewAfterDownload = previewPaneOpenRef.current;
+    void hostApiFetch<LibreOfficeRuntimeStatusPayload>('/api/files/libreoffice-runtime/status')
+      .then((status) => {
+        if (libreOfficePromptRequestRef.current !== requestId) {
+          return;
+        }
+
+        if (status.available || status.status === 'complete') {
+          setLibreOfficeDownloadPrompt(null);
+          openAttachmentPreviewPane(file);
+          return;
+        }
+
+        setLibreOfficeDownloadPrompt({
+          file,
+          openPreviewAfterDownload,
+        });
+      })
+      .catch(() => {
+        if (libreOfficePromptRequestRef.current !== requestId) {
+          return;
+        }
+
+        setLibreOfficeDownloadPrompt({
+          file,
+          openPreviewAfterDownload,
+        });
+      });
+  }, [openAttachmentPreviewPane]);
+
+  const handleLibreOfficePromptComplete = useCallback(() => {
+    const prompt = libreOfficeDownloadPrompt;
+    setLibreOfficeDownloadPrompt(null);
+    if (prompt?.openPreviewAfterDownload && previewPaneOpenRef.current) {
+      openAttachmentPreviewPane(prompt.file);
+    }
+  }, [libreOfficeDownloadPrompt, openAttachmentPreviewPane]);
+
+  const handleLibreOfficePromptCancel = useCallback(() => {
+    setLibreOfficeDownloadPrompt(null);
+  }, []);
+
   const handleCloseAttachmentPreview = useCallback(() => {
     restoreAutoCollapsedSidebar();
     setSelectedPreviewFile(null);
@@ -1286,7 +1626,6 @@ export function Chat() {
           className="flex-1 min-h-0 min-w-0 overflow-x-hidden"
           style={{ width: '100%' }}
           data={chatListItems}
-          alignToBottom
           increaseViewportBy={{ top: 720, bottom: 360 }}
           context={chatListContext}
           computeItemKey={(_, item) => item.key}
@@ -1302,19 +1641,41 @@ export function Chat() {
       )}
 
       {/* Session notice bar */}
-      {error && (
+      {sessionBanner && (
         <div
-          className="border-t border-amber-500/20 bg-amber-500/10 px-4 py-2"
+          className={cn(
+            'border-t px-4 py-2',
+            sessionBannerIsWarning
+              ? 'border-amber-500/20 bg-amber-500/10'
+              : 'border-sky-500/20 bg-sky-500/10',
+          )}
           data-testid="chat-session-notice"
+          data-notice-tone={sessionBanner.tone}
         >
           <div className={cn(CHAT_SURFACE_MAX_WIDTH_CLASS, 'mx-auto flex items-center justify-between')}>
-            <p className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-300">
-              <AlertCircle className="h-4 w-4" />
-              {error}
+            <p
+              className={cn(
+                'flex items-center gap-2 text-sm',
+                sessionBannerIsWarning
+                  ? 'text-amber-700 dark:text-amber-300'
+                  : 'text-sky-700 dark:text-sky-300',
+              )}
+            >
+              {sessionBannerIsWarning ? (
+                <AlertCircle className="h-4 w-4" />
+              ) : (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
+              {sessionBanner.message}
             </p>
             <button
-              onClick={clearError}
-              className="text-xs text-amber-700/70 underline hover:text-amber-700 dark:text-amber-300/70 dark:hover:text-amber-300"
+              onClick={clearSessionFeedback}
+              className={cn(
+                'text-xs underline',
+                sessionBannerIsWarning
+                  ? 'text-amber-700/70 hover:text-amber-700 dark:text-amber-300/70 dark:hover:text-amber-300'
+                  : 'text-sky-700/70 hover:text-sky-700 dark:text-sky-300/70 dark:hover:text-sky-300',
+              )}
             >
               {t('common:actions.dismiss')}
             </button>
@@ -1410,6 +1771,36 @@ export function Chat() {
           </div>
       )}
 
+      {/* Temporarily hidden until we revisit the jump-to-latest affordance. */}
+      {!jumpToLatestButtonTemporarilyDisabled && showScrollToLatestButton && (
+        <div
+          className="pointer-events-none absolute inset-x-0 z-20 flex justify-center px-4"
+          style={{ bottom: `${scrollToLatestButtonBottomPx}px` }}
+        >
+          <button
+            type="button"
+            onClick={handleJumpToLatest}
+            data-testid="chat-scroll-to-latest"
+            className={cn(
+              'pointer-events-auto inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium shadow-lg backdrop-blur-md transition hover:-translate-y-0.5',
+              hasDetachedNewContent
+                ? 'border-sky-500/30 bg-sky-500/95 text-white hover:bg-sky-500'
+                : 'border-border/70 bg-background/92 text-foreground hover:bg-background',
+            )}
+          >
+            <ChevronDown className="h-4 w-4" />
+            <span>
+              {hasDetachedNewContent
+                ? (isZh ? '有新内容，回到最新' : 'New activity, jump to latest')
+                : (isZh ? '回到最新' : 'Back to latest')}
+            </span>
+            {hasDetachedNewContent ? (
+              <span className="inline-flex h-2 w-2 rounded-full bg-white/90" />
+            ) : null}
+          </button>
+        </div>
+      )}
+
       {/* Input Area */}
       <ChatInput
         onSend={handleSendMessage}
@@ -1457,6 +1848,14 @@ export function Chat() {
           </>
         ) : null}
       </div>
+
+      {libreOfficeDownloadPrompt ? (
+        <LibreOfficeDownloadDialog
+          variant="global"
+          onCancel={handleLibreOfficePromptCancel}
+          onComplete={handleLibreOfficePromptComplete}
+        />
+      ) : null}
     </div>
   );
 }

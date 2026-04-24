@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import { basename, extname, join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { TextDecoder } from 'node:util';
 import { LRUCache } from 'lru-cache';
@@ -22,6 +22,11 @@ import {
   resolveUserUploadStorageDir,
   resolveStagedUploadFilePath,
 } from '../../utils/session-file-storage';
+import {
+  getLibreOfficeRuntimeStatus,
+  resolveLibreOfficeExecutable,
+  startLibreOfficeRuntimeDownload,
+} from '../../utils/libreoffice-runtime';
 
 const EXT_MIME_MAP: Record<string, string> = {
   '.png': 'image/png',
@@ -114,10 +119,17 @@ const MAX_SPREADSHEET_PREVIEW_COLUMNS = 18;
 const MAX_PRESENTATION_PREVIEW_SLIDES = 40;
 const MAX_PRESENTATION_SLIDE_PARAGRAPHS = 16;
 const POWERPOINT_EXPORT_TARGET_LONG_EDGE_PX = 1600;
-const OUTBOUND_DIR = join(homedir(), '.openclaw', 'media', 'outbound');
-const PRESENTATION_PREVIEW_DIR = join(homedir(), '.openclaw', 'media', 'presentation-preview');
+const LIBREOFFICE_EXPORT_TIMEOUT_MS = 1000 * 30;
+const PRESENTATION_PREVIEW_CACHE_TTL_MS = 1000 * 60 * 45;
+const PRESENTATION_PREVIEW_DIR = join(tmpdir(), 'clawx-presentation-preview');
 const PRESENTATION_PREVIEW_MANIFEST_NAME = 'manifest.json';
 const PRESENTATION_PREVIEW_CACHE_VERSION = 3;
+const OFFICE_PAGES_PREVIEW_CACHE_TTL_MS = 1000 * 60 * 45;
+const OFFICE_PAGES_PREVIEW_DIR = join(tmpdir(), 'clawx-office-pages-preview');
+const OFFICE_PAGES_PREVIEW_MANIFEST_NAME = 'manifest.json';
+const OFFICE_PAGES_PREVIEW_CACHE_VERSION = 1;
+const MAX_OFFICE_PAGE_PREVIEW_PAGES = 80;
+const LIBREOFFICE_PDF_EXPORT_TIMEOUT_MS = 1000 * 60 * 4;
 const XML_ENTITY_MAP: Record<string, string> = {
   amp: '&',
   lt: '<',
@@ -227,6 +239,7 @@ type FilePreviewUnavailableReasonCode =
   | 'missingPath'
   | 'tooLarge'
   | 'legacyOffice'
+  | 'requiresLibreOffice'
   | 'unsupported';
 
 type PresentationRenderMode = 'html' | 'image';
@@ -303,6 +316,15 @@ type FilePreviewPayload =
       truncatedSheets: boolean;
     }
   | {
+      kind: 'office-pages';
+      fileName: string;
+      mimeType: string;
+      fileSize: number;
+      previewId: string;
+      pageCount: number;
+      truncatedPages: boolean;
+    }
+  | {
       kind: 'presentation';
       fileName: string;
       mimeType: string;
@@ -343,6 +365,22 @@ type PresentationPreviewManifest = {
   createdAt: number;
 };
 
+type OfficePagesPreviewCacheEntry = {
+  previewId: string;
+  dirPath: string;
+  pdfPath: string;
+  pageCount: number;
+  truncatedPages: boolean;
+};
+
+type OfficePagesPreviewManifest = {
+  version: number;
+  previewId: string;
+  pageCount: number;
+  truncatedPages: boolean;
+  createdAt: number;
+};
+
 type PresentationImageExportResult = {
   slideWidth: number;
   slideHeight: number;
@@ -350,11 +388,23 @@ type PresentationImageExportResult = {
   truncatedSlides: boolean;
 };
 
+type PresentationSlideSize = {
+  width: number;
+  height: number;
+};
+
 const presentationPreviewCache = new LRUCache<string, PresentationPreviewCacheEntry>({
   max: 4,
-  ttl: 1000 * 60 * 45,
+  ttl: PRESENTATION_PREVIEW_CACHE_TTL_MS,
 });
 const presentationPreviewBuilds = new Map<string, Promise<PresentationPreviewCacheEntry>>();
+let presentationPreviewCleanupAt = 0;
+const officePagesPreviewCache = new LRUCache<string, OfficePagesPreviewCacheEntry>({
+  max: 4,
+  ttl: OFFICE_PAGES_PREVIEW_CACHE_TTL_MS,
+});
+const officePagesPreviewBuilds = new Map<string, Promise<OfficePagesPreviewCacheEntry>>();
+let officePagesPreviewCleanupAt = 0;
 type XmlCompatNode = XmlNode & {
   __clawxPatched?: boolean;
   parentElement?: XmlElement | null;
@@ -763,6 +813,24 @@ function createUnavailablePreview(
   };
 }
 
+function isLibreOfficeBackedPreviewExtension(extension: string): boolean {
+  return PRESENTATION_EXTENSIONS.has(extension)
+    || WORD_EXTENSIONS.has(extension)
+    || SPREADSHEET_EXTENSIONS.has(extension);
+}
+
+async function shouldPromptForLibreOfficePreview(extension: string): Promise<boolean> {
+  if (!isLibreOfficeBackedPreviewExtension(extension)) {
+    return false;
+  }
+
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+    return false;
+  }
+
+  return !(await resolveLibreOfficeExecutable());
+}
+
 function stripHtmlTags(value: string): string {
   return decodeXmlText(value.replace(/<[^>]+>/g, ''));
 }
@@ -814,6 +882,7 @@ function summarizePresentationSlideFromHtml(
 async function extractPresentationTextPreviewFromBuffer(buffer: Buffer): Promise<{
   slides: PresentationSlideSummary[];
   truncatedSlides: boolean;
+  slideSize: PresentationSlideSize | null;
 }> {
   const jszipModule = await import('jszip');
   const JSZip = jszipModule.default ?? jszipModule;
@@ -825,6 +894,13 @@ async function extractPresentationTextPreviewFromBuffer(buffer: Buffer): Promise
       const rightNumber = Number.parseInt(right.match(/slide(\d+)\.xml/i)?.[1] ?? '0', 10);
       return leftNumber - rightNumber;
     });
+  const presentationXml = await zip.file('ppt/presentation.xml')?.async('string');
+  const slideSizeMatch = presentationXml?.match(/<p:sldSz[^>]*cx="(\d+)"[^>]*cy="(\d+)"/i);
+  const rawSlideWidth = Number.parseInt(slideSizeMatch?.[1] ?? '0', 10);
+  const rawSlideHeight = Number.parseInt(slideSizeMatch?.[2] ?? '0', 10);
+  const slideSize = rawSlideWidth > 0 && rawSlideHeight > 0
+    ? scalePresentationDimensionsToLongEdge(rawSlideWidth, rawSlideHeight, POWERPOINT_EXPORT_TARGET_LONG_EDGE_PX)
+    : null;
 
   const slides: PresentationSlideSummary[] = [];
   for (const slideEntry of slideEntries.slice(0, MAX_PRESENTATION_PREVIEW_SLIDES)) {
@@ -851,6 +927,7 @@ async function extractPresentationTextPreviewFromBuffer(buffer: Buffer): Promise
   return {
     slides,
     truncatedSlides: slideEntries.length > slides.length,
+    slideSize,
   };
 }
 
@@ -870,12 +947,45 @@ function buildPresentationPreviewManifestPath(dirPath: string): string {
   return join(dirPath, PRESENTATION_PREVIEW_MANIFEST_NAME);
 }
 
+function isPresentationPreviewExpired(createdAt: number | undefined): boolean {
+  if (!Number.isFinite(createdAt) || !createdAt) {
+    return true;
+  }
+  return Date.now() - createdAt > PRESENTATION_PREVIEW_CACHE_TTL_MS;
+}
+
 function buildPresentationSlideHtmlPath(dirPath: string, slideIndex: number): string {
   return join(dirPath, `slide-${slideIndex}.html`);
 }
 
 function buildPresentationSlideImagePath(dirPath: string, slideIndex: number): string {
   return join(dirPath, `slide-${slideIndex}.png`);
+}
+
+function buildPresentationSlideExportDirPath(dirPath: string, exportKey: string): string {
+  return join(dirPath, `export-${exportKey}`);
+}
+
+function scalePresentationDimensionsToLongEdge(
+  rawWidth: number,
+  rawHeight: number,
+  longEdgePx: number,
+): PresentationSlideSize {
+  if (rawWidth <= 0 || rawHeight <= 0) {
+    return { width: longEdgePx, height: longEdgePx };
+  }
+
+  if (rawWidth >= rawHeight) {
+    return {
+      width: longEdgePx,
+      height: Math.max(1, Math.round((rawHeight / rawWidth) * longEdgePx)),
+    };
+  }
+
+  return {
+    width: Math.max(1, Math.round((rawWidth / rawHeight) * longEdgePx)),
+    height: longEdgePx,
+  };
 }
 
 function encodePowerShellCommand(script: string): string {
@@ -1010,6 +1120,207 @@ try {
   }
 }
 
+function buildLibreOfficePngFilter(options: {
+  width: number;
+  height: number;
+  pageNumber?: number;
+}): string {
+  const filterOptions: Record<string, { type: string; value: string }> = {
+    PixelWidth: {
+      type: 'long',
+      value: String(options.width),
+    },
+    PixelHeight: {
+      type: 'long',
+      value: String(options.height),
+    },
+    AntiAliasing: {
+      type: 'boolean',
+      value: 'true',
+    },
+  };
+
+  if (options.pageNumber) {
+    filterOptions.PageNumber = {
+      type: 'long',
+      value: String(options.pageNumber),
+    };
+  }
+
+  return `png:impress_png_Export:${JSON.stringify(filterOptions)}`;
+}
+
+async function listLibreOfficeExportedSlideImages(sourceDir: string): Promise<string[]> {
+  const fsP = await import('node:fs/promises');
+  const exportedFiles = (await fsP.readdir(sourceDir, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && /\.png$/i.test(entry.name))
+    .sort((left, right) => {
+      return extractSlideNumberFromFileName(left.name, 0) - extractSlideNumberFromFileName(right.name, 0);
+    });
+
+  return exportedFiles.map((entry) => join(sourceDir, entry.name));
+}
+
+async function copyLibreOfficeExportedSlideImages(options: {
+  sourceDir: string;
+  targetDir: string;
+  startSlideIndex: number;
+  maxSlides?: number;
+}): Promise<number> {
+  const fsP = await import('node:fs/promises');
+  const exportedFiles = await listLibreOfficeExportedSlideImages(options.sourceDir);
+  const limitedFiles = exportedFiles.slice(0, options.maxSlides ?? exportedFiles.length);
+  for (const [index, sourcePath] of limitedFiles.entries()) {
+    const targetPath = buildPresentationSlideImagePath(options.targetDir, options.startSlideIndex + index);
+    await fsP.copyFile(sourcePath, targetPath);
+  }
+
+  return limitedFiles.length;
+}
+
+async function runLibreOfficePresentationImageExport(options: {
+  sofficePath: string;
+  filePath: string;
+  outDir: string;
+  profileDir: string;
+  width: number;
+  height: number;
+  pageNumber?: number;
+}): Promise<boolean> {
+  const fsP = await import('node:fs/promises');
+  await fsP.rm(options.outDir, { recursive: true, force: true });
+  await fsP.mkdir(options.outDir, { recursive: true });
+
+  try {
+    await execFileAsync(
+      options.sofficePath,
+      [
+        `-env:UserInstallation=${pathToFileURL(options.profileDir).href}`,
+        '--headless',
+        '--nologo',
+        '--nodefault',
+        '--nolockcheck',
+        '--norestore',
+        '--convert-to',
+        buildLibreOfficePngFilter({
+          width: options.width,
+          height: options.height,
+          pageNumber: options.pageNumber,
+        }),
+        '--outdir',
+        options.outDir,
+        options.filePath,
+      ],
+      LIBREOFFICE_EXPORT_TIMEOUT_MS,
+    );
+  } catch {
+    return false;
+  }
+
+  return true;
+}
+
+async function tryExportPresentationImagesWithLibreOffice(options: {
+  filePath: string;
+  dirPath: string;
+  slideCount: number;
+  slideSize: PresentationSlideSize | null;
+}): Promise<PresentationImageExportResult | null> {
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+    return null;
+  }
+
+  const sofficePath = await resolveLibreOfficeExecutable();
+  if (!sofficePath || options.slideCount <= 0) {
+    return null;
+  }
+
+  const fsP = await import('node:fs/promises');
+  const profileDir = join(options.dirPath, 'lo-profile');
+  const slideSize = options.slideSize ?? scalePresentationDimensionsToLongEdge(16, 9, POWERPOINT_EXPORT_TARGET_LONG_EDGE_PX);
+  const bulkExportDir = buildPresentationSlideExportDirPath(options.dirPath, 'bulk');
+  const didBulkExport = await runLibreOfficePresentationImageExport({
+    sofficePath,
+    filePath: options.filePath,
+    outDir: bulkExportDir,
+    profileDir,
+    width: slideSize.width,
+    height: slideSize.height,
+  });
+
+  let exportedSlideCount = didBulkExport
+    ? await copyLibreOfficeExportedSlideImages({
+      sourceDir: bulkExportDir,
+      targetDir: options.dirPath,
+      startSlideIndex: 1,
+      maxSlides: MAX_PRESENTATION_PREVIEW_SLIDES,
+    })
+    : 0;
+  if (exportedSlideCount <= 1 && options.slideCount > 1) {
+    const stableImagePaths = (await fsP.readdir(options.dirPath, { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && /^slide-\d+\.png$/i.test(entry.name));
+    await Promise.all(stableImagePaths.map(async (entry) => {
+      await fsP.rm(join(options.dirPath, entry.name), { force: true });
+    }));
+    exportedSlideCount = 0;
+
+    for (let slideIndex = 1; slideIndex <= Math.min(options.slideCount, MAX_PRESENTATION_PREVIEW_SLIDES); slideIndex += 1) {
+      const slideExportDir = buildPresentationSlideExportDirPath(options.dirPath, `slide-${slideIndex}`);
+      const exported = await runLibreOfficePresentationImageExport({
+        sofficePath,
+        filePath: options.filePath,
+        outDir: slideExportDir,
+        profileDir,
+        width: slideSize.width,
+        height: slideSize.height,
+        pageNumber: slideIndex,
+      });
+      if (!exported) {
+        await fsP.rm(slideExportDir, { recursive: true, force: true }).catch(() => undefined);
+        break;
+      }
+      exportedSlideCount += await copyLibreOfficeExportedSlideImages({
+        sourceDir: slideExportDir,
+        targetDir: options.dirPath,
+        startSlideIndex: slideIndex,
+        maxSlides: 1,
+      });
+      await fsP.rm(slideExportDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  await fsP.rm(bulkExportDir, { recursive: true, force: true }).catch(() => undefined);
+  await fsP.rm(profileDir, { recursive: true, force: true }).catch(() => undefined);
+
+  if (!didBulkExport && exportedSlideCount === 0) {
+    return null;
+  }
+
+  if (exportedSlideCount <= 0) {
+    return null;
+  }
+
+  return {
+    slideWidth: slideSize.width,
+    slideHeight: slideSize.height,
+    slideCount: exportedSlideCount,
+    truncatedSlides: options.slideCount > exportedSlideCount,
+  };
+}
+
+async function tryExportPresentationImagesLocally(options: {
+  filePath: string;
+  dirPath: string;
+  slideCount: number;
+  slideSize: PresentationSlideSize | null;
+}): Promise<PresentationImageExportResult | null> {
+  return await tryExportPresentationImagesWithLibreOffice(options)
+    ?? await tryExportPresentationImagesWithPowerPoint({
+      filePath: options.filePath,
+      dirPath: options.dirPath,
+    });
+}
+
 function buildPresentationImageSlideSummaries(
   slideCount: number,
   summary: {
@@ -1062,6 +1373,11 @@ async function readPresentationPreviewCacheFromDisk(previewId: string): Promise<
       return null;
     }
 
+    if (isPresentationPreviewExpired(manifest.createdAt)) {
+      await fsP.rm(dirPath, { recursive: true, force: true });
+      return null;
+    }
+
     return {
       previewId,
       dirPath,
@@ -1089,6 +1405,47 @@ async function loadPresentationPreviewCacheEntry(previewId: string): Promise<Pre
   }
 
   return null;
+}
+
+async function cleanupPresentationPreviewTempDirs(): Promise<void> {
+  const now = Date.now();
+  if (now - presentationPreviewCleanupAt < 1000 * 60 * 10) {
+    return;
+  }
+  presentationPreviewCleanupAt = now;
+
+  try {
+    const fsP = await import('node:fs/promises');
+    const entries = await fsP.readdir(PRESENTATION_PREVIEW_DIR, { withFileTypes: true });
+
+    await Promise.all(entries.map(async (entry) => {
+      if (!entry.isDirectory()) {
+        return;
+      }
+
+      const dirPath = join(PRESENTATION_PREVIEW_DIR, entry.name);
+      const manifestPath = buildPresentationPreviewManifestPath(dirPath);
+
+      try {
+        const manifestRaw = await fsP.readFile(manifestPath, 'utf8');
+        const manifest = JSON.parse(manifestRaw) as Partial<PresentationPreviewManifest>;
+        if (isPresentationPreviewExpired(manifest.createdAt)) {
+          await fsP.rm(dirPath, { recursive: true, force: true });
+        }
+      } catch {
+        try {
+          const stat = await fsP.stat(dirPath);
+          if (now - stat.mtimeMs > PRESENTATION_PREVIEW_CACHE_TTL_MS) {
+            await fsP.rm(dirPath, { recursive: true, force: true });
+          }
+        } catch {
+          // Ignore cleanup races for temp preview directories.
+        }
+      }
+    }));
+  } catch {
+    // Ignore temp preview cleanup failures. They should not block previews.
+  }
 }
 
 async function writePresentationPreviewManifest(entry: PresentationPreviewCacheEntry): Promise<void> {
@@ -1149,25 +1506,30 @@ async function ensurePresentationPreviewCache(options: {
   const buildPromise = (async (): Promise<PresentationPreviewCacheEntry> => {
     const fsP = await import('node:fs/promises');
     const dirPath = buildPresentationPreviewDirPath(previewId);
+    await cleanupPresentationPreviewTempDirs();
     await fsP.mkdir(PRESENTATION_PREVIEW_DIR, { recursive: true });
     await fsP.rm(dirPath, { recursive: true, force: true });
     await fsP.mkdir(dirPath, { recursive: true });
 
-    const imageExport = await tryExportPresentationImagesWithPowerPoint({
+    let summary: {
+      slides: PresentationSlideSummary[];
+      truncatedSlides: boolean;
+      slideSize: PresentationSlideSize | null;
+    } | null = null;
+    try {
+      summary = await extractPresentationTextPreviewFromBuffer(options.buffer);
+    } catch {
+      summary = null;
+    }
+
+    const imageExport = await tryExportPresentationImagesLocally({
       filePath: options.filePath,
       dirPath,
+      slideCount: summary?.slides.length ?? 0,
+      slideSize: summary?.slideSize ?? null,
     });
 
     if (imageExport) {
-      let summary: {
-        slides: PresentationSlideSummary[];
-        truncatedSlides: boolean;
-      } | null = null;
-      try {
-        summary = await extractPresentationTextPreviewFromBuffer(options.buffer);
-      } catch {
-        summary = null;
-      }
       const entry: PresentationPreviewCacheEntry = {
         previewId,
         dirPath,
@@ -1285,6 +1647,360 @@ async function warmPresentationPreviewCache(
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+function buildOfficePagesPreviewId(filePath: string, fileSize: number, modifiedAtMs: number): string {
+  return crypto
+    .createHash('sha256')
+    .update(`office-pages\u0000${filePath}\u0000${fileSize}\u0000${modifiedAtMs}`)
+    .digest('hex')
+    .slice(0, 24);
+}
+
+function buildOfficePagesPreviewDirPath(previewId: string): string {
+  return join(OFFICE_PAGES_PREVIEW_DIR, previewId);
+}
+
+function buildOfficePagesPreviewManifestPath(dirPath: string): string {
+  return join(dirPath, OFFICE_PAGES_PREVIEW_MANIFEST_NAME);
+}
+
+function buildOfficePagesPreviewPdfPath(dirPath: string): string {
+  return join(dirPath, 'document.pdf');
+}
+
+function isOfficePagesPreviewExpired(createdAt: number | undefined): boolean {
+  if (!Number.isFinite(createdAt) || !createdAt) {
+    return true;
+  }
+  return Date.now() - createdAt > OFFICE_PAGES_PREVIEW_CACHE_TTL_MS;
+}
+
+function isOfficePagesPreviewManifest(value: unknown): value is OfficePagesPreviewManifest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Partial<OfficePagesPreviewManifest>;
+  return candidate.version === OFFICE_PAGES_PREVIEW_CACHE_VERSION
+    && typeof candidate.previewId === 'string'
+    && typeof candidate.pageCount === 'number'
+    && typeof candidate.truncatedPages === 'boolean';
+}
+
+async function readOfficePagesPreviewCacheFromDisk(previewId: string): Promise<OfficePagesPreviewCacheEntry | null> {
+  const dirPath = buildOfficePagesPreviewDirPath(previewId);
+  const manifestPath = buildOfficePagesPreviewManifestPath(dirPath);
+  const pdfPath = buildOfficePagesPreviewPdfPath(dirPath);
+
+  try {
+    const fsP = await import('node:fs/promises');
+    const manifestRaw = await fsP.readFile(manifestPath, 'utf8');
+    const manifest = JSON.parse(manifestRaw) as unknown;
+    if (!isOfficePagesPreviewManifest(manifest) || manifest.previewId !== previewId) {
+      return null;
+    }
+
+    if (isOfficePagesPreviewExpired(manifest.createdAt)) {
+      await fsP.rm(dirPath, { recursive: true, force: true });
+      return null;
+    }
+
+    await fsP.access(pdfPath);
+    return {
+      previewId,
+      dirPath,
+      pdfPath,
+      pageCount: manifest.pageCount,
+      truncatedPages: manifest.truncatedPages,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function loadOfficePagesPreviewCacheEntry(previewId: string): Promise<OfficePagesPreviewCacheEntry | null> {
+  const cached = officePagesPreviewCache.get(previewId);
+  if (cached) {
+    return cached;
+  }
+
+  const diskEntry = await readOfficePagesPreviewCacheFromDisk(previewId);
+  if (diskEntry) {
+    officePagesPreviewCache.set(previewId, diskEntry);
+    return diskEntry;
+  }
+
+  return null;
+}
+
+async function cleanupOfficePagesPreviewTempDirs(): Promise<void> {
+  const now = Date.now();
+  if (now - officePagesPreviewCleanupAt < 1000 * 60 * 10) {
+    return;
+  }
+  officePagesPreviewCleanupAt = now;
+
+  try {
+    const fsP = await import('node:fs/promises');
+    const entries = await fsP.readdir(OFFICE_PAGES_PREVIEW_DIR, { withFileTypes: true });
+
+    await Promise.all(entries.map(async (entry) => {
+      if (!entry.isDirectory()) {
+        return;
+      }
+
+      const dirPath = join(OFFICE_PAGES_PREVIEW_DIR, entry.name);
+      const manifestPath = buildOfficePagesPreviewManifestPath(dirPath);
+      try {
+        const manifestRaw = await fsP.readFile(manifestPath, 'utf8');
+        const manifest = JSON.parse(manifestRaw) as Partial<OfficePagesPreviewManifest>;
+        if (isOfficePagesPreviewExpired(manifest.createdAt)) {
+          await fsP.rm(dirPath, { recursive: true, force: true });
+        }
+      } catch {
+        try {
+          const stat = await fsP.stat(dirPath);
+          if (now - stat.mtimeMs > OFFICE_PAGES_PREVIEW_CACHE_TTL_MS) {
+            await fsP.rm(dirPath, { recursive: true, force: true });
+          }
+        } catch {
+          // Ignore cleanup races for temp preview directories.
+        }
+      }
+    }));
+  } catch {
+    // Ignore temp preview cleanup failures. They should not block previews.
+  }
+}
+
+async function writeOfficePagesPreviewManifest(entry: OfficePagesPreviewCacheEntry): Promise<void> {
+  const fsP = await import('node:fs/promises');
+  const manifest: OfficePagesPreviewManifest = {
+    version: OFFICE_PAGES_PREVIEW_CACHE_VERSION,
+    previewId: entry.previewId,
+    pageCount: entry.pageCount,
+    truncatedPages: entry.truncatedPages,
+    createdAt: Date.now(),
+  };
+
+  await fsP.writeFile(
+    buildOfficePagesPreviewManifestPath(entry.dirPath),
+    JSON.stringify(manifest),
+    'utf8',
+  );
+}
+
+function countPdfPagesFromBuffer(buffer: Buffer): number {
+  const raw = buffer.toString('latin1');
+  const explicitPageMatches = raw.match(/\/Type\s*\/Page\b/g);
+  if (explicitPageMatches?.length) {
+    return explicitPageMatches.length;
+  }
+
+  const countValues = Array.from(raw.matchAll(/\/Count\s+(\d+)/g))
+    .map((match) => Number.parseInt(match[1] ?? '0', 10))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  return Math.max(1, ...countValues);
+}
+
+async function materializeLibreOfficeInputForPreview(options: {
+  filePath: string;
+  extension: string;
+  workDir: string;
+}): Promise<string> {
+  if (options.extension !== '.csv') {
+    return options.filePath;
+  }
+
+  const fsP = await import('node:fs/promises');
+  const buffer = await fsP.readFile(options.filePath);
+  const decoded = decodeCsvBuffer(buffer);
+  const csvPath = join(options.workDir, 'source.csv');
+  await fsP.writeFile(csvPath, decoded, 'utf8');
+  return csvPath;
+}
+
+async function convertOfficeDocumentToPdfWithLibreOffice(options: {
+  filePath: string;
+  extension: string;
+  dirPath: string;
+}): Promise<string | null> {
+  const override = (globalThis as typeof globalThis & {
+    __clawxOfficePagesPdfExporter?: (
+      options: { filePath: string; dirPath: string; extension: string },
+    ) => Promise<string | null>;
+  }).__clawxOfficePagesPdfExporter;
+  if (override) {
+    return await override(options);
+  }
+
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+    return null;
+  }
+
+  const sofficePath = await resolveLibreOfficeExecutable();
+  if (!sofficePath) {
+    return null;
+  }
+
+  const fsP = await import('node:fs/promises');
+  const exportDir = join(options.dirPath, 'pdf-export');
+  const profileDir = join(options.dirPath, 'lo-profile');
+  const sourcePath = await materializeLibreOfficeInputForPreview({
+    filePath: options.filePath,
+    extension: options.extension,
+    workDir: options.dirPath,
+  });
+
+  await fsP.rm(exportDir, { recursive: true, force: true });
+  await fsP.mkdir(exportDir, { recursive: true });
+
+  try {
+    await execFileAsync(
+      sofficePath,
+      [
+        `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
+        '--headless',
+        '--nologo',
+        '--nodefault',
+        '--nolockcheck',
+        '--norestore',
+        '--convert-to',
+        'pdf',
+        '--outdir',
+        exportDir,
+        sourcePath,
+      ],
+      LIBREOFFICE_PDF_EXPORT_TIMEOUT_MS,
+    );
+
+    const exportedPdf = (await fsP.readdir(exportDir, { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && /\.pdf$/i.test(entry.name))
+      .map((entry) => join(exportDir, entry.name))
+      .sort()[0];
+    if (!exportedPdf) {
+      return null;
+    }
+
+    const targetPdfPath = buildOfficePagesPreviewPdfPath(options.dirPath);
+    await fsP.copyFile(exportedPdf, targetPdfPath);
+    return targetPdfPath;
+  } finally {
+    await fsP.rm(exportDir, { recursive: true, force: true }).catch(() => undefined);
+    await fsP.rm(profileDir, { recursive: true, force: true }).catch(() => undefined);
+    if (sourcePath !== options.filePath) {
+      await fsP.rm(sourcePath, { force: true }).catch(() => undefined);
+    }
+  }
+}
+
+async function ensureOfficePagesPreviewCache(options: {
+  filePath: string;
+  fileSize: number;
+  modifiedAtMs: number;
+  extension: string;
+}): Promise<OfficePagesPreviewCacheEntry | null> {
+  const previewId = buildOfficePagesPreviewId(options.filePath, options.fileSize, options.modifiedAtMs);
+  const cached = await loadOfficePagesPreviewCacheEntry(previewId);
+  if (cached) {
+    return cached;
+  }
+
+  const inFlight = officePagesPreviewBuilds.get(previewId);
+  if (inFlight) {
+    return await inFlight;
+  }
+
+  const buildPromise = (async (): Promise<OfficePagesPreviewCacheEntry> => {
+    const fsP = await import('node:fs/promises');
+    const dirPath = buildOfficePagesPreviewDirPath(previewId);
+    await cleanupOfficePagesPreviewTempDirs();
+    await fsP.mkdir(OFFICE_PAGES_PREVIEW_DIR, { recursive: true });
+    await fsP.rm(dirPath, { recursive: true, force: true });
+    await fsP.mkdir(dirPath, { recursive: true });
+
+    const pdfPath = await convertOfficeDocumentToPdfWithLibreOffice({
+      filePath: options.filePath,
+      extension: options.extension,
+      dirPath,
+    });
+    if (!pdfPath) {
+      throw new Error('LibreOffice did not produce a PDF preview');
+    }
+
+    const pdfBuffer = await fsP.readFile(pdfPath);
+    const renderedPageCount = countPdfPagesFromBuffer(pdfBuffer);
+    const pageCount = Math.min(Math.max(1, renderedPageCount), MAX_OFFICE_PAGE_PREVIEW_PAGES);
+    const entry: OfficePagesPreviewCacheEntry = {
+      previewId,
+      dirPath,
+      pdfPath,
+      pageCount,
+      truncatedPages: renderedPageCount > pageCount,
+    };
+    await writeOfficePagesPreviewManifest(entry);
+    officePagesPreviewCache.set(previewId, entry);
+    return entry;
+  })();
+
+  officePagesPreviewBuilds.set(previewId, buildPromise);
+  try {
+    return await buildPromise;
+  } catch {
+    return null;
+  } finally {
+    if (officePagesPreviewBuilds.get(previewId) === buildPromise) {
+      officePagesPreviewBuilds.delete(previewId);
+    }
+  }
+}
+
+function buildOfficePagesPreviewPayload(
+  entry: OfficePagesPreviewCacheEntry,
+  fileName: string,
+  mimeType: string,
+  fileSize: number,
+): FilePreviewPayload {
+  return {
+    kind: 'office-pages',
+    fileName,
+    mimeType,
+    fileSize,
+    previewId: entry.previewId,
+    pageCount: entry.pageCount,
+    truncatedPages: entry.truncatedPages,
+  };
+}
+
+async function buildOfficePagesPreview(
+  filePath: string,
+  fileName: string,
+  mimeType: string,
+  fileSize: number,
+  extension: string,
+): Promise<FilePreviewPayload | null> {
+  const fsP = await import('node:fs/promises');
+  const stat = await fsP.stat(filePath);
+  const previewId = buildOfficePagesPreviewId(filePath, fileSize, stat.mtimeMs);
+
+  const cachedEntry = await loadOfficePagesPreviewCacheEntry(previewId);
+  if (cachedEntry) {
+    return buildOfficePagesPreviewPayload(cachedEntry, fileName, mimeType, fileSize);
+  }
+
+  const inFlight = officePagesPreviewBuilds.get(previewId);
+  if (inFlight) {
+    return buildOfficePagesPreviewPayload(await inFlight, fileName, mimeType, fileSize);
+  }
+
+  const entry = await ensureOfficePagesPreviewCache({
+    filePath,
+    fileSize,
+    modifiedAtMs: stat.mtimeMs,
+    extension,
+  });
+  return entry ? buildOfficePagesPreviewPayload(entry, fileName, mimeType, fileSize) : null;
 }
 
 function slugifyHeading(value: string, fallback: string, usedIds: Set<string>): string {
@@ -1560,6 +2276,15 @@ async function buildFilePreview(
     );
   }
 
+  if (await shouldPromptForLibreOfficePreview(extension)) {
+    return createUnavailablePreview(
+      fileName,
+      mimeType,
+      fileSize,
+      'requiresLibreOffice',
+    );
+  }
+
   if (mimeType.startsWith('image/')) {
     return {
       kind: 'image',
@@ -1581,10 +2306,18 @@ async function buildFilePreview(
   }
 
   if (WORD_EXTENSIONS.has(extension)) {
+    const officePagesPreview = await buildOfficePagesPreview(filePath, fileName, mimeType, fileSize, extension);
+    if (officePagesPreview) {
+      return officePagesPreview;
+    }
     return await buildDocxPreview(filePath, fileName, mimeType, fileSize);
   }
 
   if (SPREADSHEET_EXTENSIONS.has(extension)) {
+    const officePagesPreview = await buildOfficePagesPreview(filePath, fileName, mimeType, fileSize, extension);
+    if (officePagesPreview) {
+      return officePagesPreview;
+    }
     return await buildSpreadsheetPreview(filePath, fileName, mimeType, fileSize);
   }
 
@@ -1747,6 +2480,26 @@ export async function handleFileRoutes(
     return true;
   }
 
+  if (url.pathname === '/api/files/libreoffice-runtime/status' && req.method === 'GET') {
+    try {
+      const status = await getLibreOfficeRuntimeStatus(url.searchParams.get('jobId') ?? undefined);
+      sendJson(res, 200, status);
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === '/api/files/libreoffice-runtime/download' && req.method === 'POST') {
+    try {
+      const status = await startLibreOfficeRuntimeDownload();
+      sendJson(res, 200, status);
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
   if (url.pathname === '/api/files/preview' && req.method === 'POST') {
     try {
       const body = await parseJsonBody<{ filePath: string; fileName?: string; mimeType?: string }>(req);
@@ -1777,6 +2530,30 @@ export async function handleFileRoutes(
       const stat = await fsP.stat(body.filePath);
       const source = await buildDocxPreviewSource(body.filePath, fileName, mimeType, stat.size);
       sendJson(res, 200, source);
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === '/api/files/preview-office-pages-pdf' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{ previewId?: string }>(req);
+      const previewId = body.previewId?.trim();
+
+      if (!previewId) {
+        sendJson(res, 400, { success: false, error: 'Invalid office pages preview request' });
+        return true;
+      }
+
+      const entry = await loadOfficePagesPreviewCacheEntry(previewId);
+      if (!entry) {
+        sendJson(res, 404, { success: false, error: 'Office pages preview expired' });
+        return true;
+      }
+
+      const src = await readFileAsDataUrl(entry.pdfPath, 'application/pdf');
+      sendJson(res, 200, { src });
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
     }

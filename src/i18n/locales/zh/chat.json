@@ -63,12 +63,15 @@
         "missingPath": "这个附件已经无法定位到可读取的本地文件。",
         "loadFailed": "加载预览失败：{{error}}",
         "download": "下载",
+        "saveAs": "另存为",
         "downloadSuccess": "文件已保存。",
         "downloadFailed": "保存文件失败：{{error}}",
         "copyImage": "复制图片",
         "copySuccess": "图片已复制。",
         "copyFailed": "复制图片失败：{{error}}",
         "openFile": "打开文件",
+        "openWith": "打开方式",
+        "openWithFailed": "调用打开方式失败：{{error}}",
         "removeFile": "移除文件",
         "revealInFolder": "在文件夹中显示",
         "revealFailed": "无法在文件夹中定位该文件：{{error}}",
@@ -85,15 +88,29 @@
         "firstRowsOnly": "当前只展示前几行内容。",
         "trailingColumnsHidden": "部分靠后的列已被折叠。",
         "extraSheetsHidden": "其余工作表未在这里展开。",
-        "slideLabel": "第 {{count}} 页",
-        "extraSlideContentHidden": "该页还有更多内容，当前预览未全部展开。",
-        "extraSlidesHidden": "其余幻灯片未在侧边预览中展示。",
-        "unavailable": {
-            "tooLarge": "这个文件过大，暂时无法在会话中预览，请下载后查看完整内容。",
-            "legacyOffice": "暂不支持直接预览旧版 Office 文件，请下载后在本地查看。",
-            "unsupported": "当前文件类型暂不支持内联预览，请下载后在本地查看。"
-        }
+    "slideLabel": "第 {{count}} 页",
+    "slideProgress": "第{{current}}页/共{{total}}页",
+    "extraSlideContentHidden": "该页还有更多内容，当前预览未全部展开。",
+    "extraSlidesHidden": "其余幻灯片未在侧边预览中展示。",
+    "extraPagesHidden": "其余页面未在预览中展示。",
+    "libreOfficeDownload": {
+      "title": "需要下载办公套件",
+      "message": "该文件预览需要下载LibreOffice办公套件，是否下载？",
+      "platform": "适用平台：{{platform}}",
+      "download": "下载",
+      "cancel": "取消",
+      "downloading": "正在下载 LibreOffice",
+      "extracting": "正在安装预览运行时",
+      "failed": "LibreOffice 下载失败，请稍后重试。",
+      "unsupported": "当前系统暂不支持自动下载 LibreOffice。"
     },
+    "unavailable": {
+      "tooLarge": "这个文件过大，暂时无法在会话中预览，请下载后查看完整内容。",
+      "legacyOffice": "暂不支持直接预览旧版 Office 文件，请下载后在本地查看。",
+      "requiresLibreOffice": "该文件预览需要下载 LibreOffice 办公套件。",
+      "unsupported": "当前文件类型暂不支持内联预览，请下载后在本地查看。"
+    }
+  },
     "process": {
         "workingFor": "处理中 {{duration}}",
         "processedFor": "已处理 {{duration}}",
@@ -122,8 +139,12 @@
         "gatewayNotConnected": "网关未连接。",
         "gatewayUnavailable": "网关异常，请重启网关后重试。"
     },
+    "sessionNotices": {
+        "delayedResponse": "回复耗时较长，仍在同步结果..."
+    },
     "sessionWarnings": {
         "finalReplyMissing": "最终回复暂未到达，但你仍然可以继续当前会话。",
+        "noFinalReply": "暂时还没有收到最终回复。请稍后重试，或检查提供商和网关状态。",
         "assistantMissingInUI": "助手回复可能已写入会话，但当前显示模式无法展示。请尝试工具栏「刷新聊天」、打开「显示思考过程」或「过程详情」，或稍等网关同步后再试。"
     },
     "archive": {

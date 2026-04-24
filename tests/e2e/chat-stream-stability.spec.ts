@@ -8,9 +8,9 @@ import {
 } from './fixtures/electron';
 
 const SESSION_KEY = 'agent:main:main';
-const SESSION_ID = 'stream-click-scroll';
-const RUN_ID = 'run-stream-click-scroll';
-const PROMPT = 'Keep the running transcript visible while the browser works.';
+const SESSION_ID = 'stream-stability';
+const RUN_ID = 'run-stream-stability';
+const PROMPT = 'Keep this short transcript stable while the answer streams.';
 
 function stableStringify(value: unknown): string {
   if (value == null || typeof value !== 'object') return JSON.stringify(value);
@@ -21,22 +21,15 @@ function stableStringify(value: unknown): string {
   return `{${entries.join(',')}}`;
 }
 
-async function measureScrollMetrics(page: Page): Promise<{ scrollTop: number; distanceFromBottom: number | null }> {
+async function measureActiveTurnTop(page: Page): Promise<number | null> {
   return await page.evaluate(() => {
-    const scrollContainer = document.querySelector('[data-testid="chat-scroll-container"]') as HTMLElement | null;
-    if (!scrollContainer) {
-      return { scrollTop: 0, distanceFromBottom: null };
-    }
-
-    return {
-      scrollTop: scrollContainer.scrollTop,
-      distanceFromBottom: scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop,
-    };
+    const anchor = document.querySelector('[data-testid="chat-active-turn-anchor"]') as HTMLElement | null;
+    return anchor ? anchor.getBoundingClientRect().top : null;
   });
 }
 
-test.describe('Chat stream click scroll', () => {
-  test('stops following the stream after the user clicks inside the transcript', async ({ launchElectronApp }) => {
+test.describe('Chat stream stability', () => {
+  test('keeps a short active turn anchored instead of reflowing upward while streaming', async ({ launchElectronApp }) => {
     test.setTimeout(180_000);
 
     const app = await launchElectronApp({ skipSetup: true });
@@ -73,50 +66,29 @@ test.describe('Chat stream click scroll', () => {
       });
 
       await app.evaluate(({ ipcMain, BrowserWindow }, { prompt, runId, sessionId, sessionKey }) => {
-        const baseTimestamp = Math.floor(Date.now() / 1000) - 600;
-        const seedMessages: Array<Record<string, unknown>> = [];
-        for (let index = 0; index < 16; index += 1) {
-          seedMessages.push({
-            id: `history-user-${index + 1}`,
-            role: 'user',
-            content: `History question ${index + 1}. Keep enough text here so the transcript remains scrollable.`,
-            timestamp: baseTimestamp + (index * 4),
-          });
-          seedMessages.push({
-            id: `history-assistant-${index + 1}`,
-            role: 'assistant',
-            content: `History answer ${index + 1}.\nDetail line one.\nDetail line two.`,
-            timestamp: baseTimestamp + (index * 4) + 1,
-          });
-        }
+        let sessions = [{
+          key: sessionKey,
+          id: sessionId,
+          label: 'Stream stability',
+          updatedAt: Date.now(),
+        }];
+        let historyMessages: Array<Record<string, unknown>> = [];
 
         const chunkOne = [
-          'Working on the browser task now.',
+          'Streaming answer started.',
           '',
-          'Stage 1 summary:',
-          '- Opened the travel site.',
-          '- Starting to collect the latest flight rows.',
+          'First visible block.',
         ].join('\n');
         const chunkTwo = [
           chunkOne,
           '',
-          'Stage 2 details:',
-          '- Found a late-night option that lands after midnight.',
-          '- Found an early-morning option that arrives before ten.',
-          '- Found a midday option with a slightly higher fare.',
-          '- Comparing transfer rules and baggage notes now.',
-          '- Keeping the transcript live while the browser continues.',
-          '- This extra block is intentionally long enough to change scroll height.',
-          '- Another line to make the growth obvious in Electron.',
+          'Second visible block.',
+          '',
+          ...Array.from(
+            { length: 12 },
+            (_value, index) => `Extra line ${index + 1} to grow the active turn without needing a tall history backlog.`,
+          ),
         ].join('\n');
-
-        let sessions = [{
-          key: sessionKey,
-          id: sessionId,
-          label: 'Stream click scroll',
-          updatedAt: Date.now(),
-        }];
-        let historyMessages: Array<Record<string, unknown>> = [...seedMessages];
 
         function emitNotification(payload: unknown): void {
           const window = BrowserWindow.getAllWindows().at(-1);
@@ -150,15 +122,13 @@ test.describe('Chat stream click scroll', () => {
           if (method === 'chat.send') {
             const now = Math.floor(Date.now() / 1000);
             const activeSessionKey = params?.sessionKey || sessionKey;
-            historyMessages = [
-              ...seedMessages,
-              {
-                id: 'user-stream-click-1',
-                role: 'user',
-                content: prompt,
-                timestamp: now,
-              },
-            ];
+
+            historyMessages = [{
+              id: 'user-stream-stability-1',
+              role: 'user',
+              content: prompt,
+              timestamp: now,
+            }];
             sessions = [{
               key: activeSessionKey,
               id: sessionId,
@@ -190,7 +160,7 @@ test.describe('Chat stream click scroll', () => {
                   },
                 },
               });
-            }, 400);
+            }, 350);
 
             setTimeout(() => {
               emitNotification({
@@ -205,7 +175,7 @@ test.describe('Chat stream click scroll', () => {
                   },
                 },
               });
-            }, 2_600);
+            }, 2_200);
 
             return {
               success: true,
@@ -226,42 +196,32 @@ test.describe('Chat stream click scroll', () => {
       });
 
       const page = await getStableWindow(app);
+      await page.setViewportSize({ width: 1440, height: 1200 });
       await expect(page.getByTestId('main-layout')).toBeVisible({ timeout: 60_000 });
 
       const composer = page.getByTestId('chat-composer');
       const messageInput = composer.getByRole('textbox');
       const sendButton = composer.getByTestId('chat-send-button');
 
-      await page.getByTestId(`sidebar-session-${SESSION_KEY}`).click({ force: true });
-      await expect(page.getByText('History answer 16.')).toBeVisible({ timeout: 30_000 });
       await messageInput.fill(PROMPT);
       await sendButton.click();
 
-      await expect.poll(async () => (
-        await sendButton.evaluate((node) => !!node.querySelector('svg.lucide-square'))
-      ), { timeout: 20_000 }).toBe(true);
+      await expect(page.getByTestId('chat-active-turn-anchor')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText('First visible block.')).toBeVisible({ timeout: 20_000 });
+      await page.waitForTimeout(250);
 
-      await expect(page.getByText('Stage 1 summary:')).toBeVisible({ timeout: 20_000 });
-      await page.waitForTimeout(300);
+      const beforeGrowthTop = await measureActiveTurnTop(page);
+      expect(beforeGrowthTop).not.toBeNull();
 
-      const beforeClick = await measureScrollMetrics(page);
-      expect(beforeClick.distanceFromBottom).not.toBeNull();
-      expect(beforeClick.distanceFromBottom ?? 999).toBeLessThanOrEqual(24);
-
-      await page.getByText('Stage 1 summary:').click();
-
-      await expect(page.getByTestId('chat-content-column')).toContainText('Stage 2 details:', { timeout: 20_000 });
+      await expect(page.getByText('Second visible block.')).toBeVisible({ timeout: 20_000 });
       await expect.poll(async () => {
-        const metrics = await measureScrollMetrics(page);
-        return metrics.distanceFromBottom ?? 0;
-      }, { timeout: 20_000 }).toBeGreaterThan((beforeClick.distanceFromBottom ?? 0) + 120);
+        const top = await measureActiveTurnTop(page);
+        return top == null || beforeGrowthTop == null ? null : Math.round(top - beforeGrowthTop);
+      }, { timeout: 20_000 }).not.toBeNull();
 
-      const finalMetrics = await measureScrollMetrics(page);
-      expect(Math.abs(finalMetrics.scrollTop - beforeClick.scrollTop)).toBeLessThanOrEqual(3);
-      expect(finalMetrics.distanceFromBottom).not.toBeNull();
-      expect(finalMetrics.distanceFromBottom ?? 0).toBeGreaterThan((beforeClick.distanceFromBottom ?? 0) + 120);
-
-      await expect(page.getByTestId('chat-scroll-to-latest')).toHaveCount(0);
+      const afterGrowthTop = await measureActiveTurnTop(page);
+      expect(afterGrowthTop).not.toBeNull();
+      expect(Math.abs((afterGrowthTop ?? 0) - (beforeGrowthTop ?? 0))).toBeLessThanOrEqual(4);
     } finally {
       await closeElectronApp(app);
     }

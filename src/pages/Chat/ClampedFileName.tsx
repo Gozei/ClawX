@@ -7,6 +7,7 @@ const MIN_FADE_WIDTH = 40;
 interface ClampedFileNameProps {
   text: string;
   metaText?: string;
+  collapseToSingleLine?: boolean;
   textClassName?: string;
   metaClassName?: string;
   containerClassName?: string;
@@ -29,6 +30,7 @@ interface SplitFileNameLinesResult {
 
 interface FileNameLayoutState extends SplitFileNameLinesResult {
   metaWidth: number;
+  isSingleLine: boolean;
 }
 
 function fitCharacters(
@@ -110,6 +112,7 @@ export function splitFileNameLines({
 export function ClampedFileName({
   text,
   metaText,
+  collapseToSingleLine = false,
   textClassName,
   metaClassName,
   containerClassName,
@@ -124,6 +127,7 @@ export function ClampedFileName({
     secondLine: '',
     truncated: false,
     metaWidth: 0,
+    isSingleLine: false,
   });
 
   useLayoutEffect(() => {
@@ -153,13 +157,22 @@ export function ClampedFileName({
       const reservedSecondLineWidth = metaWidth > 0
         ? metaWidth + SECOND_LINE_META_GAP
         : 0;
+      const singleLineWidth = Math.max(0, containerWidth - reservedSecondLineWidth);
+      const isSingleLine = collapseToSingleLine
+        && measureWidth(text) <= (metaWidth > 0 ? singleLineWidth : containerWidth);
 
-      const nextLayout = splitFileNameLines({
-        text,
-        firstLineWidth: containerWidth,
-        secondLineWidth: Math.max(0, containerWidth - reservedSecondLineWidth),
-        measureWidth,
-      });
+      const nextLayout = isSingleLine
+        ? {
+          firstLine: text,
+          secondLine: '',
+          truncated: false,
+        }
+        : splitFileNameLines({
+          text,
+          firstLineWidth: containerWidth,
+          secondLineWidth: Math.max(0, containerWidth - reservedSecondLineWidth),
+          measureWidth,
+        });
 
       setLayout((current) => {
         if (
@@ -167,6 +180,7 @@ export function ClampedFileName({
           && current.secondLine === nextLayout.secondLine
           && current.truncated === nextLayout.truncated
           && current.metaWidth === metaWidth
+          && current.isSingleLine === isSingleLine
         ) {
           return current;
         }
@@ -174,6 +188,7 @@ export function ClampedFileName({
         return {
           ...nextLayout,
           metaWidth,
+          isSingleLine,
         };
       });
     };
@@ -207,7 +222,7 @@ export function ClampedFileName({
       resizeObserver?.disconnect();
       window.removeEventListener('resize', scheduleMeasure);
     };
-  }, [metaText, text]);
+  }, [collapseToSingleLine, metaText, text]);
 
   const fadeWidth = Math.max(
     MIN_FADE_WIDTH,
@@ -229,49 +244,77 @@ export function ClampedFileName({
           textClassName,
         )}
       />
-      <div className="flex h-full min-w-0 flex-col justify-between">
-        <p
-          data-testid={textTestId ? `${textTestId}-first-line` : undefined}
-          className={cn(
-            'min-w-0 overflow-hidden whitespace-nowrap text-ellipsis',
-            textClassName,
-          )}
-        >
-          {layout.firstLine}
-        </p>
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="relative min-w-0 flex-1">
+      <div className={cn('flex h-full min-w-0', layout.isSingleLine ? 'items-center' : 'flex-col justify-between')}>
+        {layout.isSingleLine ? (
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <p
-              data-testid={textTestId ? `${textTestId}-second-line` : undefined}
+              data-testid={textTestId ? `${textTestId}-first-line` : undefined}
+              className={cn(
+                'min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis',
+                textClassName,
+              )}
+            >
+              {layout.firstLine}
+            </p>
+            {metaText ? (
+              <span
+                ref={metaRef}
+                data-testid={textTestId ? `${textTestId}-meta` : undefined}
+                className={cn(
+                  'shrink-0 whitespace-nowrap text-muted-foreground',
+                  metaClassName,
+                )}
+              >
+                {metaText}
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <>
+            <p
+              data-testid={textTestId ? `${textTestId}-first-line` : undefined}
               className={cn(
                 'min-w-0 overflow-hidden whitespace-nowrap text-ellipsis',
                 textClassName,
               )}
             >
-              {layout.secondLine}
+              {layout.firstLine}
             </p>
-            {layout.truncated ? (
-              <div
-                aria-hidden="true"
-                data-testid={fadeTestId}
-                className="pointer-events-none absolute inset-y-0 right-0 bg-gradient-to-l from-white/95 via-white/78 to-transparent dark:from-slate-950/94 dark:via-slate-950/76"
-                style={{ width: `${fadeWidth}px` }}
-              />
-            ) : null}
-          </div>
-          {metaText ? (
-            <span
-              ref={metaRef}
-              data-testid={textTestId ? `${textTestId}-meta` : undefined}
-              className={cn(
-                'shrink-0 whitespace-nowrap text-muted-foreground',
-                metaClassName,
-              )}
-            >
-              {metaText}
-            </span>
-          ) : null}
-        </div>
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="relative min-w-0 flex-1">
+                <p
+                  data-testid={textTestId ? `${textTestId}-second-line` : undefined}
+                  className={cn(
+                    'min-w-0 overflow-hidden whitespace-nowrap text-ellipsis',
+                    textClassName,
+                  )}
+                >
+                  {layout.secondLine}
+                </p>
+                {layout.truncated ? (
+                  <div
+                    aria-hidden="true"
+                    data-testid={fadeTestId}
+                    className="pointer-events-none absolute inset-y-0 right-0 bg-gradient-to-l from-white/95 via-white/78 to-transparent dark:from-slate-950/94 dark:via-slate-950/76"
+                    style={{ width: `${fadeWidth}px` }}
+                  />
+                ) : null}
+              </div>
+              {metaText ? (
+                <span
+                  ref={metaRef}
+                  data-testid={textTestId ? `${textTestId}-meta` : undefined}
+                  className={cn(
+                    'shrink-0 whitespace-nowrap text-muted-foreground',
+                    metaClassName,
+                  )}
+                >
+                  {metaText}
+                </span>
+              ) : null}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

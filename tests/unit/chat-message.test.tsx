@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { ChatMessage } from '@/pages/Chat/ChatMessage';
 import type { RawMessage } from '@/stores/chat';
 
@@ -81,6 +83,14 @@ vi.mock('@/lib/api-client', () => ({
   invokeIpc: (...args: unknown[]) => invokeIpcMock(...args),
 }));
 
+function renderWithTooltip(ui: ReactNode) {
+  return render(
+    <TooltipProvider delayDuration={0}>
+      {ui}
+    </TooltipProvider>,
+  );
+}
+
 describe('ChatMessage', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -112,7 +122,7 @@ describe('ChatMessage', () => {
       timestamp: 1712123456,
     };
 
-    render(<ChatMessage message={message} showThinking={false} />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
 
     fireEvent.click(screen.getByTestId('chat-message-copy-user'));
 
@@ -129,7 +139,7 @@ describe('ChatMessage', () => {
       timestamp: 1712123456,
     };
 
-    render(<ChatMessage message={message} showThinking={false} />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
 
     expect(screen.getByTestId('chat-message-model-label')).toHaveTextContent('JD Provider / gpt-5.4');
   });
@@ -142,7 +152,7 @@ describe('ChatMessage', () => {
       timestamp: 1712123456,
     };
 
-    render(<ChatMessage message={message} showThinking={false} />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
 
     expect(screen.getByTestId('chat-message-model-label')).toHaveTextContent('JD Provider / gpt-5.4');
   });
@@ -155,7 +165,7 @@ describe('ChatMessage', () => {
       timestamp: 1712123456,
     };
 
-    render(<ChatMessage message={message} showThinking={false} />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
 
     const copyButton = screen.getByTestId('chat-message-copy-user');
     const hoverRow = copyButton.parentElement;
@@ -173,7 +183,7 @@ describe('ChatMessage', () => {
       timestamp: 1712123456,
     };
 
-    render(<ChatMessage message={message} showThinking={false} />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
 
     expect(screen.getByTestId('chat-assistant-message-shell')).toHaveClass('space-y-3.5');
     expect(screen.getByTestId('chat-assistant-message-shell')).not.toHaveStyle({
@@ -204,7 +214,7 @@ describe('ChatMessage', () => {
       timestamp: 1712123456,
     };
 
-    render(<ChatMessage message={message} showThinking={false} />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
 
     expect(screen.getByTestId('chat-message-model-label')).toHaveTextContent('JD Provider / gpt-5.4');
     expect(screen.getByTestId('chat-message-model-label')).not.toHaveTextContent('qwen3.5-plus');
@@ -224,7 +234,7 @@ describe('ChatMessage', () => {
       ],
     };
 
-    render(<ChatMessage message={message} showThinking={true} />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={true} />);
 
     expect(screen.getByTestId('chat-tool-card')).toHaveClass('w-full');
   });
@@ -236,7 +246,7 @@ describe('ChatMessage', () => {
       content: 'Process step',
     };
 
-    render(<ChatMessage message={message} showThinking={false} constrainWidth={false} />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} constrainWidth={false} />);
 
     expect(screen.getByTestId('chat-message-content-assistant')).not.toHaveClass('max-w-[80%]');
   });
@@ -250,7 +260,7 @@ describe('ChatMessage', () => {
       content: 'Flat response content',
     };
 
-    render(<ChatMessage message={message} showThinking={false} />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
 
     expect(screen.getByTestId('chat-assistant-message-stream')).toBeInTheDocument();
     expect(screen.getByTestId('chat-message-content-assistant')).not.toHaveClass('max-w-[80%]');
@@ -265,7 +275,7 @@ describe('ChatMessage', () => {
       content: 'Searching flights now...',
     };
 
-    render(
+    renderWithTooltip(
       <ChatMessage
         message={message}
         showThinking={false}
@@ -295,7 +305,7 @@ describe('ChatMessage', () => {
       content: '### Section\n\n1. **AI and Models**\n- LM Report',
     };
 
-    render(<ChatMessage message={message} showThinking={false} isStreaming />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} isStreaming />);
 
     expect(screen.getByText('Section')).toBeInTheDocument();
     expect(screen.getByText('1.')).toBeInTheDocument();
@@ -313,7 +323,7 @@ describe('ChatMessage', () => {
       isError: true,
     };
 
-    render(<ChatMessage message={message} showThinking={false} />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
 
     expect(screen.getByTestId('chat-assistant-error-message')).toBeInTheDocument();
   });
@@ -331,7 +341,7 @@ describe('ChatMessage', () => {
       ].join('\n'),
     };
 
-    render(<ChatMessage message={message} showThinking={false} />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
 
     const bubble = screen.getByTestId('chat-assistant-message-bubble');
     expect(bubble).toHaveClass('min-w-0');
@@ -357,14 +367,14 @@ describe('ChatMessage', () => {
       ],
     };
 
-    render(<ChatMessage message={message} showThinking={false} />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
 
     expect(screen.getByTestId('chat-assistant-attachments')).toHaveClass('self-start');
     expect(screen.getByTestId('chat-assistant-attachments')).toHaveClass('justify-start');
     expect(screen.getByTestId('chat-file-card')).toBeInTheDocument();
     expect(screen.getByText('HEARTBEAT.md')).toBeInTheDocument();
     expect(screen.getByTestId('chat-file-ext-badge')).toHaveTextContent('MD');
-    expect(screen.getByText('193 B')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-file-card')).toHaveTextContent('193 B');
   });
 
   it('aligns user file attachments with the shared preview column', () => {
@@ -390,7 +400,7 @@ describe('ChatMessage', () => {
       ],
     };
 
-    render(<ChatMessage message={message} showThinking={false} />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
 
     expect(screen.getByTestId('chat-user-attachments')).toHaveClass('self-end');
     expect(screen.getByTestId('chat-user-attachments')).toHaveClass('justify-end');
@@ -413,7 +423,7 @@ describe('ChatMessage', () => {
       ],
     };
 
-    render(<ChatMessage message={message} showThinking={false} />);
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
 
     fireEvent.click(screen.getByTestId('chat-file-card'));
     fireEvent.click(screen.getByTestId('chat-image-lightbox-copy'));

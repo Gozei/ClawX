@@ -396,6 +396,311 @@ describe('chat store session resume', () => {
     expect(next.error).toMatch(/Authentication failed|鉴权失败/);
   });
 
+  it('clears a stale no-response notice when history later settles the latest user turn', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [
+            {
+              id: 'user-prev',
+              role: 'user',
+              content: 'Earlier question',
+              timestamp: userTimestampSeconds - 10,
+            },
+            {
+              id: 'assistant-prev',
+              role: 'assistant',
+              content: 'Earlier answer',
+              timestamp: userTimestampSeconds - 9,
+            },
+            { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+            {
+              id: 'assistant-final',
+              role: 'assistant',
+              content: 'Final answer from history',
+              timestamp: assistantTimestampSeconds,
+            },
+          ],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        {
+          id: 'user-prev',
+          role: 'user',
+          content: 'Earlier question',
+          timestamp: userTimestampSeconds - 10,
+        },
+        {
+          id: 'assistant-prev',
+          role: 'assistant',
+          content: 'Earlier answer',
+          timestamp: userTimestampSeconds - 9,
+        },
+        { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: 'Localized no response',
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: null,
+    });
+
+    await useChatStore.getState().loadHistory(true);
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual([
+      'user-prev',
+      'assistant-prev',
+      'user-1',
+      'assistant-final',
+    ]);
+    expect(next.error).toBeNull();
+    expect(next.activeRunId).toBeNull();
+    expect(next.sendStage).toBeNull();
+  });
+
+  it('keeps a no-response notice when history only has an earlier assistant reply', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [
+            {
+              id: 'user-prev',
+              role: 'user',
+              content: 'Earlier question',
+              timestamp: userTimestampSeconds - 10,
+            },
+            {
+              id: 'assistant-prev',
+              role: 'assistant',
+              content: 'Earlier answer',
+              timestamp: userTimestampSeconds - 9,
+            },
+            { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+          ],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        {
+          id: 'user-prev',
+          role: 'user',
+          content: 'Earlier question',
+          timestamp: userTimestampSeconds - 10,
+        },
+        {
+          id: 'assistant-prev',
+          role: 'assistant',
+          content: 'Earlier answer',
+          timestamp: userTimestampSeconds - 9,
+        },
+        { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: 'Localized no response',
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: null,
+    });
+
+    await useChatStore.getState().loadHistory(true);
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual([
+      'user-prev',
+      'assistant-prev',
+      'user-1',
+    ]);
+    expect(next.error).toBe('Localized no response');
+  });
+
+  it('keeps polling history after the safety timeout so a late final reply still appears', async () => {
+    let historySettled = false;
+
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: historySettled
+            ? [
+                { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+                {
+                  id: 'assistant-final',
+                  role: 'assistant',
+                  content: 'Final answer from history',
+                  timestamp: assistantTimestampSeconds,
+                },
+              ]
+            : [
+                { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+              ],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      if (method === 'chat.send') return new Promise(() => undefined);
+      if (method === 'chat.abort') return Promise.resolve({ ok: true });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: null,
+    });
+
+    setTimeout(() => {
+      historySettled = true;
+    }, 92_000);
+
+    void useChatStore.getState().sendMessage('Question');
+
+    await vi.advanceTimersByTimeAsync(91_000);
+    await Promise.resolve();
+
+    const duringRecovery = useChatStore.getState();
+    expect(duringRecovery.error).toBeNull();
+    expect(duringRecovery.sessionNotice).toMatchObject({
+      tone: 'info',
+    });
+    expect(duringRecovery.sessionNotice?.message).toMatch(/sync|同步/i);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await Promise.resolve();
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual([
+      expect.any(String),
+      'assistant-final',
+    ]);
+    expect(next.error).toBeNull();
+    expect(next.sessionNotice).toBeNull();
+    expect(next.sending).toBe(false);
+    expect(next.activeRunId).toBeNull();
+    expect(next.sendStage).toBeNull();
+  });
+
+  it('shows a warning notice instead of an error when the final reply still never arrives', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [
+            { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+          ],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: { 'agent:main:main': true },
+      sending: true,
+      activeRunId: 'run-missing-final',
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: 'running',
+    });
+
+    useChatStore.getState().handleChatEvent({
+      state: 'final',
+      runId: 'run-missing-final',
+      sessionKey: 'agent:main:main',
+    });
+
+    await vi.advanceTimersByTimeAsync(8_500);
+    await Promise.resolve();
+
+    const next = useChatStore.getState();
+    expect(next.error).toBeNull();
+    expect(next.sessionNotice).toMatchObject({
+      tone: 'warning',
+    });
+    expect(next.sessionNotice?.message).toMatch(/final reply|最终回复/i);
+    expect(next.sending).toBe(false);
+    expect(next.pendingFinal).toBe(false);
+  });
+
   it('auto-finalizes shortly after history reveals the final assistant reply during the live-turn guard window', async () => {
     gatewayRpcMock.mockReset();
     gatewayRpcMock.mockImplementation((method: string) => {

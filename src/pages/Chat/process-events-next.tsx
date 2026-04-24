@@ -353,6 +353,28 @@ function createUnmatchedStatusItems(
     });
 }
 
+function insertUnmatchedStatusItems(
+  items: ProcessEventItem[],
+  unmatchedStatusItems: ProcessEventItem[],
+): ProcessEventItem[] {
+  if (unmatchedStatusItems.length === 0) return items;
+
+  let trailingDirectStart = items.length;
+  while (trailingDirectStart > 0 && isDirectContent(items[trailingDirectStart - 1])) {
+    trailingDirectStart -= 1;
+  }
+
+  if (trailingDirectStart === items.length) {
+    return [...items, ...unmatchedStatusItems];
+  }
+
+  return [
+    ...items.slice(0, trailingDirectStart),
+    ...unmatchedStatusItems,
+    ...items.slice(trailingDirectStart),
+  ];
+}
+
 /** 用于列表项 React key：按消息 id + 块下标稳定，避免流式增长时整表卸载重建 */
 function processItemKeyPrefix(message: RawMessage): string {
   if (message.id != null && String(message.id).length > 0) {
@@ -425,7 +447,8 @@ export function getProcessEventItems(
   }
 
   if (chatProcessDisplayMode === 'all' && streamingTools.length > 0) {
-    items.push(...createUnmatchedStatusItems(items, streamingTools));
+    const unmatchedStatusItems = createUnmatchedStatusItems(items, streamingTools);
+    items.splice(0, items.length, ...insertUnmatchedStatusItems(items, unmatchedStatusItems));
   }
 
   if (!hideInternalRoutineProcesses) {

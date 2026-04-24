@@ -9,6 +9,7 @@ export type FilePreviewUnavailableReasonCode =
   | 'missingPath'
   | 'tooLarge'
   | 'legacyOffice'
+  | 'requiresLibreOffice'
   | 'unsupported';
 
 export type PresentationRenderMode = 'html' | 'image';
@@ -76,6 +77,15 @@ export type FilePreviewPayload =
         truncatedColumns: boolean;
       }>;
       truncatedSheets: boolean;
+    }
+  | {
+      kind: 'office-pages';
+      fileName: string;
+      mimeType: string;
+      fileSize: number;
+      previewId: string;
+      pageCount: number;
+      truncatedPages: boolean;
     }
   | {
       kind: 'presentation';

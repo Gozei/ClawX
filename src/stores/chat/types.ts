@@ -121,6 +121,11 @@ export type ChatSendStage =
   | 'running'
   | 'finalizing';
 
+export interface ChatSessionNotice {
+  message: string;
+  tone: 'info' | 'warning';
+}
+
 export interface ActiveTurnBuffer {
   historyMessages: RawMessage[];
   userMessage: RawMessage | null;
@@ -141,6 +146,7 @@ export interface ChatState {
   messages: RawMessage[];
   loading: boolean;
   error: string | null;
+  sessionNotice: ChatSessionNotice | null;
 
   // Streaming
   sending: boolean;
@@ -201,6 +207,7 @@ export interface ChatState {
   toggleThinking: () => void;
   refresh: () => Promise<void>;
   clearError: () => void;
+  clearSessionFeedback: () => void;
   setComposerDraft: (sessionKey: string, draft: ChatComposerDraftUpdate) => void;
   clearComposerDraft: (sessionKey?: string) => void;
   queueOfflineMessage: (

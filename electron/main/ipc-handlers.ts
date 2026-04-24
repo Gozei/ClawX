@@ -3,6 +3,7 @@
  * Registers all IPC handlers for main-renderer communication
  */
 import { ipcMain, BrowserWindow, shell, dialog, app, nativeImage, clipboard } from 'electron';
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, extname, basename } from 'node:path';
@@ -2018,6 +2019,27 @@ function registerShellHandlers(): void {
       return `File not found: ${path}`;
     }
     return await shell.openPath(path);
+  });
+
+  ipcMain.handle('shell:openWith', async (_, path: string) => {
+    if (!path || !existsSync(path)) {
+      return `File not found: ${path}`;
+    }
+
+    try {
+      if (process.platform === 'win32') {
+        const child = spawn('rundll32.exe', ['shell32.dll,OpenAs_RunDLL', path], {
+          detached: true,
+          stdio: 'ignore',
+        });
+        child.unref();
+        return '';
+      }
+
+      return await shell.openPath(path);
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
   });
 }
 

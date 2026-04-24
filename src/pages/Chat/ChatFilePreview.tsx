@@ -29,6 +29,7 @@ import {
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { invokeIpc } from '@/lib/api-client';
@@ -36,6 +37,7 @@ import { hostApiFetch } from '@/lib/host-api';
 import { cn } from '@/lib/utils';
 import type { AttachedFileMeta } from '@/stores/chat';
 import { FileTypeIcon } from './file-icon';
+import { LibreOfficeDownloadDialog } from './LibreOfficeDownloadDialog';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import type {
   FilePreviewOutlineItem,
@@ -47,12 +49,15 @@ const previewCache = new Map<string, FilePreviewPayload>();
 const docxBinaryCache = new Map<string, string>();
 const presentationSlideCache = new Map<string, string>();
 const presentationSlideImageCache = new Map<string, string>();
+const officePagesPdfCache = new Map<string, string>();
 const PREVIEW_RETRY_DELAYS_MS = [0, 250, 800];
 const IMAGE_MIN_ZOOM = 0.5;
 const IMAGE_MAX_ZOOM = 4;
 const IMAGE_ZOOM_STEP = 0.25;
 const PRESENTATION_SCROLL_SETTLE_THRESHOLD_PX = 28;
 const PRESENTATION_ACTIVE_SLIDE_OFFSET_PX = 96;
+const PRESENTATION_PRELOAD_RADIUS = 2;
+const PRESENTATION_LOAD_ROOT_MARGIN = '180% 0px';
 const SYSTEM_UI_FONT_FAMILY = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif';
 const SYSTEM_MONO_FONT_FAMILY = 'ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
 const PREVIEW_PANEL_BACKGROUND_CLASS = 'bg-[linear-gradient(180deg,rgba(255,255,255,0.97),rgba(248,250,252,0.96))] dark:bg-[linear-gradient(180deg,rgba(10,14,22,0.96),rgba(12,17,26,0.94))]';
@@ -69,6 +74,31 @@ const DOCX_PREVIEW_HEADING_SELECTOR = [
 
 type DocxPreviewSourcePayload = {
   base64: string;
+};
+
+type PdfViewportLike = {
+  width: number;
+  height: number;
+};
+
+type PdfRenderTaskLike = {
+  promise: Promise<unknown>;
+  cancel?: () => void;
+};
+
+type PdfPageLike = {
+  getViewport: (options: { scale: number }) => PdfViewportLike;
+  render: (options: {
+    canvasContext: CanvasRenderingContext2D;
+    viewport: PdfViewportLike;
+  }) => PdfRenderTaskLike;
+  cleanup?: () => void;
+};
+
+type PdfDocumentLike = {
+  numPages: number;
+  getPage: (pageNumber: number) => Promise<PdfPageLike>;
+  destroy?: () => Promise<void> | void;
 };
 
 function formatFileSize(bytes: number): string {
@@ -451,6 +481,26 @@ function buildPresentationSlideCacheKey(previewId: string, slideIndex: number): 
   return `${previewId}:${slideIndex}`;
 }
 
+function buildOfficePagesPdfCacheKey(previewId: string): string {
+  return `office-pages:${previewId}`;
+}
+
+async function loadPdfDocumentFromDataUrl(dataUrl: string): Promise<PdfDocumentLike> {
+  const pdfjs = await import('pdfjs-dist');
+  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
+  const base64 = extractBase64FromDataUrl(dataUrl);
+  if (!base64) {
+    throw new Error('Office preview PDF data is empty');
+  }
+
+  const loadingTask = pdfjs.getDocument({
+    data: decodeBase64ToUint8Array(base64),
+    isEvalSupported: false,
+  });
+  return await loadingTask.promise as unknown as PdfDocumentLike;
+}
+
 function buildPresentationSlideSrcDoc(
   rawHtml: string,
   slideWidth: number,
@@ -644,6 +694,8 @@ function resolveUnavailableReason(
       return t('filePreview.unavailable.tooLarge');
     case 'legacyOffice':
       return t('filePreview.unavailable.legacyOffice');
+    case 'requiresLibreOffice':
+      return t('filePreview.unavailable.requiresLibreOffice');
     case 'unsupported':
     default:
       return t('filePreview.unavailable.unsupported');
@@ -1113,6 +1165,284 @@ function SpreadsheetPreview({
   );
 }
 
+function OfficePageCanvas({
+  pdfDocument,
+  pageNumber,
+  shouldRender,
+  dataTestId,
+}: {
+  pdfDocument: PdfDocumentLike | null;
+  pageNumber: number;
+  shouldRender: boolean;
+  dataTestId?: string;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [aspectRatio, setAspectRatio] = useState('794 / 1123');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [rendered, setRendered] = useState(false);
+
+  useEffect(() => {
+    setRendered(false);
+    setError(null);
+  }, [pdfDocument, pageNumber]);
+
+  useEffect(() => {
+    if (!pdfDocument || !shouldRender || rendered) {
+      return;
+    }
+
+    let cancelled = false;
+    let renderTask: PdfRenderTaskLike | null = null;
+    setLoading(true);
+    setError(null);
+
+    void (async () => {
+      const page = await pdfDocument.getPage(pageNumber);
+      if (cancelled) {
+        page.cleanup?.();
+        return;
+      }
+
+      const baseViewport = page.getViewport({ scale: 1 });
+      const targetWidth = Math.min(1800, Math.max(1200, Math.round(baseViewport.width * 2)));
+      const scale = targetWidth / Math.max(1, baseViewport.width);
+      const viewport = page.getViewport({ scale });
+      const canvas = canvasRef.current;
+      const context = canvas?.getContext('2d');
+      if (!canvas || !context) {
+        throw new Error('Office page canvas is not ready');
+      }
+
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      setAspectRatio(`${Math.max(1, baseViewport.width)} / ${Math.max(1, baseViewport.height)}`);
+
+      renderTask = page.render({
+        canvasContext: context,
+        viewport,
+      });
+      await renderTask.promise;
+      page.cleanup?.();
+
+      if (!cancelled) {
+        setRendered(true);
+      }
+    })()
+      .catch((renderError) => {
+        if (!cancelled) {
+          setError(renderError instanceof Error ? renderError.message : String(renderError));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      renderTask?.cancel?.();
+    };
+  }, [pdfDocument, pageNumber, rendered, shouldRender]);
+
+  return (
+    <div
+      data-testid={dataTestId}
+      className="relative mx-auto w-full max-w-[1040px] overflow-hidden bg-white shadow-[0_18px_42px_rgba(15,23,42,0.16)] dark:bg-white"
+      style={{ aspectRatio }}
+    >
+      <canvas
+        ref={canvasRef}
+        className={cn('block h-full w-full bg-white object-contain', rendered ? 'opacity-100' : 'opacity-0')}
+      />
+      {!rendered || loading ? (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-100/80">
+          <Loader2 className="h-5 w-5 animate-spin text-foreground/42" />
+        </div>
+      ) : null}
+      {error ? (
+        <div className="absolute inset-0 flex items-center justify-center bg-white/80 px-4 text-center text-[12px] text-foreground/56">
+          {error}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function OfficePagesPreview({
+  preview,
+  className,
+}: {
+  preview: Extract<FilePreviewPayload, { kind: 'office-pages' }>;
+  className?: string;
+}) {
+  const { t } = useTranslation('chat');
+  const [pdfDocument, setPdfDocument] = useState<PdfDocumentLike | null>(null);
+  const [pageCount, setPageCount] = useState(preview.pageCount);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadedPages, setLoadedPages] = useState<Set<number>>(() => new Set([1, 2, 3]));
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const pageSectionRefs = useRef(new Map<number, HTMLElement>());
+
+  useEffect(() => {
+    let cancelled = false;
+    let loadedDocument: PdfDocumentLike | null = null;
+    setPdfDocument(null);
+    setPageCount(preview.pageCount);
+    setLoadError(null);
+    setLoadedPages(new Set([1, 2, 3]));
+
+    const cacheKey = buildOfficePagesPdfCacheKey(preview.previewId);
+    void (async () => {
+      const cachedPdf = officePagesPdfCache.get(cacheKey);
+      const source = cachedPdf
+        ? { src: cachedPdf }
+        : await hostApiFetch<{ src: string }>('/api/files/preview-office-pages-pdf', {
+            method: 'POST',
+            body: JSON.stringify({
+              previewId: preview.previewId,
+            }),
+          });
+      if (!cachedPdf) {
+        officePagesPdfCache.set(cacheKey, source.src);
+      }
+
+      const nextDocument = await loadPdfDocumentFromDataUrl(source.src);
+      loadedDocument = nextDocument;
+      if (cancelled) {
+        await nextDocument.destroy?.();
+        return;
+      }
+      setPdfDocument(nextDocument);
+      setPageCount(Math.min(nextDocument.numPages, preview.pageCount));
+    })()
+      .catch((error) => {
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      void loadedDocument?.destroy?.();
+    };
+  }, [preview.pageCount, preview.previewId]);
+
+  const setPageSectionRef = useCallback((pageNumber: number, node: HTMLElement | null) => {
+    if (node) {
+      pageSectionRefs.current.set(pageNumber, node);
+      return;
+    }
+    pageSectionRefs.current.delete(pageNumber);
+  }, []);
+
+  useEffect(() => {
+    const container = scrollerRef.current;
+    if (!container || typeof window.IntersectionObserver !== 'function') {
+      setLoadedPages(new Set(Array.from({ length: pageCount }, (_unused, index) => index + 1)));
+      return;
+    }
+
+    const observer = new window.IntersectionObserver((entries) => {
+      const nextPages = new Set<number>();
+      for (const entry of entries) {
+        if (!entry.isIntersecting && entry.intersectionRatio <= 0) {
+          continue;
+        }
+
+        const pageNumber = Number((entry.target as HTMLElement).dataset.officePageNumber ?? '');
+        if (!Number.isFinite(pageNumber) || pageNumber < 1) {
+          continue;
+        }
+
+        for (let candidate = Math.max(1, pageNumber - 1); candidate <= Math.min(pageCount, pageNumber + 2); candidate += 1) {
+          nextPages.add(candidate);
+        }
+      }
+
+      if (nextPages.size === 0) {
+        return;
+      }
+
+      setLoadedPages((current) => {
+        let changed = false;
+        const next = new Set(current);
+        for (const pageNumber of nextPages) {
+          if (!next.has(pageNumber)) {
+            next.add(pageNumber);
+            changed = true;
+          }
+        }
+        return changed ? next : current;
+      });
+    }, {
+      root: container,
+      rootMargin: PRESENTATION_LOAD_ROOT_MARGIN,
+      threshold: 0.01,
+    });
+
+    for (const [pageNumber, node] of pageSectionRefs.current.entries()) {
+      node.dataset.officePageNumber = String(pageNumber);
+      observer.observe(node);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [pageCount, pdfDocument]);
+
+  if (loadError) {
+    return (
+      <div className="flex min-h-[320px] flex-1 items-center justify-center px-8 text-center text-[14px] leading-7 text-foreground/68">
+        {t('filePreview.loadFailed', { error: loadError })}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={scrollerRef}
+      data-testid="chat-file-preview-office-pages-scroller"
+      className={cn('h-full min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain', className)}
+      style={{ fontFamily: SYSTEM_UI_FONT_FAMILY, touchAction: 'pan-y' }}
+    >
+      <div className="space-y-8 px-2 py-3 sm:space-y-10 sm:px-4 sm:py-4">
+        {Array.from({ length: pageCount }, (_unused, index) => {
+          const pageNumber = index + 1;
+          return (
+            <section
+              key={`office-page-${pageNumber}`}
+              ref={(node) => setPageSectionRef(pageNumber, node)}
+              data-testid={`chat-file-preview-office-page-section-${index}`}
+              className="scroll-mt-4"
+            >
+              <OfficePageCanvas
+                pdfDocument={pdfDocument}
+                pageNumber={pageNumber}
+                shouldRender={loadedPages.has(pageNumber)}
+                dataTestId={`chat-file-preview-office-page-${index}`}
+              />
+              <div className="mt-3 text-center text-[12px] text-foreground/48">
+                {t('filePreview.slideProgress', {
+                  current: pageNumber,
+                  total: pageCount,
+                })}
+              </div>
+            </section>
+          );
+        })}
+
+        {preview.truncatedPages ? (
+          <div className="rounded-2xl border border-dashed border-black/10 bg-white/60 px-4 py-3 text-[12px] text-foreground/56 dark:border-white/12 dark:bg-white/[0.03]">
+            {t('filePreview.extraPagesHidden')}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function LegacyPresentationPreview({
   preview,
   className,
@@ -1340,6 +1670,29 @@ function PresentationPreview({
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const slideSectionRefs = useRef(new Map<number, HTMLElement>());
   const pendingScrollTargetRef = useRef<number | null>(null);
+  const slideIndexPositions = useMemo(
+    () => new Map(preview.slides.map((slide, position) => [slide.index, position])),
+    [preview.slides],
+  );
+  const collectSlidesAround = useCallback((slideIndex: number) => {
+    const centerPosition = slideIndexPositions.get(slideIndex) ?? 0;
+    const start = Math.max(0, centerPosition - PRESENTATION_PRELOAD_RADIUS);
+    const end = Math.min(preview.slides.length - 1, centerPosition + PRESENTATION_PRELOAD_RADIUS);
+    const indexes: number[] = [];
+    for (let position = start; position <= end; position += 1) {
+      const candidate = preview.slides[position];
+      if (candidate) {
+        indexes.push(candidate.index);
+      }
+    }
+    return indexes;
+  }, [preview.slides, slideIndexPositions]);
+  const buildLoadedSlideSet = useCallback((seedSlideIndex: number) => {
+    return new Set(collectSlidesAround(seedSlideIndex));
+  }, [collectSlidesAround]);
+  const [loadedSlideIndexes, setLoadedSlideIndexes] = useState<Set<number>>(() => (
+    buildLoadedSlideSet(resolvedInitialSlideIndex)
+  ));
   const activeSlidePosition = preview.slides.findIndex((slide) => slide.index === activeSlideIndex);
 
   const setSlideSectionRef = useCallback((slideIndex: number, node: HTMLElement | null) => {
@@ -1444,7 +1797,86 @@ function PresentationPreview({
   useEffect(() => {
     pendingScrollTargetRef.current = resolvedInitialSlideIndex;
     updateActiveSlideIndex(resolvedInitialSlideIndex);
-  }, [preview.fileName, preview.previewId, resolvedInitialSlideIndex, updateActiveSlideIndex]);
+    setLoadedSlideIndexes(buildLoadedSlideSet(resolvedInitialSlideIndex));
+  }, [buildLoadedSlideSet, preview.fileName, preview.previewId, resolvedInitialSlideIndex, updateActiveSlideIndex]);
+
+  useEffect(() => {
+    const slidesToLoad = collectSlidesAround(activeSlideIndex);
+    if (slidesToLoad.length === 0) {
+      return;
+    }
+
+    setLoadedSlideIndexes((current) => {
+      let changed = false;
+      const next = new Set(current);
+      for (const slideIndex of slidesToLoad) {
+        if (!next.has(slideIndex)) {
+          next.add(slideIndex);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [activeSlideIndex, collectSlidesAround]);
+
+  useEffect(() => {
+    const container = scrollerRef.current;
+    if (!container || preview.slides.length === 0) {
+      return;
+    }
+
+    if (typeof window.IntersectionObserver !== 'function') {
+      setLoadedSlideIndexes(new Set(preview.slides.map((slide) => slide.index)));
+      return;
+    }
+
+    const observer = new window.IntersectionObserver((entries) => {
+      const nextSlideIndexes = new Set<number>();
+      for (const entry of entries) {
+        if (!entry.isIntersecting && entry.intersectionRatio <= 0) {
+          continue;
+        }
+
+        const slideIndex = Number((entry.target as HTMLElement).dataset.presentationSlideIndex ?? '');
+        if (!Number.isFinite(slideIndex) || slideIndex < 1) {
+          continue;
+        }
+
+        for (const preloadSlideIndex of collectSlidesAround(slideIndex)) {
+          nextSlideIndexes.add(preloadSlideIndex);
+        }
+      }
+
+      if (nextSlideIndexes.size === 0) {
+        return;
+      }
+
+      setLoadedSlideIndexes((current) => {
+        let changed = false;
+        const next = new Set(current);
+        for (const slideIndex of nextSlideIndexes) {
+          if (!next.has(slideIndex)) {
+            next.add(slideIndex);
+            changed = true;
+          }
+        }
+        return changed ? next : current;
+      });
+    }, {
+      root: container,
+      rootMargin: PRESENTATION_LOAD_ROOT_MARGIN,
+      threshold: 0.01,
+    });
+
+    for (const [slideIndex, node] of slideSectionRefs.current.entries()) {
+      node.dataset.presentationSlideIndex = String(slideIndex);
+      observer.observe(node);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [collectSlidesAround, preview.previewId, preview.slides]);
 
   useEffect(() => {
     const pendingSlideIndex = pendingScrollTargetRef.current;
@@ -1544,10 +1976,16 @@ function PresentationPreview({
                     mode="main"
                     dataTestId={`chat-file-preview-presentation-frame-${index}`}
                     className="rounded-none bg-white"
-                    shouldLoad={activeSlidePosition < 0 || Math.abs(index - activeSlidePosition) <= 3}
-                    loadingBehavior="lazy"
+                    shouldLoad={loadedSlideIndexes.has(slide.index) || activeSlidePosition < 0}
+                    loadingBehavior={renderMode === 'image' ? 'eager' : 'lazy'}
                   />
                 </div>
+              </div>
+              <div className="mt-3 text-center text-[12px] text-foreground/48">
+                {t('filePreview.slideProgress', {
+                  current: slide.index,
+                  total: preview.slides.length,
+                })}
               </div>
             </section>
           );
@@ -1695,6 +2133,12 @@ function PreviewSurface({
       return (
         <div className={cn(isModal ? 'min-h-0 flex-1 px-1 py-1 sm:px-2' : 'min-h-full px-4 py-4', contentClassName)}>
           <SpreadsheetPreview preview={preview} className="h-full" mode={mode} />
+        </div>
+      );
+    case 'office-pages':
+      return (
+        <div className={cn(isModal ? 'flex min-h-0 flex-1 overflow-hidden px-1 py-1 sm:px-2' : 'flex min-h-0 flex-1 overflow-hidden px-4 py-4', contentClassName)}>
+          <OfficePagesPreview preview={preview} />
         </div>
       );
     case 'presentation':
@@ -1872,6 +2316,7 @@ function ImagePreviewWindowWorkspace({
 function useResolvedFilePreview(file: AttachedFileMeta) {
   const { t, i18n } = useTranslation(['chat', 'common']);
   const cacheKey = useMemo(() => buildPreviewCacheKey(file), [file]);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const initialPreview = useMemo<FilePreviewPayload | null>(() => {
     if (!file.filePath) {
       return {
@@ -1882,8 +2327,11 @@ function useResolvedFilePreview(file: AttachedFileMeta) {
         reasonCode: 'missingPath',
       };
     }
+    if (reloadNonce > 0) {
+      return null;
+    }
     return previewCache.get(cacheKey) ?? null;
-  }, [cacheKey, file]);
+  }, [cacheKey, file, reloadNonce]);
   const [preview, setPreview] = useState<FilePreviewPayload | null>(initialPreview);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(!initialPreview);
@@ -1914,7 +2362,9 @@ function useResolvedFilePreview(file: AttachedFileMeta) {
             }),
           });
           if (cancelled) return;
-          previewCache.set(cacheKey, result);
+          if (!(result.kind === 'unavailable' && result.reasonCode === 'requiresLibreOffice')) {
+            previewCache.set(cacheKey, result);
+          }
           setPreview(result);
           return;
         } catch (previewError) {
@@ -1938,7 +2388,15 @@ function useResolvedFilePreview(file: AttachedFileMeta) {
     return () => {
       cancelled = true;
     };
-  }, [cacheKey, file, initialPreview]);
+  }, [cacheKey, file, initialPreview, reloadNonce]);
+
+  const reloadPreview = useCallback(() => {
+    previewCache.delete(cacheKey);
+    setError(null);
+    setLoading(true);
+    setPreview(null);
+    setReloadNonce((current) => current + 1);
+  }, [cacheKey]);
 
   const handleRevealInFolder = useCallback(() => {
     if (!file.filePath) return;
@@ -1976,6 +2434,7 @@ function useResolvedFilePreview(file: AttachedFileMeta) {
     loading,
     preview,
     previewLanguage,
+    reloadPreview,
   };
 }
 
@@ -1990,6 +2449,7 @@ function PreviewBodyState({
   mode,
   presentationInitialSlideIndex,
   onPresentationSlideChange,
+  onPreviewReload,
 }: {
   error: string | null;
   loading: boolean;
@@ -2001,8 +2461,15 @@ function PreviewBodyState({
   mode: 'panel' | 'modal';
   presentationInitialSlideIndex?: number;
   onPresentationSlideChange?: (slideIndex: number) => void;
+  onPreviewReload: () => void;
 }) {
   const { t } = useTranslation('chat');
+  const previewReasonCode = preview?.kind === 'unavailable' ? preview.reasonCode : undefined;
+  const [dismissedLibreOfficePrompt, setDismissedLibreOfficePrompt] = useState(false);
+
+  useEffect(() => {
+    setDismissedLibreOfficePrompt(false);
+  }, [preview?.fileName, preview?.mimeType, previewReasonCode]);
 
   if (loading) {
     return (
@@ -2024,6 +2491,20 @@ function PreviewBodyState({
 
   if (!preview) {
     return null;
+  }
+
+  if (
+    preview.kind === 'unavailable'
+    && preview.reasonCode === 'requiresLibreOffice'
+    && mode === 'modal'
+    && !dismissedLibreOfficePrompt
+  ) {
+    return (
+      <LibreOfficeDownloadDialog
+        onCancel={() => setDismissedLibreOfficePrompt(true)}
+        onComplete={onPreviewReload}
+      />
+    );
   }
 
   return (
@@ -2050,7 +2531,15 @@ export function ChatFilePreviewPanel({
   desktopWidthPercent?: number;
 }) {
   const { t } = useTranslation(['chat', 'common']);
-  const { error, handleCopyImage, handleRevealInFolder, loading, preview, previewLanguage } = useResolvedFilePreview(file);
+  const {
+    error,
+    handleCopyImage,
+    handleRevealInFolder,
+    loading,
+    preview,
+    previewLanguage,
+    reloadPreview,
+  } = useResolvedFilePreview(file);
   const [presentationSlideIndex, setPresentationSlideIndex] = useState<number | undefined>(undefined);
   const panelStyle = useMemo<CSSProperties>(() => ({
     width: `${desktopWidthPercent}%`,
@@ -2140,6 +2629,7 @@ export function ChatFilePreviewPanel({
           onOpenFullscreen={handleOpenDetachedWindow}
           presentationInitialSlideIndex={presentationSlideIndex}
           onPresentationSlideChange={setPresentationSlideIndex}
+          onPreviewReload={reloadPreview}
         />
       </div>
     </aside>
@@ -2165,7 +2655,15 @@ export function ChatFilePreviewWindowPage() {
     const parsedSlideIndex = Number.parseInt(searchParams.get('slideIndex') ?? '', 10);
     return Number.isFinite(parsedSlideIndex) && parsedSlideIndex > 0 ? parsedSlideIndex : undefined;
   }, [searchParams]);
-  const { error, handleCopyImage, handleRevealInFolder, loading, preview, previewLanguage } = useResolvedFilePreview(file);
+  const {
+    error,
+    handleCopyImage,
+    handleRevealInFolder,
+    loading,
+    preview,
+    previewLanguage,
+    reloadPreview,
+  } = useResolvedFilePreview(file);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
 
   const refreshWindowChromeState = useCallback(() => {
@@ -2297,6 +2795,7 @@ export function ChatFilePreviewWindowPage() {
               mode="modal"
               onCopyImage={handleCopyImage}
               presentationInitialSlideIndex={initialPresentationSlideIndex}
+              onPreviewReload={reloadPreview}
             />
           )}
         </div>

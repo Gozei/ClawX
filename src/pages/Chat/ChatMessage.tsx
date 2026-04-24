@@ -3,15 +3,16 @@
  * Renders user / assistant / system / toolresult messages
  * with markdown, thinking sections, images, and tool cards.
  */
-import { useState, useCallback, useEffect, useMemo, memo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, memo } from 'react';
 import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { FileTypeIcon } from './file-icon';
-import { getFileVisual } from './file-visual';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { invokeIpc } from '@/lib/api-client';
 import { useBranding } from '@/lib/branding';
+import { hostApiFetch } from '@/lib/host-api';
 import { useChatStore, type RawMessage, type AttachedFileMeta } from '@/stores/chat';
 import { useProviderStore } from '@/stores/providers';
 import { useSettingsStore, type AssistantMessageStyle } from '@/stores/settings';
@@ -848,10 +849,44 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+type SaveFileResult = {
+  success?: boolean;
+  savedPath?: string;
+  error?: string;
+};
+
+const FILE_CONTEXT_MENU_WIDTH = 176;
+const FILE_CONTEXT_MENU_HEIGHT = 104;
+
+function resolveFileContextMenuPosition(clientX: number, clientY: number): { left: number; top: number } {
+  if (typeof window === 'undefined') {
+    return { left: clientX, top: clientY };
+  }
+
+  const maxLeft = Math.max(12, window.innerWidth - FILE_CONTEXT_MENU_WIDTH - 12);
+  const maxTop = Math.max(12, window.innerHeight - FILE_CONTEXT_MENU_HEIGHT - 12);
+
+  return {
+    left: Math.max(12, Math.min(clientX, maxLeft)),
+    top: Math.max(12, Math.min(clientY, maxTop)),
+  };
+}
+
 function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () => void }) {
-  const visual = getFileVisual(file.mimeType, file.fileName);
   const { t } = useTranslation(['chat', 'common']);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ left: number; top: number } | null>(null);
+  const closeContextMenu = useCallback(() => {
+    setContextMenuPosition(null);
+  }, []);
+
   const handleOpen = useCallback(async () => {
+    if (contextMenuPosition) {
+      closeContextMenu();
+      return;
+    }
+
     if (onPreview) {
       onPreview();
       return;
@@ -882,34 +917,139 @@ function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () 
         }));
       }
     }
-  }, [file.fileName, file.filePath, onPreview, t]);
+  }, [closeContextMenu, contextMenuPosition, file.fileName, file.filePath, onPreview, t]);
+
   const handleRevealInFolder = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     if (!file.filePath) return;
+    closeContextMenu();
     void invokeIpc('shell:showItemInFolder', file.filePath)
       .catch((revealError) => {
         toast.error(t('filePreview.revealFailed', {
           error: revealError instanceof Error ? revealError.message : String(revealError),
         }));
       });
-  }, [file.filePath, t]);
+  }, [closeContextMenu, file.filePath, t]);
+
+  const handleContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!file.filePath) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenuPosition(resolveFileContextMenuPosition(event.clientX, event.clientY));
+  }, [file.filePath]);
+
+  const handleSaveAs = useCallback(async () => {
+    if (!file.filePath) return;
+    closeContextMenu();
+    try {
+      const result = await hostApiFetch<SaveFileResult>('/api/files/save-file', {
+        method: 'POST',
+        body: JSON.stringify({
+          defaultFileName: file.fileName,
+          filePath: file.filePath,
+          mimeType: file.mimeType,
+        }),
+      });
+      if (result?.success) {
+        toast.success(t('filePreview.downloadSuccess'));
+        return;
+      }
+      if (!result?.error) {
+        return;
+      }
+      toast.error(t('filePreview.downloadFailed', { error: result.error }));
+    } catch (error) {
+      toast.error(t('filePreview.downloadFailed', {
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }, [closeContextMenu, file.fileName, file.filePath, file.mimeType, t]);
+
+  const handleOpenWith = useCallback(async () => {
+    if (!file.filePath) return;
+    closeContextMenu();
+    try {
+      const result = await invokeIpc<string>('shell:openWith', file.filePath);
+      if (!result || !result.trim()) {
+        return;
+      }
+      const normalized = result.trim().toLowerCase();
+      if (
+        normalized.includes('file not found:')
+        || normalized.includes('does not exist')
+        || normalized.includes('not found')
+        || normalized.includes('no such file')
+      ) {
+        toast.error(t('attachments.fileMissing', { fileName: file.fileName }));
+        return;
+      }
+      toast.error(t('filePreview.openWithFailed', { error: result.trim() }));
+    } catch (error) {
+      toast.error(t('filePreview.openWithFailed', {
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }, [closeContextMenu, file.fileName, file.filePath, t]);
+
+  useEffect(() => {
+    if (!contextMenuPosition) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) {
+        closeContextMenu();
+        return;
+      }
+      if (menuRef.current?.contains(target) || cardRef.current?.contains(target)) {
+        return;
+      }
+      closeContextMenu();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeContextMenu();
+      }
+    };
+
+    const handleBlur = () => {
+      closeContextMenu();
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [closeContextMenu, contextMenuPosition]);
 
   return (
     <div
+      ref={cardRef}
       data-testid="chat-file-card"
       className={cn(
         "group/file-card relative w-[224px] max-w-full min-w-0 overflow-hidden rounded-xl border border-black/10 bg-white/80 shadow-[0_14px_34px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.06]",
         (file.filePath || onPreview) && "cursor-pointer hover:border-black/15 hover:bg-white dark:hover:border-white/15 dark:hover:bg-white/[0.08] transition-colors"
       )}
       onClick={handleOpen}
-      title={file.filePath ? t('filePreview.openFile') : undefined}
+      onContextMenu={handleContextMenu}
+      aria-label={file.filePath ? t('filePreview.openFile') : undefined}
     >
       <div data-testid="chat-file-card-body" className="relative flex h-14 min-w-0 items-center gap-3 px-3">
         <FileTypeIcon mimeType={file.mimeType} fileName={file.fileName} />
         <div className="min-w-0 flex-1 overflow-hidden leading-tight flex flex-col justify-center">
           <ClampedFileName
             text={file.fileName}
-            metaText={file.fileSize > 0 ? `${visual.label} | ${formatFileSize(file.fileSize)}` : visual.label}
+            metaText={file.fileSize > 0 ? formatFileSize(file.fileSize) : ''}
+            collapseToSingleLine
             containerClassName="h-8"
             textClassName="text-[13px] font-semibold leading-[1.25] tracking-[-0.01em]"
             metaClassName="text-[11px] leading-[1.25]"
@@ -918,19 +1058,62 @@ function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () 
           />
         </div>
         {file.filePath ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            data-testid="chat-file-card-reveal"
-            className="pointer-events-none absolute right-3 top-1/2 h-8 w-8 -translate-y-1/2 translate-x-1 rounded-[8px] border border-slate-300 bg-white text-slate-700 opacity-0 shadow-none transition-all duration-150 hover:bg-white hover:text-slate-700 group-hover/file-card:pointer-events-auto group-hover/file-card:translate-x-0 group-hover/file-card:opacity-100 group-focus-within/file-card:pointer-events-auto group-focus-within/file-card:translate-x-0 group-focus-within/file-card:opacity-100 dark:border-white/14 dark:bg-slate-100 dark:text-slate-800 dark:hover:bg-slate-100 dark:hover:text-slate-800"
-            onClick={handleRevealInFolder}
-            title={t('filePreview.revealInFolder')}
-          >
-            <FolderOpen className="h-4 w-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                data-testid="chat-file-card-reveal"
+                className="pointer-events-none absolute right-3 top-1/2 h-8 w-8 -translate-y-1/2 translate-x-1 rounded-[8px] border border-slate-300 bg-white text-slate-700 opacity-0 shadow-none transition-all duration-150 hover:bg-white hover:text-slate-700 group-hover/file-card:pointer-events-auto group-hover/file-card:translate-x-0 group-hover/file-card:opacity-100 group-focus-within/file-card:pointer-events-auto group-focus-within/file-card:translate-x-0 group-focus-within/file-card:opacity-100 dark:border-white/14 dark:bg-slate-100 dark:text-slate-800 dark:hover:bg-slate-100 dark:hover:text-slate-800"
+                onClick={handleRevealInFolder}
+                aria-label={t('filePreview.revealInFolder')}
+              >
+                <FolderOpen className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" data-testid="chat-file-card-reveal-tooltip">
+              {t('filePreview.revealInFolder')}
+            </TooltipContent>
+          </Tooltip>
         ) : null}
       </div>
+      {contextMenuPosition ? createPortal(
+        <div
+          ref={menuRef}
+          data-testid="chat-file-card-context-menu"
+          role="menu"
+          className="fixed z-[220] min-w-[176px] overflow-hidden rounded-xl border border-black/10 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-card"
+          style={{
+            left: `${contextMenuPosition.left}px`,
+            top: `${contextMenuPosition.top}px`,
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="chat-file-card-context-save"
+            className="flex w-full items-center rounded-[10px] px-3 py-2 text-left text-[13px] font-medium text-foreground/82 transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+            onClick={() => {
+              void handleSaveAs();
+            }}
+          >
+            {t('filePreview.saveAs')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="chat-file-card-context-open-with"
+            className="flex w-full items-center rounded-[10px] px-3 py-2 text-left text-[13px] font-medium text-foreground/82 transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+            onClick={() => {
+              void handleOpenWith();
+            }}
+          >
+            {t('filePreview.openWith')}
+          </button>
+        </div>,
+        document.body,
+      ) : null}
     </div>
   );
 }

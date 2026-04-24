@@ -1,4 +1,4 @@
-import type { ElectronApplication } from '@playwright/test';
+﻿import type { ElectronApplication } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -34,6 +34,35 @@ function createPresentationSlideDataUrl(options: {
     </svg>
   `.replace(/\s{2,}/g, ' ').trim();
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function createSimplePdfDataUrl(text: string): string {
+  const escapedText = text
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)');
+  const objects = [
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n',
+    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
+  ];
+  const stream = `BT /F1 24 Tf 72 720 Td (${escapedText}) Tj ET`;
+  objects.push(`5 0 obj\n<< /Length ${stream.length} >>\nstream\n${stream}\nendstream\nendobj\n`);
+
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  for (const object of objects) {
+    offsets.push(Buffer.byteLength(pdf, 'latin1'));
+    pdf += object;
+  }
+  const xrefOffset = Buffer.byteLength(pdf, 'latin1');
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1)) {
+    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  }
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return `data:application/pdf;base64,${Buffer.from(pdf, 'latin1').toString('base64')}`;
 }
 
 async function installGatewaySessionMocks(
@@ -114,6 +143,9 @@ async function installHostApiPreviewMocks(
     docxFileSize?: number;
     docxHtml?: string;
     docxBinaryBase64?: string;
+    docxOfficePages?: boolean;
+    docxOfficePdfDataUrl?: string;
+    docxOfficePageCount?: number;
     docxOutline?: Array<{
       id: string;
       text: string;
@@ -133,6 +165,9 @@ async function installHostApiPreviewMocks(
       truncatedColumns: boolean;
     }>;
     spreadsheetTruncatedSheets?: boolean;
+    spreadsheetOfficePages?: boolean;
+    spreadsheetOfficePdfDataUrl?: string;
+    spreadsheetOfficePageCount?: number;
     imageFilePath?: string;
     imagePreview?: string;
     presentationFilePath?: string;
@@ -151,6 +186,7 @@ async function installHostApiPreviewMocks(
     presentationSlideHtmlByIndex?: Record<number, string>;
     presentationSlideImageByIndex?: Record<number, string>;
     presentationTruncatedSlides?: boolean;
+    presentationRequiresLibreOffice?: boolean;
     sessionHistoryMessages?: Array<Record<string, unknown>>;
     sessionHistoryResolved?: boolean;
     sessionHistoryThinkingLevel?: string | null;
@@ -163,6 +199,10 @@ async function installHostApiPreviewMocks(
         const requestLog: string[] = [];
         const copyRequests: Array<{ filePath?: string; base64?: string }> = [];
         const revealRequests: string[] = [];
+        const openWithRequests: string[] = [];
+        let libreOfficeDownloadStarted = false;
+        let libreOfficeStatusPollCount = 0;
+        let libreOfficeReady = !config.presentationRequiresLibreOffice;
         const gatewayStatus = {
           state: 'running',
           port: 18789,
@@ -317,6 +357,60 @@ async function installHostApiPreviewMocks(
               };
             }
 
+            if (path.startsWith('/api/files/libreoffice-runtime/status') && method === 'GET') {
+              if (libreOfficeDownloadStarted) {
+                libreOfficeStatusPollCount += 1;
+              }
+              if (libreOfficeDownloadStarted && libreOfficeStatusPollCount >= 2) {
+                libreOfficeReady = true;
+              }
+              return {
+                ok: true,
+                data: {
+                  status: 200,
+                  ok: true,
+                  json: {
+                    available: libreOfficeReady,
+                    supported: true,
+                    targetId: 'win32-x64',
+                    targetLabel: 'Windows x64',
+                    status: libreOfficeReady
+                      ? 'complete'
+                      : libreOfficeDownloadStarted
+                        ? 'downloading'
+                        : 'idle',
+                    jobId: libreOfficeDownloadStarted ? 'libreoffice-download-job' : undefined,
+                    percent: libreOfficeReady
+                      ? 100
+                      : libreOfficeDownloadStarted
+                        ? 45
+                        : null,
+                  },
+                },
+              };
+            }
+
+            if (path === '/api/files/libreoffice-runtime/download' && method === 'POST') {
+              libreOfficeDownloadStarted = true;
+              libreOfficeStatusPollCount = 0;
+              return {
+                ok: true,
+                data: {
+                  status: 200,
+                  ok: true,
+                  json: {
+                    available: false,
+                    supported: true,
+                    targetId: 'win32-x64',
+                    targetLabel: 'Windows x64',
+                    status: 'downloading',
+                    jobId: 'libreoffice-download-job',
+                    percent: 25,
+                  },
+                },
+              };
+            }
+
             if (path === '/api/files/preview' && method === 'POST') {
               const parsed = request?.body ? JSON.parse(request.body) as { filePath?: string } : {};
 
@@ -376,6 +470,25 @@ async function installHostApiPreviewMocks(
               }
 
               if (parsed.filePath && parsed.filePath === config.docxFilePath) {
+                if (config.docxOfficePages) {
+                  return {
+                    ok: true,
+                    data: {
+                      status: 200,
+                      ok: true,
+                      json: {
+                        kind: 'office-pages',
+                        fileName: config.docxFileName ?? 'outline-fixture.docx',
+                        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                        fileSize: config.docxFileSize ?? 2048,
+                        previewId: 'docx-office-pages-preview',
+                        pageCount: config.docxOfficePageCount ?? 1,
+                        truncatedPages: false,
+                      },
+                    },
+                  };
+                }
+
                 return {
                   ok: true,
                   data: {
@@ -408,6 +521,25 @@ async function installHostApiPreviewMocks(
               }
 
               if (parsed.filePath && parsed.filePath === config.spreadsheetFilePath) {
+                if (config.spreadsheetOfficePages) {
+                  return {
+                    ok: true,
+                    data: {
+                      status: 200,
+                      ok: true,
+                      json: {
+                        kind: 'office-pages',
+                        fileName: config.spreadsheetFileName ?? 'system-font-preview.xlsx',
+                        mimeType: config.spreadsheetMimeType ?? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        fileSize: config.spreadsheetFileSize ?? 0,
+                        previewId: 'spreadsheet-office-pages-preview',
+                        pageCount: config.spreadsheetOfficePageCount ?? 1,
+                        truncatedPages: false,
+                      },
+                    },
+                  };
+                }
+
                 return {
                   ok: true,
                   data: {
@@ -443,6 +575,23 @@ async function installHostApiPreviewMocks(
               }
 
               if (parsed.filePath && parsed.filePath === config.presentationFilePath) {
+                if (config.presentationRequiresLibreOffice && !libreOfficeReady) {
+                  return {
+                    ok: true,
+                    data: {
+                      status: 200,
+                      ok: true,
+                      json: {
+                        kind: 'unavailable',
+                        fileName: config.presentationFileName ?? 'presentation.pptx',
+                        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                        fileSize: config.presentationFileSize ?? 0,
+                        reasonCode: 'requiresLibreOffice',
+                      },
+                    },
+                  };
+                }
+
                 return {
                   ok: true,
                   data: {
@@ -511,6 +660,25 @@ async function installHostApiPreviewMocks(
               }
             }
 
+            if (path === '/api/files/preview-office-pages-pdf' && method === 'POST') {
+              const parsed = request?.body ? JSON.parse(request.body) as { previewId?: string } : {};
+              const src = parsed.previewId === 'docx-office-pages-preview'
+                ? config.docxOfficePdfDataUrl
+                : parsed.previewId === 'spreadsheet-office-pages-preview'
+                  ? config.spreadsheetOfficePdfDataUrl
+                  : undefined;
+              if (src) {
+                return {
+                  ok: true,
+                  data: {
+                    status: 200,
+                    ok: true,
+                    json: { src },
+                  },
+                };
+              }
+            }
+
             if (path === '/api/files/save-file' && method === 'POST') {
               return {
                 ok: true,
@@ -553,17 +721,27 @@ async function installHostApiPreviewMocks(
           return { success: true };
         });
 
+        ipcMain.removeHandler('shell:openWith');
+        ipcMain.handle('shell:openWith', async (_event, targetPath?: string) => {
+          if (typeof targetPath === 'string' && targetPath.length > 0) {
+            openWithRequests.push(targetPath);
+          }
+          return '';
+        });
+
         const state = globalThis as typeof globalThis & {
           __clawxPreviewState?: {
             requests: string[];
             copyRequests: Array<{ filePath?: string; base64?: string }>;
             revealRequests: string[];
+            openWithRequests: string[];
           };
         };
         state.__clawxPreviewState = {
           requests: requestLog,
           copyRequests,
           revealRequests,
+          openWithRequests,
         };
       }, payload);
       return;
@@ -587,12 +765,14 @@ async function installPreviewStateProbe(app: ElectronApplication) {
                 requests: string[];
                 copyRequests: Array<{ filePath?: string; base64?: string }>;
                 revealRequests: string[];
+                openWithRequests: string[];
               };
             };
             return state.__clawxPreviewState ?? {
               requests: [],
               copyRequests: [],
               revealRequests: [],
+              openWithRequests: [],
             };
           }
           return {};
@@ -621,138 +801,7 @@ test.describe('Chat file preview window', () => {
       '- Important bullet',
       '- Another bullet',
     ].join('\n');
-    const historyMessages = [
-      {
-        id: 'assistant-width-intro',
-        role: 'assistant',
-        content: '鍏堟墦寮€涓€涓檮浠堕瑙堬紝鍐嶅叧闂畠锛岀劧鍚庣户缁線涓婃粴鍔ㄣ€?',
-        timestamp: Math.floor(Date.now() / 1000) - 20,
-      },
-      {
-        id: 'user-width-request',
-        role: 'user',
-        content: '鎴戞兂纭棰勮鍏抽棴浠ュ悗鑱婂ぉ瀹藉害涓嶄細鍐嶅彉銆?',
-        timestamp: Math.floor(Date.now() / 1000) - 10,
-      },
-      {
-        id: 'assistant-width-final',
-        role: 'assistant',
-        content: assistantBody,
-        timestamp: Math.floor(Date.now() / 1000),
-        _attachedFiles: [
-          {
-            fileName: 'stable-width-preview.md',
-            mimeType: 'text/markdown',
-            fileSize: 96,
-            preview: null,
-            filePath: markdownPath,
-          },
-          {
-            fileName: 'result-summary.txt',
-            mimeType: 'text/plain',
-            fileSize: 423,
-            preview: null,
-            filePath: join(homeDir, 'result-summary.txt'),
-          },
-          {
-            fileName: 'test_data.xlsx',
-            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            fileSize: 5427,
-            preview: null,
-            filePath: join(homeDir, 'test_data.xlsx'),
-          },
-          {
-            fileName: 'test_document.docx',
-            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            fileSize: 37146,
-            preview: null,
-            filePath: docxPath,
-          },
-          {
-            fileName: 'test_presentation.pptx',
-            mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            fileSize: 31924,
-            preview: null,
-            filePath: join(homeDir, 'test_presentation.pptx'),
-          },
-          {
-            fileName: 'test_image.png',
-            mimeType: 'image/png',
-            fileSize: 2451,
-            preview: null,
-            filePath: join(homeDir, 'test_image.png'),
-          },
-        ],
-      },
-    ];
-
     await writeFile(markdownPath, markdownBody, 'utf8');
-
-    const historyMessages = [
-      {
-        id: 'assistant-width-intro',
-        role: 'assistant',
-        content: '鍏堟墦寮€涓€涓檮浠堕瑙堬紝鍐嶅叧闂畠锛岀劧鍚庣户缁線涓婃粴鍔ㄣ€?',
-        timestamp: Math.floor(Date.now() / 1000) - 20,
-      },
-      {
-        id: 'user-width-request',
-        role: 'user',
-        content: '鎴戞兂纭棰勮鍏抽棴浠ュ悗鑱婂ぉ瀹藉害涓嶄細鍐嶅彉銆?',
-        timestamp: Math.floor(Date.now() / 1000) - 10,
-      },
-      {
-        id: 'assistant-width-final',
-        role: 'assistant',
-        content: assistantBody,
-        timestamp: Math.floor(Date.now() / 1000),
-        _attachedFiles: [
-          {
-            fileName: 'stable-width-preview.md',
-            mimeType: 'text/markdown',
-            fileSize: 96,
-            preview: null,
-            filePath: markdownPath,
-          },
-          {
-            fileName: 'result-summary.txt',
-            mimeType: 'text/plain',
-            fileSize: 423,
-            preview: null,
-            filePath: join(homeDir, 'result-summary.txt'),
-          },
-          {
-            fileName: 'test_data.xlsx',
-            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            fileSize: 5427,
-            preview: null,
-            filePath: join(homeDir, 'test_data.xlsx'),
-          },
-          {
-            fileName: 'test_document.docx',
-            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            fileSize: 37146,
-            preview: null,
-            filePath: docxPath,
-          },
-          {
-            fileName: 'test_presentation.pptx',
-            mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            fileSize: 31924,
-            preview: null,
-            filePath: join(homeDir, 'test_presentation.pptx'),
-          },
-          {
-            fileName: 'test_image.png',
-            mimeType: 'image/png',
-            fileSize: 2451,
-            preview: null,
-            filePath: join(homeDir, 'test_image.png'),
-          },
-        ],
-      },
-    ];
-
     const app = await launchElectronApp({ skipSetup: true });
     const page = await getStableWindow(app);
 
@@ -836,16 +885,48 @@ test.describe('Chat file preview window', () => {
       expect(((fileIconBox?.y ?? 0) + ((fileIconBox?.height ?? 0) / 2))).toBeLessThan(((fileCardBodyBox?.y ?? 0) + ((fileCardBodyBox?.height ?? 0) / 2)));
       expect(((fileIconBadgeBox?.y ?? 0) + (fileIconBadgeBox?.height ?? 0))).toBeLessThan(((fileIconBox?.y ?? 0) + (fileIconBox?.height ?? 0)) - 1);
 
-      await fileCardBody.hover({ force: true });
+      await fileCard.hover({ force: true });
       await expect.poll(async () => {
         return await revealButton.evaluate((element) => {
           return Number.parseFloat(window.getComputedStyle(element).opacity);
         });
       }, { timeout: 20_000 }).toBeGreaterThan(0.9);
+      await revealButton.hover();
+      await expect(page.getByTestId('chat-file-card-reveal-tooltip')).toBeVisible({ timeout: 20_000 });
       await expect(revealButton).toHaveCSS('border-top-left-radius', '8px');
       await expect(revealButton).toHaveCSS('background-color', 'rgb(255, 255, 255)');
       await expect(revealButton).toHaveCSS('border-top-color', 'rgb(203, 213, 225)');
       await expect(revealButton).toHaveCSS('right', '12px');
+
+      await fileCard.click({ button: 'right', force: true });
+      const fileCardContextMenu = page.getByTestId('chat-file-card-context-menu');
+      await expect(fileCardContextMenu).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('chat-file-card-context-save')).toBeVisible();
+      await expect(page.getByTestId('chat-file-card-context-open-with')).toBeVisible();
+      await page.getByTestId('chat-file-card-context-save').click();
+      await expect(fileCardContextMenu).toHaveCount(0);
+      await expect.poll(async () => {
+        const state = await page.evaluate(async () => {
+          return await window.electron.ipcRenderer.invoke('app:request', 'e2e:file-preview-state') as {
+            requests: string[];
+          };
+        });
+        return state.requests.includes('POST /api/files/save-file');
+      }, { timeout: 20_000 }).toBe(true);
+
+      await fileCard.click({ button: 'right', force: true });
+      await expect(fileCardContextMenu).toBeVisible({ timeout: 20_000 });
+      await page.getByTestId('chat-file-card-context-open-with').click();
+      await expect(fileCardContextMenu).toHaveCount(0);
+      await expect.poll(async () => {
+        const state = await page.evaluate(async () => {
+          return await window.electron.ipcRenderer.invoke('app:request', 'e2e:file-preview-state') as {
+            openWithRequests: string[];
+          };
+        });
+        return state.openWithRequests;
+      }, { timeout: 20_000 }).toEqual([markdownPath]);
+
       await revealButton.click();
       await expect(page.getByTestId('chat-file-preview-panel')).toHaveCount(0);
       await expect.poll(async () => {
@@ -1098,12 +1179,12 @@ test.describe('Chat file preview window', () => {
     const fixtureDocx = await readFile(join(process.cwd(), 'tests', 'e2e', 'fixtures', 'docx-styled-preview.docx'));
     const docxPath = join(homeDir, 'styled-preview.docx');
     const docxHtml = [
-      '<h1 id="chapter-1">第一章：简介</h1>',
-      '<p>这是一个用于验证会话区 DOCX 预览样式的示例文档。</p>',
-      '<h2 id="chapter-2">第二章：列表</h2>',
-      '<ul><li>第一项内容</li><li>第二项内容</li><li>第三项内容</li></ul>',
-      '<h2 id="chapter-3">第三章：表格</h2>',
-      '<table><tbody><tr><th>姓名</th><th>年龄</th><th>城市</th></tr><tr><td>张三</td><td>28</td><td>北京</td></tr></tbody></table>',
+      '<h1 id="chapter-1">绗竴绔狅細绠€浠?/h1>',
+      '<p>杩欐槸涓€涓敤浜庨獙璇佷細璇濆尯 DOCX 棰勮鏍峰紡鐨勭ず渚嬫枃妗ｃ€?/p>',
+      '<h2 id="chapter-2">绗簩绔狅細鍒楄〃</h2>',
+      '<ul><li>绗竴椤瑰唴瀹?/li><li>绗簩椤瑰唴瀹?/li><li>绗笁椤瑰唴瀹?/li></ul>',
+      '<h2 id="chapter-3">绗笁绔狅細琛ㄦ牸</h2>',
+      '<table><tbody><tr><th>濮撳悕</th><th>骞撮緞</th><th>鍩庡競</th></tr><tr><td>寮犱笁</td><td>28</td><td>鍖椾含</td></tr></tbody></table>',
     ].join('');
 
     await writeFile(docxPath, fixtureDocx);
@@ -1124,7 +1205,7 @@ test.describe('Chat file preview window', () => {
           {
             id: 'user-styled-docx-request',
             role: 'user',
-            content: '请检查这个 Word 附件的样式预览。',
+            content: 'Please inspect the styled DOCX attachment.',
             timestamp: Math.floor(Date.now() / 1000),
             _attachedFiles: [
               {
@@ -1147,19 +1228,19 @@ test.describe('Chat file preview window', () => {
         docxOutline: [
           {
             id: 'chapter-1',
-            text: '第一章：简介',
+            text: 'Chapter 1 Introduction',
             level: 1,
             isBold: true,
           },
           {
             id: 'chapter-2',
-            text: '第二章：列表',
+            text: '绗簩绔狅細鍒楄〃',
             level: 2,
             isBold: true,
           },
           {
             id: 'chapter-3',
-            text: '第三章：表格',
+            text: '绗笁绔狅細琛ㄦ牸',
             level: 2,
             isBold: true,
           },
@@ -1260,7 +1341,7 @@ test.describe('Chat file preview window', () => {
           {
             id: 'user-docx-page-break-request',
             role: 'user',
-            content: '看看这个 Word 预览分页是否正确。',
+            content: 'Check whether the Word preview keeps page breaks intact.',
             timestamp: Math.floor(Date.now() / 1000),
             _attachedFiles: [
               {
@@ -1279,10 +1360,10 @@ test.describe('Chat file preview window', () => {
         docxFileName: 'page-break-preview.docx',
         docxFileSize: fixtureDocx.length,
         docxBinaryBase64: fixtureDocx.toString('base64'),
-        docxHtml: '<h1 id="page-1">分页测试封面</h1><p>第一页内容应该停在这里。</p><h1 id="page-2">第二页开始</h1><p>如果分页准确，这段应该出现在新的页面。</p>',
+        docxHtml: '<h1 id="page-1">鍒嗛〉娴嬭瘯灏侀潰</h1><p>绗竴椤靛唴瀹瑰簲璇ュ仠鍦ㄨ繖閲屻€?/p><h1 id="page-2">绗簩椤靛紑濮?/h1><p>濡傛灉鍒嗛〉鍑嗙‘锛岃繖娈靛簲璇ュ嚭鐜板湪鏂扮殑椤甸潰銆?/p>',
         docxOutline: [
-          { id: 'page-1', text: '分页测试封面', level: 1, isBold: true },
-          { id: 'page-2', text: '第二页开始', level: 1, isBold: true },
+          { id: 'page-1', text: '鍒嗛〉娴嬭瘯灏侀潰', level: 1, isBold: true },
+          { id: 'page-2', text: 'Page 2', level: 1, isBold: true },
         ],
       });
 
@@ -1331,6 +1412,77 @@ test.describe('Chat file preview window', () => {
       expect(flowState.sectionCount).toBe(1);
       expect(flowState.paragraphCount).toBeGreaterThanOrEqual(4);
       expect(flowState.textLength).toBeGreaterThan(0);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
+  test('renders docx previews through the office pages renderer when LibreOffice output is available', async ({ launchElectronApp, homeDir }) => {
+    test.setTimeout(180_000);
+
+    const docxPath = join(homeDir, 'office-pages-preview.docx');
+    await writeFile(docxPath, 'docx placeholder', 'utf8');
+    const app = await launchElectronApp({ skipSetup: true });
+    const page = await getStableWindow(app);
+
+    try {
+      await installGatewaySessionMocks(app, {
+        sessionKey: SESSION_KEY,
+        messages: [
+          {
+            id: 'assistant-docx-office-pages-intro',
+            role: 'assistant',
+            content: 'Open the DOCX attachment as office pages.',
+            timestamp: Math.floor(Date.now() / 1000) - 10,
+          },
+          {
+            id: 'user-docx-office-pages-request',
+            role: 'user',
+            content: 'Preview this Word document.',
+            timestamp: Math.floor(Date.now() / 1000),
+            _attachedFiles: [
+              {
+                fileName: 'office-pages-preview.docx',
+                mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                fileSize: 2048,
+                preview: null,
+                filePath: docxPath,
+              },
+            ],
+          },
+        ],
+      });
+      await installHostApiPreviewMocks(app, {
+        docxFilePath: docxPath,
+        docxFileName: 'office-pages-preview.docx',
+        docxFileSize: 2048,
+        docxOfficePages: true,
+        docxOfficePdfDataUrl: createSimplePdfDataUrl('DOCX office pages preview'),
+        docxOfficePageCount: 1,
+      });
+
+      await page.reload();
+      await page.waitForLoadState('domcontentloaded');
+      await expect(page.getByTestId('main-layout')).toBeVisible({ timeout: 60_000 });
+      await app.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().at(-1);
+        window?.webContents.send('gateway:status-changed', {
+          state: 'running',
+          port: 18789,
+          pid: 12345,
+          connectedAt: Date.now(),
+        });
+      });
+
+      await page.getByTestId(`sidebar-session-${SESSION_KEY}`).click({ force: true });
+      const docxCard = page.getByTestId('chat-file-card').filter({ hasText: 'office-pages-preview.docx' }).first();
+      await expect(docxCard).toBeVisible({ timeout: 20_000 });
+      await docxCard.click({ force: true });
+
+      const officePagesSurface = page.getByTestId('chat-file-preview-office-pages-scroller');
+      await expect(officePagesSurface).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('chat-file-preview-office-page-0')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('chat-file-preview-office-page-section-0')).toContainText('第1页/共1页');
     } finally {
       await closeElectronApp(app);
     }
@@ -1435,19 +1587,9 @@ test.describe('Chat file preview window', () => {
         spreadsheetFilePath: spreadsheetPath,
         spreadsheetFileName: 'system-font-preview.xlsx',
         spreadsheetFileSize: 2048,
-        spreadsheetSheets: [
-          {
-            name: 'Summary',
-            rows: [
-              ['Item', 'Status'],
-              ['Typography', 'System UI'],
-            ],
-            rowCount: 2,
-            columnCount: 2,
-            truncatedRows: false,
-            truncatedColumns: false,
-          },
-        ],
+        spreadsheetOfficePages: true,
+        spreadsheetOfficePdfDataUrl: createSimplePdfDataUrl('Spreadsheet office pages preview'),
+        spreadsheetOfficePageCount: 1,
         docxFilePath: docxPath,
         docxHtml,
         presentationFilePath: presentationPath,
@@ -1510,8 +1652,9 @@ test.describe('Chat file preview window', () => {
 
       const spreadsheetCard = attachmentList.getByTestId('chat-file-card').filter({ hasText: 'system-font-preview.xlsx' }).first();
       await spreadsheetCard.click({ force: true });
-      const spreadsheetSurface = page.getByTestId('chat-file-preview-spreadsheet');
+      const spreadsheetSurface = page.getByTestId('chat-file-preview-office-pages-scroller');
       await expect(spreadsheetSurface).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('chat-file-preview-office-page-0')).toBeVisible({ timeout: 20_000 });
       const spreadsheetFont = normalizeFontFamily(await spreadsheetSurface.evaluate((element) => {
         return window.getComputedStyle(element).fontFamily;
       }));
@@ -1552,7 +1695,7 @@ test.describe('Chat file preview window', () => {
     }
   });
 
-  test('renders chinese csv spreadsheet previews without mojibake in the chat panel', async ({ launchElectronApp, homeDir }) => {
+  test('renders csv previews through the office pages renderer in the chat panel', async ({ launchElectronApp, homeDir }) => {
     test.setTimeout(180_000);
 
     const csvPath = join(homeDir, 'contacts-preview.csv');
@@ -1568,13 +1711,13 @@ test.describe('Chat file preview window', () => {
           {
             id: 'assistant-csv-preview-intro',
             role: 'assistant',
-            content: '请打开这份 CSV 看看中文预览是否正常。',
+            content: 'Open the CSV attachment and verify the localized preview.',
             timestamp: Math.floor(Date.now() / 1000) - 10,
           },
           {
             id: 'user-csv-preview-message',
             role: 'user',
-            content: '我想确认会话里的表格预览不再乱码。',
+            content: 'I want to confirm the table preview no longer shows garbled text.',
             timestamp: Math.floor(Date.now() / 1000),
             _attachedFiles: [
               {
@@ -1593,20 +1736,9 @@ test.describe('Chat file preview window', () => {
         spreadsheetFileName: 'contacts-preview.csv',
         spreadsheetMimeType: 'text/csv',
         spreadsheetFileSize: 256,
-        spreadsheetSheets: [
-          {
-            name: 'Sheet1',
-            rows: [
-              ['姓名', '年龄', '城市'],
-              ['张三', '28', '北京'],
-              ['李四', '32', '上海'],
-            ],
-            rowCount: 3,
-            columnCount: 3,
-            truncatedRows: false,
-            truncatedColumns: false,
-          },
-        ],
+        spreadsheetOfficePages: true,
+        spreadsheetOfficePdfDataUrl: createSimplePdfDataUrl('CSV office pages preview with long text'),
+        spreadsheetOfficePageCount: 1,
       });
 
       await expect(page.getByTestId('main-layout')).toBeVisible({ timeout: 60_000 });
@@ -1628,11 +1760,10 @@ test.describe('Chat file preview window', () => {
       await expect(csvCard).toBeVisible({ timeout: 20_000 });
       await csvCard.click({ force: true });
 
-      const spreadsheetSurface = page.getByTestId('chat-file-preview-spreadsheet');
-      await expect(spreadsheetSurface).toBeVisible({ timeout: 20_000 });
-      await expect(spreadsheetSurface).toContainText('姓名');
-      await expect(spreadsheetSurface).toContainText('张三');
-      await expect(spreadsheetSurface).toContainText('上海');
+      const officePagesSurface = page.getByTestId('chat-file-preview-office-pages-scroller');
+      await expect(officePagesSurface).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('chat-file-preview-office-page-0')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('chat-file-preview-office-page-section-0')).toContainText('第1页/共1页');
     } finally {
       await closeElectronApp(app);
     }
@@ -1643,28 +1774,67 @@ test.describe('Chat file preview window', () => {
 
     const presentationPath = join(homeDir, 'large-deck.pptx');
     const presentationFileSize = 22 * 1024 * 1024;
-    const presentationSlideImageByIndex = {
-      1: createPresentationSlideDataUrl({
+    const presentationDeck = [
+      {
         title: 'Quarterly Business Review',
         body: 'Revenue grew 18% year over year.',
         accent: '#0f3d73',
-      }),
-      2: createPresentationSlideDataUrl({
+      },
+      {
         title: 'Roadmap',
         body: 'Focus areas include onboarding, analytics, and approval flow upgrades.',
         accent: '#1d4ed8',
-      }),
-      3: createPresentationSlideDataUrl({
+      },
+      {
         title: 'Regional Performance',
         body: 'APAC bookings rose 24% while customer retention improved across enterprise accounts.',
         accent: '#0f172a',
-      }),
-      4: createPresentationSlideDataUrl({
+      },
+      {
         title: 'Operating Priorities',
         body: 'Delivery teams are reducing approval latency and tightening launch readiness checklists.',
         accent: '#334155',
-      }),
-    };
+      },
+      {
+        title: 'Customer Stories',
+        body: 'Reference wins now cover compliance, finance, and customer support teams.',
+        accent: '#2563eb',
+      },
+      {
+        title: 'Brand Marketing Example',
+        body: 'Campaign lift improved after segment-level targeting and media mix tuning.',
+        accent: '#1e40af',
+      },
+      {
+        title: 'Delivery Workflow',
+        body: 'Automation now handles intake, approval routing, and launch readiness review.',
+        accent: '#475569',
+      },
+      {
+        title: 'Next Quarter Priorities',
+        body: 'The team is investing in analytics, QA coverage, and rollout operations.',
+        accent: '#0f172a',
+      },
+    ] as const;
+    const presentationSlideImageByIndex = Object.fromEntries(
+      presentationDeck.map((slide, index) => [
+        index + 1,
+        createPresentationSlideDataUrl({
+          title: slide.title,
+          body: slide.body,
+          accent: slide.accent,
+        }),
+      ]),
+    );
+    const presentationSlides = presentationDeck.map((slide, index) => ({
+      index: index + 1,
+      title: slide.title,
+      paragraphs: [
+        slide.title,
+        slide.body,
+      ],
+      truncatedParagraphs: index === 1,
+    }));
 
     await writeFile(presentationPath, 'presentation placeholder', 'utf8');
 
@@ -1706,47 +1876,10 @@ test.describe('Chat file preview window', () => {
         presentationRenderMode: 'image',
         presentationSlideWidth: 960,
         presentationSlideHeight: 540,
-        presentationSlides: [
-          {
-            index: 1,
-            title: 'Quarterly Business Review',
-            paragraphs: [
-              'Quarterly Business Review',
-              'Revenue grew 18% year over year.',
-              'North America remained the fastest-growing region.',
-            ],
-            truncatedParagraphs: false,
-          },
-          {
-            index: 2,
-            title: 'Roadmap',
-            paragraphs: [
-              'Roadmap',
-              'Focus areas include onboarding, analytics, and approval flow upgrades.',
-            ],
-            truncatedParagraphs: true,
-          },
-          {
-            index: 3,
-            title: 'Regional Performance',
-            paragraphs: [
-              'Regional Performance',
-              'APAC bookings rose 24% while customer retention improved across enterprise accounts.',
-            ],
-            truncatedParagraphs: false,
-          },
-          {
-            index: 4,
-            title: 'Operating Priorities',
-            paragraphs: [
-              'Operating Priorities',
-              'Delivery teams are reducing approval latency and tightening launch readiness checklists.',
-            ],
-            truncatedParagraphs: false,
-          },
-        ],
+        presentationSlides,
         presentationSlideImageByIndex,
-        presentationTruncatedSlides: true,
+        presentationTruncatedSlides: false,
+        presentationRequiresLibreOffice: true,
       });
 
       await page.reload();
@@ -1770,6 +1903,17 @@ test.describe('Chat file preview window', () => {
 
       await presentationCard.click({ force: true });
       const previewPanel = page.getByTestId('chat-file-preview-panel');
+      const libreOfficeGlobalDialog = page.getByTestId('chat-libreoffice-global-dialog');
+      const libreOfficeDialog = page.getByTestId('chat-file-preview-libreoffice-dialog');
+      await expect(libreOfficeGlobalDialog).toBeVisible({ timeout: 20_000 });
+      await expect(libreOfficeDialog).toBeVisible({ timeout: 20_000 });
+      await expect(libreOfficeDialog).toContainText('该文件预览需要下载LibreOffice办公套件，是否下载？');
+      await expect(previewPanel).toHaveCount(0);
+      await page.getByTestId('chat-file-preview-libreoffice-download').click();
+      await expect(libreOfficeGlobalDialog).toBeHidden({ timeout: 20_000 });
+      await expect(previewPanel).toHaveCount(0);
+
+      await presentationCard.click({ force: true });
       await expect(previewPanel).toBeVisible({ timeout: 20_000 });
       await expect(page.getByTestId('chat-file-preview-header')).toContainText('large-deck.pptx');
       await expect(page.getByTestId('chat-file-preview-header')).toContainText('22.00 MB');
@@ -1789,6 +1933,7 @@ test.describe('Chat file preview window', () => {
       }, { timeout: 20_000 }).not.toBe('none');
       const firstSlideFrame = page.getByTestId('chat-file-preview-presentation-frame-0');
       await expect(firstSlideFrame).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('chat-file-preview-presentation-section-0')).toContainText(`第1页/共${presentationSlides.length}页`);
       await expect.poll(async () => {
         return await firstSlideFrame.evaluate((element) => {
           return element.tagName;
@@ -1804,14 +1949,13 @@ test.describe('Chat file preview window', () => {
         return await presentationScroller.evaluate((element: HTMLDivElement) => element.scrollTop);
       }, { timeout: 20_000 }).toBeGreaterThan(initialScrollMetrics.scrollTop + 30);
 
-      await presentationScroller.evaluate((element: HTMLDivElement) => {
-        element.scrollTo({ top: element.scrollHeight, behavior: 'auto' });
-      });
-      await expect(page.getByTestId('chat-file-preview-presentation-section-1')).toBeVisible();
-      const secondSlideFrame = page.getByTestId('chat-file-preview-presentation-frame-1');
-      await expect(secondSlideFrame).toBeVisible({ timeout: 20_000 });
-      await expect(secondSlideFrame).toHaveAttribute('src', /Roadmap/);
-      await expect(secondSlideFrame).toHaveAttribute('alt', 'Roadmap');
+      const sixthSlideSection = page.getByTestId('chat-file-preview-presentation-section-5');
+      await sixthSlideSection.scrollIntoViewIfNeeded();
+      await expect(sixthSlideSection).toBeVisible({ timeout: 20_000 });
+      const sixthSlideFrame = page.getByTestId('chat-file-preview-presentation-frame-5');
+      await expect(sixthSlideFrame).toBeVisible({ timeout: 20_000 });
+      await expect(sixthSlideFrame).toHaveAttribute('src', /Brand%20Marketing%20Example/);
+      await expect(sixthSlideFrame).toHaveAttribute('alt', 'Brand Marketing Example');
 
       const previewWindowPromise = app.waitForEvent('window');
       await page.getByTestId('chat-file-preview-expand').click();
@@ -1822,10 +1966,10 @@ test.describe('Chat file preview window', () => {
       await expect(previewPage.getByTestId('chat-file-preview-window-header')).toContainText('large-deck.pptx');
       await expect(previewPage.getByTestId('chat-file-preview-window-header')).toContainText('22.00 MB');
       await expect(previewPage.getByTestId('chat-file-preview-presentation-scroller')).toBeVisible({ timeout: 20_000 });
-      const detachedSecondSlideFrame = previewPage.getByTestId('chat-file-preview-presentation-frame-1');
-      await expect(detachedSecondSlideFrame).toBeVisible({ timeout: 20_000 });
-      await expect(detachedSecondSlideFrame).toHaveAttribute('src', /Roadmap/);
-      await expect(detachedSecondSlideFrame).toHaveAttribute('alt', 'Roadmap');
+      const detachedSixthSlideFrame = previewPage.getByTestId('chat-file-preview-presentation-frame-5');
+      await expect(detachedSixthSlideFrame).toBeVisible({ timeout: 20_000 });
+      await expect(detachedSixthSlideFrame).toHaveAttribute('src', /Brand%20Marketing%20Example/);
+      await expect(detachedSixthSlideFrame).toHaveAttribute('alt', 'Brand Marketing Example');
 
       await Promise.all([
         previewPage.waitForEvent('close'),
@@ -1844,18 +1988,18 @@ test.describe('Chat file preview window', () => {
     await writeFile(markdownPath, '# Stable Width Preview\n\nThis file is used to open the preview panel.\n', 'utf8');
 
     const assistantBody = [
-      '斌哥，收到！所有文件都成功输出了！✅',
+      'All requested files were generated successfully.',
       '',
-      '## 输出文件清单',
+      '## Generated Files',
       '',
       ...Array.from(
         { length: 28 },
-        (_value, index) => `- 条目 ${index + 1}：这里是用于验证聊天正文宽度稳定性的较长说明文本，滚动前后都不应该让消息轨道变窄。`,
+        (_value, index) => `- Item ${index + 1}: This longer sentence keeps the message body wide enough to verify layout stability while scrolling.`,
       ),
       '',
       '---',
       '',
-      '继续向上滚动时，正文和附件应该保持在同一条内容轨道里。',
+      'Scrolling back upward should keep the message body and attachments on the same width track.',
     ].join('\n');
 
     const app = await launchElectronApp({ skipSetup: true });
@@ -1867,13 +2011,13 @@ test.describe('Chat file preview window', () => {
           {
             id: 'assistant-width-intro',
             role: 'assistant',
-            content: '先打开一个附件预览，再关闭它，然后继续往上滚动。',
+            content: 'Open an attachment preview, close it, and then keep scrolling upward.',
             timestamp: Math.floor(Date.now() / 1000) - 20,
           },
           {
             id: 'user-width-request',
             role: 'user',
-            content: '我想确认预览关闭以后聊天宽度不会再变。',
+            content: 'I want to confirm the chat width stays stable after closing the preview.',
             timestamp: Math.floor(Date.now() / 1000) - 10,
           },
           {

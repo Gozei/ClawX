@@ -959,7 +959,7 @@ function normalizeToolFailureMessage(value: unknown): string | undefined {
   return normalized || undefined;
 }
 
-function normalizeToolStatus(rawStatus: unknown, fallback: 'running' | 'completed'): ToolStatus['status'] {
+function normalizeToolStatus(rawStatus: unknown, fallback: 'running' | 'completed' | 'error'): ToolStatus['status'] {
   const status = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : '';
   if (status.includes('retry')) return 'retrying';
   if (status === 'error' || status === 'failed') return 'error';
@@ -1044,7 +1044,7 @@ function extractToolResultBlocks(message: unknown, _eventState: string): ToolSta
   return updates;
 }
 
-function extractToolResultUpdate(message: unknown, eventState: string): ToolStatus | null {
+function extractToolResultUpdate(message: unknown, _eventState: string): ToolStatus | null {
   if (!message || typeof message !== 'object') return null;
   const msg = message as Record<string, unknown>;
   const role = typeof msg.role === 'string' ? msg.role.toLowerCase() : '';
@@ -1054,7 +1054,9 @@ function extractToolResultUpdate(message: unknown, eventState: string): ToolStat
   const toolCallId = typeof msg.toolCallId === 'string' ? msg.toolCallId : undefined;
   const details = (msg.details && typeof msg.details === 'object') ? msg.details as Record<string, unknown> : undefined;
   const rawStatus = (msg.status ?? details?.status);
-  const fallback = eventState === 'delta' ? 'running' : 'completed';
+  // A direct tool_result message is itself a terminal event, even when it arrives
+  // during the broader run's streaming delta phase.
+  const fallback = normalizeToolFailureMessage(details?.error ?? msg.error) ? 'error' : 'completed';
   const status = normalizeToolStatus(rawStatus, fallback);
   const durationMs = parseDurationMs(details?.durationMs ?? details?.duration ?? (msg as Record<string, unknown>).durationMs);
 
@@ -1202,6 +1204,153 @@ function hasNonToolAssistantContent(message: RawMessage | undefined): boolean {
   return false;
 }
 
+function isAssistantLikeRole(role: unknown): boolean {
+  return role === 'assistant' || role == null || role === '';
+}
+
+function normalizeBlockText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function isToolContentBlock(block: ContentBlock): boolean {
+  return block.type === 'tool_use'
+    || block.type === 'toolCall'
+    || block.type === 'tool_result'
+    || block.type === 'toolResult';
+}
+
+function resolveBlockToolKey(block: ContentBlock): string {
+  const id = typeof block.id === 'string' ? block.id.trim() : '';
+  const name = typeof block.name === 'string' ? block.name.trim() : '';
+  return id || name;
+}
+
+function isProcessBlockPreserved(previous: ContentBlock, nextBlocks: ContentBlock[]): boolean {
+  switch (previous.type) {
+    case 'text': {
+      const previousText = normalizeBlockText(previous.text);
+      if (!previousText) return true;
+      return nextBlocks.some((candidate) => {
+        if (candidate.type !== 'text') return false;
+        const nextText = normalizeBlockText(candidate.text);
+        return !!nextText && (nextText.startsWith(previousText) || previousText.startsWith(nextText));
+      });
+    }
+    case 'thinking': {
+      const previousThinking = normalizeBlockText(previous.thinking);
+      if (!previousThinking) return true;
+      return nextBlocks.some((candidate) => {
+        if (candidate.type !== 'thinking') return false;
+        const nextThinking = normalizeBlockText(candidate.thinking);
+        return !!nextThinking && (nextThinking.startsWith(previousThinking) || previousThinking.startsWith(nextThinking));
+      });
+    }
+    case 'tool_use':
+    case 'toolCall': {
+      const previousKey = resolveBlockToolKey(previous);
+      if (!previousKey) return false;
+      return nextBlocks.some((candidate) => {
+        if (
+          candidate.type !== 'tool_use'
+          && candidate.type !== 'toolCall'
+          && candidate.type !== 'tool_result'
+          && candidate.type !== 'toolResult'
+        ) {
+          return false;
+        }
+        return resolveBlockToolKey(candidate) === previousKey;
+      });
+    }
+    case 'tool_result':
+    case 'toolResult': {
+      const previousKey = resolveBlockToolKey(previous);
+      if (!previousKey) return false;
+      return nextBlocks.some((candidate) => (
+        (candidate.type === 'tool_result' || candidate.type === 'toolResult')
+        && resolveBlockToolKey(candidate) === previousKey
+      ));
+    }
+    case 'image': {
+      const previousUrl = normalizeBlockText((previous as ContentBlock & { image_url?: string }).image_url);
+      if (!previousUrl) return true;
+      return nextBlocks.some((candidate) => (
+        candidate.type === 'image'
+        && normalizeBlockText((candidate as ContentBlock & { image_url?: string }).image_url) === previousUrl
+      ));
+    }
+    default:
+      return false;
+  }
+}
+
+function shouldContinueAssistantDelta(previous: RawMessage | null | undefined, next: RawMessage | null | undefined): boolean {
+  if (!previous || !next) return false;
+  if (!isAssistantLikeRole(previous.role) || !isAssistantLikeRole(next.role)) return false;
+
+  if (previous.id && next.id && previous.id === next.id) {
+    return true;
+  }
+
+  if (typeof previous.content === 'string' || typeof next.content === 'string') {
+    const previousText = getMessageText(previous.content).trim();
+    const nextText = getMessageText(next.content).trim();
+    if (!previousText || !nextText) return false;
+    return nextText.startsWith(previousText) || previousText.startsWith(nextText);
+  }
+
+  if (!Array.isArray(previous.content) || !Array.isArray(next.content)) {
+    return false;
+  }
+
+  const previousBlocks = (previous.content as ContentBlock[]).filter((block) => (
+    block.type === 'text'
+      || block.type === 'thinking'
+      || block.type === 'tool_use'
+      || block.type === 'toolCall'
+      || block.type === 'tool_result'
+      || block.type === 'toolResult'
+      || block.type === 'image'
+  ));
+  if (previousBlocks.length === 0) return false;
+
+  const nextBlocks = next.content as ContentBlock[];
+  return previousBlocks.every((block) => isProcessBlockPreserved(block, nextBlocks));
+}
+
+function createAssistantDeltaSnapshot(message: RawMessage, snapshotId: string): RawMessage | null {
+  if (!isAssistantLikeRole(message.role)) return null;
+
+  if (typeof message.content === 'string') {
+    if (!message.content.trim() && (message._attachedFiles?.length ?? 0) === 0) return null;
+    return {
+      ...message,
+      role: 'assistant',
+      id: snapshotId,
+    };
+  }
+
+  if (!Array.isArray(message.content)) {
+    if ((message._attachedFiles?.length ?? 0) === 0) return null;
+    return {
+      ...message,
+      role: 'assistant',
+      id: snapshotId,
+    };
+  }
+
+  const snapshotContent = (message.content as ContentBlock[]).filter((block) => !isToolContentBlock(block));
+  if (snapshotContent.length === 0 && (message._attachedFiles?.length ?? 0) === 0) {
+    return null;
+  }
+
+  return {
+    ...message,
+    role: 'assistant',
+    id: snapshotId,
+    content: snapshotContent,
+  };
+}
+
 /**
  * 判断 assistant 消息是否包含真正的最终文本回复内容。
  * 与 hasNonToolAssistantContent 的区别：不把 thinking 块视为"最终内容"。
@@ -1282,6 +1431,7 @@ export {
   getToolCallFilePath,
   createToolResultProcessMessage,
   collectToolUpdates,
+  createAssistantDeltaSnapshot,
   upsertToolStatuses,
   EMPTY_ASSISTANT_RESPONSE_ERROR,
   hasNonToolAssistantContent,
@@ -1291,6 +1441,7 @@ export {
   isEmptyAssistantResponse,
   isUnusedDraftSession,
   isToolOnlyMessage,
+  shouldContinueAssistantDelta,
   setHistoryPollTimer,
   hasErrorRecoveryTimer,
   setErrorRecoveryTimer,

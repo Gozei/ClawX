@@ -62,12 +62,15 @@
         "missingPath": "This attachment no longer points to a readable local file.",
         "loadFailed": "Could not load the preview: {{error}}",
         "download": "Download",
+        "saveAs": "Save as",
         "downloadSuccess": "File saved successfully.",
         "downloadFailed": "Could not save the file: {{error}}",
         "copyImage": "Copy image",
         "copySuccess": "Image copied.",
         "copyFailed": "Could not copy the image: {{error}}",
         "openFile": "Open file",
+        "openWith": "Open with",
+        "openWithFailed": "Could not open the app chooser: {{error}}",
         "removeFile": "Remove file",
         "revealInFolder": "Show in folder",
         "revealFailed": "Could not reveal the file in its folder: {{error}}",
@@ -84,15 +87,29 @@
         "firstRowsOnly": "Preview shows the first rows only.",
         "trailingColumnsHidden": "Some trailing columns are hidden.",
         "extraSheetsHidden": "Additional sheets are not shown here.",
-        "slideLabel": "Slide {{count}}",
-        "extraSlideContentHidden": "Additional slide content is hidden in this preview.",
-        "extraSlidesHidden": "Additional slides are not shown in the side preview.",
-        "unavailable": {
-            "tooLarge": "This file is too large to preview inside chat. Download it to inspect the full contents.",
-            "legacyOffice": "Legacy Office files are not rendered inline yet. Download the file to inspect it locally.",
-            "unsupported": "This file type does not have an inline preview yet. Download the file to inspect it locally."
-        }
+    "slideLabel": "Slide {{count}}",
+    "slideProgress": "Page {{current}} of {{total}}",
+    "extraSlideContentHidden": "Additional slide content is hidden in this preview.",
+    "extraSlidesHidden": "Additional slides are not shown in the side preview.",
+    "extraPagesHidden": "Additional pages are not shown in this preview.",
+    "libreOfficeDownload": {
+      "title": "Office suite required",
+      "message": "This file preview needs to download the LibreOffice office suite. Download now?",
+      "platform": "Platform: {{platform}}",
+      "download": "Download",
+      "cancel": "Cancel",
+      "downloading": "Downloading LibreOffice",
+      "extracting": "Installing preview runtime",
+      "failed": "LibreOffice download failed. Please try again later.",
+      "unsupported": "Automatic LibreOffice download is not supported on this system yet."
     },
+    "unavailable": {
+      "tooLarge": "This file is too large to preview inside chat. Download it to inspect the full contents.",
+      "legacyOffice": "Legacy Office files are not rendered inline yet. Download the file to inspect it locally.",
+      "requiresLibreOffice": "This file preview requires the LibreOffice office suite.",
+      "unsupported": "This file type does not have an inline preview yet. Download the file to inspect it locally."
+    }
+  },
     "process": {
         "workingFor": "Working for {{duration}}",
         "processedFor": "Processed {{duration}}",
@@ -121,8 +138,12 @@
         "gatewayNotConnected": "Gateway not connected.",
         "gatewayUnavailable": "Gateway error. Please restart the gateway and try again."
     },
+    "sessionNotices": {
+        "delayedResponse": "The reply is taking longer than usual. Still syncing the result..."
+    },
     "sessionWarnings": {
         "finalReplyMissing": "The final reply did not arrive, but you can continue the conversation.",
+        "noFinalReply": "A final reply has not arrived yet. Please try again later, or check the provider and gateway status.",
         "assistantMissingInUI": "A reply may exist in the session, but the current display settings cannot render it. Try Refresh in the toolbar, enable thinking/process details, or wait for the gateway to finish syncing."
     },
     "archive": {

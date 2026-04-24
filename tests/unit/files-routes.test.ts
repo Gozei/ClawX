@@ -1,24 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'http';
 import crypto from 'node:crypto';
-import { homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const PPTX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
 const {
+  accessMock,
+  copyFileMock,
   mkdirMock,
   parseJsonBodyMock,
   pptxToHtmlMock,
+  readdirMock,
   readFileMock,
   rmMock,
   sendJsonMock,
   statMock,
   writeFileMock,
 } = vi.hoisted(() => ({
+  accessMock: vi.fn(),
+  copyFileMock: vi.fn(),
   mkdirMock: vi.fn(),
   parseJsonBodyMock: vi.fn(),
   pptxToHtmlMock: vi.fn(),
+  readdirMock: vi.fn(),
   readFileMock: vi.fn(),
   rmMock: vi.fn(),
   sendJsonMock: vi.fn(),
@@ -46,12 +52,24 @@ vi.mock('electron', () => ({
 }));
 
 vi.mock('node:fs/promises', () => ({
-  copyFile: vi.fn(),
+  access: (...args: unknown[]) => accessMock(...args),
+  copyFile: (...args: unknown[]) => copyFileMock(...args),
   mkdir: (...args: unknown[]) => mkdirMock(...args),
+  readdir: (...args: unknown[]) => readdirMock(...args),
   readFile: (...args: unknown[]) => readFileMock(...args),
   rm: (...args: unknown[]) => rmMock(...args),
   stat: (...args: unknown[]) => statMock(...args),
   writeFile: (...args: unknown[]) => writeFileMock(...args),
+  default: {
+    access: (...args: unknown[]) => accessMock(...args),
+    copyFile: (...args: unknown[]) => copyFileMock(...args),
+    mkdir: (...args: unknown[]) => mkdirMock(...args),
+    readdir: (...args: unknown[]) => readdirMock(...args),
+    readFile: (...args: unknown[]) => readFileMock(...args),
+    rm: (...args: unknown[]) => rmMock(...args),
+    stat: (...args: unknown[]) => statMock(...args),
+    writeFile: (...args: unknown[]) => writeFileMock(...args),
+  },
 }));
 
 vi.mock('@jvmr/pptx-to-html', () => ({
@@ -109,7 +127,10 @@ describe('handleFileRoutes presentation previews', () => {
     writeFileMock.mockImplementation(async (filePath: string, content: string) => {
       storedPreviewFiles.set(filePath, String(content));
     });
+    accessMock.mockResolvedValue(undefined);
+    copyFileMock.mockResolvedValue(undefined);
     mkdirMock.mockResolvedValue(undefined);
+    readdirMock.mockResolvedValue([]);
     rmMock.mockResolvedValue(undefined);
   });
 
@@ -231,7 +252,7 @@ describe('handleFileRoutes presentation previews', () => {
     });
   });
 
-  it('builds an image-based pptx preview when PowerPoint export is available and serves slide png data', async () => {
+  it('builds an image-based pptx preview when a local slide exporter is available and serves slide png data', async () => {
     const filePath = 'D:\\fixtures\\visual-review.pptx';
     const fileSize = 30 * 1024 * 1024;
 
@@ -309,12 +330,13 @@ describe('handleFileRoutes presentation previews', () => {
     const filePath = 'D:\\fixtures\\cached-review.pptx';
     const fileSize = 24 * 1024 * 1024;
     const modifiedAtMs = 1_710_000_000_500;
+    const createdAt = Date.now();
     const previewId = crypto
       .createHash('sha256')
       .update(`${filePath}\u0000${fileSize}\u0000${modifiedAtMs}`)
       .digest('hex')
       .slice(0, 24);
-    const dirPath = join(homedir(), '.openclaw', 'media', 'presentation-preview', previewId);
+    const dirPath = join(tmpdir(), 'clawx-presentation-preview', previewId);
     const manifestPath = join(dirPath, 'manifest.json');
 
     storedPreviewFiles.set(manifestPath, JSON.stringify({
@@ -332,7 +354,7 @@ describe('handleFileRoutes presentation previews', () => {
         },
       ],
       truncatedSlides: false,
-      createdAt: 1_710_000_000_500,
+      createdAt,
     }));
 
     parseJsonBodyMock.mockResolvedValue({

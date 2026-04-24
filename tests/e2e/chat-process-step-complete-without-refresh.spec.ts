@@ -238,4 +238,450 @@ test.describe('Chat process step completion', () => {
       await closeElectronApp(app);
     }
   });
+
+  test('updates a streamed process card to completed when tool_result arrives as a direct delta message', async ({ launchElectronApp }) => {
+    test.setTimeout(180_000);
+
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      await getStableWindow(app);
+
+      await installIpcMocks(app, {
+        gatewayStatus: { state: 'running', port: 18789, pid: 12345, connectedAt: Date.now() },
+        hostApi: {
+          [stableStringify(['/api/gateway/status', 'GET'])]: {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                state: 'running',
+                port: 18789,
+                pid: 12345,
+                connectedAt: Date.now(),
+              },
+            },
+          },
+          [stableStringify(['/api/agents', 'GET'])]: {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                success: true,
+                agents: [],
+              },
+            },
+          },
+          [stableStringify(['/api/settings', 'GET'])]: {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                language: 'en',
+                chatProcessDisplayMode: 'all',
+                assistantMessageStyle: 'bubble',
+                hideInternalRoutineProcesses: true,
+                setupComplete: true,
+              },
+            },
+          },
+        },
+      });
+
+      await app.evaluate(({ ipcMain, BrowserWindow }, { prompt, runId, sessionId, sessionKey, toolPath }) => {
+        let sessions: Array<{ key: string; id: string; label: string; updatedAt: number }> = [];
+        let historyMessages: Array<Record<string, unknown>> = [];
+
+        function emitNotification(payload: unknown): void {
+          const window = BrowserWindow.getAllWindows().at(-1);
+          if (!window) throw new Error('No BrowserWindow available');
+          window.webContents.send('gateway:notification', payload);
+        }
+
+        ipcMain.removeHandler('gateway:rpc');
+        ipcMain.handle('gateway:rpc', async (_event, method: string, params?: { sessionKey?: string }) => {
+          if (method === 'sessions.list') {
+            return {
+              success: true,
+              result: { sessions },
+            };
+          }
+
+          if (method === 'chat.history') {
+            return {
+              success: true,
+              result: { messages: historyMessages },
+            };
+          }
+
+          if (method === 'chat.abort') {
+            return {
+              success: true,
+              result: { ok: true },
+            };
+          }
+
+          if (method === 'chat.send') {
+            const now = Date.now();
+            const activeSessionKey = params?.sessionKey || sessionKey;
+
+            sessions = [{
+              key: activeSessionKey,
+              id: sessionId,
+              label: prompt,
+              updatedAt: now,
+            }];
+
+            historyMessages = [{
+              id: 'user-process-step-direct-result-1',
+              role: 'user',
+              content: prompt,
+              timestamp: Math.floor(now / 1000),
+            }];
+
+            setTimeout(() => {
+              emitNotification({
+                method: 'agent',
+                params: {
+                  phase: 'started',
+                  runId,
+                  sessionKey: activeSessionKey,
+                },
+              });
+            }, 0);
+
+            setTimeout(() => {
+              emitNotification({
+                method: 'agent',
+                params: {
+                  runId,
+                  sessionKey: activeSessionKey,
+                  state: 'delta',
+                  message: {
+                    role: 'assistant',
+                    content: [
+                      {
+                        type: 'tool_use',
+                        id: 'write-process-direct-1',
+                        name: 'write',
+                        input: {
+                          path: toolPath,
+                          content: 'print(\"draft\")',
+                        },
+                      },
+                    ],
+                    timestamp: Math.floor(Date.now() / 1000),
+                  },
+                },
+              });
+            }, 600);
+
+            setTimeout(() => {
+              emitNotification({
+                method: 'agent',
+                params: {
+                  runId,
+                  sessionKey: activeSessionKey,
+                  state: 'delta',
+                  message: {
+                    role: 'tool_result',
+                    toolCallId: 'write-process-direct-1',
+                    toolName: 'write',
+                    content: `Successfully wrote 149 bytes to ${toolPath}`,
+                    timestamp: Math.floor(Date.now() / 1000),
+                  },
+                },
+              });
+            }, 1_800);
+
+            return {
+              success: true,
+              result: { runId },
+            };
+          }
+
+          return {};
+        });
+      }, {
+        prompt: PROMPT,
+        runId: `${RUN_ID}-direct-tool-result`,
+        sessionId: `${SESSION_ID}-direct-tool-result`,
+        sessionKey: SESSION_KEY,
+        toolPath: TOOL_PATH,
+      });
+
+      const page = await getStableWindow(app);
+      await expect(page.getByTestId('main-layout')).toBeVisible({ timeout: 60_000 });
+
+      const composer = page.getByTestId('chat-composer');
+      const messageInput = composer.getByRole('textbox');
+      const sendButton = composer.getByTestId('chat-send-button');
+
+      await messageInput.fill(PROMPT);
+      await sendButton.click();
+
+      await expect.poll(async () => {
+        return await sendButton.evaluate((node) => !!node.querySelector('svg.lucide-square'));
+      }, { timeout: 30_000 }).toBe(true);
+
+      const processSummaries = page.getByTestId('chat-process-event-summary');
+      await expect(processSummaries.first()).toHaveText('Editing code', { timeout: 30_000 });
+      await expect.poll(async () => await processSummaries.allTextContents(), { timeout: 30_000 }).toEqual([
+        'Code edit completed',
+      ]);
+
+      await expect.poll(async () => {
+        return await sendButton.evaluate((node) => !!node.querySelector('svg.lucide-square'));
+      }, { timeout: 5_000 }).toBe(true);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
+  test('keeps completed process rows above trailing live notes when tool status is tracked separately', async ({ launchElectronApp }) => {
+    test.setTimeout(180_000);
+
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      await getStableWindow(app);
+
+      await installIpcMocks(app, {
+        gatewayStatus: { state: 'running', port: 18789, pid: 12345, connectedAt: Date.now() },
+        hostApi: {
+          [stableStringify(['/api/gateway/status', 'GET'])]: {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                state: 'running',
+                port: 18789,
+                pid: 12345,
+                connectedAt: Date.now(),
+              },
+            },
+          },
+          [stableStringify(['/api/agents', 'GET'])]: {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                success: true,
+                agents: [],
+              },
+            },
+          },
+          [stableStringify(['/api/settings', 'GET'])]: {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                language: 'en',
+                chatProcessDisplayMode: 'all',
+                assistantMessageStyle: 'bubble',
+                hideInternalRoutineProcesses: true,
+                setupComplete: true,
+              },
+            },
+          },
+        },
+      });
+
+      await app.evaluate(({ ipcMain, BrowserWindow }, { prompt, runId, sessionId, sessionKey }) => {
+        let sessions: Array<{ key: string; id: string; label: string; updatedAt: number }> = [];
+        let historyMessages: Array<Record<string, unknown>> = [];
+
+        function emitNotification(payload: unknown): void {
+          const window = BrowserWindow.getAllWindows().at(-1);
+          if (!window) throw new Error('No BrowserWindow available');
+          window.webContents.send('gateway:notification', payload);
+        }
+
+        ipcMain.removeHandler('gateway:rpc');
+        ipcMain.handle('gateway:rpc', async (_event, method: string, params?: { sessionKey?: string }) => {
+          if (method === 'sessions.list') {
+            return {
+              success: true,
+              result: { sessions },
+            };
+          }
+
+          if (method === 'chat.history') {
+            return {
+              success: true,
+              result: { messages: historyMessages },
+            };
+          }
+
+          if (method === 'chat.abort') {
+            return {
+              success: true,
+              result: { ok: true },
+            };
+          }
+
+          if (method === 'chat.send') {
+            const now = Date.now();
+            const activeSessionKey = params?.sessionKey || sessionKey;
+
+            sessions = [{
+              key: activeSessionKey,
+              id: sessionId,
+              label: prompt,
+              updatedAt: now,
+            }];
+
+            historyMessages = [{
+              id: 'user-process-order-1',
+              role: 'user',
+              content: prompt,
+              timestamp: Math.floor(now / 1000),
+            }];
+
+            setTimeout(() => {
+              emitNotification({
+                method: 'agent',
+                params: {
+                  phase: 'started',
+                  runId,
+                  sessionKey: activeSessionKey,
+                },
+              });
+            }, 0);
+
+            setTimeout(() => {
+              emitNotification({
+                method: 'agent',
+                params: {
+                  runId,
+                  sessionKey: activeSessionKey,
+                  state: 'delta',
+                  message: {
+                    role: 'assistant',
+                    content: [
+                      {
+                        type: 'text',
+                        text: 'The browser request hit a restriction.',
+                      },
+                    ],
+                    timestamp: Math.floor(Date.now() / 1000),
+                  },
+                },
+              });
+            }, 600);
+
+            setTimeout(() => {
+              emitNotification({
+                method: 'agent',
+                params: {
+                  runId,
+                  sessionKey: activeSessionKey,
+                  state: 'delta',
+                  message: {
+                    role: 'assistant',
+                    content: [
+                      {
+                        type: 'tool_use',
+                        id: 'browser-order-live-1',
+                        name: 'browser',
+                        input: {
+                          action: 'open',
+                          url: 'https://flights.ctrip.com/',
+                        },
+                      },
+                    ],
+                    timestamp: Math.floor(Date.now() / 1000),
+                  },
+                },
+              });
+            }, 1_400);
+
+            setTimeout(() => {
+              emitNotification({
+                method: 'agent',
+                params: {
+                  runId,
+                  sessionKey: activeSessionKey,
+                  state: 'delta',
+                  message: {
+                    role: 'tool_result',
+                    toolCallId: 'browser-order-live-1',
+                    toolName: 'browser',
+                    content: 'Blocked by site policy',
+                    timestamp: Math.floor(Date.now() / 1000),
+                  },
+                },
+              });
+            }, 2_000);
+
+            setTimeout(() => {
+              emitNotification({
+                method: 'agent',
+                params: {
+                  runId,
+                  sessionKey: activeSessionKey,
+                  state: 'delta',
+                  message: {
+                    role: 'assistant',
+                    content: [
+                      {
+                        type: 'text',
+                        text: 'The browser was blocked, so I am switching to search results now.',
+                      },
+                    ],
+                    timestamp: Math.floor(Date.now() / 1000),
+                  },
+                },
+              });
+            }, 2_600);
+
+            return {
+              success: true,
+              result: { runId },
+            };
+          }
+
+          return {};
+        });
+      }, {
+        prompt: 'Check tomorrow Shenzhen to Beijing flights.',
+        runId: `${RUN_ID}-event-order`,
+        sessionId: `${SESSION_ID}-event-order`,
+        sessionKey: SESSION_KEY,
+      });
+
+      const page = await getStableWindow(app);
+      await expect(page.getByTestId('main-layout')).toBeVisible({ timeout: 60_000 });
+
+      const composer = page.getByTestId('chat-composer');
+      const messageInput = composer.getByRole('textbox');
+      const sendButton = composer.getByTestId('chat-send-button');
+
+      await messageInput.fill('Check tomorrow Shenzhen to Beijing flights.');
+      await sendButton.click();
+
+      await expect.poll(async () => {
+        return await page.getByTestId('chat-process-content').evaluate((container) => {
+          const summary = container.querySelector('[data-testid="chat-process-event-summary"]');
+          const directNote = container.querySelector('[data-testid="chat-process-note-content"]');
+          if (!summary || !directNote) {
+            return false;
+          }
+          if (!directNote.textContent?.includes('The browser was blocked, so I am switching to search results now.')) {
+            return false;
+          }
+          return (summary.compareDocumentPosition(directNote) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+        });
+      }, { timeout: 30_000 }).toBe(true);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
 });

@@ -525,6 +525,52 @@ describe('ProcessEventMessage', () => {
     ]);
   });
 
+  it('places unmatched tool status rows before trailing direct notes so the timeline reads top-down', () => {
+    const { container } = render(
+      <ProcessEventMessage
+        message={{
+          id: 'assistant-unmatched-status-order',
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'The browser was blocked, so I am switching to search results now.',
+            },
+          ],
+        }}
+        showThinking
+        chatProcessDisplayMode="all"
+        streamingTools={[
+          {
+            id: 'browser-order-1',
+            toolCallId: 'browser-order-1',
+            name: 'browser',
+            status: 'completed',
+            summary: 'browser https://flights.ctrip.com/',
+            updatedAt: Date.now(),
+          },
+          {
+            id: 'search-order-1',
+            toolCallId: 'search-order-1',
+            name: 'web_search',
+            status: 'running',
+            summary: 'web_search for flights',
+            updatedAt: Date.now() + 1,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByTestId('chat-process-event-summary').map((node) => node.textContent)).toEqual([
+      'Browser action completed',
+      'Reading content',
+    ]);
+    expect(screen.getByTestId('chat-process-note-content')).toBeInTheDocument();
+    expect(container.textContent?.indexOf('Browser action completed')).toBeLessThan(
+      container.textContent?.indexOf('The browser was blocked, so I am switching to search results now.') ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
   it('hides internal heartbeat process reads and notes from the process stream', () => {
     const { container } = render(
       <ProcessEventMessage
