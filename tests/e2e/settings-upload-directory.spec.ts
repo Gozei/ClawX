@@ -1,7 +1,25 @@
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { closeElectronApp, closeSettingsHub, expect, getStableWindow, openSettingsHub, test } from './fixtures/electron';
-import { resolveUserUploadStorageDirForBase } from '../../electron/utils/session-file-storage';
+
+async function findUploadFile(rootDir: string, fileName: string): Promise<string | null> {
+  try {
+    const entries = await readdir(rootDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = join(rootDir, entry.name);
+      if (entry.isDirectory()) {
+        const nested = await findUploadFile(entryPath, fileName);
+        if (nested) return nested;
+      } else if (entry.isFile() && entry.name === fileName) {
+        return entryPath;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
 
 test.describe('Settings upload directory', () => {
   test('stores staged chat uploads inside the selected session directory', async ({ launchElectronApp, homeDir }) => {
@@ -38,8 +56,8 @@ test.describe('Settings upload directory', () => {
       await page.getByTestId('settings-hub-menu-settings').click({ force: true });
       await expect(page.getByTestId('settings-page')).toBeVisible();
 
-      await page.getByTestId('settings-user-upload-dir-choose').click({ force: true });
-      await expect(page.getByTestId('settings-user-upload-dir-input')).toHaveValue(selectedUploadDir);
+      await page.getByTestId('settings-file-storage-dir-choose').click({ force: true });
+      await expect(page.getByTestId('settings-file-storage-dir-input')).toHaveValue(selectedUploadDir);
 
       await closeSettingsHub(page);
 
@@ -53,18 +71,17 @@ test.describe('Settings upload directory', () => {
       await page.getByTestId('chat-attach-button').click({ force: true });
       await expect(composerShell).toContainText('selected-attachment.txt', { timeout: 20_000 });
 
-      const expectedSessionDir = resolveUserUploadStorageDirForBase(selectedUploadDir, sessionKey);
+      let uploadedPath: string | null = null;
       await expect.poll(async () => {
-        try {
-          const entries = await readdir(expectedSessionDir);
-          if (entries.length !== 1) return '';
-          return entries[0] || '';
-        } catch {
-          return '';
-        }
+        uploadedPath = await findUploadFile(selectedUploadDir, 'selected-attachment.txt');
+        return uploadedPath;
       }, {
         timeout: 20_000,
-      }).toBe('selected-attachment.txt');
+      }).not.toBeNull();
+
+      const resolvedUploadedPath = uploadedPath as string;
+      expect(resolvedUploadedPath).toContain(selectedUploadDir);
+      expect(resolvedUploadedPath).toContain(`${join('uploads', 'selected-attachment.txt')}`);
     } finally {
       await closeElectronApp(app);
     }

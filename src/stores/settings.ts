@@ -44,8 +44,7 @@ interface SettingsState {
   hideInternalRoutineProcesses: boolean;
   assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
-  userUploadBaseDir: string;
-  assistantOutputBaseDir: string;
+  fileStorageBaseDir: string;
 
   // Gateway
   gatewayAutoStart: boolean;
@@ -90,8 +89,7 @@ interface SettingsState {
   setHideInternalRoutineProcesses: (value: boolean) => void;
   setAssistantMessageStyle: (value: AssistantMessageStyle) => void;
   setChatFontScale: (value: number) => void;
-  setUserUploadBaseDir: (value: string) => void;
-  setAssistantOutputBaseDir: (value: string) => void;
+  setFileStorageBaseDir: (value: string) => void;
   setGatewayAutoStart: (value: boolean) => void;
   setGatewayPort: (port: number) => void;
   setProxyEnabled: (value: boolean) => void;
@@ -128,8 +126,7 @@ const defaultSettings = {
   hideInternalRoutineProcesses: true,
   assistantMessageStyle: 'bubble' as AssistantMessageStyle,
   chatFontScale: 100,
-  userUploadBaseDir: '',
-  assistantOutputBaseDir: '',
+  fileStorageBaseDir: '',
   gatewayAutoStart: true,
   gatewayPort: 18789,
   proxyEnabled: false,
@@ -155,13 +152,26 @@ export const useSettingsStore = create<SettingsState>()(
 
       init: async () => {
         try {
-          const settings = await hostApiFetch<Partial<typeof defaultSettings>>('/api/settings');
+          const settings = await hostApiFetch<Partial<typeof defaultSettings> & {
+            userUploadBaseDir?: string;
+            assistantOutputBaseDir?: string;
+          }>('/api/settings');
           const resolvedLanguage = settings.language
             ? resolveSupportedLanguage(settings.language)
             : undefined;
+          const resolvedFileStorageBaseDir = typeof settings.fileStorageBaseDir === 'string'
+            ? settings.fileStorageBaseDir.trim()
+            : '';
+          const legacyUploadBaseDir = typeof settings.userUploadBaseDir === 'string'
+            ? settings.userUploadBaseDir.trim()
+            : '';
+          const legacyOutputBaseDir = typeof settings.assistantOutputBaseDir === 'string'
+            ? settings.assistantOutputBaseDir.trim()
+            : '';
           set((state) => ({
             ...state,
             ...settings,
+            fileStorageBaseDir: resolvedFileStorageBaseDir || legacyUploadBaseDir || legacyOutputBaseDir,
             ...(resolvedLanguage ? { language: resolvedLanguage } : {}),
           }));
           if (resolvedLanguage) {
@@ -277,18 +287,10 @@ export const useSettingsStore = create<SettingsState>()(
           body: JSON.stringify({ value: normalized }),
         }).catch(() => { });
       },
-      setUserUploadBaseDir: (userUploadBaseDir) => {
-        const normalized = userUploadBaseDir.trim();
-        set({ userUploadBaseDir: normalized });
-        void hostApiFetch('/api/settings/userUploadBaseDir', {
-          method: 'PUT',
-          body: JSON.stringify({ value: normalized }),
-        }).catch(() => { });
-      },
-      setAssistantOutputBaseDir: (assistantOutputBaseDir) => {
-        const normalized = assistantOutputBaseDir.trim();
-        set({ assistantOutputBaseDir: normalized });
-        void hostApiFetch('/api/settings/assistantOutputBaseDir', {
+      setFileStorageBaseDir: (fileStorageBaseDir) => {
+        const normalized = fileStorageBaseDir.trim();
+        set({ fileStorageBaseDir: normalized });
+        void hostApiFetch('/api/settings/fileStorageBaseDir', {
           method: 'PUT',
           body: JSON.stringify({ value: normalized }),
         }).catch(() => { });

@@ -117,8 +117,8 @@ test.describe('Settings output directory', () => {
       await page.getByTestId('settings-hub-menu-settings').click({ force: true });
       await expect(page.getByTestId('settings-page')).toBeVisible();
 
-      await page.getByTestId('settings-assistant-output-dir-choose').click({ force: true });
-      await expect(page.getByTestId('settings-assistant-output-dir-input')).toHaveValue(selectedOutputDir);
+      await page.getByTestId('settings-file-storage-dir-choose').click({ force: true });
+      await expect(page.getByTestId('settings-file-storage-dir-input')).toHaveValue(selectedOutputDir);
 
       await closeSettingsHub(page);
 
