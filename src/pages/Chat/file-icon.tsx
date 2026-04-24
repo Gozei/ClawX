@@ -25,15 +25,15 @@ export function FileTypeIcon({
     <div
       data-testid="chat-file-icon"
       className={cn(
-        'relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ring-1 ring-inset shadow-[0_10px_18px_rgba(15,23,42,0.08)]',
+        'relative flex h-11 w-11 shrink-0 self-center -translate-y-[2px] items-center justify-center rounded-xl',
         visual.accentClassName,
       )}
     >
-      <Icon className={cn('h-5 w-5', className)} />
+      <Icon data-testid="chat-file-icon-glyph" className={cn('h-[27px] w-[27px] -translate-y-[1px]', className)} />
       <span
         data-testid="chat-file-ext-badge"
         className={cn(
-          'absolute bottom-0 rounded-md px-1.5 py-[2px] text-[9px] font-bold leading-none shadow-sm',
+          'absolute bottom-[3px] rounded-[6px] px-1.5 py-[2px] text-[10px] font-bold leading-none',
           visual.badgeClassName,
         )}
       >

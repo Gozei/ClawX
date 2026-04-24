@@ -14,6 +14,7 @@ const createLocalAssistantMessage = vi.fn((content: string, options?: { isError?
 const createToolResultProcessMessage = vi.fn((message: unknown) => message);
 const EMPTY_ASSISTANT_RESPONSE_ERROR = 'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.';
 const getEmptyAssistantResponseError = vi.fn(() => EMPTY_ASSISTANT_RESPONSE_ERROR);
+const getAssistantRuntimeErrorNotice = vi.fn(() => null);
 const enrichWithCachedImages = vi.fn((messages) => messages);
 const enrichWithToolResultFiles = vi.fn((messages) => messages);
 const getMessageText = vi.fn((content: unknown) => typeof content === 'string' ? content : '');
@@ -86,6 +87,7 @@ vi.mock('@/stores/chat/helpers', () => ({
   createLocalAssistantMessage: (...args: unknown[]) => createLocalAssistantMessage(...args),
   createToolResultProcessMessage: (...args: unknown[]) => createToolResultProcessMessage(...args),
   EMPTY_ASSISTANT_RESPONSE_ERROR,
+  getAssistantRuntimeErrorNotice: (...args: unknown[]) => getAssistantRuntimeErrorNotice(...args),
   getEmptyAssistantResponseError: (...args: unknown[]) => getEmptyAssistantResponseError(...args),
   enrichWithCachedImages: (...args: unknown[]) => enrichWithCachedImages(...args),
   enrichWithToolResultFiles: (...args: unknown[]) => enrichWithToolResultFiles(...args),

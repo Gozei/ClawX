@@ -9,6 +9,7 @@ import {
   enrichWithCachedImages,
   enrichWithToolResultFiles,
   getMessageText,
+  getAssistantRuntimeErrorNotice,
   hasNonToolAssistantContent,
   hasAssistantFinalTextContent,
   isEmptyAssistantResponse,
@@ -225,6 +226,9 @@ export function createHistoryActions(
               && isEmptyAssistantResponse(msg)
             ))
           : undefined;
+        const historyRecentAssistantError = historyRecentAssistant
+          ? getAssistantRuntimeErrorNotice(historyRecentAssistant)
+          : null;
 
         if (historyRecentAssistant || historyEmptyAssistant) {
           clearHistoryPoll();
@@ -243,6 +247,7 @@ export function createHistoryActions(
                 streamingMessage: null,
                 streamingTools: [],
                 pendingToolImages: [],
+                error: historyRecentAssistantError,
               }
             : historyEmptyAssistant
               ? {

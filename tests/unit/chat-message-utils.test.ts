@@ -74,6 +74,29 @@ describe('chat message utils', () => {
     expect(isInternalMaintenanceTurnUserMessage(message)).toBe(true);
   });
 
+  it('hides async command completion heartbeat turns from user-visible chat text', () => {
+    const message: RawMessage = {
+      id: 'async-exec-heartbeat-1',
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: [
+            'System (untrusted): [2026-04-24 11:42:02 GMT+8] Exec failed (amber-lo, signal SIGTERM) :: Resolved 24 packages in 4.22s Downloading onnxruntime (16.9MiB) Downloading magika (12.7MiB) Downloading numpy (5.0MiB)',
+            '',
+            'An async command you ran earlier has completed. The result is shown in the system messages above. Handle the result internally. Do not relay it to the user unless explicitly requested.',
+            '',
+            '\u5f53\u524d\u65f6\u95f4\uff1aFriday, April 24th, 2026 - 11:42\uff08Asia/Shanghai\uff09',
+          ].join('\n'),
+        },
+      ],
+      timestamp: 1713920522,
+    };
+
+    expect(extractText(message)).toBe('');
+    expect(isInternalMaintenanceTurnUserMessage(message)).toBe(true);
+  });
+
   it('preserves normal user text that only happens to mention system wording', () => {
     const message: RawMessage = {
       id: 'normal-user-1',

@@ -58,6 +58,42 @@
         "gatewayStatus": "gateway {{state}} | port: {{port}} {{pid}}",
         "retryFailedAttachments": "重试失败附件"
     },
+    "filePreview": {
+        "hint": "当前仅支持预览。需要查看本地文件时，可在文件夹中定位。",
+        "missingPath": "这个附件已经无法定位到可读取的本地文件。",
+        "loadFailed": "加载预览失败：{{error}}",
+        "download": "下载",
+        "downloadSuccess": "文件已保存。",
+        "downloadFailed": "保存文件失败：{{error}}",
+        "copyImage": "复制图片",
+        "copySuccess": "图片已复制。",
+        "copyFailed": "复制图片失败：{{error}}",
+        "openFile": "打开文件",
+        "removeFile": "移除文件",
+        "revealInFolder": "在文件夹中显示",
+        "revealFailed": "无法在文件夹中定位该文件：{{error}}",
+        "openFullscreen": "放大查看",
+        "outline": "目录",
+        "expandOutline": "展开目录",
+        "collapseOutline": "收起目录",
+        "zoomIn": "放大",
+        "zoomOut": "缩小",
+        "resetView": "重置视图",
+        "rotate": "旋转",
+        "rows": "{{count}} 行",
+        "columns": "{{count}} 列",
+        "firstRowsOnly": "当前只展示前几行内容。",
+        "trailingColumnsHidden": "部分靠后的列已被折叠。",
+        "extraSheetsHidden": "其余工作表未在这里展开。",
+        "slideLabel": "第 {{count}} 页",
+        "extraSlideContentHidden": "该页还有更多内容，当前预览未全部展开。",
+        "extraSlidesHidden": "其余幻灯片未在侧边预览中展示。",
+        "unavailable": {
+            "tooLarge": "这个文件过大，暂时无法在会话中预览，请下载后查看完整内容。",
+            "legacyOffice": "暂不支持直接预览旧版 Office 文件，请下载后在本地查看。",
+            "unsupported": "当前文件类型暂不支持内联预览，请下载后在本地查看。"
+        }
+    },
     "process": {
         "workingFor": "处理中 {{duration}}",
         "processedFor": "已处理 {{duration}}",
@@ -72,7 +108,8 @@
         "noResponse": "模型没有返回响应。提供商可能暂时不可用，或 API Key 配额不足。请检查你的提供商设置。",
         "sendFailed": "消息发送失败。请检查提供商或网关状态后重试。",
         "sendFailedWithDetail": "消息发送失败：{{error}}",
-        "emptyAssistantResponse": "当前提供商返回了空响应。请检查提供商 Base URL、API 协议、模型和 API Key。"
+        "emptyAssistantResponse": "当前提供商返回了空响应。请检查提供商 Base URL、API 协议、模型和 API Key。",
+        "replyInterrupted": "回复在完成前中断了。请检查提供商设置后重试。"
     },
     "sessionErrorDetails": {
         "authInvalid": "鉴权失败，请检查 API Key 或登录状态后重试。",

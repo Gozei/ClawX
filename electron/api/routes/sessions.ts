@@ -1,6 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { join } from 'node:path';
-import { stripInjectedInboundPrelude } from '../../../shared/inbound-user-text';
+import {
+  stripInjectedInboundPrelude,
+  stripLeadingInternalHeartbeatMaintenance,
+} from '../../../shared/inbound-user-text';
 import { getOpenClawConfigDir } from '../../utils/paths';
 import type { HostApiContext } from '../context';
 import { parseJsonBody, sendJson } from '../route-utils';
@@ -483,9 +486,9 @@ async function resolveSessionCreatedAt(
 }
 
 function cleanUserMessageText(text: string): string {
-  const cleaned = stripInjectedInboundPrelude(text
+  const cleaned = stripLeadingInternalHeartbeatMaintenance(stripInjectedInboundPrelude(text
     .replace(/\s*\[media attached:[^\]]*\]/g, '')
-    .replace(/\s*\[message_id:\s*[^\]]+\]/g, ''))
+    .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')))
     .trim();
 
   return isPreCompactionMemoryFlushPrompt(cleaned) ? '' : cleaned;

@@ -7,6 +7,7 @@ import { useGatewayStore } from '@/stores/gateway';
 import { useProviderStore } from '@/stores/providers';
 import { useChannelsStore } from '@/stores/channels';
 import { useCronStore } from '@/stores/cron';
+import { buildConfiguredModelEntries } from '@/lib/provider-accounts';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/layout/PageHeader';
 
@@ -31,11 +32,13 @@ type MonitorCardProps = {
     label: string;
   };
   items: MonitorSummaryItem[];
+  testId?: string;
+  valueTestId?: string;
 };
 
-function MonitorCard({ title, value, icon, badge, items }: MonitorCardProps) {
+function MonitorCard({ title, value, icon, badge, items, testId, valueTestId }: MonitorCardProps) {
   return (
-    <Card className="border-[#dbe3f0] bg-white shadow-[0_10px_24px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-card/80">
+    <Card data-testid={testId} className="border-[#dbe3f0] bg-white shadow-[0_10px_24px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-card/80">
       <CardHeader className="space-y-0 pb-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#f5f7fb] text-foreground dark:bg-white/5">
@@ -45,7 +48,7 @@ function MonitorCard({ title, value, icon, badge, items }: MonitorCardProps) {
         </div>
         <div className="space-y-1.5">
           <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
-          <div className="text-3xl font-semibold tracking-tight text-foreground">{value}</div>
+          <div data-testid={valueTestId} className="text-3xl font-semibold tracking-tight text-foreground">{value}</div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3 pt-0">
@@ -128,6 +131,9 @@ export function Dashboard() {
   const initGateway = useGatewayStore((state) => state.init);
 
   const providerStatuses = useProviderStore((state) => state.statuses);
+  const providerAccounts = useProviderStore((state) => state.accounts);
+  const providerVendors = useProviderStore((state) => state.vendors);
+  const providerDefaultAccountId = useProviderStore((state) => state.defaultAccountId);
   const providerLoading = useProviderStore((state) => state.loading);
   const providerError = useProviderStore((state) => state.error);
   const refreshProviderSnapshot = useProviderStore((state) => state.refreshProviderSnapshot);
@@ -149,7 +155,7 @@ export function Dashboard() {
     void fetchJobs();
   }, [fetchChannels, fetchJobs, initGateway, refreshProviderSnapshot]);
 
-  const providerSummary = useMemo(() => {
+  const providerAccountSummary = useMemo(() => {
     const enabled = providerStatuses.filter((provider) => provider.enabled);
     const healthy = enabled.filter((provider) => provider.hasKey || provider.type === 'ollama');
     return {
@@ -159,6 +165,26 @@ export function Dashboard() {
       missingKey: enabled.length - healthy.length,
     };
   }, [providerStatuses]);
+
+  const configuredModels = useMemo(
+    () => buildConfiguredModelEntries(
+      providerAccounts,
+      providerStatuses,
+      providerVendors,
+      providerDefaultAccountId,
+    ),
+    [providerAccounts, providerDefaultAccountId, providerStatuses, providerVendors],
+  );
+
+  const modelSummary = useMemo(() => {
+    const enabled = configuredModels.filter((model) => model.account.enabled);
+    const healthy = enabled.filter((model) => model.hasConfiguredCredentials);
+    return {
+      total: configuredModels.length,
+      enabled: enabled.length,
+      healthy: healthy.length,
+    };
+  }, [configuredModels]);
 
   const channelSummary = useMemo(() => {
     const connected = channels.filter((channel) => channel.status === 'connected').length;
@@ -199,11 +225,11 @@ export function Dashboard() {
       });
     }
 
-    if (providerSummary.missingKey > 0) {
+    if (providerAccountSummary.missingKey > 0) {
       items.push({
         id: 'provider-missing-key',
         title: t('systemMonitor.summary.providerMissingTitle'),
-        detail: t('systemMonitor.summary.providerMissingDetail', { count: providerSummary.missingKey }),
+        detail: t('systemMonitor.summary.providerMissingDetail', { count: providerAccountSummary.missingKey }),
         severity: 'high',
       });
     }
@@ -245,7 +271,7 @@ export function Dashboard() {
     gatewayStatus.error,
     gatewayStatus.state,
     providerError,
-    providerSummary.missingKey,
+    providerAccountSummary.missingKey,
     t,
   ]);
 
@@ -274,7 +300,7 @@ export function Dashboard() {
           subtitle={t('systemMonitor.subtitle')}
           metadata={[
             t('systemMonitor.metadata.gateway', { state: gatewayStateLabel }),
-            t('systemMonitor.metadata.models', { count: providerSummary.total }),
+            t('systemMonitor.metadata.models', { count: modelSummary.total }),
             t('systemMonitor.metadata.channels', { connected: channelSummary.connected, total: channelSummary.total }),
             t('systemMonitor.metadata.tasks', { enabled: cronSummary.enabled, total: cronSummary.total }),
             isRefreshing ? t('systemMonitor.metadata.syncing') : t('systemMonitor.metadata.synced'),
@@ -299,18 +325,20 @@ export function Dashboard() {
 
           <MonitorCard
             title={t('systemMonitor.cards.models')}
-            value={`${providerSummary.healthy}/${providerSummary.enabled || providerSummary.total}`}
+            value={String(modelSummary.total)}
             icon={<Cpu className="h-5 w-5" />}
             badge={{
-              status: providerSummary.missingKey > 0 ? 'connecting' : 'connected',
-              label: providerSummary.missingKey > 0 ? t('systemMonitor.states.attention') : t('systemMonitor.states.healthy'),
+              status: providerAccountSummary.missingKey > 0 ? 'connecting' : 'connected',
+              label: providerAccountSummary.missingKey > 0 ? t('systemMonitor.states.attention') : t('systemMonitor.states.healthy'),
             }}
             items={[
-              { label: t('systemMonitor.rows.totalAccounts'), value: String(providerSummary.total) },
-              { label: t('systemMonitor.rows.enabledAccounts'), value: String(providerSummary.enabled) },
-              { label: t('systemMonitor.rows.healthyAccounts'), value: String(providerSummary.healthy) },
-              { label: t('systemMonitor.rows.missingCredentials'), value: String(providerSummary.missingKey) },
+              { label: t('systemMonitor.rows.totalModels'), value: String(modelSummary.total) },
+              { label: t('systemMonitor.rows.enabledModels'), value: String(modelSummary.enabled) },
+              { label: t('systemMonitor.rows.totalAccounts'), value: String(providerAccountSummary.total) },
+              { label: t('systemMonitor.rows.missingCredentials'), value: String(providerAccountSummary.missingKey) },
             ]}
+            testId="dashboard-models-card"
+            valueTestId="dashboard-models-card-value"
           />
 
           <MonitorCard

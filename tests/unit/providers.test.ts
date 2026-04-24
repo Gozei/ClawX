@@ -9,7 +9,10 @@ import {
   resolveProviderModelForSave,
   shouldShowProviderModelId,
 } from '@/lib/providers';
-import { buildProviderListItems } from '@/lib/provider-accounts';
+import {
+  buildConfiguredModelEntries,
+  buildProviderListItems,
+} from '@/lib/provider-accounts';
 import {
   BUILTIN_PROVIDER_TYPES,
   getProviderConfig,
@@ -148,6 +151,12 @@ describe('provider metadata', () => {
     expect(shouldShowProviderModelId(minimaxCn, true)).toBe(true);
     expect(shouldShowProviderModelId(qwen, true)).toBe(true);
 
+    expect(resolveProviderModelForSave(openai, '   ', false)).toBe('gpt-5.4');
+    expect(resolveProviderModelForSave(google, '   ', false)).toBe('gemini-3-pro-preview');
+    expect(resolveProviderModelForSave(minimax, '   ', false)).toBe('MiniMax-M2.7');
+    expect(resolveProviderModelForSave(minimaxCn, '   ', false)).toBe('MiniMax-M2.7');
+    expect(resolveProviderModelForSave(qwen, '   ', false)).toBe('qwen3.5-plus');
+
     expect(resolveProviderModelForSave(openai, '   ', true)).toBe('gpt-5.4');
     expect(resolveProviderModelForSave(google, '   ', true)).toBe('gemini-3-pro-preview');
     expect(resolveProviderModelForSave(minimax, '   ', true)).toBe('MiniMax-M2.7');
@@ -161,14 +170,14 @@ describe('provider metadata', () => {
     const ark = PROVIDER_TYPE_INFO.find((provider) => provider.id === 'ark');
 
     expect(resolveProviderModelForSave(openrouter, 'openai/gpt-5', false)).toBe('openai/gpt-5');
-    expect(resolveProviderModelForSave(siliconflow, 'Qwen/Qwen3-Coder-480B-A35B-Instruct', false)).toBeUndefined();
+    expect(resolveProviderModelForSave(siliconflow, 'Qwen/Qwen3-Coder-480B-A35B-Instruct', false)).toBe('Qwen/Qwen3-Coder-480B-A35B-Instruct');
 
     expect(resolveProviderModelForSave(openrouter, 'openai/gpt-5', true)).toBe('openai/gpt-5');
     expect(resolveProviderModelForSave(siliconflow, 'Qwen/Qwen3-Coder-480B-A35B-Instruct', true)).toBe('Qwen/Qwen3-Coder-480B-A35B-Instruct');
 
     expect(resolveProviderModelForSave(openrouter, '   ', false)).toBe('openai/gpt-5.4');
     expect(resolveProviderModelForSave(openrouter, '   ', true)).toBe('openai/gpt-5.4');
-    expect(resolveProviderModelForSave(siliconflow, '   ', false)).toBeUndefined();
+    expect(resolveProviderModelForSave(siliconflow, '   ', false)).toBe('deepseek-ai/DeepSeek-V3');
     expect(resolveProviderModelForSave(siliconflow, '   ', true)).toBe('deepseek-ai/DeepSeek-V3');
     expect(resolveProviderModelForSave(ark, '  ep-custom-model  ', false)).toBe('ep-custom-model');
   });
@@ -179,6 +188,145 @@ describe('provider metadata', () => {
     expect(resolveProviderApiKeyForSave('ollama', 'real-key')).toBe('real-key');
     expect(resolveProviderApiKeyForSave('openai', '')).toBeUndefined();
     expect(resolveProviderApiKeyForSave('openai', ' sk-test ')).toBe('sk-test');
+  });
+
+  it('falls back to the vendor default model when a configured account is missing an explicit model', () => {
+    const accounts: ProviderAccount[] = [
+      {
+        id: 'siliconflow',
+        vendorId: 'siliconflow',
+        label: 'SiliconFlow (CN)',
+        authMode: 'api_key',
+        baseUrl: 'https://api.siliconflow.cn/v1',
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-23T00:00:00.000Z',
+        updatedAt: '2026-04-23T00:00:00.000Z',
+      },
+    ];
+    const statuses = [
+      {
+        id: 'siliconflow',
+        name: 'SiliconFlow (CN)',
+        type: 'siliconflow',
+        enabled: true,
+        createdAt: '2026-04-23T00:00:00.000Z',
+        updatedAt: '2026-04-23T00:00:00.000Z',
+        hasKey: true,
+        keyMasked: '****',
+      },
+    ];
+    const vendors: ProviderVendorInfo[] = [
+      {
+        ...(PROVIDER_TYPE_INFO.find((provider) => provider.id === 'siliconflow') as ProviderVendorInfo),
+        category: 'compatible',
+        supportedAuthModes: ['api_key'],
+        defaultAuthMode: 'api_key',
+        supportsMultipleAccounts: false,
+      },
+    ];
+
+    const items = buildProviderListItems(accounts, statuses, vendors, 'siliconflow');
+    const configuredModels = items[0]?.models.filter((model) => model.source !== 'recommended');
+
+    expect(configuredModels).toEqual([
+      expect.objectContaining({
+        id: 'deepseek-ai/DeepSeek-V3',
+        isDefault: true,
+        source: 'default',
+      }),
+    ]);
+  });
+
+  it('builds configured model entries with the same dedupe rules as the Models page', () => {
+    const accounts: ProviderAccount[] = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI Main',
+        authMode: 'api_key',
+        baseUrl: 'https://api.openai.com/v1',
+        apiProtocol: 'openai-completions',
+        model: 'gpt-5.4',
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-23T00:00:00.000Z',
+        updatedAt: '2026-04-23T00:00:00.000Z',
+        metadata: {
+          customModels: ['gpt-5.4-mini'],
+          modelProtocols: {
+            'gpt-5.4': 'openai-completions',
+            'gpt-5.4-mini': 'openai-completions',
+          },
+        },
+      },
+      {
+        id: 'openai-duplicate',
+        vendorId: 'openai',
+        label: 'OpenAI Main',
+        authMode: 'api_key',
+        baseUrl: 'https://api.openai.com/v1',
+        apiProtocol: 'openai-completions',
+        model: 'gpt-5.4',
+        enabled: true,
+        isDefault: false,
+        createdAt: '2026-04-23T00:00:00.000Z',
+        updatedAt: '2026-04-23T00:00:01.000Z',
+        metadata: {
+          modelProtocols: {
+            'gpt-5.4': 'openai-completions',
+          },
+        },
+      },
+    ];
+    const statuses = [
+      {
+        id: 'openai',
+        name: 'OpenAI Main',
+        type: 'openai',
+        enabled: true,
+        createdAt: '2026-04-23T00:00:00.000Z',
+        updatedAt: '2026-04-23T00:00:00.000Z',
+        hasKey: true,
+        keyMasked: '****',
+        model: 'gpt-5.4',
+      },
+      {
+        id: 'openai-duplicate',
+        name: 'OpenAI Main',
+        type: 'openai',
+        enabled: true,
+        createdAt: '2026-04-23T00:00:00.000Z',
+        updatedAt: '2026-04-23T00:00:01.000Z',
+        hasKey: true,
+        keyMasked: '****',
+        model: 'gpt-5.4',
+      },
+    ];
+    const vendors: ProviderVendorInfo[] = [
+      {
+        ...(PROVIDER_TYPE_INFO.find((provider) => provider.id === 'openai') as ProviderVendorInfo),
+        category: 'official',
+        supportedAuthModes: ['api_key', 'oauth_browser'],
+        defaultAuthMode: 'api_key',
+        supportsMultipleAccounts: false,
+      },
+    ];
+
+    const rows = buildConfiguredModelEntries(accounts, statuses, vendors, 'openai');
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        key: 'openai:gpt-5.4',
+        modelId: 'gpt-5.4',
+        isGlobalDefault: true,
+      }),
+      expect.objectContaining({
+        key: 'openai:gpt-5.4-mini',
+        modelId: 'gpt-5.4-mini',
+        isGlobalDefault: false,
+      }),
+    ]);
   });
 
   it('merges duplicate compatible providers into one display item with a friendly name', () => {

@@ -35,6 +35,21 @@ export interface ProviderModelSummary {
   manualUsageTags: string[];
 }
 
+export interface ConfiguredModelEntry {
+  key: string;
+  account: ProviderAccount;
+  displayName: string;
+  displayVendorName: string;
+  vendorId: ProviderType;
+  modelId: string;
+  isDefault: boolean;
+  isGlobalDefault: boolean;
+  protocol: NonNullable<ProviderAccount['apiProtocol']>;
+  hasConfiguredCredentials: boolean;
+}
+
+const DEFAULT_PROVIDER_PROTOCOL: NonNullable<ProviderAccount['apiProtocol']> = 'openai-completions';
+
 function normalizeBaseUrl(baseUrl?: string): string {
   return (baseUrl || '').trim().replace(/\/+$/, '').toLowerCase();
 }
@@ -198,12 +213,14 @@ function buildProviderModels(
   primary: ProviderAccount,
   aliases: ProviderAccount[],
   status?: ProviderWithKeyInfo,
+  hasCredentials = hasConfiguredCredentials(primary, status),
 ): ProviderModelSummary[] {
-  const defaultModel = getResolvedModel(primary, status, aliases);
   const recommended = getRecommendedModelOptions(primary.vendorId, {
     baseUrl: primary.baseUrl,
     apiProtocol: primary.apiProtocol,
   });
+  const defaultModel = getResolvedModel(primary, status, aliases)
+    || (hasCredentials ? recommended[0]?.value : undefined);
   const configuredModels = normalizeConfiguredModelIds([
     ...getConfiguredModelIds(primary),
     ...aliases.flatMap((alias) => getConfiguredModelIds(alias)),
@@ -383,6 +400,8 @@ export function buildProviderListItems(
         const primary = pickPrimaryListAccount(group, defaultAccountId, statusMap);
         const vendor = vendorMap.get(primary.vendorId);
         const status = statusMap.get(primary.id);
+        const hasCredentials = group.some((candidate) =>
+          hasConfiguredCredentials(candidate, statusMap.get(candidate.id)));
         return {
           account: primary,
           vendor,
@@ -391,9 +410,8 @@ export function buildProviderListItems(
           displayName: getResolvedDisplayName(primary, vendor),
           displayVendorName: getResolvedVendorName(primary, vendor),
           resolvedModel: getResolvedModel(primary, status, group),
-          hasConfiguredCredentials: group.some((candidate) =>
-            hasConfiguredCredentials(candidate, statusMap.get(candidate.id))),
-          models: buildProviderModels(primary, group, status),
+          hasConfiguredCredentials: hasCredentials,
+          models: buildProviderModels(primary, group, status, hasCredentials),
         };
       })
       .sort((left, right) => {
@@ -412,6 +430,52 @@ export function buildProviderListItems(
     displayVendorName: vendorMap.get(status.type)?.name || status.type,
     resolvedModel: status.model,
     hasConfiguredCredentials: status.hasKey,
-    models: buildProviderModels(legacyProviderToAccount(status), [legacyProviderToAccount(status)], status),
+    models: buildProviderModels(legacyProviderToAccount(status), [legacyProviderToAccount(status)], status, status.hasKey),
   }));
+}
+
+function resolveConfiguredModelProtocol(
+  account: ProviderAccount,
+  modelId: string,
+): NonNullable<ProviderAccount['apiProtocol']> {
+  return account.metadata?.modelProtocols?.[modelId] || account.apiProtocol || DEFAULT_PROVIDER_PROTOCOL;
+}
+
+export function buildConfiguredModelEntries(
+  accounts: ProviderAccount[],
+  statuses: ProviderWithKeyInfo[],
+  vendors: ProviderVendorInfo[],
+  defaultAccountId: string | null,
+): ConfiguredModelEntry[] {
+  const deduped = new Map<string, ConfiguredModelEntry>();
+
+  for (const item of buildProviderListItems(accounts, statuses, vendors, defaultAccountId)) {
+    for (const model of item.models.filter((entry) => entry.source !== 'recommended')) {
+      const protocol = resolveConfiguredModelProtocol(item.account, model.id);
+      const entry: ConfiguredModelEntry = {
+        key: `${item.account.id}:${model.id}`,
+        account: item.account,
+        displayName: item.displayName,
+        displayVendorName: item.displayVendorName,
+        vendorId: item.account.vendorId,
+        modelId: model.id,
+        isDefault: model.isDefault,
+        isGlobalDefault: item.account.id === defaultAccountId && model.isDefault,
+        protocol,
+        hasConfiguredCredentials: item.hasConfiguredCredentials,
+      };
+      const signature = [
+        entry.vendorId,
+        entry.displayName.trim().toLowerCase(),
+        (entry.account.baseUrl || '').trim().toLowerCase(),
+        entry.modelId.trim().toLowerCase(),
+        entry.protocol,
+      ].join('|');
+      if (!deduped.has(signature)) {
+        deduped.set(signature, entry);
+      }
+    }
+  }
+
+  return [...deduped.values()];
 }

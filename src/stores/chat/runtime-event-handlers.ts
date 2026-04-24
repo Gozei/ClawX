@@ -8,6 +8,7 @@ import {
   extractImagesAsAttachedFiles,
   extractMediaRefs,
   extractRawFilePaths,
+  getAssistantRuntimeErrorNotice,
   getMessageText,
   getToolCallFilePath,
   getContinueConversationWarning,
@@ -340,6 +341,9 @@ export function handleRuntimeEventState(
             : finalMsg;
           const hasOutput = hasNonToolAssistantContent(previewFinalMsg);
           const emptyAssistantResponse = !toolOnly && isEmptyAssistantResponse(previewFinalMsg);
+          const assistantRuntimeErrorNotice = !toolOnly
+            ? getAssistantRuntimeErrorNotice(previewFinalMsg)
+            : null;
           const msgId = finalMsg.id || (toolOnly ? `run-${runId}-tool-${Date.now()}` : `run-${runId}`);
           set((s) => {
             const nextTools = updates.length > 0 ? upsertToolStatuses(s.streamingTools, updates) : s.streamingTools;
@@ -372,10 +376,11 @@ export function handleRuntimeEventState(
                   streamingMessage: null,
                   sending: hasOutput ? false : s.sending,
                   activeRunId: hasOutput ? null : s.activeRunId,
-                pendingFinal: hasOutput ? false : true,
-                streamingTools,
-                ...clearPendingImages,
-              };
+                  pendingFinal: hasOutput ? false : true,
+                  streamingTools,
+                  error: assistantRuntimeErrorNotice,
+                  ...clearPendingImages,
+                };
             }
               if (emptyAssistantResponse) {
                 const emptyReply = createLocalAssistantMessage(getEmptyAssistantResponseError(), {
@@ -390,7 +395,7 @@ export function handleRuntimeEventState(
                   activeRunId: null,
                   pendingFinal: false,
                   streamingTools,
-                  error: null,
+                  error: assistantRuntimeErrorNotice,
                   ...clearPendingImages,
                 };
               }
@@ -409,6 +414,7 @@ export function handleRuntimeEventState(
                 activeRunId: hasOutput ? null : s.activeRunId,
                 pendingFinal: hasOutput ? false : true,
                 streamingTools,
+                error: assistantRuntimeErrorNotice,
                 ...clearPendingImages,
               };
             });

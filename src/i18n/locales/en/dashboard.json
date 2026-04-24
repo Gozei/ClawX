@@ -18,7 +18,7 @@
         "subtitle": "A read-only monitoring view for gateway, models, channels, and scheduled tasks.",
         "metadata": {
             "gateway": "Gateway: {{state}}",
-            "models": "Model accounts: {{count}}",
+            "models": "Configured models: {{count}}",
             "channels": "Channels online: {{connected}} / {{total}}",
             "tasks": "Tasks enabled: {{enabled}} / {{total}}",
             "syncing": "Monitoring data is syncing",
@@ -52,6 +52,8 @@
             "port": "Port",
             "uptime": "Uptime",
             "lastError": "Last error",
+            "totalModels": "Total models",
+            "enabledModels": "Enabled models",
             "totalAccounts": "Total accounts",
             "enabledAccounts": "Enabled accounts",
             "healthyAccounts": "Healthy accounts",

@@ -692,7 +692,7 @@ export function Sidebar() {
     <aside
       data-testid="sidebar"
       className={cn(
-        'relative flex shrink-0 flex-col border-r border-black/6 bg-[#f3f6fb] text-foreground/90 transition-[width] duration-200 dark:bg-background'
+        'relative flex shrink-0 flex-col border-r border-black/6 bg-[#f3f6fb] text-foreground/90 dark:bg-background'
       )}
       style={{ width: `${renderedSidebarWidth}px` }}
     >

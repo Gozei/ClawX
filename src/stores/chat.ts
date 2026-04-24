@@ -9,13 +9,17 @@ import { isWithinCompletedTurnProcessGrace } from '@/lib/chat-turn-grace';
 import { normalizeAppError } from '@/lib/error-model';
 import { hostApiFetch } from '@/lib/host-api';
 import i18n from '@/i18n';
-import { stripInjectedInboundPrelude } from '../../shared/inbound-user-text';
+import {
+  stripInjectedInboundPrelude,
+  stripLeadingInternalHeartbeatMaintenance,
+} from '../../shared/inbound-user-text';
 import { useGatewayStore } from './gateway';
 import { useAgentsStore } from './agents';
 import { buildCronSessionHistoryPath, isCronSessionKey } from './chat/cron-session-utils';
 import {
   CHAT_HISTORY_LABEL_PREFETCH_LIMIT,
   CHAT_HISTORY_RPC_TIMEOUT_MS,
+  getAssistantRuntimeErrorNotice,
   hasAssistantFinalTextContent,
   hasComposerDraftContent,
   hasStoredSessionLabel,
@@ -705,9 +709,9 @@ function getMessageText(content: unknown): string {
 }
 
 function cleanUserMessageText(text: string): string {
-  const cleaned = stripInjectedInboundPrelude(text
+  const cleaned = stripLeadingInternalHeartbeatMaintenance(stripInjectedInboundPrelude(text
     .replace(/\s*\[media attached:[^\]]*\]/g, '')
-    .replace(/\s*\[message_id:\s*[^\]]+\]/g, ''))
+    .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')))
     .trim();
 
   return isPreCompactionMemoryFlushPrompt(cleaned) ? '' : cleaned;
@@ -3285,6 +3289,9 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       const historyEmptyAssistant = (historyPendingFinal || shouldEnterHistoryPendingFinal)
         ? observedHistoryEmptyAssistant
         : undefined;
+      const historyRecentAssistantError = historyRecentAssistant
+        ? getAssistantRuntimeErrorNotice(historyRecentAssistant)
+        : null;
       const staleStreamingReferenceTs = (() => {
         const currentStreamingMessage = get().streamingMessage;
         if (currentStreamingMessage && typeof currentStreamingMessage === 'object') {
@@ -3304,6 +3311,9 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             return toMs(msg.timestamp) >= staleStreamingReferenceTs;
           })
         : undefined;
+      const historySettledAssistantError = historySettledAssistant
+        ? getAssistantRuntimeErrorNotice(historySettledAssistant)
+        : null;
       const shouldClearSettledStreamingState = !historyIsSendingNow
         && !!historySettledAssistant
         && (
@@ -3362,6 +3372,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                 streamingMessage: null,
                 streamingTools: [],
                 pendingToolImages: [],
+                error: historyRecentAssistantError,
               }
             : shouldFinalizeEmptyAssistant
               ? {
@@ -3390,6 +3401,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                       streamingMessage: null,
                       streamingTools: [],
                       pendingToolImages: [],
+                      error: historySettledAssistantError,
                     }
                 : {}),
         };
@@ -4012,6 +4024,9 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           const hasOutput = hasNonToolAssistantContent(previewFinalMsg);
           const internalAssistantControlMessage = !toolOnly && isInternalAssistantControlMessage(previewFinalMsg);
           const emptyAssistantResponse = !toolOnly && isEmptyAssistantResponse(previewFinalMsg);
+          const assistantRuntimeErrorNotice = !toolOnly
+            ? getAssistantRuntimeErrorNotice(previewFinalMsg)
+            : null;
           const msgId = finalMsg.id || (toolOnly ? `run-${runId}-tool-${Date.now()}` : `run-${runId}`);
           set((s) => {
             const nextTools = updates.length > 0 ? upsertToolStatuses(s.streamingTools, updates) : s.streamingTools;
@@ -4063,6 +4078,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                 sendStage: hasOutput ? null : 'finalizing',
                 pendingFinal: hasOutput ? false : true,
                 streamingTools,
+                error: assistantRuntimeErrorNotice,
                 sessionRunningState: updateSessionRunningState(
                   s.sessionRunningState,
                   currentSessionKey,
@@ -4085,7 +4101,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                 sendStage: null,
                 pendingFinal: false,
                 streamingTools,
-                error: null,
+                error: assistantRuntimeErrorNotice,
                 sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, false),
                 ...clearPendingImages,
               };
@@ -4108,6 +4124,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
               sendStage: hasOutput ? null : 'finalizing',
               pendingFinal: hasOutput ? false : true,
               streamingTools,
+              error: assistantRuntimeErrorNotice,
               sessionRunningState: updateSessionRunningState(
                 s.sessionRunningState,
                 currentSessionKey,

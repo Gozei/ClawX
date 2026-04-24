@@ -270,6 +270,132 @@ describe('chat store session resume', () => {
     expect(next.sessionRunningState).toEqual({});
   });
 
+  it('surfaces a localized notice when history shows a partial assistant reply that ended with auth failure', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [
+            { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+            {
+              id: 'assistant-partial-auth',
+              role: 'assistant',
+              content: 'Here is the partial answer before the provider failed.',
+              timestamp: assistantTimestampSeconds,
+              stopReason: 'error',
+              errorMessage: 'HTTP 401: Invalid Authentication',
+            },
+          ],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: { 'agent:main:main': true },
+      sending: true,
+      activeRunId: 'run-auth-error',
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: 'running',
+    });
+
+    await useChatStore.getState().loadHistory(true);
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual([
+      'user-1',
+      'assistant-partial-auth',
+    ]);
+    expect(next.sending).toBe(false);
+    expect(next.activeRunId).toBeNull();
+    expect(next.pendingFinal).toBe(false);
+    expect(next.sendStage).toBeNull();
+    expect(next.sessionRunningState).toEqual({});
+    expect(next.error).toMatch(/Authentication failed|鉴权失败/);
+  });
+
+  it('keeps an auth failure visible when completion lands before the history refresh', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [
+            { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+            {
+              id: 'assistant-settled-auth',
+              role: 'assistant',
+              content: 'Partial answer from the provider before it stopped.',
+              timestamp: assistantTimestampSeconds,
+              stopReason: 'error',
+              errorMessage: 'HTTP 401: Invalid Authentication',
+            },
+          ],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: {
+        id: 'assistant-streaming',
+        role: 'assistant',
+        content: 'Partial answer from the provider before it stopped.',
+        timestamp: assistantTimestampSeconds,
+      },
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: null,
+    });
+
+    await useChatStore.getState().loadHistory(true);
+
+    const next = useChatStore.getState();
+    expect(next.streamingMessage).toBeNull();
+    expect(next.pendingToolImages).toEqual([]);
+    expect(next.error).toMatch(/Authentication failed|鉴权失败/);
+  });
+
   it('auto-finalizes shortly after history reveals the final assistant reply during the live-turn guard window', async () => {
     gatewayRpcMock.mockReset();
     gatewayRpcMock.mockImplementation((method: string) => {

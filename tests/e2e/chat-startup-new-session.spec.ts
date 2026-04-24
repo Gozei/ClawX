@@ -112,6 +112,22 @@ test.describe('Chat startup new session', () => {
       await expect(recentSessionButton).not.toHaveClass(/font-medium/);
       await expect(mainSessionButton).not.toHaveClass(/font-medium/);
       await expect(page.getByText('Recovered startup history.', { exact: true })).toHaveCount(0);
+
+      const mainPane = page.getByTestId('chat-main-pane');
+      const composer = page.getByTestId('chat-composer');
+      await expect(composer).toBeVisible({ timeout: 30_000 });
+
+      const [mainPaneBox, composerBox] = await Promise.all([
+        mainPane.boundingBox(),
+        composer.boundingBox(),
+      ]);
+
+      expect(mainPaneBox).not.toBeNull();
+      expect(composerBox).not.toBeNull();
+      expect(Math.abs(
+        ((composerBox?.x ?? 0) + ((composerBox?.width ?? 0) / 2))
+        - ((mainPaneBox?.x ?? 0) + ((mainPaneBox?.width ?? 0) / 2)),
+      )).toBeLessThanOrEqual(2);
     } finally {
       await closeElectronApp(app);
     }

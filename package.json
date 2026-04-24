@@ -83,17 +83,23 @@
         "postversion": "git push && git push --tags"
     },
     "dependencies": {
+        "@jvmr/pptx-to-html": "^1.0.1",
         "@sinclair/typebox": "^0.34.48",
-        "clawhub": "^0.9.0",
         "@whiskeysockets/baileys": "7.0.0-rc.9",
+        "@xmldom/xmldom": "^0.9.10",
+        "clawhub": "^0.9.0",
+        "docx-preview": "0.3.7",
         "electron-store": "^11.0.2",
         "electron-updater": "^6.8.3",
+        "jszip": "^3.10.1",
         "lru-cache": "^11.2.6",
+        "mammoth": "^1.12.0",
         "ms": "^2.1.3",
         "node-machine-id": "^1.1.12",
         "posthog-node": "^5.28.0",
         "react-virtuoso": "^4.18.5",
-        "ws": "^8.19.0"
+        "ws": "^8.19.0",
+        "xlsx": "^0.18.5"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",

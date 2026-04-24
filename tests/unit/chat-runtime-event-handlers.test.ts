@@ -17,6 +17,7 @@ const extractMediaRefs = vi.fn(() => []);
 const extractRawFilePaths = vi.fn(() => []);
 const getContinueConversationWarning = vi.fn(() => 'Final reply missing but conversation can continue.');
 const getEmptyAssistantResponseError = vi.fn(() => 'Localized empty assistant response');
+const getAssistantRuntimeErrorNotice = vi.fn(() => null);
 const getMessageText = vi.fn(() => '');
 const getSendFailedError = vi.fn((error?: string) => error ? `Localized send failed: ${error}` : 'Localized send failed');
 const getToolCallFilePath = vi.fn(() => undefined);
@@ -46,6 +47,7 @@ vi.mock('@/stores/chat/helpers', () => ({
   extractImagesAsAttachedFiles: (...args: unknown[]) => extractImagesAsAttachedFiles(...args),
   extractMediaRefs: (...args: unknown[]) => extractMediaRefs(...args),
   extractRawFilePaths: (...args: unknown[]) => extractRawFilePaths(...args),
+  getAssistantRuntimeErrorNotice: (...args: unknown[]) => getAssistantRuntimeErrorNotice(...args),
   getContinueConversationWarning: (...args: unknown[]) => getContinueConversationWarning(...args),
   getEmptyAssistantResponseError: (...args: unknown[]) => getEmptyAssistantResponseError(...args),
   getMessageText: (...args: unknown[]) => getMessageText(...args),

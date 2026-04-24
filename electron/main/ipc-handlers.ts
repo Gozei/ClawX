@@ -68,6 +68,7 @@ import {
   type AppRequest,
   type AppResponse,
 } from './ipc/request-helpers';
+import type { FilePreviewWindowRequest } from '../../shared/file-preview';
 
 /**
  * Register all IPC handlers
@@ -75,7 +76,8 @@ import {
 export function registerIpcHandlers(
   gatewayManager: GatewayManager,
   clawHubService: ClawHubService,
-  mainWindow: BrowserWindow
+  mainWindow: BrowserWindow,
+  openFilePreviewWindow: (file: FilePreviewWindowRequest) => BrowserWindow | Promise<BrowserWindow>,
 ): void {
   // Unified request protocol (non-breaking: legacy channels remain available)
   registerUnifiedRequestHandlers(gatewayManager);
@@ -126,7 +128,7 @@ export function registerIpcHandlers(
   registerCronHandlers(gatewayManager);
 
   // Window control handlers (for custom title bar on Windows/Linux)
-  registerWindowHandlers(mainWindow);
+  registerWindowHandlers(mainWindow, openFilePreviewWindow);
 
   // WhatsApp handlers
   registerWhatsAppHandlers(mainWindow);
@@ -2206,25 +2208,51 @@ function registerUsageHandlers(): void {
 /**
  * Window control handlers (for custom title bar on Windows)
  */
-function registerWindowHandlers(mainWindow: BrowserWindow): void {
-  ipcMain.handle('window:minimize', () => {
-    mainWindow.minimize();
+function registerWindowHandlers(
+  mainWindow: BrowserWindow,
+  openFilePreviewWindow: (file: FilePreviewWindowRequest) => BrowserWindow | Promise<BrowserWindow>,
+): void {
+  const resolveTargetWindow = (sender: Electron.WebContents): BrowserWindow => {
+    return BrowserWindow.fromWebContents(sender) ?? mainWindow;
+  };
+
+  ipcMain.handle('window:minimize', (event) => {
+    resolveTargetWindow(event.sender).minimize();
   });
 
-  ipcMain.handle('window:maximize', () => {
-    if (mainWindow.isMaximized()) {
-      mainWindow.unmaximize();
+  ipcMain.handle('window:maximize', (event) => {
+    const targetWindow = resolveTargetWindow(event.sender);
+    if (targetWindow.isMaximized()) {
+      targetWindow.unmaximize();
     } else {
-      mainWindow.maximize();
+      targetWindow.maximize();
     }
   });
 
-  ipcMain.handle('window:close', () => {
-    mainWindow.close();
+  ipcMain.handle('window:close', (event) => {
+    resolveTargetWindow(event.sender).close();
   });
 
-  ipcMain.handle('window:isMaximized', () => {
-    return mainWindow.isMaximized();
+  ipcMain.handle('window:isMaximized', (event) => {
+    return resolveTargetWindow(event.sender).isMaximized();
+  });
+
+  ipcMain.handle('window:openFilePreview', async (_event, payload: FilePreviewWindowRequest) => {
+    if (!payload || typeof payload.fileName !== 'string' || typeof payload.mimeType !== 'string') {
+      throw new Error('Invalid file preview payload');
+    }
+
+    await openFilePreviewWindow({
+      fileName: payload.fileName,
+      mimeType: payload.mimeType,
+      fileSize: Number.isFinite(payload.fileSize) ? payload.fileSize : 0,
+      ...(payload.filePath ? { filePath: payload.filePath } : {}),
+      ...(Number.isFinite(payload.slideIndex) && (payload.slideIndex ?? 0) > 0
+        ? { slideIndex: payload.slideIndex }
+        : {}),
+    });
+
+    return { success: true };
   });
 }
 

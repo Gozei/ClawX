@@ -30,7 +30,8 @@ import type { ProviderAccount } from '@/lib/providers';
 import { buildProviderListItems } from '@/lib/provider-accounts';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { CHAT_SURFACE_MAX_WIDTH_CLASS } from './layout';
+import { CHAT_CONTENT_COLUMN_MAX_WIDTH_CLASS } from './layout';
+import { ClampedFileName } from './ClampedFileName';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -943,7 +944,7 @@ export function ChatInput({
         onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className={cn('mx-auto w-full', CHAT_SURFACE_MAX_WIDTH_CLASS)}>
+      <div className={cn('mx-auto w-full', CHAT_CONTENT_COLUMN_MAX_WIDTH_CLASS)}>
         {/* Attachment Previews */}
         {attachments.length > 0 && (
           <div className="mb-3 grid grid-cols-3 gap-2">
@@ -1246,15 +1247,22 @@ function AttachmentPreview({
   attachment: FileAttachment;
   onRemove: () => void;
 }) {
+  const { t } = useTranslation(['chat', 'common']);
+
   return (
     <div className="relative min-w-0 overflow-hidden rounded-xl border border-black/10 bg-white/80 shadow-[0_14px_34px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.06]">
-      <div className="flex h-14 min-w-0 items-center gap-3 px-3">
+      <div data-testid="chat-input-attachment-body" className="flex h-14 min-w-0 items-center gap-3 px-3">
         <FileTypeIcon mimeType={attachment.mimeType} fileName={attachment.fileName} />
-        <div className="min-w-0 overflow-hidden leading-tight flex flex-col justify-center">
-          <p className="text-[13px] font-medium truncate">{attachment.fileName}</p>
-          <p className="text-[10px] text-muted-foreground">
-            {attachment.fileSize > 0 ? formatFileSize(attachment.fileSize) : '...'}
-          </p>
+        <div className="min-w-0 flex-1 overflow-hidden leading-tight flex flex-col justify-center">
+          <ClampedFileName
+            text={attachment.fileName}
+            metaText={attachment.fileSize > 0 ? formatFileSize(attachment.fileSize) : '...'}
+            containerClassName="h-8"
+            textClassName="text-[13px] font-medium leading-[1.25]"
+            metaClassName="text-[10px] leading-[1.25]"
+            fadeTestId="chat-input-attachment-fade"
+            textTestId="chat-input-attachment-name"
+          />
         </div>
       </div>
 
@@ -1268,14 +1276,14 @@ function AttachmentPreview({
       {/* Error overlay */}
       {attachment.status === 'error' && (
         <div className="absolute inset-0 flex items-center justify-center bg-destructive/20">
-          <span className="text-[10px] text-destructive font-medium px-1">Error</span>
+          <span className="text-[10px] text-destructive font-medium px-1">{t('common:status.error')}</span>
         </div>
       )}
 
       <button
         onClick={onRemove}
         className="absolute right-1.5 top-1.5 rounded-[8px] border border-black/8 bg-white/92 p-1 text-foreground shadow-sm transition-colors hover:bg-white dark:border-white/10 dark:bg-black/70 dark:hover:bg-black"
-        title="Remove file"
+        title={t('filePreview.removeFile')}
       >
         <X className="h-3.5 w-3.5" />
       </button>

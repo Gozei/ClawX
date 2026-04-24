@@ -237,6 +237,56 @@ function getEmptyAssistantResponseError(): string {
   );
 }
 
+function getInterruptedReplyError(): string {
+  return translateChat(
+    'sessionErrors.replyInterrupted',
+    'The reply stopped before completion. Check your provider settings and try again.',
+  );
+}
+
+function isGenericAssistantRuntimeDetail(detail: string): boolean {
+  return /^(error|failed|failure|abort(?:ed)?|cancel(?:led|ed)?|stopped|terminated|interrupted)$/i.test(detail.trim());
+}
+
+function isErrorLikeStopReason(stopReason: string | null): boolean {
+  if (!stopReason) return false;
+  return /(error|fail|abort|cancel|terminate|interrupt|unauthor|auth|forbidden|timeout|rate)/i.test(stopReason);
+}
+
+function readAssistantRuntimeErrorField(record: Record<string, unknown> | null): string | null {
+  if (!record) return null;
+  for (const key of ['errorMessage', 'error_message', 'error', 'reason', 'detail']) {
+    const candidate = normalizeErrorDetail(record[key] as string | null | undefined);
+    if (candidate) return candidate;
+  }
+  return null;
+}
+
+function getAssistantRuntimeErrorNotice(message: RawMessage | undefined): string | null {
+  if (!message || message.role !== 'assistant') return null;
+
+  const record = message as unknown as Record<string, unknown>;
+  const stopReason = normalizeErrorDetail((record.stopReason ?? record.stop_reason) as string | null | undefined);
+  const detailsRecord = record.details && typeof record.details === 'object' && !Array.isArray(record.details)
+    ? record.details as Record<string, unknown>
+    : null;
+  const explicitError = readAssistantRuntimeErrorField(record) ?? readAssistantRuntimeErrorField(detailsRecord);
+  const status = normalizeErrorDetail(record.status as string | null | undefined)?.toLowerCase() ?? null;
+  const endedWithRuntimeError = !!explicitError || status === 'error' || isErrorLikeStopReason(stopReason);
+  if (!endedWithRuntimeError) return null;
+
+  const actionableDetail = explicitError
+    ?? ((stopReason && !isGenericAssistantRuntimeDetail(stopReason)) ? stopReason : null);
+  if (actionableDetail) {
+    const localizedDetail = localizeChatErrorDetail(actionableDetail);
+    if (localizedDetail && !isGenericAssistantRuntimeDetail(localizedDetail)) {
+      return localizedDetail;
+    }
+  }
+
+  return getInterruptedReplyError();
+}
+
 function getContinueConversationWarning(): string {
   return translateChat(
     'sessionWarnings.finalReplyMissing',
@@ -1145,9 +1195,11 @@ export {
   createLocalAssistantMessage,
   extractImagesAsAttachedFiles,
   getMessageText,
+  getAssistantRuntimeErrorNotice,
   getContinueConversationWarning,
   getEmptyAssistantResponseError,
   getChatNoticeMessage,
+  getInterruptedReplyError,
   getNoResponseError,
   getSendFailedError,
   extractMediaRefs,

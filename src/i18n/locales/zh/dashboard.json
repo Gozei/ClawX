@@ -18,7 +18,7 @@
         "subtitle": "集中展示网关、模型、通道与任务的运行状态，仅保留监控信息展示。",
         "metadata": {
             "gateway": "网关：{{state}}",
-            "models": "模型账户：{{count}}",
+            "models": "已配置模型：{{count}}",
             "channels": "通道在线：{{connected}} / {{total}}",
             "tasks": "任务启用：{{enabled}} / {{total}}",
             "syncing": "监控数据同步中",
@@ -52,6 +52,8 @@
             "port": "端口",
             "uptime": "运行时长",
             "lastError": "最近错误",
+            "totalModels": "模型总数",
+            "enabledModels": "启用模型",
             "totalAccounts": "账户总数",
             "enabledAccounts": "启用账户",
             "healthyAccounts": "可用账户",

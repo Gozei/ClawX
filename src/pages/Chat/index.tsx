@@ -8,15 +8,16 @@ import { forwardRef, type ForwardedRef, useCallback, useDeferredValue, useEffect
 import { AlertCircle, ChevronDown, ChevronRight, Loader2, Sparkles } from 'lucide-react';
 import { Virtuoso, type ContextProp, type ItemProps, type ListProps, type ScrollerProps, type VirtuosoHandle } from 'react-virtuoso';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useChatStore, type RawMessage, type ToolStatus } from '@/stores/chat';
+import { useChatStore, type AttachedFileMeta, type RawMessage, type ToolStatus } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
 import { AppLogo } from '@/components/branding/AppLogo';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { ChatMessage } from './ChatMessage';
+import { ChatFilePreviewPanel } from './ChatFilePreview';
 import { ChatInput } from './ChatInput';
 import { ChatToolbarV2 } from './ChatToolbarV2';
-import { CHAT_SURFACE_MAX_WIDTH_CLASS } from './layout';
+import { CHAT_CONTENT_COLUMN_MAX_WIDTH_CLASS, CHAT_SURFACE_MAX_WIDTH_CLASS } from './layout';
 import {
   assistantMessageShowsInChat,
   extractImages,
@@ -47,8 +48,15 @@ const ACTIVE_TURN_USER_MATCH_WINDOW_MS = 60_000;
 const SESSION_ENTRY_BOTTOM_STABILIZE_MS = 400;
 const PROCESS_ACTIVITY_SOFT_STALL_MS = 12_000;
 const PROCESS_ACTIVITY_LONG_STALL_MS = 30_000;
-
+const CHAT_CONTENT_COLUMN_WIDTH_CSS = 'min(calc(100% - 1rem), 54rem)';
+const CHAT_PREVIEW_DEFAULT_WIDTH_PERCENT = 50;
+const CHAT_PREVIEW_MIN_WIDTH_PERCENT = 25;
+const CHAT_PREVIEW_MAX_WIDTH_PERCENT = 75;
 type ActiveTurnAutoScrollMode = 'idle' | 'follow-bottom';
+
+function clampPreviewPaneWidth(widthPercent: number): number {
+  return Math.max(CHAT_PREVIEW_MIN_WIDTH_PERCENT, Math.min(CHAT_PREVIEW_MAX_WIDTH_PERCENT, widthPercent));
+}
 
 type ChatListItem =
   | {
@@ -76,6 +84,8 @@ type ChatListItem =
 
 type ChatVirtuosoContext = {
   disableOverflowAnchor: boolean;
+  horizontalOffsetPx: number;
+  scrollbarGutter?: 'auto' | 'stable both-edges';
   setScrollElement: (node: HTMLDivElement | null) => void;
 };
 
@@ -88,6 +98,20 @@ function assignForwardedRef<T>(ref: ForwardedRef<T>, value: T | null) {
   if (ref) {
     ref.current = value;
   }
+}
+
+function ChatContentMeasureRail({ horizontalOffsetPx = 0 }: { horizontalOffsetPx?: number }) {
+  return (
+    <div
+      aria-hidden="true"
+      data-testid="chat-content-measure-rail"
+      className={cn(CHAT_CONTENT_COLUMN_MAX_WIDTH_CLASS, 'pointer-events-none absolute left-0 right-0 top-0 mx-auto h-px min-w-0 opacity-0')}
+      style={{
+        width: CHAT_CONTENT_COLUMN_WIDTH_CSS,
+        transform: horizontalOffsetPx === 0 ? undefined : `translateX(${horizontalOffsetPx}px)`,
+      }}
+    />
+  );
 }
 
 const ChatVirtuosoScroller = forwardRef<HTMLDivElement, ScrollerProps & ContextProp<ChatVirtuosoContext>>(
@@ -105,14 +129,15 @@ const ChatVirtuosoScroller = forwardRef<HTMLDivElement, ScrollerProps & ContextP
         {...restProps}
         data-testid="chat-scroll-container"
         data-chat-scroll-container="true"
-        className={cn('flex-1 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto px-4 pb-8', resolvedClassName)}
+        className={cn('relative flex-1 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto px-4 pb-8', resolvedClassName)}
         style={{
           ...style,
           overflowAnchor: context.disableOverflowAnchor ? 'none' : style?.overflowAnchor,
           overflowX: 'hidden',
-          scrollbarGutter: 'stable both-edges',
+          scrollbarGutter: context.scrollbarGutter ?? 'stable both-edges',
         }}
       >
+        <ChatContentMeasureRail horizontalOffsetPx={context.horizontalOffsetPx} />
         {children}
       </div>
     );
@@ -130,7 +155,7 @@ function ChatVirtuosoHeader() {
 }
 
 const ChatVirtuosoList = forwardRef<HTMLDivElement, ListProps & ContextProp<ChatVirtuosoContext>>(
-  function ChatVirtuosoList({ children, style, ...restProps }, ref) {
+  function ChatVirtuosoList({ children, context, style, ...restProps }, ref) {
     const resolvedClassName = (restProps as { className?: string }).className;
     return (
       <div
@@ -138,14 +163,15 @@ const ChatVirtuosoList = forwardRef<HTMLDivElement, ListProps & ContextProp<Chat
         {...restProps}
         data-testid="chat-content-column"
         data-chat-content-column="true"
-        className={cn(CHAT_SURFACE_MAX_WIDTH_CLASS, 'mx-auto flex min-w-0 w-full flex-col gap-4', resolvedClassName)}
+        className={cn(CHAT_CONTENT_COLUMN_MAX_WIDTH_CLASS, 'mx-auto flex min-w-0 flex-col gap-4', resolvedClassName)}
         style={{
           ...style,
           boxSizing: 'border-box',
           display: 'flex',
           flexDirection: 'column',
           gap: '1rem',
-          width: '100%',
+          transform: context.horizontalOffsetPx === 0 ? undefined : `translateX(${context.horizontalOffsetPx}px)`,
+          width: CHAT_CONTENT_COLUMN_WIDTH_CSS,
         }}
       >
         {children}
@@ -169,7 +195,7 @@ const ChatVirtuosoItem = forwardRef<HTMLDivElement, ItemProps<ChatListItem> & Co
           padding: 0,
           width: '100%',
         }}
-        className="w-full min-w-0 last:mb-10"
+        className="min-w-0 last:mb-10"
       >
         {children}
       </div>
@@ -193,6 +219,8 @@ export function Chat() {
   const chatProcessDisplayMode = useSettingsStore((s) => s.chatProcessDisplayMode);
   const hideInternalRoutineProcesses = useSettingsStore((s) => s.hideInternalRoutineProcesses);
   const assistantMessageStyle = useSettingsStore((s) => s.assistantMessageStyle);
+  const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
+  const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
   const sessionRunningState = useChatStore((s) => s.sessionRunningState);
   const activeTurnBuffer = useChatStore((s) => s.activeTurnBuffer);
   const rawStreamingMessage = useChatStore((s) => s.streamingMessage);
@@ -221,6 +249,7 @@ export function Chat() {
   const chatListRef = useRef<VirtuosoHandle | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const activeTurnViewportAnchorRef = useRef<HTMLDivElement | null>(null);
+  const splitPaneRef = useRef<HTMLDivElement | null>(null);
   const activeTurnAutoScrollModeRef = useRef<ActiveTurnAutoScrollMode>('idle');
   const activeTurnTrackedTurnKeyRef = useRef<string | null>(null);
   const suppressedAutoFollowTurnKeyRef = useRef<string | null>(null);
@@ -232,9 +261,22 @@ export function Chat() {
   const activeTurnAutoScrollTargetRef = useRef(0);
   const activeTurnAutoScrollFrameRef = useRef<number | null>(null);
   const activeTurnAutoScrollAnimationRef = useRef<{ startTop: number; targetTop: number; startedAt: number } | null>(null);
+  const previewResizeStartXRef = useRef<number | null>(null);
+  const previewResizeStartWidthRef = useRef(CHAT_PREVIEW_DEFAULT_WIDTH_PERCENT);
+  const previewAutoCollapsedSidebarRef = useRef(false);
+  const previewPaneOpenRef = useRef(false);
+  const sidebarCollapsedRef = useRef(sidebarCollapsed);
+  const hadPreviewOpenRef = useRef(false);
   const [activeTurnUserInterruptVersion, setActiveTurnUserInterruptVersion] = useState(0);
   const [composerShellPadding, setComposerShellPadding] = useState({ left: 16, right: 16 });
+  const [scrollContainerNode, setScrollContainerNodeState] = useState<HTMLDivElement | null>(null);
+  const [contentColumnHorizontalOffsetPx, setContentColumnHorizontalOffsetPx] = useState(0);
+  const [selectedPreviewFile, setSelectedPreviewFile] = useState<AttachedFileMeta | null>(null);
+  const [previewPaneWidthPercent, setPreviewPaneWidthPercent] = useState(CHAT_PREVIEW_DEFAULT_WIDTH_PERCENT);
   const lastConsumedLocationKeyRef = useRef<string | null>(null);
+
+  previewPaneOpenRef.current = !!selectedPreviewFile;
+  sidebarCollapsedRef.current = sidebarCollapsed;
 
   const safeMessages = Array.isArray(messages) ? messages : EMPTY_MESSAGES;
   const sending = useMemo(() => (
@@ -251,6 +293,14 @@ export function Chat() {
   const showQueuedMessageCard = queuedMessageCount > 0 && (!isGatewayRunning || sending);
   const canSendQueuedDraftNow = isGatewayRunning && !sending;
   const minLoading = useMinLoading(loading && safeMessages.length > 0);
+  const restoreAutoCollapsedSidebar = useCallback(() => {
+    if (!previewAutoCollapsedSidebarRef.current) {
+      return;
+    }
+
+    previewAutoCollapsedSidebarRef.current = false;
+    setSidebarCollapsed(false);
+  }, [setSidebarCollapsed]);
 
   // Load data when gateway is running.
   // When the store already holds messages for this session (i.e. the user
@@ -273,6 +323,21 @@ export function Chat() {
     const shouldLoadQuietly = safeMessages.length > 0 || !isGatewayRunning;
     void loadHistory(shouldLoadQuietly);
   }, [currentSessionKey, isGatewayRunning, loadHistory]);
+
+  useEffect(() => {
+    restoreAutoCollapsedSidebar();
+    setSelectedPreviewFile(null);
+  }, [currentSessionKey, restoreAutoCollapsedSidebar]);
+
+  useLayoutEffect(() => {
+    const hasPreview = !!selectedPreviewFile;
+
+    if (!hasPreview && hadPreviewOpenRef.current) {
+      restoreAutoCollapsedSidebar();
+    }
+
+    hadPreviewOpenRef.current = hasPreview;
+  }, [restoreAutoCollapsedSidebar, selectedPreviewFile]);
 
   useEffect(() => {
     const routeState = location.state && typeof location.state === 'object'
@@ -528,6 +593,7 @@ export function Chat() {
   const isZh = (i18n.resolvedLanguage || i18n.language || '').startsWith('zh');
   const setScrollContainerNode = useCallback((node: HTMLDivElement | null) => {
     scrollContainerRef.current = node;
+    setScrollContainerNodeState((current) => (current === node ? current : node));
   }, []);
   useEffect(() => {
     const scrollElement = scrollContainerRef.current;
@@ -644,8 +710,58 @@ export function Chat() {
       resizeObserver?.disconnect();
     };
   }, [activeTurnScrollKey, chatListItems.length, loading, sending]);
-  useEffect(() => {
-    const scrollElement = scrollContainerRef.current;
+  useLayoutEffect(() => {
+    const scrollElement = scrollContainerNode;
+    if (!scrollElement) {
+      setContentColumnHorizontalOffsetPx(0);
+      return;
+    }
+
+    const updateHorizontalOffset = () => {
+      const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
+      if (!contentColumn) {
+        setContentColumnHorizontalOffsetPx(0);
+        return;
+      }
+
+      const scrollRect = scrollElement.getBoundingClientRect();
+      const contentRect = contentColumn.getBoundingClientRect();
+      const actualLeft = contentRect.left - scrollRect.left;
+      const expectedLeft = (scrollRect.width - contentRect.width) / 2;
+      const drift = expectedLeft - actualLeft;
+      setContentColumnHorizontalOffsetPx((current) => (
+        (() => {
+          const nextOffset = Math.round(current + drift);
+          return current === nextOffset ? current : nextOffset;
+        })()
+      ));
+    };
+
+    updateHorizontalOffset();
+
+    if (typeof ResizeObserver !== 'function') {
+      window.addEventListener('resize', updateHorizontalOffset);
+      return () => {
+        window.removeEventListener('resize', updateHorizontalOffset);
+      };
+    }
+
+    const observer = new ResizeObserver(() => {
+      updateHorizontalOffset();
+    });
+    observer.observe(scrollElement);
+    const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
+    if (contentColumn) {
+      observer.observe(contentColumn);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [chatListItems.length, currentSessionKey, loading, scrollContainerNode, sending]);
+
+  useLayoutEffect(() => {
+    const scrollElement = scrollContainerNode;
     if (!scrollElement) {
       setComposerShellPadding({ left: 16, right: 16 });
       return;
@@ -689,7 +805,7 @@ export function Chat() {
     return () => {
       observer.disconnect();
     };
-  }, [currentSessionKey, chatListItems.length, loading, sending]);
+  }, [contentColumnHorizontalOffsetPx, currentSessionKey, chatListItems.length, loading, scrollContainerNode, sending]);
   const isScrollNearBottom = useCallback(() => {
     const scrollElement = scrollContainerRef.current;
     if (!scrollElement) return false;
@@ -712,8 +828,10 @@ export function Chat() {
   }, [activeTurnScrollKey]);
   const chatListContext = useMemo<ChatVirtuosoContext>(() => ({
     disableOverflowAnchor: sending && !!activeTurnScrollKey,
+    horizontalOffsetPx: contentColumnHorizontalOffsetPx,
+    scrollbarGutter: 'stable both-edges',
     setScrollElement: setScrollContainerNode,
-  }), [activeTurnScrollKey, sending, setScrollContainerNode]);
+  }), [activeTurnScrollKey, contentColumnHorizontalOffsetPx, sending, setScrollContainerNode]);
 
   useEffect(() => {
     if (!hasMountedSessionRef.current) {
@@ -967,6 +1085,44 @@ export function Chat() {
     pendingLocalSendFollowBottomRef.current = true;
     void sendMessage(text, attachments, targetAgentId);
   }, [sendMessage]);
+  const handleOpenAttachmentPreview = useCallback((file: AttachedFileMeta) => {
+    if (!previewPaneOpenRef.current) {
+      previewAutoCollapsedSidebarRef.current = !sidebarCollapsedRef.current;
+      if (!sidebarCollapsedRef.current) {
+        setSidebarCollapsed(true);
+      }
+    }
+    setSelectedPreviewFile(file);
+  }, [setSidebarCollapsed]);
+  const handleCloseAttachmentPreview = useCallback(() => {
+    restoreAutoCollapsedSidebar();
+    setSelectedPreviewFile(null);
+  }, [restoreAutoCollapsedSidebar]);
+  const handlePreviewResizeStart = useCallback((event: { clientX: number; preventDefault: () => void }) => {
+    if (!selectedPreviewFile || window.innerWidth < 1024) return;
+    event.preventDefault();
+    previewResizeStartXRef.current = event.clientX;
+    previewResizeStartWidthRef.current = previewPaneWidthPercent;
+
+    const handlePointerMove = (moveEvent: MouseEvent) => {
+      if (previewResizeStartXRef.current == null || !splitPaneRef.current) return;
+      const containerWidth = splitPaneRef.current.getBoundingClientRect().width;
+      if (!containerWidth) return;
+
+      const deltaX = moveEvent.clientX - previewResizeStartXRef.current;
+      const deltaPercent = (deltaX / containerWidth) * 100;
+      setPreviewPaneWidthPercent(clampPreviewPaneWidth(previewResizeStartWidthRef.current - deltaPercent));
+    };
+
+    const stopResizing = () => {
+      previewResizeStartXRef.current = null;
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', stopResizing);
+    };
+
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mouseup', stopResizing, { once: true });
+  }, [previewPaneWidthPercent, selectedPreviewFile]);
   const renderChatListItem = useCallback((_: number, item: ChatListItem) => {
     switch (item.type) {
       case 'history':
@@ -981,6 +1137,7 @@ export function Chat() {
               assistantMessageStyle={assistantMessageStyle}
               hideInternalRoutineProcesses={hideInternalRoutineProcesses}
               onProcessSectionExpand={handleActiveTurnUserInterrupt}
+              onOpenAttachmentPreview={handleOpenAttachmentPreview}
             />
           );
         }
@@ -989,6 +1146,7 @@ export function Chat() {
           <ChatMessage
             message={item.item.message}
             showThinking={showThinking}
+            onOpenAttachmentPreview={handleOpenAttachmentPreview}
           />
         );
       case 'active-turn':
@@ -1011,6 +1169,7 @@ export function Chat() {
               streamingTools={streamingTools}
               sending={sending}
               onProcessSectionExpand={handleActiveTurnUserInterrupt}
+              onOpenAttachmentPreview={handleOpenAttachmentPreview}
             />
           </div>
         ) : null;
@@ -1021,6 +1180,7 @@ export function Chat() {
             showThinking={showThinking}
             isStreaming={sending}
             hideAvatar={shouldHideStandaloneStreamingAvatar}
+            onOpenAttachmentPreview={handleOpenAttachmentPreview}
           />
         );
       case 'activity':
@@ -1040,6 +1200,7 @@ export function Chat() {
     currentSessionKey,
     effectiveActiveTurnProcessMessages,
     handleActiveTurnUserInterrupt,
+    handleOpenAttachmentPreview,
     hasAnyStreamContent,
     hideInternalRoutineProcesses,
     pendingFinal,
@@ -1062,13 +1223,26 @@ export function Chat() {
           'radial-gradient(circle at top right, rgba(59,130,246,0.10), transparent 24%), radial-gradient(circle at 18% 12%, rgba(148,163,184,0.08), transparent 18%)',
       }}
     >
-      {/* Toolbar */}
-      <div
-        data-testid="chat-toolbar-header"
-        className="flex h-14 shrink-0 items-center justify-end border-b border-black/5 bg-white/32 px-4 backdrop-blur-md dark:border-white/5 dark:bg-white/[0.02]"
-      >
-        <ChatToolbarV2 />
-      </div>
+      <div ref={splitPaneRef} className="relative flex min-h-0 flex-1 overflow-hidden">
+        <div
+          data-testid="chat-main-pane"
+          className={cn(
+            'relative flex min-h-0 min-w-0 flex-1 flex-col',
+            selectedPreviewFile && 'lg:flex-none max-lg:!w-full max-lg:!basis-full',
+          )}
+          style={selectedPreviewFile
+            ? {
+                width: `${100 - previewPaneWidthPercent}%`,
+                flexBasis: `${100 - previewPaneWidthPercent}%`,
+              }
+            : undefined}
+        >
+          <div
+            data-testid="chat-toolbar-header"
+            className="flex h-14 shrink-0 items-center justify-end border-b border-black/5 bg-white/32 px-4 backdrop-blur-md dark:border-white/5 dark:bg-white/[0.02]"
+          >
+            <ChatToolbarV2 />
+          </div>
 
       {/* Messages Area */}
       {showSessionLoadingState ? (
@@ -1079,7 +1253,11 @@ export function Chat() {
           className="flex-1 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto px-4 pt-5 pb-8"
           style={{ scrollbarGutter: 'stable both-edges' }}
         >
-          <div data-testid="chat-content-column" className={cn(CHAT_SURFACE_MAX_WIDTH_CLASS, 'mx-auto flex min-h-full min-w-0 items-center justify-center')}>
+          <div
+            data-testid="chat-content-column"
+            className={cn(CHAT_CONTENT_COLUMN_MAX_WIDTH_CLASS, 'mx-auto flex min-h-full min-w-0 items-center justify-center')}
+            style={{ width: CHAT_CONTENT_COLUMN_WIDTH_CSS }}
+          >
             <div className="bg-background shadow-lg rounded-full border border-border p-2.5">
               <LoadingSpinner size="md" />
             </div>
@@ -1093,7 +1271,11 @@ export function Chat() {
           className="flex-1 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto px-4 pt-5 pb-8"
           style={{ scrollbarGutter: 'stable both-edges' }}
         >
-          <div data-testid="chat-content-column" className={cn(CHAT_SURFACE_MAX_WIDTH_CLASS, 'mx-auto min-w-0')}>
+          <div
+            data-testid="chat-content-column"
+            className={cn(CHAT_CONTENT_COLUMN_MAX_WIDTH_CLASS, 'mx-auto min-w-0')}
+            style={{ width: CHAT_CONTENT_COLUMN_WIDTH_CSS }}
+          >
             <WelcomeScreenMinimal />
           </div>
         </div>
@@ -1250,6 +1432,31 @@ export function Chat() {
           </div>
         </div>
       )}
+
+        </div>
+
+        {selectedPreviewFile ? (
+          <>
+            <div
+              data-testid="chat-preview-resize-handle"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize chat preview"
+              onMouseDown={handlePreviewResizeStart}
+              className="absolute inset-y-0 z-20 hidden w-3 -translate-x-1/2 cursor-col-resize lg:block"
+              style={{ left: `${100 - previewPaneWidthPercent}%` }}
+            >
+              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-black/8 transition-colors hover:bg-primary/45 dark:bg-white/10 dark:hover:bg-primary/55" />
+            </div>
+            <ChatFilePreviewPanel
+              key={selectedPreviewFile.filePath ?? `${selectedPreviewFile.fileName}:${selectedPreviewFile.mimeType}:${selectedPreviewFile.fileSize}`}
+              file={selectedPreviewFile}
+              desktopWidthPercent={previewPaneWidthPercent}
+              onClose={handleCloseAttachmentPreview}
+            />
+          </>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -1465,6 +1672,7 @@ function ProcessSection({
   showFinalDivider,
   streamingTools,
   onExpandStart,
+  onOpenAttachmentPreview,
 }: {
   processMessages: RawMessage[];
   processStreamingMessage?: RawMessage | null;
@@ -1481,6 +1689,7 @@ function ProcessSection({
   showFinalDivider?: boolean;
   streamingTools?: ToolStatus[];
   onExpandStart?: () => void;
+  onOpenAttachmentPreview?: (file: AttachedFileMeta) => void;
 }) {
   const { i18n } = useTranslation('chat');
   const language = i18n?.resolvedLanguage || i18n?.language;
@@ -1604,7 +1813,7 @@ function ProcessSection({
   );
 
   return (
-    <div className="space-y-2.5">
+    <div className="w-full space-y-2.5">
       <div className="flex items-center gap-3" data-testid="chat-process-header-row">
         <div
           data-testid="chat-process-avatar"
@@ -1676,6 +1885,7 @@ function ProcessSection({
                   showThinking={showThinking}
                   hideAvatar
                   constrainWidth={false}
+                  onOpenAttachmentPreview={onOpenAttachmentPreview}
                 />
               ))}
               {hasStreamingProcessContent && effectiveProcessStreamingMessage && (
@@ -1720,6 +1930,7 @@ function CollapsedProcessTurn({
   assistantMessageStyle,
   hideInternalRoutineProcesses,
   onProcessSectionExpand,
+  onOpenAttachmentPreview,
 }: {
   userMessage: RawMessage;
   intermediateMessages: RawMessage[];
@@ -1729,6 +1940,7 @@ function CollapsedProcessTurn({
   assistantMessageStyle: AssistantMessageStyle;
   hideInternalRoutineProcesses: boolean;
   onProcessSectionExpand?: () => void;
+  onOpenAttachmentPreview?: (file: AttachedFileMeta) => void;
 }) {
   const { t } = useTranslation('chat');
   const { collapsedProcessMessage, finalDisplayMessage } = splitFinalMessageForTurnDisplay(finalMessage);
@@ -1745,7 +1957,11 @@ function CollapsedProcessTurn({
 
   return (
     <div className={cn('space-y-3', hasProcessSection && finalHasVisibleContent && 'space-y-2')}>
-      <ChatMessage message={userMessage} showThinking={showThinking} />
+      <ChatMessage
+        message={userMessage}
+        showThinking={showThinking}
+        onOpenAttachmentPreview={onOpenAttachmentPreview}
+      />
 
       {hasProcessSection && (
         <ProcessSection
@@ -1760,6 +1976,7 @@ function CollapsedProcessTurn({
           completedAtMs={resolveMessageTimestampMs(finalMessage, resolveMessageTimestampMs(userMessage))}
           showFinalDivider={finalHasVisibleContent}
           onExpandStart={onProcessSectionExpand}
+          onOpenAttachmentPreview={onOpenAttachmentPreview}
         />
       )}
 
@@ -1768,13 +1985,18 @@ function CollapsedProcessTurn({
           message={finalDisplayMessage}
           showThinking={false}
           hideAvatar={hasProcessSection}
+          onOpenAttachmentPreview={onOpenAttachmentPreview}
         />
       )}
 
       {/* 闁告帒妫涚划宥囨喆閸℃绂堥柡鍫海閻︽垿宕氶銏犳瘔閺夆晛娲ㄩ埢濂稿礌?缂備礁鐗忛…鍫ュ籍閺堢數鐭濋悘蹇旂箚閻︻垶寮€涙啸闁诡収鍨辩憰鍡涘蓟閹垮嫮骞㈤柛鎰С缁楀鎮扮仦钘夌仧闁圭粯鍔楅妵姘舵偨閵婏箑鐓曢柛鎺楁敱閺屽﹪骞嬮弽顒傛闁轰礁鐡ㄥΟ澶岀矆濞差亖鍋撴径鎰┾偓?*/}
       {!finalHasVisibleContent && !hasProcessSection && (
         <>
-          <ChatMessage message={finalMessage} showThinking={showThinking} />
+          <ChatMessage
+            message={finalMessage}
+            showThinking={showThinking}
+            onOpenAttachmentPreview={onOpenAttachmentPreview}
+          />
           {pipelineMissesAssistantBody && (
             <div
               className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3 text-sm text-muted-foreground"
@@ -1805,6 +2027,7 @@ function ActiveTurn({
   streamingTools,
   sending,
   onProcessSectionExpand,
+  onOpenAttachmentPreview,
 }: {
   userMessage: RawMessage;
   processMessages: RawMessage[];
@@ -1821,6 +2044,7 @@ function ActiveTurn({
   streamingTools: ToolStatus[];
   sending: boolean;
   onProcessSectionExpand?: () => void;
+  onOpenAttachmentPreview?: (file: AttachedFileMeta) => void;
 }) {
   const liveProcessMessages = sending
     ? [
@@ -1863,7 +2087,11 @@ function ActiveTurn({
   return (
     <div className={cn('space-y-3', hasProcessSection && (finalHasVisibleContent || finalStreamingHasVisibleContent) && 'space-y-2')}>
       <div className="min-w-0">
-        <ChatMessage message={userMessage} showThinking={showThinking} />
+        <ChatMessage
+          message={userMessage}
+          showThinking={showThinking}
+          onOpenAttachmentPreview={onOpenAttachmentPreview}
+        />
       </div>
 
       {hasProcessSection && (
@@ -1884,6 +2112,7 @@ function ActiveTurn({
           showFinalDivider={!sending && (finalHasVisibleContent || finalStreamingHasVisibleContent)}
           streamingTools={streamingTools}
           onExpandStart={onProcessSectionExpand}
+          onOpenAttachmentPreview={onOpenAttachmentPreview}
         />
       )}
 
@@ -1892,6 +2121,7 @@ function ActiveTurn({
           message={finalMessage}
           showThinking={false}
           hideAvatar={hasProcessSection}
+          onOpenAttachmentPreview={onOpenAttachmentPreview}
         />
       )}
 
@@ -1901,6 +2131,7 @@ function ActiveTurn({
           showThinking={false}
           hideAvatar={hasProcessSection}
           isStreaming={sending}
+          onOpenAttachmentPreview={onOpenAttachmentPreview}
         />
       )}
 
@@ -2115,7 +2346,7 @@ function PreOutputStatusPanel({ testIdPrefix }: { testIdPrefix: string }) {
 function TypingIndicator() {
   return (
     <div
-      className="group min-w-0 max-w-full space-y-3.5 pt-0.5"
+      className="group w-full min-w-0 space-y-3.5 pt-0.5"
       data-testid="chat-typing-indicator"
     >
       <div
@@ -2228,4 +2459,3 @@ function ActivityIndicator({ phase }: { phase: 'tool_processing' }) {
 }
 
 export default Chat;
-

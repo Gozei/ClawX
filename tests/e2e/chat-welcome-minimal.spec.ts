@@ -13,6 +13,7 @@ test.describe('Chat welcome screen', () => {
         await newChatButton.click({ force: true });
       }
 
+      await expect(page.getByText('页面加载失败')).toHaveCount(0);
       await expect(page.getByTestId('chat-scroll-container')).toBeVisible();
       await expect(page.getByTestId('chat-content-column')).toBeVisible();
       await expect(page.getByTestId('chat-welcome-logo')).toBeVisible();

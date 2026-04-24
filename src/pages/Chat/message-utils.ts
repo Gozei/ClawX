@@ -4,7 +4,10 @@
  * message content formats returned by the Gateway.
  */
 import type { RawMessage, ContentBlock } from '@/stores/chat';
-import { stripInjectedInboundPrelude } from '../../../shared/inbound-user-text';
+import {
+  stripInjectedInboundPrelude,
+  stripLeadingInternalHeartbeatMaintenance,
+} from '../../../shared/inbound-user-text';
 
 /** 不参与正文回退拼接的工具/思考类块（避免重复与噪音） */
 function isNonBodyAssistantBlockType(type: string | undefined): boolean {
@@ -20,6 +23,10 @@ function isNonBodyAssistantBlockType(type: string | undefined): boolean {
 
 const SYSTEM_LINE_RE = /^System(?: \(untrusted\))?:\s*(?:\[[^\]]+\]\s*)?(.*)$/i;
 const EXEC_SYSTEM_RE = /^Exec (?:completed|finished)\s*\(([^)]*)\)(?:\s*::\s*([\s\S]*))?$/i;
+const INTERNAL_ASYNC_EXEC_COMPLETION_RE =
+  /^An async command you ran earlier has completed\.\s*The result is shown in the system messages above\.\s*Handle the result internally\.\s*Do not relay it to the user unless explicitly requested\.\s*$/i;
+const INTERNAL_CRON_NO_CONTENT_RE =
+  /^A scheduled cron event was triggered, but no event content was found\.\s*Handle this internally and reply HEARTBEAT_OK when nothing needs user-facing follow-up\.\s*$/i;
 const HEARTBEAT_PROMPT_FALLBACK_RE =
   /^(?:如果存在 HEARTBEAT\.md|读取 HEARTBEAT\.md 时|当前时间[:：]|Read HEARTBEAT\.md if it exists|When reading HEARTBEAT\.md|Current time:)/i;
 const HEARTBEAT_PROMPT_LINE_RE =
@@ -30,6 +37,13 @@ function isPreCompactionMemoryFlushPrompt(text: string): boolean {
   return /^Pre-compaction memory flush\./i.test(normalized)
     && /Store durable memories only in memory\//i.test(normalized)
     && /reply with NO_REPLY\./i.test(normalized);
+}
+
+function isHeartbeatMaintenanceLine(line: string): boolean {
+  return HEARTBEAT_PROMPT_LINE_RE.test(line)
+    || HEARTBEAT_PROMPT_FALLBACK_RE.test(line)
+    || INTERNAL_ASYNC_EXEC_COMPLETION_RE.test(line)
+    || INTERNAL_CRON_NO_CONTENT_RE.test(line);
 }
 
 function summarizeSystemHeartbeatNoise(text: string): string {
@@ -46,7 +60,7 @@ function summarizeSystemHeartbeatNoise(text: string): string {
   let otherSystemLineCount = 0;
 
   for (const line of lines) {
-    if (HEARTBEAT_PROMPT_LINE_RE.test(line) || HEARTBEAT_PROMPT_FALLBACK_RE.test(line)) {
+    if (isHeartbeatMaintenanceLine(line)) {
       heartbeatLineCount += 1;
       continue;
     }
@@ -117,7 +131,7 @@ function isHeartbeatMaintenanceOnlyText(text: string): boolean {
   let sawHeartbeatDirective = false;
 
   for (const line of lines) {
-    if (HEARTBEAT_PROMPT_LINE_RE.test(line) || HEARTBEAT_PROMPT_FALLBACK_RE.test(line)) {
+    if (isHeartbeatMaintenanceLine(line)) {
       sawHeartbeatDirective = true;
       continue;
     }
@@ -138,11 +152,11 @@ function isHeartbeatMaintenanceOnlyText(text: string): boolean {
  * and the timestamp prefix [Day Date Time Timezone].
  */
 function cleanUserText(text: string): string {
-  const cleaned = stripInjectedInboundPrelude(text
+  const cleaned = stripLeadingInternalHeartbeatMaintenance(stripInjectedInboundPrelude(text
     // Remove [media attached: path (mime) | path] references
     .replace(/\s*\[media attached:[^\]]*\]/g, '')
     // Remove [message_id: uuid]
-    .replace(/\s*\[message_id:\s*[^\]]+\]/g, ''))
+    .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')))
     .trim();
 
   if (isPreCompactionMemoryFlushPrompt(cleaned)) {
@@ -183,10 +197,12 @@ export function isInternalMaintenanceTurnUserMessage(message: RawMessage | unkno
   const rawText = extractRawText(message);
   if (!rawText.trim()) return false;
 
-  const normalized = stripInjectedInboundPrelude(rawText
+  const normalized = stripLeadingInternalHeartbeatMaintenance(stripInjectedInboundPrelude(rawText
     .replace(/\s*\[media attached:[^\]]*\]/g, '')
-    .replace(/\s*\[message_id:\s*[^\]]+\]/g, ''))
+    .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')))
     .trim();
+
+  if (!normalized) return true;
 
   return isPreCompactionMemoryFlushPrompt(normalized) || isHeartbeatMaintenanceOnlyText(normalized);
 }

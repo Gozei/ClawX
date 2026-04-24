@@ -364,10 +364,10 @@ describe('ChatMessage', () => {
     expect(screen.getByTestId('chat-file-card')).toBeInTheDocument();
     expect(screen.getByText('HEARTBEAT.md')).toBeInTheDocument();
     expect(screen.getByTestId('chat-file-ext-badge')).toHaveTextContent('MD');
-    expect(screen.getByText(/Markdown/)).toBeInTheDocument();
+    expect(screen.getByText('193 B')).toBeInTheDocument();
   });
 
-  it('aligns user file attachments to the right edge of the message column', () => {
+  it('aligns user file attachments with the shared preview column', () => {
     const message: RawMessage = {
       id: 'user-file-1',
       role: 'user',

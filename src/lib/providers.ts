@@ -369,12 +369,8 @@ export function shouldShowProviderModelId(
 export function resolveProviderModelForSave(
   provider: Pick<ProviderTypeInfo, 'defaultModelId' | 'showModelId' | 'showModelIdInDevModeOnly'> | undefined,
   modelId: string,
-  devModeUnlocked: boolean
+  _devModeUnlocked: boolean
 ): string | undefined {
-  if (!shouldShowProviderModelId(provider, devModeUnlocked)) {
-    return undefined;
-  }
-
   const trimmedModelId = modelId.trim();
   return trimmedModelId || provider?.defaultModelId || undefined;
 }

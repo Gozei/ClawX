@@ -1123,6 +1123,13 @@ function ProviderContent({
       : [],
     [selectedProvider, baseUrl, apiProtocol],
   );
+  const savedModelId = resolveProviderModelForSave(
+    selectedProviderData,
+    modelId,
+    devModeUnlocked,
+  );
+  const shouldShowSavedModel = Boolean(savedModelId)
+    && (keyValid === true || (!showModelIdField && Boolean(selectedAccountId)));
   const selectedRecommendedModel = recommendedModels.some((option) => option.value === modelId)
     ? modelId
     : '__custom__';
@@ -1308,6 +1315,7 @@ function ProviderContent({
         </div>
         <div className="relative" ref={providerMenuRef}>
           <button
+            data-testid="setup-provider-trigger"
             type="button"
             aria-haspopup="listbox"
             aria-expanded={providerMenuOpen}
@@ -1353,6 +1361,7 @@ function ProviderContent({
                 return (
                   <button
                     key={p.id}
+                    data-testid={`setup-provider-option-${p.id}`}
                     type="button"
                     role="option"
                     aria-selected={isSelected}
@@ -1601,6 +1610,7 @@ function ProviderContent({
               <div className="relative">
                 <Input
                   id="apiKey"
+                  data-testid="setup-provider-api-key-input"
                   type={showKey ? 'text' : 'password'}
                   placeholder={selectedProviderData?.placeholder}
                   value={apiKey}
@@ -1754,6 +1764,7 @@ function ProviderContent({
 
           {/* Validate & Save */}
           <Button
+            data-testid="setup-provider-save-button"
             onClick={handleValidateAndSave}
             disabled={!canSubmit || validating}
             className={cn("w-full", useOAuthFlow && "hidden")}
@@ -1768,6 +1779,23 @@ function ProviderContent({
             <p className={cn('text-sm text-center', keyValid ? 'text-green-400' : 'text-red-400')}>
               {keyValid ? `✓ ${t('provider.valid')}` : `✗ ${t('provider.invalid')}`}
             </p>
+          )}
+
+          {shouldShowSavedModel && savedModelId && (
+            <div
+              data-testid="setup-provider-saved-model"
+              className="rounded-lg border border-border bg-muted/40 p-3 text-left"
+            >
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {t('provider.modelId')}
+              </p>
+              <p
+                data-testid="setup-provider-saved-model-value"
+                className="mt-1 break-all font-mono text-sm text-foreground"
+              >
+                {savedModelId}
+              </p>
+            </div>
           )}
 
           <p className="text-sm text-muted-foreground text-center">

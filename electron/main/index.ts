@@ -3,9 +3,10 @@
  * Manages window creation, system tray, and IPC handlers
  */
 import './warning-filter';
-import { app, BrowserWindow, nativeImage, session, shell } from 'electron';
+import { app, BrowserWindow, nativeImage, screen, session, shell } from 'electron';
 import type { Server } from 'node:http';
 import { join } from 'path';
+import { pathToFileURL } from 'node:url';
 import { GatewayManager, type GatewayStatus } from '../gateway/manager';
 import { registerIpcHandlers } from './ipc-handlers';
 import { createTray, updateTrayStatus } from './tray';
@@ -48,6 +49,7 @@ import { syncAllProviderAuthToRuntime } from '../services/providers/provider-run
 import { migrateLegacyUserDataIfNeeded } from '../utils/user-data-migration';
 import { auditAndRepairOpenClawRuntimeConfig } from '../utils/openclaw-runtime-audit';
 import { syncRuntimeLoggingSettingsFromStore } from '../utils/logging-config';
+import type { FilePreviewWindowRequest } from '../../shared/file-preview';
 
 const WINDOWS_APP_USER_MODEL_ID = 'app.clawx.desktop';
 const isE2EMode = process.env.CLAWX_E2E === '1';
@@ -127,6 +129,7 @@ const gotTheLock = gotElectronLock && gotFileLock;
 
 // Global references
 let mainWindow: BrowserWindow | null = null;
+let filePreviewWindow: BrowserWindow | null = null;
 let gatewayManager!: GatewayManager;
 let clawHubService!: ClawHubService;
 let hostEventBus!: HostEventBus;
@@ -161,6 +164,62 @@ function getAppIcon(): Electron.NativeImage | undefined {
   return icon.isEmpty() ? undefined : icon;
 }
 
+type RendererRouteLoadOptions = {
+  hash?: string;
+  query?: Record<string, string | undefined>;
+  openDevToolsInDev?: boolean;
+};
+
+function buildRendererUrl(options: RendererRouteLoadOptions = {}): string {
+  const shouldSkipSetupForE2E = process.env.CLAWX_E2E_SKIP_SETUP === '1';
+  const rendererUrl = process.env.VITE_DEV_SERVER_URL
+    ? new URL(process.env.VITE_DEV_SERVER_URL)
+    : pathToFileURL(join(__dirname, '../../dist/index.html'));
+  const query = {
+    ...(shouldSkipSetupForE2E ? { e2eSkipSetup: '1' } : {}),
+    ...(process.env.CLAWX_E2E_SETUP_STEP ? { e2eSetupStep: process.env.CLAWX_E2E_SETUP_STEP } : {}),
+    ...(options.query ?? {}),
+  };
+
+  for (const [key, value] of Object.entries(query)) {
+    if (typeof value === 'string' && value.length > 0) {
+      rendererUrl.searchParams.set(key, value);
+    }
+  }
+
+  if (options.hash) {
+    rendererUrl.hash = options.hash.startsWith('#') ? options.hash : `#${options.hash}`;
+  }
+
+  return rendererUrl.toString();
+}
+
+function loadRendererWindow(win: BrowserWindow, options: RendererRouteLoadOptions = {}): void {
+  void win.loadURL(buildRendererUrl(options));
+
+  if (process.env.VITE_DEV_SERVER_URL && options.openDevToolsInDev && !isE2EMode) {
+    win.webContents.openDevTools();
+  }
+}
+
+function configureWindowOpenHandler(win: BrowserWindow): void {
+  // Handle external links - only allow safe protocols to prevent arbitrary
+  // command execution via shell.openExternal() (e.g. file://, ms-msdt:, etc.)
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        shell.openExternal(url);
+      } else {
+        logger.warn(`Blocked openExternal for disallowed protocol: ${parsed.protocol}`);
+      }
+    } catch {
+      logger.warn(`Blocked openExternal for malformed URL: ${url}`);
+    }
+    return { action: 'deny' };
+  });
+}
+
 /**
  * Create the main application window
  */
@@ -168,7 +227,6 @@ function createWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin';
   const isWindows = process.platform === 'win32';
   const useCustomTitleBar = isWindows;
-  const shouldSkipSetupForE2E = process.env.CLAWX_E2E_SKIP_SETUP === '1';
 
   const win = new BrowserWindow({
     width: 1280,
@@ -189,45 +247,97 @@ function createWindow(): BrowserWindow {
     show: false,
   });
 
-  // Handle external links — only allow safe protocols to prevent arbitrary
-  // command execution via shell.openExternal() (e.g. file://, ms-msdt:, etc.)
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
-        shell.openExternal(url);
-      } else {
-        logger.warn(`Blocked openExternal for disallowed protocol: ${parsed.protocol}`);
-      }
-    } catch {
-      logger.warn(`Blocked openExternal for malformed URL: ${url}`);
-    }
-    return { action: 'deny' };
-  });
-
-  // Load the app
-  if (process.env.VITE_DEV_SERVER_URL) {
-    const rendererUrl = new URL(process.env.VITE_DEV_SERVER_URL);
-    if (shouldSkipSetupForE2E) {
-      rendererUrl.searchParams.set('e2eSkipSetup', '1');
-    }
-    if (process.env.CLAWX_E2E_SETUP_STEP) {
-      rendererUrl.searchParams.set('e2eSetupStep', process.env.CLAWX_E2E_SETUP_STEP);
-    }
-    win.loadURL(rendererUrl.toString());
-    if (!isE2EMode) {
-      win.webContents.openDevTools();
-    }
-  } else {
-    win.loadFile(join(__dirname, '../../dist/index.html'), {
-      query: {
-        ...(shouldSkipSetupForE2E ? { e2eSkipSetup: '1' } : {}),
-        ...(process.env.CLAWX_E2E_SETUP_STEP ? { e2eSetupStep: process.env.CLAWX_E2E_SETUP_STEP } : {}),
-      },
-    });
-  }
+  configureWindowOpenHandler(win);
+  loadRendererWindow(win, { openDevToolsInDev: true });
 
   return win;
+}
+
+function getFilePreviewWindowBounds(): Electron.Rectangle {
+  const referenceBounds = mainWindow && !mainWindow.isDestroyed()
+    ? mainWindow.getBounds()
+    : screen.getPrimaryDisplay().workArea;
+  const display = screen.getDisplayMatching(referenceBounds);
+  const workArea = display.workArea;
+  const width = Math.min(1440, Math.max(720, Math.round(workArea.width * 0.8)));
+  const height = Math.min(960, Math.max(520, Math.round(workArea.height * 0.82)));
+
+  return {
+    x: workArea.x + Math.max(0, Math.round((workArea.width - width) / 2)),
+    y: workArea.y + Math.max(0, Math.round((workArea.height - height) / 2)),
+    width,
+    height,
+  };
+}
+
+function createFilePreviewWindow(file: FilePreviewWindowRequest): BrowserWindow {
+  const isMac = process.platform === 'darwin';
+  const previewWindowBounds = getFilePreviewWindowBounds();
+  const query = {
+    fileName: file.fileName,
+    mimeType: file.mimeType,
+    fileSize: String(file.fileSize),
+    ...(file.filePath ? { filePath: file.filePath } : {}),
+    ...(Number.isFinite(file.slideIndex) && (file.slideIndex ?? 0) > 0
+      ? { slideIndex: String(file.slideIndex) }
+      : {}),
+  };
+
+  if (filePreviewWindow && !filePreviewWindow.isDestroyed()) {
+    filePreviewWindow.setTitle(file.fileName);
+    loadRendererWindow(filePreviewWindow, {
+      hash: `/file-preview?${new URLSearchParams(query).toString()}`,
+    });
+    focusWindow(filePreviewWindow);
+    return filePreviewWindow;
+  }
+
+  const previewWindow = new BrowserWindow({
+    x: previewWindowBounds.x,
+    y: previewWindowBounds.y,
+    width: previewWindowBounds.width,
+    height: previewWindowBounds.height,
+    minWidth: 720,
+    minHeight: 520,
+    title: file.fileName,
+    autoHideMenuBar: true,
+    backgroundColor: '#f8fafc',
+    icon: getAppIcon(),
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: false,
+      webviewTag: true,
+    },
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
+    trafficLightPosition: isMac ? { x: 16, y: 16 } : undefined,
+    frame: isMac,
+    show: false,
+  });
+
+  configureWindowOpenHandler(previewWindow);
+  attachContextMenu(previewWindow.webContents);
+  loadRendererWindow(previewWindow, {
+    hash: `/file-preview?${new URLSearchParams(query).toString()}`,
+  });
+
+  previewWindow.once('ready-to-show', () => {
+    if (previewWindow.isDestroyed()) {
+      return;
+    }
+    previewWindow.show();
+    previewWindow.focus();
+  });
+
+  previewWindow.on('closed', () => {
+    if (filePreviewWindow === previewWindow) {
+      filePreviewWindow = null;
+    }
+  });
+
+  filePreviewWindow = previewWindow;
+  return previewWindow;
 }
 
 function focusWindow(win: BrowserWindow): void {
@@ -416,7 +526,7 @@ async function initialize(): Promise<void> {
   );
 
   // Register IPC handlers
-  registerIpcHandlers(gatewayManager, clawHubService, window);
+  registerIpcHandlers(gatewayManager, clawHubService, window, createFilePreviewWindow);
 
   hostApiServer = startHostApiServer({
     gatewayManager,

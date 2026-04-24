@@ -56,10 +56,20 @@ async function allocatePort(): Promise<number> {
 }
 
 async function getStableWindow(app: ElectronApplication): Promise<Page> {
-  const deadline = Date.now() + 30_000;
-  let page = await app.firstWindow();
+  const deadline = Date.now() + 60_000;
+  let page = app.windows().find((candidate) => !candidate.isClosed()) ?? null;
 
   while (Date.now() < deadline) {
+    if (!page || page.isClosed()) {
+      try {
+        page = await app.waitForEvent('window', {
+          timeout: Math.min(5_000, Math.max(1_000, deadline - Date.now())),
+        });
+      } catch {
+        page = app.windows().find((candidate) => !candidate.isClosed()) ?? null;
+      }
+    }
+
     const openWindows = app.windows().filter((candidate) => !candidate.isClosed());
     const currentWindow = openWindows.at(-1) ?? page;
 
@@ -75,7 +85,9 @@ async function getStableWindow(app: ElectronApplication): Promise<Page> {
     }
 
     try {
-      page = await app.waitForEvent('window', { timeout: 2_000 });
+      page = await app.waitForEvent('window', {
+        timeout: Math.min(2_000, Math.max(1_000, deadline - Date.now())),
+      });
     } catch {
       // Keep polling until a stable window is available or the deadline expires.
     }
@@ -250,55 +262,64 @@ export async function installIpcMocks(
   app: ElectronApplication,
   mocks: ElectronIpcMocks,
 ): Promise<void> {
-  await app.evaluate(({ ipcMain }, mockConfig) => {
-    function stableStringify(value: unknown): string {
-      if (value == null || typeof value !== 'object') return JSON.stringify(value);
-      if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`;
-      const entries = Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`);
-      return `{${entries.join(',')}}`;
-    }
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await app.evaluate(({ ipcMain }, mockConfig) => {
+        function stableStringify(value: unknown): string {
+          if (value == null || typeof value !== 'object') return JSON.stringify(value);
+          if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+          const entries = Object.entries(value as Record<string, unknown>)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`);
+          return `{${entries.join(',')}}`;
+        }
 
-    if (mockConfig?.gatewayStatus) {
-      ipcMain.removeHandler('gateway:status');
-      ipcMain.handle('gateway:status', async () => mockConfig.gatewayStatus);
-    }
+        if (mockConfig?.gatewayStatus) {
+          ipcMain.removeHandler('gateway:status');
+          ipcMain.handle('gateway:status', async () => mockConfig.gatewayStatus);
+        }
 
-    if (mockConfig?.openclawStatus) {
-      ipcMain.removeHandler('openclaw:status');
-      ipcMain.handle('openclaw:status', async () => mockConfig.openclawStatus);
-    }
+        if (mockConfig?.openclawStatus) {
+          ipcMain.removeHandler('openclaw:status');
+          ipcMain.handle('openclaw:status', async () => mockConfig.openclawStatus);
+        }
 
-    if (mockConfig?.uvInstallAll) {
-      ipcMain.removeHandler('uv:install-all');
-      ipcMain.handle('uv:install-all', async () => mockConfig.uvInstallAll);
-    }
+        if (mockConfig?.uvInstallAll) {
+          ipcMain.removeHandler('uv:install-all');
+          ipcMain.handle('uv:install-all', async () => mockConfig.uvInstallAll);
+        }
 
-    if (mockConfig?.hostApi) {
-      ipcMain.removeHandler('hostapi:fetch');
-      ipcMain.handle(
-        'hostapi:fetch',
-        async (_event, request: { path?: string; method?: string }) => {
-          const method = request?.method ?? 'GET';
-          const path = request?.path ?? '';
-          const requestKey = stableStringify([path, method]);
-          const mockedResponse = mockConfig.hostApi?.[requestKey];
+        if (mockConfig?.hostApi) {
+          ipcMain.removeHandler('hostapi:fetch');
+          ipcMain.handle(
+            'hostapi:fetch',
+            async (_event, request: { path?: string; method?: string }) => {
+              const method = request?.method ?? 'GET';
+              const path = request?.path ?? '';
+              const requestKey = stableStringify([path, method]);
+              const mockedResponse = mockConfig.hostApi?.[requestKey];
 
-          if (mockedResponse) {
-            return mockedResponse;
-          }
+              if (mockedResponse) {
+                return mockedResponse;
+              }
 
-          return {
-            ok: false,
-            error: {
-              message: `Unexpected hostapi:fetch request: ${method} ${path}`,
+              return {
+                ok: false,
+                error: {
+                  message: `Unexpected hostapi:fetch request: ${method} ${path}`,
+                },
+              };
             },
-          };
-        },
-      );
+          );
+        }
+      }, mocks);
+      return;
+    } catch (error) {
+      if (attempt === 2 || !String(error).includes('Execution context was destroyed')) {
+        throw error;
+      }
     }
-  }, mocks);
+  }
 }
 
 export { closeElectronApp };

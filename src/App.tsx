@@ -19,6 +19,7 @@ import { applyGatewayTransportPreference } from './lib/api-client';
 import { cn } from '@/lib/utils';
 
 const Chat = lazy(() => import('./pages/Chat').then((module) => ({ default: module.Chat })));
+const ChatFilePreviewWindowPage = lazy(() => import('./pages/Chat/ChatFilePreview').then((module) => ({ default: module.ChatFilePreviewWindowPage })));
 const Dashboard = lazy(() => import('./pages/Dashboard').then((module) => ({ default: module.Dashboard })));
 const Models = lazy(() => import('./pages/Models').then((module) => ({ default: module.Models })));
 const Agents = lazy(() => import('./pages/Agents').then((module) => ({ default: module.Agents })));
@@ -197,6 +198,7 @@ function App() {
   const location = useLocation();
   const skipSetupForE2E = typeof window !== 'undefined'
     && new URLSearchParams(window.location.search).get('e2eSkipSetup') === '1';
+  const isFilePreviewWindow = location.pathname === '/file-preview';
   const initSettings = useSettingsStore((state) => state.init);
   const theme = useSettingsStore((state) => state.theme);
   const language = useSettingsStore((state) => state.language);
@@ -232,10 +234,10 @@ function App() {
 
   // Redirect to setup wizard if not complete
   useEffect(() => {
-    if (!setupComplete && !skipSetupForE2E && !location.pathname.startsWith('/setup')) {
+    if (!setupComplete && !skipSetupForE2E && !isFilePreviewWindow && !location.pathname.startsWith('/setup')) {
       navigate('/setup');
     }
-  }, [setupComplete, skipSetupForE2E, location.pathname, navigate]);
+  }, [isFilePreviewWindow, setupComplete, skipSetupForE2E, location.pathname, navigate]);
 
   // Listen for navigation events from main process
   useEffect(() => {
@@ -281,6 +283,7 @@ function App() {
           <Routes>
             {/* Setup wizard (shown on first launch) */}
             <Route path="/setup/*" element={<Setup />} />
+            <Route path="/file-preview" element={<ChatFilePreviewWindowPage />} />
 
             {/* Main application routes */}
             <Route element={<MainLayout />}>

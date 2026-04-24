@@ -6,7 +6,6 @@
 import { useState, useCallback, useEffect, useMemo, memo } from 'react';
 import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { FileTypeIcon } from './file-icon';
-import { getFileVisual } from './file-visual';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -20,6 +19,9 @@ import { buildProviderListItems } from '@/lib/provider-accounts';
 import { extractText, extractThinking, extractImages, extractToolUse, formatTimestamp } from './message-utils';
 import { StreamingMarkdownPreview } from './StreamingMarkdownPreview';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { ClampedFileName } from './ClampedFileName';
+import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 
 interface ChatMessageProps {
   message: RawMessage;
@@ -28,6 +30,7 @@ interface ChatMessageProps {
   hideAvatar?: boolean;
   reserveAvatarSpace?: boolean;
   constrainWidth?: boolean;
+  onOpenAttachmentPreview?: (file: AttachedFileMeta) => void;
   streamingTools?: Array<{
     id?: string;
     toolCallId?: string;
@@ -123,6 +126,7 @@ function areChatMessagePropsEqual(prev: ChatMessageProps, next: ChatMessageProps
     && prev.hideAvatar === next.hideAvatar
     && prev.reserveAvatarSpace === next.reserveAvatarSpace
     && prev.constrainWidth === next.constrainWidth
+    && prev.onOpenAttachmentPreview === next.onOpenAttachmentPreview
     && buildMessageSignature(prev.message) === buildMessageSignature(next.message)
     && areStreamingToolsEqual(prev.streamingTools, next.streamingTools);
 }
@@ -178,6 +182,7 @@ export const ChatMessage = memo(function ChatMessage({
   hideAvatar = false,
   reserveAvatarSpace = false,
   constrainWidth = true,
+  onOpenAttachmentPreview,
   streamingTools = [],
 }: ChatMessageProps) {
   const isUser = message.role === 'user';
@@ -199,14 +204,15 @@ export const ChatMessage = memo(function ChatMessage({
   const currentSessionKey = useChatStore((state) => state.currentSessionKey);
   const sessionModels = useChatStore((state) => state.sessionModels);
   const sessions = useChatStore((state) => state.sessions);
-  const usesAssistantStreamStyle = !isUser && assistantMessageStyle === 'stream';
   const visibleThinking = showThinking ? thinking : null;
   const visibleTools = useMemo(() => (
     chatProcessDisplayMode === 'all' ? tools : []
   ), [chatProcessDisplayMode, tools]);
   const bodyFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
   const metaFontSize = `${Math.round(12 * (chatFontScale / 100) * 10) / 10}px`;
-  const attachmentListClassName = 'flex max-w-[720px] flex-wrap gap-2';
+  const constrainedMessageWidthClassName = constrainWidth ? 'w-full' : 'w-full max-w-full';
+  const attachmentListClassName = cn('flex min-w-0 flex-wrap gap-2', constrainedMessageWidthClassName);
+  const mediaListClassName = cn('flex min-w-0 flex-wrap gap-2', constrainedMessageWidthClassName);
   const branding = useBranding();
   const providerItems = useMemo(
     () => buildProviderListItems(providerAccounts, providerStatuses, providerVendors, providerDefaultAccountId),
@@ -246,6 +252,20 @@ export const ChatMessage = memo(function ChatMessage({
 
   const attachedFiles = useMemo(() => message._attachedFiles || [], [message._attachedFiles]);
   const [lightboxImg, setLightboxImg] = useState<{ src: string; fileName: string; filePath?: string; base64?: string; mimeType?: string } | null>(null);
+  const getAttachmentPreviewHandler = useCallback((file: AttachedFileMeta) => {
+    if (onOpenAttachmentPreview) {
+      return () => onOpenAttachmentPreview(file);
+    }
+    if (file.preview && file.mimeType.startsWith('image/')) {
+      return () => setLightboxImg({
+        src: file.preview!,
+        fileName: file.fileName,
+        filePath: file.filePath,
+        mimeType: file.mimeType,
+      });
+    }
+    return undefined;
+  }, [onOpenAttachmentPreview, setLightboxImg]);
 
   // Never render tool result messages in chat UI
   if (isToolResult) return null;
@@ -261,7 +281,7 @@ export const ChatMessage = memo(function ChatMessage({
     return (
       <div
         data-testid="chat-assistant-message-shell"
-        className="group min-w-0 max-w-full space-y-3.5"
+        className={cn('group min-w-0 space-y-3.5', constrainedMessageWidthClassName)}
       >
         <div
           data-testid="chat-assistant-brand-header"
@@ -291,8 +311,8 @@ export const ChatMessage = memo(function ChatMessage({
         <div
           data-testid="chat-message-content-assistant"
           className={cn(
-            'flex w-full min-w-0 flex-col items-start space-y-2.5',
-            constrainWidth && !usesAssistantStreamStyle && 'max-w-[80%]',
+            'flex min-w-0 flex-col items-start space-y-2.5',
+            constrainedMessageWidthClassName,
           )}
         >
           {shouldShowStreamingToolStatus && (
@@ -323,7 +343,7 @@ export const ChatMessage = memo(function ChatMessage({
           )}
 
           {images.length > 0 && (
-            <div className="flex flex-wrap gap-2">
+            <div className={cn(mediaListClassName, 'self-start justify-start')}>
               {images.map((img, i) => {
                 const src = imageSrc(img);
                 if (!src) return null;
@@ -350,9 +370,7 @@ export const ChatMessage = memo(function ChatMessage({
                 <FileCard
                   key={`local-${i}`}
                   file={file}
-                  onPreview={file.preview && file.mimeType.startsWith('image/')
-                    ? () => setLightboxImg({ src: file.preview!, fileName: file.fileName, filePath: file.filePath, mimeType: file.mimeType })
-                    : undefined}
+                  onPreview={getAttachmentPreviewHandler(file)}
                 />
               ))}
             </div>
@@ -387,7 +405,8 @@ export const ChatMessage = memo(function ChatMessage({
     <div
       data-testid={isUser ? 'chat-message-row-user' : 'chat-message-row-assistant'}
       className={cn(
-        'group flex min-w-0 max-w-full gap-3',
+        'group flex min-w-0 gap-3',
+        constrainedMessageWidthClassName,
         isUser ? 'flex-row-reverse' : 'flex-row',
       )}
     >
@@ -413,9 +432,9 @@ export const ChatMessage = memo(function ChatMessage({
       <div
         data-testid={isUser ? 'chat-message-content-user' : 'chat-message-content-assistant'}
         className={cn(
-          'flex flex-col w-full min-w-0',
+          'flex flex-col min-w-0',
           !isUser && showsAssistantBrandHeader ? 'space-y-2.5' : 'space-y-2',
-          constrainWidth && !usesAssistantStreamStyle && 'max-w-[80%]',
+          constrainedMessageWidthClassName,
           isUser ? 'items-end' : 'items-start',
         )}
         style={!isUser && showsAssistantBrandHeader
@@ -457,7 +476,7 @@ export const ChatMessage = memo(function ChatMessage({
         {/* Images — rendered ABOVE text bubble for user messages */}
         {/* Images from content blocks (Gateway session data / channel push photos) */}
         {isUser && images.length > 0 && (
-          <div className="flex flex-wrap gap-2">
+          <div className={cn(mediaListClassName, 'self-end justify-end')}>
             {images.map((img, i) => {
               const src = imageSrc(img);
               if (!src) return null;
@@ -485,9 +504,7 @@ export const ChatMessage = memo(function ChatMessage({
               <FileCard
                 key={`local-${i}`}
                 file={file}
-                onPreview={file.preview && file.mimeType.startsWith('image/')
-                  ? () => setLightboxImg({ src: file.preview!, fileName: file.fileName, filePath: file.filePath, mimeType: file.mimeType })
-                  : undefined}
+                onPreview={getAttachmentPreviewHandler(file)}
               />
             ))}
           </div>
@@ -507,7 +524,7 @@ export const ChatMessage = memo(function ChatMessage({
 
         {/* Images from content blocks — assistant messages (below text) */}
         {!isUser && images.length > 0 && (
-          <div className="flex flex-wrap gap-2">
+          <div className={cn(mediaListClassName, 'self-start justify-start')}>
             {images.map((img, i) => {
               const src = imageSrc(img);
               if (!src) return null;
@@ -535,9 +552,7 @@ export const ChatMessage = memo(function ChatMessage({
               <FileCard
                 key={`local-${i}`}
                 file={file}
-                onPreview={file.preview && file.mimeType.startsWith('image/')
-                  ? () => setLightboxImg({ src: file.preview!, fileName: file.fileName, filePath: file.filePath, mimeType: file.mimeType })
-                  : undefined}
+                onPreview={getAttachmentPreviewHandler(file)}
               />
             ))}
           </div>
@@ -833,7 +848,7 @@ function formatFileSize(bytes: number): string {
 }
 
 function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () => void }) {
-  const visual = getFileVisual(file.mimeType, file.fileName);
+  const { t } = useTranslation(['chat', 'common']);
   const handleOpen = useCallback(() => {
     if (onPreview) {
       onPreview();
@@ -843,26 +858,53 @@ function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () 
       invokeIpc('shell:openPath', file.filePath);
     }
   }, [file.filePath, onPreview]);
+  const handleRevealInFolder = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!file.filePath) return;
+    void invokeIpc('shell:showItemInFolder', file.filePath)
+      .catch((revealError) => {
+        toast.error(t('filePreview.revealFailed', {
+          error: revealError instanceof Error ? revealError.message : String(revealError),
+        }));
+      });
+  }, [file.filePath, t]);
 
   return (
     <div
       data-testid="chat-file-card"
       className={cn(
-        "relative w-[224px] max-w-full min-w-0 overflow-hidden rounded-xl border border-black/10 bg-white/80 shadow-[0_14px_34px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.06]",
+        "group/file-card relative w-[224px] max-w-full min-w-0 overflow-hidden rounded-xl border border-black/10 bg-white/80 shadow-[0_14px_34px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.06]",
         (file.filePath || onPreview) && "cursor-pointer hover:border-black/15 hover:bg-white dark:hover:border-white/15 dark:hover:bg-white/[0.08] transition-colors"
       )}
       onClick={handleOpen}
-      title={file.filePath ? '打开文件' : undefined}
+      title={file.filePath ? t('filePreview.openFile') : undefined}
     >
-      <div className="flex h-14 min-w-0 items-center gap-3 px-3">
+      <div data-testid="chat-file-card-body" className="relative flex h-14 min-w-0 items-center gap-3 px-3">
         <FileTypeIcon mimeType={file.mimeType} fileName={file.fileName} />
-        <div className="min-w-0 overflow-hidden leading-tight flex flex-col justify-center gap-1">
-          <p className="text-[13px] font-semibold tracking-[-0.01em] truncate">{file.fileName}</p>
-          <p className="text-[11px] text-muted-foreground">
-            {visual.label}
-            {file.fileSize > 0 ? ` · ${formatFileSize(file.fileSize)}` : ''}
-          </p>
+        <div className="min-w-0 flex-1 overflow-hidden leading-tight flex flex-col justify-center">
+          <ClampedFileName
+            text={file.fileName}
+            metaText={file.fileSize > 0 ? formatFileSize(file.fileSize) : '...'}
+            containerClassName="h-8"
+            textClassName="text-[13px] font-semibold leading-[1.25] tracking-[-0.01em]"
+            metaClassName="text-[11px] leading-[1.25]"
+            fadeTestId="chat-file-card-fade"
+            textTestId="chat-file-card-name"
+          />
         </div>
+        {file.filePath ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            data-testid="chat-file-card-reveal"
+            className="pointer-events-none absolute right-3 top-1/2 h-8 w-8 -translate-y-1/2 translate-x-1 rounded-[8px] border border-slate-300 bg-white text-slate-700 opacity-0 shadow-none transition-all duration-150 hover:bg-white hover:text-slate-700 group-hover/file-card:pointer-events-auto group-hover/file-card:translate-x-0 group-hover/file-card:opacity-100 group-focus-within/file-card:pointer-events-auto group-focus-within/file-card:translate-x-0 group-focus-within/file-card:opacity-100 dark:border-white/14 dark:bg-slate-100 dark:text-slate-800 dark:hover:bg-slate-100 dark:hover:text-slate-800"
+            onClick={handleRevealInFolder}
+            title={t('filePreview.revealInFolder')}
+          >
+            <FolderOpen className="h-4 w-4" />
+          </Button>
+        ) : null}
       </div>
     </div>
   );
@@ -948,6 +990,7 @@ const ImageLightbox = memo(function ImageLightbox({
   onClose: () => void;
 }) {
   void mimeType;
+  const { t } = useTranslation(['chat', 'common']);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -999,7 +1042,7 @@ const ImageLightbox = memo(function ImageLightbox({
             data-testid="chat-image-lightbox-copy"
             className="h-8 w-8 bg-white/10 hover:bg-white/20 text-white"
             onClick={handleCopyImage}
-            title="复制图片"
+            title={t('filePreview.copyImage')}
           >
             {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
           </Button>
@@ -1009,7 +1052,7 @@ const ImageLightbox = memo(function ImageLightbox({
               size="icon"
               className="h-8 w-8 bg-white/10 hover:bg-white/20 text-white"
               onClick={handleShowInFolder}
-              title="在文件夹中显示"
+              title={t('filePreview.revealInFolder')}
             >
               <FolderOpen className="h-4 w-4" />
             </Button>
@@ -1019,7 +1062,7 @@ const ImageLightbox = memo(function ImageLightbox({
             size="icon"
             className="h-8 w-8 bg-white/10 hover:bg-white/20 text-white"
             onClick={onClose}
-            title="关闭"
+            title={t('common:actions.close')}
           >
             <X className="h-4 w-4" />
           </Button>

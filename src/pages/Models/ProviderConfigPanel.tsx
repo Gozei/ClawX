@@ -15,7 +15,7 @@ import {
   type ProviderAuthMode,
   type ProviderType,
 } from '@/lib/providers';
-import { buildProviderAccountId, buildProviderListItems } from '@/lib/provider-accounts';
+import { buildConfiguredModelEntries, buildProviderAccountId } from '@/lib/provider-accounts';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -72,10 +72,6 @@ const DEFAULT_PROTOCOL: NonNullable<ProviderAccount['apiProtocol']> = 'openai-co
 
 function normalizeConfiguredModelIds(account: ProviderAccount): string[] {
   return Array.from(new Set([account.model || '', ...(account.metadata?.customModels ?? [])].map((value) => value.trim()).filter(Boolean)));
-}
-
-function resolveProtocol(account: ProviderAccount, modelId: string): NonNullable<ProviderAccount['apiProtocol']> {
-  return account.metadata?.modelProtocols?.[modelId] || account.apiProtocol || DEFAULT_PROTOCOL;
 }
 
 function inferResultType(modelId: string): ResultType {
@@ -189,38 +185,20 @@ function getStatusTone(test?: TestStatus): string {
 }
 
 function buildModelRows(accounts: ProviderAccount[], statuses: ReturnType<typeof useProviderStore.getState>['statuses'], vendors: ReturnType<typeof useProviderStore.getState>['vendors'], defaultAccountId: string | null): ModelRow[] {
-  const deduped = new Map<string, ModelRow>();
-
-  for (const row of buildProviderListItems(accounts, statuses, vendors, defaultAccountId)
-    .flatMap((item) => item.models
-      .filter((model) => model.source !== 'recommended')
-      .map((model) => ({
-        key: `${item.account.id}:${model.id}`,
-        account: item.account,
-        accountLabel: item.displayName,
-        vendorLabel: item.displayVendorName,
-        vendorId: item.account.vendorId,
-        modelId: model.id,
-        isDefault: model.isDefault,
-        isGlobalDefault: item.account.id === defaultAccountId && model.isDefault,
-        protocol: resolveProtocol(item.account, model.id),
-        authMode: item.account.authMode,
-        hasCredentials: item.hasConfiguredCredentials,
-        resultType: inferResultType(model.id),
-      })))) {
-    const signature = [
-      row.vendorId,
-      row.accountLabel.trim().toLowerCase(),
-      (row.account.baseUrl || '').trim().toLowerCase(),
-      row.modelId.trim().toLowerCase(),
-      row.protocol,
-    ].join('|');
-    if (!deduped.has(signature)) {
-      deduped.set(signature, row);
-    }
-  }
-
-  return [...deduped.values()];
+  return buildConfiguredModelEntries(accounts, statuses, vendors, defaultAccountId).map((entry) => ({
+    key: entry.key,
+    account: entry.account,
+    accountLabel: entry.displayName,
+    vendorLabel: entry.displayVendorName,
+    vendorId: entry.vendorId,
+    modelId: entry.modelId,
+    isDefault: entry.isDefault,
+    isGlobalDefault: entry.isGlobalDefault,
+    protocol: entry.protocol,
+    authMode: entry.account.authMode,
+    hasCredentials: entry.hasConfiguredCredentials,
+    resultType: inferResultType(entry.modelId),
+  }));
 }
 
 function applyModelChangeToAccount(account: ProviderAccount, draft: DraftState): Partial<ProviderAccount> {
