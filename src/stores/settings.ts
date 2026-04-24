@@ -44,6 +44,7 @@ interface SettingsState {
   hideInternalRoutineProcesses: boolean;
   assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
+  dreamModeEnabled: boolean;
   userUploadBaseDir: string;
   assistantOutputBaseDir: string;
 
@@ -90,6 +91,7 @@ interface SettingsState {
   setHideInternalRoutineProcesses: (value: boolean) => void;
   setAssistantMessageStyle: (value: AssistantMessageStyle) => void;
   setChatFontScale: (value: number) => void;
+  setDreamModeEnabled: (value: boolean) => void;
   setUserUploadBaseDir: (value: string) => void;
   setAssistantOutputBaseDir: (value: string) => void;
   setGatewayAutoStart: (value: boolean) => void;
@@ -128,6 +130,7 @@ const defaultSettings = {
   hideInternalRoutineProcesses: true,
   assistantMessageStyle: 'bubble' as AssistantMessageStyle,
   chatFontScale: 100,
+  dreamModeEnabled: false,
   userUploadBaseDir: '',
   assistantOutputBaseDir: '',
   gatewayAutoStart: true,
@@ -275,6 +278,13 @@ export const useSettingsStore = create<SettingsState>()(
         void hostApiFetch('/api/settings/chatFontScale', {
           method: 'PUT',
           body: JSON.stringify({ value: normalized }),
+        }).catch(() => { });
+      },
+      setDreamModeEnabled: (dreamModeEnabled) => {
+        set({ dreamModeEnabled });
+        void hostApiFetch('/api/settings/dreamModeEnabled', {
+          method: 'PUT',
+          body: JSON.stringify({ value: dreamModeEnabled }),
         }).catch(() => { });
       },
       setUserUploadBaseDir: (userUploadBaseDir) => {

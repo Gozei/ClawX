@@ -5,6 +5,7 @@ import { createMenu } from '../../main/menu';
 import { refreshTray } from '../../main/tray';
 import { syncProxyConfigToOpenClaw } from '../../utils/openclaw-proxy';
 import { getAllSettings, getSetting, resetSettings, setSetting, type AppSettings } from '../../utils/store';
+import { syncDreamModeToOpenClawConfig } from '../../utils/dream-mode';
 import { applyRuntimeLoggingSettings, patchTouchesLoggingSettings } from '../../utils/logging-config';
 import type { HostApiContext } from '../context';
 import { emitMutationAudit } from '../audit-utils';
@@ -39,9 +40,20 @@ function patchTouchesNativeMenus(patch: Partial<AppSettings>): boolean {
     || Object.prototype.hasOwnProperty.call(patch, 'brandingOverrides');
 }
 
+function patchTouchesDreamMode(patch: Partial<AppSettings>): boolean {
+  return Object.prototype.hasOwnProperty.call(patch, 'dreamModeEnabled');
+}
+
 async function refreshNativeMenus(ctx: HostApiContext): Promise<void> {
   await createMenu();
   await refreshTray(ctx.mainWindow);
+}
+
+async function syncDreamModeAndRestartIfNeeded(ctx: HostApiContext, enabled: boolean): Promise<void> {
+  await syncDreamModeToOpenClawConfig(enabled);
+  if (ctx.gatewayManager.getStatus().state === 'running') {
+    await ctx.gatewayManager.restart();
+  }
 }
 
 export async function handleSettingsRoutes(
@@ -74,6 +86,9 @@ export async function handleSettingsRoutes(
       }
       if (patchTouchesNativeMenus(patch)) {
         await refreshNativeMenus(ctx);
+      }
+      if (patchTouchesDreamMode(patch)) {
+        await syncDreamModeAndRestartIfNeeded(ctx, Boolean(patch.dreamModeEnabled));
       }
       emitMutationAudit(req, ctx, {
         startedAt,
@@ -145,6 +160,9 @@ export async function handleSettingsRoutes(
       if (key === 'language' || key === 'brandingOverrides') {
         await refreshNativeMenus(ctx);
       }
+      if (key === 'dreamModeEnabled') {
+        await syncDreamModeAndRestartIfNeeded(ctx, Boolean(body.value));
+      }
       emitMutationAudit(req, ctx, {
         startedAt,
         action: 'settings.update',
@@ -194,6 +212,7 @@ export async function handleSettingsRoutes(
       await handleProxySettingsChange(ctx);
       await syncLaunchAtStartupSettingFromStore();
       await refreshNativeMenus(ctx);
+      await syncDreamModeAndRestartIfNeeded(ctx, settings.dreamModeEnabled);
       emitMutationAudit(req, ctx, {
         startedAt,
         action: 'settings.reset',

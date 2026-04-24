@@ -731,6 +731,20 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
                 />
               </div>
 
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-[15px] font-medium text-foreground">{t('advanced.dreamMode')}</Label>
+                  <p className="text-[13px] text-muted-foreground mt-1">
+                    {t('advanced.dreamModeDesc')}
+                  </p>
+                </div>
+                <Switch
+                  checked={dreamModeEnabled}
+                  onCheckedChange={setDreamModeEnabled}
+                  data-testid="settings-dream-mode-switch"
+                />
+              </div>
+
               <div className="space-y-3">
                 <div>
                   <Label className="text-[15px] font-medium text-foreground">{t('advanced.chatProcessDisplay')}</Label>

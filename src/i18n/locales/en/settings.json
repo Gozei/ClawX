@@ -8,6 +8,7 @@
       "dashboard": "System Monitoring",
       "models": "Models",
       "channels": "Channels",
+      "dream": "Dreams",
       "archives": "Session Archive",
       "theme": "Theme",
       "language": "Language",
@@ -409,6 +410,8 @@
     "devModeDesc": "Show developer tools and shortcuts",
     "chatProcessDisplay": "Chat process hints",
     "chatProcessDisplayDesc": "Control whether tool execution and read-process cards appear in the conversation.",
+    "dreamMode": "Dream Mode",
+    "dreamModeDesc": "Syncs OpenClaw memory dreaming and shows the Dreams workspace.",
     "assistantMessageStyle": "Assistant output style",
     "assistantMessageStyleDesc": "Switch between the current bubble reply and a flatter event-stream reply.",
     "hideInternalRoutineProcesses": "Hide internal routine checks",
@@ -427,6 +430,51 @@
     },
     "telemetry": "Anonymous Usage Data",
     "telemetryDesc": "Allow providing anonymous basic usage data to improve {{appName}}"
+  },
+  "dream": {
+    "title": "Dreams",
+    "subtitle": "{{appName}} memory consolidation",
+    "gatewayStopped": "Gateway is stopped",
+    "gatewayStoppedDesc": "Dream status is available after the OpenClaw Gateway starts.",
+    "startGateway": "Start Gateway",
+    "actionDone": "{{action}} complete ({{count}})",
+    "metrics": {
+      "shortTerm": "Short-term",
+      "signals": "Signals",
+      "grounded": "Grounded",
+      "promotedToday": "Promoted today"
+    },
+    "status": {
+      "enabled": "Dreaming enabled",
+      "disabled": "Dreaming disabled",
+      "schedule": "Schedule",
+      "timezone": "Timezone",
+      "nextRun": "Next run"
+    },
+    "phase": {
+      "light": "Light",
+      "deep": "Deep",
+      "rem": "REM"
+    },
+    "diary": {
+      "title": "Dream Diary",
+      "empty": "No dream diary entries yet."
+    },
+    "actions": {
+      "title": "Maintenance",
+      "backfill": "Backfill Diary",
+      "dedupe": "Dedupe Diary",
+      "clearGrounded": "Clear Grounded",
+      "repair": "Repair Cache"
+    },
+    "lists": {
+      "waiting": "Waiting",
+      "strongest": "Strongest Signals",
+      "promoted": "Promoted",
+      "signals": "signals",
+      "phaseHits": "phase hits",
+      "empty": "No entries"
+    }
   },
   "developer": {
     "title": "Developer",

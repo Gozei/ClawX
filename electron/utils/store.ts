@@ -54,6 +54,7 @@ export interface AppSettings {
   hideInternalRoutineProcesses: boolean;
   assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
+  dreamModeEnabled: boolean;
   userUploadBaseDir: string;
   assistantOutputBaseDir: string;
   machineId: string;
@@ -118,6 +119,7 @@ function createDefaultSettings(): AppSettings {
     hideInternalRoutineProcesses: true,
     assistantMessageStyle: 'bubble',
     chatFontScale: 100,
+    dreamModeEnabled: false,
     userUploadBaseDir: '',
     assistantOutputBaseDir: '',
     machineId: '',
