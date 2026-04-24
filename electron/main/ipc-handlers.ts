@@ -25,6 +25,7 @@ import {
   removeProviderFromOpenClaw,
 } from '../utils/openclaw-auth';
 import { syncProxyConfigToOpenClaw } from '../utils/openclaw-proxy';
+import { syncDreamModeToOpenClawConfig } from '../utils/dream-mode';
 import { buildOpenClawControlUiUrl } from '../utils/openclaw-control-ui';
 import { logger } from '../utils/logger';
 import {
@@ -2167,6 +2168,13 @@ function registerSettingsHandlers(gatewayManager: GatewayManager): void {
     }
   };
 
+  const handleDreamModeChange = async (enabled: boolean) => {
+    await syncDreamModeToOpenClawConfig(enabled);
+    if (gatewayManager.getStatus().state === 'running') {
+      await gatewayManager.restart();
+    }
+  };
+
   ipcMain.handle('settings:get', async (_, key: keyof AppSettings) => {
     return await getSetting(key);
   });
@@ -2191,6 +2199,9 @@ function registerSettingsHandlers(gatewayManager: GatewayManager): void {
     if (key === 'launchAtStartup') {
       await syncLaunchAtStartupSettingFromStore();
     }
+    if (key === 'dreamModeEnabled') {
+      await handleDreamModeChange(Boolean(value));
+    }
 
     return { success: true };
   });
@@ -2214,6 +2225,9 @@ function registerSettingsHandlers(gatewayManager: GatewayManager): void {
     if (entries.some(([key]) => key === 'launchAtStartup')) {
       await syncLaunchAtStartupSettingFromStore();
     }
+    if (entries.some(([key]) => key === 'dreamModeEnabled')) {
+      await handleDreamModeChange(Boolean(patch.dreamModeEnabled));
+    }
 
     return { success: true };
   });
@@ -2223,6 +2237,7 @@ function registerSettingsHandlers(gatewayManager: GatewayManager): void {
     const settings = await getAllSettings();
     await handleProxySettingsChange();
     await syncLaunchAtStartupSettingFromStore();
+    await handleDreamModeChange(settings.dreamModeEnabled);
     return { success: true, settings };
   });
 }

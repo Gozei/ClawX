@@ -53,10 +53,8 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
   const {
     launchAtStartup,
     setLaunchAtStartup,
-    userUploadBaseDir,
-    setUserUploadBaseDir,
-    assistantOutputBaseDir,
-    setAssistantOutputBaseDir,
+    fileStorageBaseDir,
+    setFileStorageBaseDir,
     gatewayAutoStart,
     setGatewayAutoStart,
     autoCheckUpdate,
@@ -87,6 +85,8 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
     setAssistantMessageStyle,
     chatFontScale,
     setChatFontScale,
+    dreamModeEnabled,
+    setDreamModeEnabled,
   } = useSettingsStore();
 
   const { status: gatewayStatus, restart: restartGateway } = useGatewayStore();
@@ -264,44 +264,24 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
     }
   };
 
-  const handleChooseUserUploadDirectory = async () => {
+  const handleChooseFileStorageDirectory = async () => {
     try {
       const result = await invokeIpc<{ canceled: boolean; filePaths?: string[] }>('dialog:open', {
-        defaultPath: userUploadBaseDir || undefined,
+        defaultPath: fileStorageBaseDir || undefined,
         properties: ['openDirectory', 'createDirectory'],
       });
       const nextPath = result.filePaths?.[0]?.trim() || '';
       if (result.canceled || !nextPath) return;
-      setUserUploadBaseDir(nextPath);
+      setFileStorageBaseDir(nextPath);
       toast.success(t('storage.saved'));
     } catch (error) {
       toast.error(`${t('storage.saveFailed')}: ${String(error)}`);
     }
   };
 
-  const handleClearUserUploadDirectory = () => {
-    setUserUploadBaseDir('');
+  const handleClearFileStorageDirectory = () => {
+    setFileStorageBaseDir('');
     toast.success(t('storage.reset'));
-  };
-
-  const handleChooseAssistantOutputDirectory = async () => {
-    try {
-      const result = await invokeIpc<{ canceled: boolean; filePaths?: string[] }>('dialog:open', {
-        defaultPath: assistantOutputBaseDir || undefined,
-        properties: ['openDirectory', 'createDirectory'],
-      });
-      const nextPath = result.filePaths?.[0]?.trim() || '';
-      if (result.canceled || !nextPath) return;
-      setAssistantOutputBaseDir(nextPath);
-      toast.success(t('storage.outputSaved'));
-    } catch (error) {
-      toast.error(`${t('storage.outputSaveFailed')}: ${String(error)}`);
-    }
-  };
-
-  const handleClearAssistantOutputDirectory = () => {
-    setAssistantOutputBaseDir('');
-    toast.success(t('storage.outputReset'));
   };
 
   useEffect(() => {
@@ -552,99 +532,76 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
               {t('appearance.title')}
             </h2>
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
+              <div className="space-y-4">
                 <div>
-                  <Label className="text-[15px] font-medium text-foreground/80">{t('appearance.launchAtStartup')}</Label>
-                  <p className="text-[13px] text-muted-foreground mt-1">
-                    {t('appearance.launchAtStartupDesc', {
-                      appName: branding.productName,
-                    })}
-                  </p>
+                  <h3 className="text-lg font-semibold tracking-tight text-foreground">
+                    {t('appearance.startupSection')}
+                  </h3>
                 </div>
-                <Switch
-                  checked={launchAtStartup}
-                  onCheckedChange={setLaunchAtStartup}
-                />
+                <div className="flex items-center justify-between rounded-2xl border border-black/6 bg-black/[0.02] px-4 py-4 dark:border-white/8 dark:bg-white/[0.02]">
+                  <div>
+                    <Label className="text-[15px] font-medium text-foreground/80">{t('appearance.launchAtStartup')}</Label>
+                    <p className="text-[13px] text-muted-foreground mt-1">
+                      {t('appearance.launchAtStartupDesc', {
+                        appName: branding.productName,
+                      })}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={launchAtStartup}
+                    onCheckedChange={setLaunchAtStartup}
+                  />
+                </div>
               </div>
 
-              <div className="space-y-3 rounded-2xl border border-black/6 bg-black/[0.02] px-4 py-4 dark:border-white/8 dark:bg-white/[0.02]">
+              <div className="space-y-4">
                 <div>
-                  <Label className="text-[15px] font-medium text-foreground/80">{t('storage.userUploadDir')}</Label>
+                  <h3 className="text-lg font-semibold tracking-tight text-foreground">
+                    {t('storage.title')}
+                  </h3>
                   <p className="text-[13px] text-muted-foreground mt-1">
-                    {t('storage.userUploadDirDesc')}
+                    {t('storage.description')}
                   </p>
                 </div>
-                <Input
-                  readOnly
-                  value={userUploadBaseDir}
-                  placeholder={t('storage.defaultPlaceholder', { path: '~/.openclaw/media/outbound' })}
-                  data-testid="settings-user-upload-dir-input"
-                  className="h-10 rounded-xl bg-black/5 dark:bg-white/5 border-transparent font-mono text-[13px]"
-                />
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void handleChooseUserUploadDirectory()}
-                    data-testid="settings-user-upload-dir-choose"
-                    className="rounded-xl h-10 px-4 bg-transparent border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5"
-                  >
-                    {t('storage.chooseFolder')}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleClearUserUploadDirectory}
-                    disabled={!userUploadBaseDir}
-                    data-testid="settings-user-upload-dir-clear"
-                    className="rounded-xl h-10 px-4 bg-transparent border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5"
-                  >
-                    {t('storage.clearFolder')}
-                  </Button>
-                </div>
-                <p className="text-[12px] text-muted-foreground">
-                  {t('storage.sessionLayoutHint')}
-                </p>
-              </div>
-
-              <div className="space-y-3 rounded-2xl border border-black/6 bg-black/[0.02] px-4 py-4 dark:border-white/8 dark:bg-white/[0.02]">
-                <div>
-                  <Label className="text-[15px] font-medium text-foreground/80">{t('storage.assistantOutputDir')}</Label>
-                  <p className="text-[13px] text-muted-foreground mt-1">
-                    {t('storage.assistantOutputDirDesc')}
+                <div className="space-y-3 rounded-2xl border border-black/6 bg-black/[0.02] px-4 py-4 dark:border-white/8 dark:bg-white/[0.02]">
+                  <div>
+                    <Label className="text-[15px] font-medium text-foreground/80">{t('storage.fileStorageDir')}</Label>
+                    <p className="text-[13px] text-muted-foreground mt-1">
+                      {t('storage.fileStorageDirDesc')}
+                    </p>
+                  </div>
+                  <Input
+                    readOnly
+                    value={fileStorageBaseDir}
+                    placeholder={t('storage.defaultPlaceholder', { path: '~/.openclaw/media/outbound' })}
+                    data-testid="settings-file-storage-dir-input"
+                    className="h-10 rounded-xl bg-black/5 dark:bg-white/5 border-transparent font-mono text-[13px]"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void handleChooseFileStorageDirectory()}
+                      data-testid="settings-file-storage-dir-choose"
+                      className="rounded-xl h-10 px-4 bg-transparent border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      {t('storage.chooseFolder')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleClearFileStorageDirectory}
+                      disabled={!fileStorageBaseDir}
+                      data-testid="settings-file-storage-dir-clear"
+                      className="rounded-xl h-10 px-4 bg-transparent border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      {t('storage.clearFolder')}
+                    </Button>
+                  </div>
+                  <p className="text-[12px] text-muted-foreground">
+                    {t('storage.sessionLayoutHint')}
                   </p>
                 </div>
-                <Input
-                  readOnly
-                  value={assistantOutputBaseDir}
-                  placeholder={t('storage.outputDefaultPlaceholder')}
-                  data-testid="settings-assistant-output-dir-input"
-                  className="h-10 rounded-xl bg-black/5 dark:bg-white/5 border-transparent font-mono text-[13px]"
-                />
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void handleChooseAssistantOutputDirectory()}
-                    data-testid="settings-assistant-output-dir-choose"
-                    className="rounded-xl h-10 px-4 bg-transparent border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5"
-                  >
-                    {t('storage.chooseFolder')}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleClearAssistantOutputDirectory}
-                    disabled={!assistantOutputBaseDir}
-                    data-testid="settings-assistant-output-dir-clear"
-                    className="rounded-xl h-10 px-4 bg-transparent border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5"
-                  >
-                    {t('storage.clearFolder')}
-                  </Button>
-                </div>
-                <p className="text-[12px] text-muted-foreground">
-                  {t('storage.outputSessionLayoutHint')}
-                </p>
               </div>
             </div>
           </div>
@@ -726,6 +683,20 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
                 <Switch
                   checked={telemetryEnabled}
                   onCheckedChange={setTelemetryEnabled}
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-[15px] font-medium text-foreground">{t('advanced.dreamMode')}</Label>
+                  <p className="text-[13px] text-muted-foreground mt-1">
+                    {t('advanced.dreamModeDesc')}
+                  </p>
+                </div>
+                <Switch
+                  checked={dreamModeEnabled}
+                  onCheckedChange={setDreamModeEnabled}
+                  data-testid="settings-dream-mode-switch"
                 />
               </div>
 

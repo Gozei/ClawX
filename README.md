@@ -114,6 +114,8 @@ Deep AI Worker now also bundles Tencent's official personal WeChat channel plugi
 Schedule AI tasks to run automatically. Define triggers, set intervals, and let your AI agents work around the clock without manual intervention.
 The Cron page now lets you configure external delivery directly in the task form with separate sender-account and recipient-target selectors. For supported channels, recipient targets are discovered automatically from channel directories or known session history, so you no longer need to edit `jobs.json` by hand.
 
+### 🌙 Dream Mode
+Enable **Dream Mode** from **Settings → General** to surface OpenClaw memory dreaming in the client. When enabled, Deep AI Worker syncs `memory-core` dreaming into OpenClaw, shows the Dreams workspace, and exposes diary/status maintenance controls; when disabled, the Dreams UI and runtime dreaming configuration are turned off.
 
 ### 🧩 Extensible Skill System
 Extend your AI agents with pre-built skills. Browse, install, and manage skills through the integrated skill panel—no package managers required.
@@ -329,7 +331,7 @@ Chain multiple skills together to create sophisticated automation pipelines. Pro
 │   ├── lib/                 # Unified frontend API + error model
 │   ├── stores/              # Zustand stores (settings/chat/gateway)
 │   ├── components/          # Reusable UI components
-│   ├── pages/               # Setup/Dashboard/Chat/Channels/Skills/Cron/Settings
+│   ├── pages/               # Setup/Dashboard/Chat/Channels/Skills/Cron/Dream/Settings
 │   ├── i18n/                # Localization resources
 │   └── types/               # TypeScript type definitions
 ├── tests/

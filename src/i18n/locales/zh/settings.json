@@ -13,7 +13,8 @@
       "language": "语言",
       "checkUpdates": "检查更新",
       "settings": "设置",
-      "console": ">_ OpenClaw 控制台"
+      "console": ">_ OpenClaw 控制台",
+      "dream": "梦境"
     },
     "theme": {
       "light": "浅色",
@@ -70,26 +71,22 @@
     "dark": "深色",
     "system": "跟随系统",
     "language": "语言",
+    "startupSection": "启动",
     "launchAtStartup": "开机自动启动",
     "launchAtStartupDesc": "登录系统后自动启动 {{appName}}"
   },
   "storage": {
-    "userUploadDir": "上传文件目录",
-    "userUploadDirDesc": "ClawX 会先把你附加的文件复制到这里，再按会话自动分文件夹管理。",
-    "assistantOutputDir": "模型输出目录",
-    "assistantOutputDirDesc": "当助手产出文件时，ClawX 会把识别到的输出复制到这里，并按会话自动分文件夹管理。",
+    "title": "文件存储",
+    "description": "统一设置上传文件和模型输出的存放位置，Deep AI Worker 会按会话自动分文件夹管理。",
+    "fileStorageDir": "文件存储目录",
+    "fileStorageDirDesc": "Deep AI Worker 会将上传文件和模型输出统一存放到这里，并按会话自动分文件夹管理。",
     "chooseFolder": "选择文件夹",
     "clearFolder": "使用默认目录",
     "defaultPlaceholder": "默认：{{path}}",
-    "outputDefaultPlaceholder": "未启用，选择目录后生效",
-    "sessionLayoutHint": "文件会按 <所选目录>/<agent>/<session>/uploads 结构存放。",
-    "outputSessionLayoutHint": "模型输出会按 <所选目录>/<agent>/<session>/outputs 结构存放。",
-    "saved": "上传文件目录已更新",
-    "saveFailed": "更新上传文件目录失败",
-    "reset": "已恢复使用默认上传目录",
-    "outputSaved": "模型输出目录已更新",
-    "outputSaveFailed": "更新模型输出目录失败",
-    "outputReset": "已关闭模型输出目录"
+    "sessionLayoutHint": "文件会按 <所选目录>/<agent>/<session>/uploads 和 <所选目录>/<agent>/<session>/outputs 结构存放。",
+    "saved": "文件存储目录已更新",
+    "saveFailed": "更新文件存储目录失败",
+    "reset": "已恢复使用默认文件存储目录"
   },
   "aiProviders": {
     "title": "AI 模型提供商",
@@ -426,7 +423,9 @@
       "hidden": "全部隐藏"
     },
     "telemetry": "匿名使用数据",
-    "telemetryDesc": "允许提供匿名的基础使用数据，用于改进 {{appName}}"
+    "telemetryDesc": "允许提供匿名的基础使用数据，用于改进 {{appName}}",
+    "dreamMode": "梦境模式",
+    "dreamModeDesc": "同步 OpenClaw 记忆梦境能力，并显示梦境工作区。"
   },
   "developer": {
     "title": "开发者",
@@ -516,5 +515,50 @@
     "docs": "官网",
     "github": "GitHub",
     "faq": "常见问题"
+  },
+  "dream": {
+    "title": "梦境",
+    "subtitle": "{{appName}} 记忆整理",
+    "gatewayStopped": "网关未启动",
+    "gatewayStoppedDesc": "启动 OpenClaw Gateway 后可查看梦境状态。",
+    "startGateway": "启动网关",
+    "actionDone": "{{action}}已完成（{{count}}）",
+    "metrics": {
+      "shortTerm": "短期记忆",
+      "signals": "信号",
+      "grounded": "回放",
+      "promotedToday": "今日提升"
+    },
+    "status": {
+      "enabled": "梦境已开启",
+      "disabled": "梦境已关闭",
+      "schedule": "计划",
+      "timezone": "时区",
+      "nextRun": "下次运行"
+    },
+    "phase": {
+      "light": "浅睡",
+      "deep": "深睡",
+      "rem": "REM"
+    },
+    "diary": {
+      "title": "梦境日志",
+      "empty": "暂无梦境日志。"
+    },
+    "actions": {
+      "title": "维护",
+      "backfill": "回填日志",
+      "dedupe": "日志去重",
+      "clearGrounded": "清空回放",
+      "repair": "修复缓存"
+    },
+    "lists": {
+      "waiting": "等待中",
+      "strongest": "最强信号",
+      "promoted": "已提升",
+      "signals": "信号",
+      "phaseHits": "阶段命中",
+      "empty": "暂无条目"
+    }
   }
 }

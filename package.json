@@ -92,6 +92,7 @@
         "docx-preview": "0.3.7",
         "electron-store": "^11.0.2",
         "electron-updater": "^6.8.3",
+        "fast-string-truncated-width": "1.2.1",
         "jszip": "^3.10.1",
         "lru-cache": "^11.2.6",
         "mammoth": "^1.12.0",

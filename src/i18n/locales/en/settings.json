@@ -8,6 +8,7 @@
       "dashboard": "System Monitoring",
       "models": "Models",
       "channels": "Channels",
+      "dream": "Dreams",
       "archives": "Session Archive",
       "theme": "Theme",
       "language": "Language",
@@ -70,26 +71,22 @@
     "dark": "Dark",
     "system": "System",
     "language": "Language",
+    "startupSection": "Startup",
     "launchAtStartup": "Launch at system startup",
     "launchAtStartupDesc": "Automatically launch {{appName}} when you log in"
   },
   "storage": {
-    "userUploadDir": "Uploaded file directory",
-    "userUploadDirDesc": "ClawX copies files you attach here and then groups them by session automatically.",
-    "assistantOutputDir": "Assistant output directory",
-    "assistantOutputDirDesc": "When the assistant produces files, ClawX copies the detected outputs here and groups them by session automatically.",
+    "title": "File Storage",
+    "description": "Set one shared location for uploads and assistant outputs, and Deep AI Worker will organize everything by session automatically.",
+    "fileStorageDir": "File storage directory",
+    "fileStorageDirDesc": "Deep AI Worker stores uploaded files and assistant outputs here, then organizes them by session automatically.",
     "chooseFolder": "Choose Folder",
     "clearFolder": "Use Default",
     "defaultPlaceholder": "Default: {{path}}",
-    "outputDefaultPlaceholder": "Disabled until you choose a folder",
-    "sessionLayoutHint": "Files are stored as <selected folder>/<agent>/<session>/uploads.",
-    "outputSessionLayoutHint": "Assistant outputs are stored as <selected folder>/<agent>/<session>/outputs.",
-    "saved": "Uploaded file directory updated",
-    "saveFailed": "Failed to update uploaded file directory",
-    "reset": "Using the default uploaded file directory",
-    "outputSaved": "Assistant output directory updated",
-    "outputSaveFailed": "Failed to update assistant output directory",
-    "outputReset": "Assistant output directory disabled"
+    "sessionLayoutHint": "Files are stored as <selected folder>/<agent>/<session>/uploads and <selected folder>/<agent>/<session>/outputs.",
+    "saved": "File storage directory updated",
+    "saveFailed": "Failed to update file storage directory",
+    "reset": "Using the default file storage directory"
   },
   "aiProviders": {
     "title": "AI Providers",
@@ -409,6 +406,8 @@
     "devModeDesc": "Show developer tools and shortcuts",
     "chatProcessDisplay": "Chat process hints",
     "chatProcessDisplayDesc": "Control whether tool execution and read-process cards appear in the conversation.",
+    "dreamMode": "Dream Mode",
+    "dreamModeDesc": "Syncs OpenClaw memory dreaming and shows the Dreams workspace.",
     "assistantMessageStyle": "Assistant output style",
     "assistantMessageStyleDesc": "Switch between the current bubble reply and a flatter event-stream reply.",
     "hideInternalRoutineProcesses": "Hide internal routine checks",
@@ -427,6 +426,51 @@
     },
     "telemetry": "Anonymous Usage Data",
     "telemetryDesc": "Allow providing anonymous basic usage data to improve {{appName}}"
+  },
+  "dream": {
+    "title": "Dreams",
+    "subtitle": "{{appName}} memory consolidation",
+    "gatewayStopped": "Gateway is stopped",
+    "gatewayStoppedDesc": "Dream status is available after the OpenClaw Gateway starts.",
+    "startGateway": "Start Gateway",
+    "actionDone": "{{action}} complete ({{count}})",
+    "metrics": {
+      "shortTerm": "Short-term",
+      "signals": "Signals",
+      "grounded": "Grounded",
+      "promotedToday": "Promoted today"
+    },
+    "status": {
+      "enabled": "Dreaming enabled",
+      "disabled": "Dreaming disabled",
+      "schedule": "Schedule",
+      "timezone": "Timezone",
+      "nextRun": "Next run"
+    },
+    "phase": {
+      "light": "Light",
+      "deep": "Deep",
+      "rem": "REM"
+    },
+    "diary": {
+      "title": "Dream Diary",
+      "empty": "No dream diary entries yet."
+    },
+    "actions": {
+      "title": "Maintenance",
+      "backfill": "Backfill Diary",
+      "dedupe": "Dedupe Diary",
+      "clearGrounded": "Clear Grounded",
+      "repair": "Repair Cache"
+    },
+    "lists": {
+      "waiting": "Waiting",
+      "strongest": "Strongest Signals",
+      "promoted": "Promoted",
+      "signals": "signals",
+      "phaseHits": "phase hits",
+      "empty": "No entries"
+    }
   },
   "developer": {
     "title": "Developer",

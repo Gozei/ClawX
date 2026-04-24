@@ -7,6 +7,7 @@ import {
   Languages,
   MonitorCog,
   Moon,
+  MoonStar,
   Network,
   RefreshCw,
   Settings2,
@@ -40,6 +41,7 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
   const setTheme = useSettingsStore((state) => state.setTheme);
   const language = useSettingsStore((state) => state.language);
   const setLanguage = useSettingsStore((state) => state.setLanguage);
+  const dreamModeEnabled = useSettingsStore((state) => state.dreamModeEnabled);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
   const downloadUpdate = useUpdateStore((state) => state.downloadUpdate);
   const clearUpdateError = useUpdateStore((state) => state.clearError);
@@ -129,6 +131,8 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
     ? 'models'
     : location.pathname.startsWith('/channels')
       ? 'channels'
+      : location.pathname.startsWith('/dream')
+        ? 'dream'
       : location.pathname.startsWith('/settings/archives')
         ? 'archives'
       : location.pathname.startsWith('/dashboard')
@@ -171,6 +175,16 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
       onClick: () => navigateFromMenu('/channels'),
       selected: selectedKey === 'channels',
     },
+    ...(dreamModeEnabled
+      ? [{
+        key: 'dream',
+        label: t('settingsHub.menu.dream'),
+        testId: 'settings-hub-menu-dream',
+        icon: MoonStar,
+        onClick: () => navigateFromMenu('/dream'),
+        selected: selectedKey === 'dream',
+      }]
+      : []),
     {
       key: 'archives',
       label: t('settingsHub.menu.archives'),
