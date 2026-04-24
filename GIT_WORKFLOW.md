@@ -25,18 +25,24 @@ tommy/feat/dashboard
 will/fix/audit-error-braces
 fai/refactor-country-list
 tommy/chore/update-fixture-data
+tommy/docs/git-workflow
 ```
 
 ## 分支类型
 
 - `feat` - 新功能
 - `fix` - 问题修复
-- `chore` - 维护、配置、依赖或数据更新
+- `docs` - 文档、说明更新
+- `style` - 代码格式或样式调整，不改变预期行为
 - `refactor` - 代码重构，不改变预期行为
 - `test` - 测试相关改动
+- `chore` - 维护、配置、依赖或数据更新
+- `build` - 构建系统、打包配置或构建依赖改动
+- `ci` - CI/CD 工作流配置改动
 - `poc` - 概念验证或实验性改动
-- `doc` - 文档、说明更新
 - `hotfix` - 线上紧急问题修复
+
+`poc` 分支用于验证方案，不建议直接合并到长期分支。验证通过后，应按实际改动类型整理为 `feat`、`fix`、`refactor` 等正式分支或提交。
 
 ## 描述规则
 
@@ -82,6 +88,7 @@ tommy/fix/bug
 ```text
 feat: add internal rate rules
 fix: save shipment pickup time correctly
+docs: update git workflow guidelines
 chore: update fixture data
 refactor: simplify quotation handler
 hotfix: fix payment callback error
@@ -89,7 +96,7 @@ hotfix: fix payment callback error
 
 规则：
 
-- `type` 应与分支类型保持一致，例如 `feat`、`fix`、`chore`、`refactor`、`test`、`poc`、`doc`、`hotfix`。
+- `type` 应与分支类型保持一致，例如 `feat`、`fix`、`docs`、`style`、`refactor`、`test`、`chore`、`build`、`ci`、`poc`、`hotfix`。
 - `short summary` 使用英文小写开头，简短描述本次改动。
 - Pull Request 名称应优先使用主要 commit 的语义。
 - 如果一个 Pull Request 包含多个 commit，整体 PR 名称应概括该分支的最终目的。
