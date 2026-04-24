@@ -17,6 +17,7 @@ import {
   MoreHorizontal,
   Pin,
   Loader2,
+  MoonStar,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -199,6 +200,7 @@ export function Sidebar() {
   const location = useLocation();
   const sidebarCollapsed = useSettingsStore((state) => state.sidebarCollapsed);
   const sidebarWidth = useSettingsStore((state) => state.sidebarWidth);
+  const dreamModeEnabled = useSettingsStore((state) => state.dreamModeEnabled);
   const setSidebarCollapsed = useSettingsStore((state) => state.setSidebarCollapsed);
   const setSidebarWidth = useSettingsStore((state) => state.setSidebarWidth);
 
@@ -686,6 +688,9 @@ export function Sidebar() {
     { to: '/agents', icon: <Bot className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.agents'), testId: 'sidebar-nav-agents' },
     { to: `/skills${lastSkillsSearch}`, icon: <Puzzle className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.skills'), testId: 'sidebar-nav-skills' },
     { to: '/cron', icon: <Clock className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.cronTasks'), testId: 'sidebar-nav-cron' },
+    ...(dreamModeEnabled
+      ? [{ to: '/dream', icon: <MoonStar className="h-[18px] w-[18px]" strokeWidth={2} />, label: t('sidebar.dream'), testId: 'sidebar-nav-dream' }]
+      : []),
   ];
 
   return (

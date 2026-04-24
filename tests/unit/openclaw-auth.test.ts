@@ -394,6 +394,42 @@ describe('sanitizeOpenClawConfig', () => {
     logSpy.mockRestore();
   });
 
+  it('preserves memory-core dreaming config during sanitize', async () => {
+    await writeOpenClawJson({
+      plugins: {
+        entries: {
+          'memory-core': {
+            enabled: true,
+            config: {
+              dreaming: {
+                enabled: true,
+                frequency: '0 3 * * *',
+                timezone: 'Asia/Shanghai',
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const { sanitizeOpenClawConfig } = await import('@electron/utils/openclaw-auth');
+    await sanitizeOpenClawConfig();
+
+    const result = await readOpenClawJson();
+    const plugins = result.plugins as Record<string, unknown>;
+    const entries = plugins.entries as Record<string, unknown>;
+    const memoryCore = entries['memory-core'] as Record<string, unknown>;
+
+    expect(memoryCore.enabled).toBe(true);
+    expect(memoryCore.config).toEqual({
+      dreaming: {
+        enabled: true,
+        frequency: '0 3 * * *',
+        timezone: 'Asia/Shanghai',
+      },
+    });
+  });
+
   it('sanitizes legacy tools.web.search.kimi for moonshot-managed config', async () => {
     await writeOpenClawJson({
       models: {

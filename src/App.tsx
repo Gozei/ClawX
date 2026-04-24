@@ -2,7 +2,7 @@
  * Root Application Component
  * Handles routing and global providers
  */
-import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { Navigate, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { Component, lazy, Suspense, useEffect, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { Loader2, Rocket } from 'lucide-react';
@@ -26,6 +26,7 @@ const Channels = lazy(() => import('./pages/Channels').then((module) => ({ defau
 const Skills = lazy(() => import('./pages/Skills').then((module) => ({ default: module.Skills })));
 const SkillDetailPage = lazy(() => import('./pages/Skills').then((module) => ({ default: module.SkillDetailPage })));
 const Cron = lazy(() => import('./pages/Cron').then((module) => ({ default: module.Cron })));
+const Dream = lazy(() => import('./pages/Dream').then((module) => ({ default: module.Dream })));
 const Settings = lazy(() => import('./pages/Settings').then((module) => ({ default: module.Settings })));
 const Setup = lazy(() => import('./pages/Setup').then((module) => ({ default: module.Setup })));
 
@@ -35,6 +36,11 @@ function RouteLoader() {
       <PageLoader />
     </div>
   );
+}
+
+function DreamRoute() {
+  const dreamModeEnabled = useSettingsStore((state) => state.dreamModeEnabled);
+  return dreamModeEnabled ? <Dream /> : <Navigate to="/" replace />;
 }
 
 function UpdateInstallOverlay() {
@@ -292,6 +298,7 @@ function App() {
               <Route path="/skills" element={<Skills />} />
               <Route path="/skills/:skillId" element={<SkillDetailPage />} />
               <Route path="/cron" element={<Cron />} />
+              <Route path="/dream" element={<DreamRoute />} />
               <Route path="/settings/*" element={<Settings />} />
             </Route>
           </Routes>

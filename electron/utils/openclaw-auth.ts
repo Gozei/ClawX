@@ -1705,11 +1705,6 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
 
       if (pEntries['memory-core']) {
         const memoryCoreEntry = pEntries['memory-core'];
-        if ('config' in memoryCoreEntry) {
-          delete memoryCoreEntry.config;
-          console.log('[sanitize] Removed incompatible plugins.entries.memory-core.config');
-          modified = true;
-        }
         if (memoryCoreEntry.enabled !== true) {
           memoryCoreEntry.enabled = true;
           modified = true;

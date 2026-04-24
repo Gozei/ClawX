@@ -44,6 +44,7 @@ interface SettingsState {
   hideInternalRoutineProcesses: boolean;
   assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
+  dreamModeEnabled: boolean;
 
   // Gateway
   gatewayAutoStart: boolean;
@@ -88,6 +89,7 @@ interface SettingsState {
   setHideInternalRoutineProcesses: (value: boolean) => void;
   setAssistantMessageStyle: (value: AssistantMessageStyle) => void;
   setChatFontScale: (value: number) => void;
+  setDreamModeEnabled: (value: boolean) => void;
   setGatewayAutoStart: (value: boolean) => void;
   setGatewayPort: (port: number) => void;
   setProxyEnabled: (value: boolean) => void;
@@ -124,6 +126,7 @@ const defaultSettings = {
   hideInternalRoutineProcesses: true,
   assistantMessageStyle: 'bubble' as AssistantMessageStyle,
   chatFontScale: 100,
+  dreamModeEnabled: false,
   gatewayAutoStart: true,
   gatewayPort: 18789,
   proxyEnabled: false,
@@ -269,6 +272,13 @@ export const useSettingsStore = create<SettingsState>()(
         void hostApiFetch('/api/settings/chatFontScale', {
           method: 'PUT',
           body: JSON.stringify({ value: normalized }),
+        }).catch(() => { });
+      },
+      setDreamModeEnabled: (dreamModeEnabled) => {
+        set({ dreamModeEnabled });
+        void hostApiFetch('/api/settings/dreamModeEnabled', {
+          method: 'PUT',
+          body: JSON.stringify({ value: dreamModeEnabled }),
         }).catch(() => { });
       },
       setGatewayAutoStart: (gatewayAutoStart) => {

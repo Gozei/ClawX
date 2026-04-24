@@ -54,6 +54,7 @@ export interface AppSettings {
   hideInternalRoutineProcesses: boolean;
   assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
+  dreamModeEnabled: boolean;
   machineId: string;
   hasReportedInstall: boolean;
 
@@ -116,6 +117,7 @@ function createDefaultSettings(): AppSettings {
     hideInternalRoutineProcesses: true,
     assistantMessageStyle: 'bubble',
     chatFontScale: 100,
+    dreamModeEnabled: false,
     machineId: '',
     hasReportedInstall: false,
 

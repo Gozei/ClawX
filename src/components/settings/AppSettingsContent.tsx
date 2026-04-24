@@ -83,6 +83,8 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
     setAssistantMessageStyle,
     chatFontScale,
     setChatFontScale,
+    dreamModeEnabled,
+    setDreamModeEnabled,
   } = useSettingsStore();
 
   const { status: gatewayStatus, restart: restartGateway } = useGatewayStore();
@@ -520,6 +522,20 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
                 <Switch
                   checked={launchAtStartup}
                   onCheckedChange={setLaunchAtStartup}
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="pr-4">
+                  <Label className="text-[15px] font-medium text-foreground/80">{t('features.dreamMode')}</Label>
+                  <p className="text-[13px] text-muted-foreground mt-1">
+                    {t('features.dreamModeDesc')}
+                  </p>
+                </div>
+                <Switch
+                  checked={dreamModeEnabled}
+                  onCheckedChange={setDreamModeEnabled}
+                  data-testid="settings-dream-mode-switch"
                 />
               </div>
             </div>

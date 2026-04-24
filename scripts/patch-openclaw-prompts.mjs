@@ -75,6 +75,13 @@ export function patchOpenClawPrompts(openclawDir, log = console.log) {
     )
   );
 
+  patchedFiles += patchHashedDistFile(distDir, 'openclaw-root-', (text) =>
+    text.replace(
+      'const CORE_PACKAGE_NAMES = new Set(["openclaw"]);',
+      'const CORE_PACKAGE_NAMES = new Set(["openclaw","@gozei/deepclaw"]);',
+    )
+  );
+
   if (patchedFiles > 0) {
     log(`Patched ${patchedFiles} OpenClaw prompt/runtime file(s) in ${openclawDir}`);
   }
