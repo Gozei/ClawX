@@ -13,7 +13,8 @@
       "language": "语言",
       "checkUpdates": "检查更新",
       "settings": "设置",
-      "console": ">_ OpenClaw 控制台"
+      "console": ">_ OpenClaw 控制台",
+      "dream": "梦境"
     },
     "theme": {
       "light": "浅色",

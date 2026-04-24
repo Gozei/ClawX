@@ -19,11 +19,11 @@ test.describe('Dream mode gating', () => {
       await switchControl.click({ force: true });
       await expect(switchControl).toHaveAttribute('data-state', 'checked');
 
-      await expect(page.getByTestId('sidebar-nav-dream')).toBeVisible();
+      await expect(page.getByTestId('sidebar-nav-dream')).toHaveCount(0);
       await openSettingsHub(page);
-      await expect(page.getByTestId('settings-hub-menu-dream')).toHaveCount(0);
-      await page.keyboard.press('Escape');
-      await page.getByTestId('sidebar-nav-dream').click({ force: true });
+      await expect(page.getByTestId('settings-hub-menu-dream')).toBeVisible();
+      await expect(page.getByTestId('settings-hub-menu-dream')).toContainText('梦境');
+      await page.getByTestId('settings-hub-menu-dream').click({ force: true });
       await expect(page.getByTestId('dream-page')).toBeVisible();
     } finally {
       await closeElectronApp(app);
@@ -33,9 +33,11 @@ test.describe('Dream mode gating', () => {
     try {
       const page = await getStableWindow(relaunched);
       await expect(page.getByTestId('main-layout')).toBeVisible();
-      await expect(page.getByTestId('sidebar-nav-dream')).toBeVisible();
+      await expect(page.getByTestId('sidebar-nav-dream')).toHaveCount(0);
 
       await openSettingsHub(page);
+      await expect(page.getByTestId('settings-hub-menu-dream')).toBeVisible();
+      await expect(page.getByTestId('settings-hub-menu-dream')).toContainText('梦境');
       await page.getByTestId('settings-hub-menu-settings').click({ force: true });
       const switchControl = page.getByTestId('settings-dream-mode-switch');
       await switchControl.scrollIntoViewIfNeeded();
@@ -44,6 +46,8 @@ test.describe('Dream mode gating', () => {
       await switchControl.click({ force: true });
       await expect(switchControl).toHaveAttribute('data-state', 'unchecked');
       await expect(page.getByTestId('sidebar-nav-dream')).toHaveCount(0);
+      await openSettingsHub(page);
+      await expect(page.getByTestId('settings-hub-menu-dream')).toHaveCount(0);
     } finally {
       await closeElectronApp(relaunched);
     }
