@@ -9,12 +9,13 @@ const subscribeHostEventMock = vi.fn();
 const fetchAgentsMock = vi.fn();
 const updateAgentMock = vi.fn();
 const updateAgentModelMock = vi.fn();
+const updateAgentStudioMock = vi.fn();
 const deleteAgentMock = vi.fn();
 const refreshProviderSnapshotMock = vi.fn();
 const fetchSkillsMock = vi.fn();
 const gatewayRpcMock = vi.fn();
 
-const { gatewayState, agentsState, providersState } = vi.hoisted(() => ({
+const { gatewayState, agentsState, providersState, skillsState } = vi.hoisted(() => ({
   gatewayState: {
     status: { state: 'running', port: 18789 },
   },
@@ -29,6 +30,9 @@ const { gatewayState, agentsState, providersState } = vi.hoisted(() => ({
     statuses: [] as Array<Record<string, unknown>>,
     vendors: [] as Array<Record<string, unknown>>,
     defaultAccountId: '' as string,
+  },
+  skillsState: {
+    skills: [] as Array<Record<string, unknown>>,
   },
 }));
 
@@ -45,7 +49,7 @@ vi.mock('@/stores/skills', () => ({
     fetchSkills: typeof fetchSkillsMock;
   }) => unknown) => {
     const state = {
-      skills: [],
+      ...skillsState,
       fetchSkills: fetchSkillsMock,
     };
     return typeof selector === 'function' ? selector(state) : state;
@@ -57,6 +61,7 @@ vi.mock('@/stores/agents', () => ({
     fetchAgents: typeof fetchAgentsMock;
     updateAgent: typeof updateAgentMock;
     updateAgentModel: typeof updateAgentModelMock;
+    updateAgentStudio: typeof updateAgentStudioMock;
     createAgent: ReturnType<typeof vi.fn>;
     deleteAgent: typeof deleteAgentMock;
   }) => unknown) => {
@@ -65,6 +70,7 @@ vi.mock('@/stores/agents', () => ({
       fetchAgents: fetchAgentsMock,
       updateAgent: updateAgentMock,
       updateAgentModel: updateAgentModelMock,
+      updateAgentStudio: updateAgentStudioMock,
       createAgent: vi.fn(),
       deleteAgent: deleteAgentMock,
     };
@@ -126,6 +132,7 @@ describe('Agents page status refresh', () => {
     gatewayState.status = { state: 'running', port: 18789 };
     agentsState.agents = [];
     agentsState.defaultModelRef = null;
+    skillsState.skills = [];
     providersState.accounts = [];
     providersState.statuses = [];
     providersState.vendors = [];
@@ -133,6 +140,7 @@ describe('Agents page status refresh', () => {
     fetchAgentsMock.mockResolvedValue(undefined);
     updateAgentMock.mockResolvedValue(undefined);
     updateAgentModelMock.mockResolvedValue(undefined);
+    updateAgentStudioMock.mockResolvedValue(undefined);
     deleteAgentMock.mockResolvedValue(undefined);
     refreshProviderSnapshotMock.mockResolvedValue(undefined);
     fetchSkillsMock.mockResolvedValue(undefined);
@@ -287,6 +295,94 @@ describe('Agents page status refresh', () => {
 
     await waitFor(() => {
       expect(deleteAgentMock).toHaveBeenCalledWith('writer');
+    });
+  });
+
+  it('keeps the agent skills search visible and lets assigned globally disabled skills be removed', async () => {
+    agentsState.agents = [
+      {
+        id: 'main',
+        name: 'Main',
+        isDefault: true,
+        modelDisplay: 'gpt-5',
+        modelRef: 'openai/gpt-5',
+        overrideModelRef: null,
+        inheritedModel: true,
+        workspace: '~/.openclaw/workspace',
+        agentDir: '~/.openclaw/agents/main/agent',
+        mainSessionKey: 'agent:main:main',
+        channelTypes: [],
+        skillIds: ['disabled-assigned'],
+      },
+    ];
+    skillsState.skills = [
+      {
+        id: 'disabled-unassigned',
+        name: 'Disabled Unassigned',
+        description: 'Unavailable globally',
+        enabled: false,
+        ready: true,
+        version: '1.0.0',
+      },
+      {
+        id: 'disabled-assigned',
+        name: 'Disabled Assigned',
+        description: 'Historical assignment',
+        enabled: false,
+        ready: true,
+        version: '1.0.0',
+      },
+      {
+        id: 'enabled-skill',
+        name: 'Enabled Skill',
+        description: 'Available globally',
+        enabled: true,
+        ready: true,
+        version: '1.0.0',
+      },
+    ];
+
+    render(<Agents />);
+
+    await waitFor(() => {
+      expect(fetchAgentsMock).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByTitle('settings'));
+    const settingsDialog = await screen.findByTestId('agent-settings-dialog');
+    const skillsTab = within(settingsDialog).getByText('settingsDialog.tabs.skills');
+    fireEvent.mouseDown(skillsTab, { button: 0 });
+    fireEvent.click(skillsTab);
+
+    expect(await screen.findByTestId('agent-skill-search-input')).toBeVisible();
+
+    const enabledCard = screen.getByTestId('agent-skill-list-item-enabled-skill');
+    const disabledAssignedCard = screen.getByTestId('agent-skill-list-item-disabled-assigned');
+    const disabledUnassignedCard = screen.getByTestId('agent-skill-list-item-disabled-unassigned');
+
+    expect(
+      enabledCard.compareDocumentPosition(disabledAssignedCard) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      disabledAssignedCard.compareDocumentPosition(disabledUnassignedCard) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    expect(within(disabledAssignedCard).getByText('settingsDialog.skillAssigned')).toBeInTheDocument();
+    expect(within(disabledAssignedCard).getByText('settingsDialog.skillDisabled')).toBeInTheDocument();
+    expect(within(disabledAssignedCard).getByText('settingsDialog.skillDisabledAssignedHint')).toBeInTheDocument();
+    expect(within(disabledUnassignedCard).getByRole('switch')).toBeDisabled();
+
+    fireEvent.click(within(disabledAssignedCard).getByRole('switch'));
+    fireEvent.click(screen.getByRole('button', { name: 'settingsDialog.saveStudio' }));
+
+    await waitFor(() => {
+      expect(updateAgentStudioMock).toHaveBeenCalledWith('main', expect.objectContaining({
+        skillIds: [],
+      }));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('agent-settings-dialog')).not.toBeInTheDocument();
     });
   });
 
