@@ -5,7 +5,14 @@ import type { HostApiContext } from '../context';
 import { emitMutationAudit } from '../audit-utils';
 import { parseJsonBody, sendJson } from '../route-utils';
 import { getOpenClawConfigDir } from '../../utils/paths';
-import { toOpenClawChannelType, toUiChannelType } from '../../utils/channel-alias';
+import { ensureWeChatPluginInstalled } from '../../utils/plugin-install';
+import {
+  OPENCLAW_WECHAT_CHANNEL_TYPE,
+  isWechatChannelType,
+  toOpenClawChannelType,
+  toUiChannelType,
+} from '../../utils/channel-alias';
+import { ensureWeChatPluginRegistration } from '../../utils/channel-config';
 
 interface GatewayCronJob {
   id: string;
@@ -424,6 +431,34 @@ function getUnsupportedCronDeliveryError(_channel: string | undefined): string |
   return null;
 }
 
+function isWeChatCronDelivery(delivery: GatewayCronDelivery | undefined): boolean {
+  return delivery?.mode === 'announce' && isWechatChannelType(delivery.channel);
+}
+
+function isWeChatOutboundMissingError(error: unknown): boolean {
+  return typeof error === 'string'
+    && error.toLowerCase().includes(`outbound not configured for channel: ${OPENCLAW_WECHAT_CHANNEL_TYPE}`);
+}
+
+function scheduleGatewayRestartForWeChatCronDelivery(ctx: HostApiContext, reason: string): void {
+  const manager = ctx.gatewayManager as HostApiContext['gatewayManager'] & {
+    debouncedRestart?: () => void;
+    getStatus?: () => { state?: string };
+  };
+  if (manager.getStatus?.().state === 'stopped') return;
+  manager.debouncedRestart?.();
+  void reason;
+}
+
+async function ensureWeChatCronDeliveryReady(): Promise<{ pluginRegistrationChanged: boolean }> {
+  const installResult = ensureWeChatPluginInstalled();
+  if (!installResult.installed) {
+    throw new Error(installResult.warning || 'WeChat plugin install failed');
+  }
+  const pluginRegistrationChanged = await ensureWeChatPluginRegistration();
+  return { pluginRegistrationChanged };
+}
+
 function normalizeCronDelivery(
   rawDelivery: unknown,
   fallbackMode: GatewayCronDelivery['mode'] = 'none',
@@ -639,6 +674,14 @@ export async function handleCronRoutes(
           }
         }
       }
+      if (jobs.some((job) => isWeChatCronDelivery(normalizeCronDelivery(job.delivery)) && isWeChatOutboundMissingError(job.state?.lastError))) {
+        try {
+          await ensureWeChatCronDeliveryReady();
+          scheduleGatewayRestartForWeChatCronDelivery(ctx, 'cron:list recovered missing WeChat outbound');
+        } catch {
+          // Listing jobs should not fail because recovery could not complete.
+        }
+      }
       sendJson(res, 200, jobs.map(transformCronJob));
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
@@ -662,6 +705,11 @@ export async function handleCronRoutes(
         sendJson(res, 400, { success: false, error: unsupportedDeliveryError });
         return true;
       }
+      let shouldRestartGatewayForWeChatDelivery = false;
+      if (isWeChatCronDelivery(delivery)) {
+        const readiness = await ensureWeChatCronDeliveryReady();
+        shouldRestartGatewayForWeChatDelivery = readiness.pluginRegistrationChanged;
+      }
       const result = await ctx.gatewayManager.rpc('cron.add', {
         name: input.name,
         schedule: { kind: 'cron', expr: input.schedule },
@@ -671,6 +719,9 @@ export async function handleCronRoutes(
         sessionTarget: 'isolated',
         delivery,
       });
+      if (shouldRestartGatewayForWeChatDelivery) {
+        scheduleGatewayRestartForWeChatCronDelivery(ctx, 'cron:create WeChat delivery');
+      }
       const transformed = result && typeof result === 'object' ? transformCronJob(result as GatewayCronJob) : result;
       emitMutationAudit(req, ctx, {
         startedAt,
@@ -719,7 +770,15 @@ export async function handleCronRoutes(
         sendJson(res, 400, { success: false, error: unsupportedDeliveryError });
         return true;
       }
+      let shouldRestartGatewayForWeChatDelivery = false;
+      if (deliveryMode === 'announce' && isWechatChannelType(deliveryChannel)) {
+        const readiness = await ensureWeChatCronDeliveryReady();
+        shouldRestartGatewayForWeChatDelivery = readiness.pluginRegistrationChanged;
+      }
       const result = await ctx.gatewayManager.rpc('cron.update', { id, patch });
+      if (shouldRestartGatewayForWeChatDelivery) {
+        scheduleGatewayRestartForWeChatCronDelivery(ctx, 'cron:update WeChat delivery');
+      }
       emitMutationAudit(req, ctx, {
         startedAt,
         action: 'cron.job.update',
