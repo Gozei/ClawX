@@ -19,6 +19,7 @@ import {
   type AppLogLevel,
   type AuditMode,
 } from '../../shared/logging';
+import { confirmGatewayImpact } from '@/lib/gateway-impact-confirm';
 
 type Theme = 'light' | 'dark' | 'system';
 type UpdateChannel = 'stable' | 'beta' | 'dev';
@@ -90,7 +91,7 @@ interface SettingsState {
   setHideInternalRoutineProcesses: (value: boolean) => void;
   setAssistantMessageStyle: (value: AssistantMessageStyle) => void;
   setChatFontScale: (value: number) => void;
-  setDreamModeEnabled: (value: boolean) => void;
+  setDreamModeEnabled: (value: boolean) => Promise<boolean>;
   setFileStorageBaseDir: (value: string) => void;
   setGatewayAutoStart: (value: boolean) => void;
   setGatewayPort: (port: number) => void;
@@ -290,12 +291,20 @@ export const useSettingsStore = create<SettingsState>()(
           body: JSON.stringify({ value: normalized }),
         }).catch(() => { });
       },
-      setDreamModeEnabled: (dreamModeEnabled) => {
-        set({ dreamModeEnabled });
-        void hostApiFetch('/api/settings/dreamModeEnabled', {
+      setDreamModeEnabled: async (dreamModeEnabled) => {
+        const confirmed = await confirmGatewayImpact({
+          mode: 'restart',
+          willApplyChanges: true,
+        });
+        if (!confirmed) {
+          return false;
+        }
+        await hostApiFetch('/api/settings/dreamModeEnabled', {
           method: 'PUT',
           body: JSON.stringify({ value: dreamModeEnabled }),
-        }).catch(() => { });
+        });
+        set({ dreamModeEnabled });
+        return true;
       },
       setFileStorageBaseDir: (fileStorageBaseDir) => {
         const normalized = fileStorageBaseDir.trim();

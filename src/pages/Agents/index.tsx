@@ -432,7 +432,8 @@ export function Agents() {
         <AddAgentDialog
           onClose={() => setShowAddDialog(false)}
           onCreate={async (name, options) => {
-            await createAgent(name, options);
+            const created = await createAgent(name, options);
+            if (!created) return;
             setShowAddDialog(false);
             toast.success(t('toast.agentCreated'));
           }}
@@ -460,7 +461,8 @@ export function Agents() {
         onConfirm={async () => {
           if (!agentToDelete) return;
           try {
-            await deleteAgent(agentToDelete.id);
+            const deleted = await deleteAgent(agentToDelete.id);
+            if (!deleted) return;
             const deletedId = agentToDelete.id;
             setAgentToDelete(null);
             if (activeAgentId === deletedId) {
@@ -982,7 +984,8 @@ function AgentSettingsModal({
     if (!name.trim() || name.trim() === safeAgentName) return;
     setSavingName(true);
     try {
-      await updateAgent(agent.id, name.trim());
+      const updated = await updateAgent(agent.id, name.trim());
+      if (!updated) return;
       toast.success(t('toast.agentUpdated'));
     } catch (error) {
       toast.error(t('toast.agentUpdateFailed', { error: String(error) }));
@@ -1046,7 +1049,7 @@ function AgentSettingsModal({
   const handleSaveStudio = async () => {
     setSavingStudio(true);
     try {
-      await updateAgentStudio(agent.id, {
+      const updated = await updateAgentStudio(agent.id, {
         description: description.trim() || null,
         profileType,
         objective: objective.trim() || null,
@@ -1057,6 +1060,7 @@ function AgentSettingsModal({
         workflowNodes: normalizedWorkflowNodes,
         triggerModes: normalizedTriggerModes,
       });
+      if (!updated) return;
       toast.success(t('toast.agentStudioUpdated'));
     } catch (error) {
       toast.error(t('toast.agentStudioUpdateFailed', { error: String(error) }));
@@ -2146,7 +2150,8 @@ function AgentModelModal({
 
     setSavingModel(true);
     try {
-      await updateAgentModel(agent.id, desiredOverrideModelRef, { setAsDefault: makeDefaultRequested });
+      const updated = await updateAgentModel(agent.id, desiredOverrideModelRef, { setAsDefault: makeDefaultRequested });
+      if (!updated) return;
       toast.success(t('toast.agentModelSettingsUpdated'));
       onClose();
     } catch (error) {

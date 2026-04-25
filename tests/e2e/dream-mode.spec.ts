@@ -17,6 +17,9 @@ test.describe('Dream mode gating', () => {
       await switchControl.scrollIntoViewIfNeeded();
       await expect(switchControl).toHaveAttribute('data-state', 'unchecked');
       await switchControl.click({ force: true });
+      const confirmDialog = page.getByTestId('gateway-impact-confirm-dialog');
+      await expect(confirmDialog).toBeVisible();
+      await confirmDialog.getByRole('button', { name: /Apply and Restart|应用并重启/ }).click();
       await expect(switchControl).toHaveAttribute('data-state', 'checked');
 
       await expect(page.getByTestId('sidebar-nav-dream')).toHaveCount(0);
@@ -44,6 +47,9 @@ test.describe('Dream mode gating', () => {
       await expect(switchControl).toHaveAttribute('data-state', 'checked');
 
       await switchControl.click({ force: true });
+      const confirmDialog = page.getByTestId('gateway-impact-confirm-dialog');
+      await expect(confirmDialog).toBeVisible();
+      await confirmDialog.getByRole('button', { name: /Apply and Restart|应用并重启/ }).click();
       await expect(switchControl).toHaveAttribute('data-state', 'unchecked');
       await expect(page.getByTestId('sidebar-nav-dream')).toHaveCount(0);
       await openSettingsHub(page);

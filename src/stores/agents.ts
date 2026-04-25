@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { hostApiFetch } from '@/lib/host-api';
+import { confirmGatewayImpact } from '@/lib/gateway-impact-confirm';
 import type { ChannelType } from '@/types/channel';
 import type { AgentProfileType, AgentSummary, AgentsSnapshot, AgentWorkflowNode } from '@/types/agent';
 
@@ -25,15 +26,15 @@ interface AgentsState {
         outputContract?: string | null;
       };
     }
-  ) => Promise<void>;
-  updateAgent: (agentId: string, name: string) => Promise<void>;
+  ) => Promise<boolean>;
+  updateAgent: (agentId: string, name: string) => Promise<boolean>;
   updateAgentModel: (
     agentId: string,
     modelRef: string | null,
     options?: {
       setAsDefault?: boolean;
     }
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   updateAgentStudio: (
     agentId: string,
     payload: {
@@ -47,10 +48,10 @@ interface AgentsState {
       workflowNodes?: AgentWorkflowNode[];
       triggerModes?: string[];
     }
-  ) => Promise<void>;
-  deleteAgent: (agentId: string) => Promise<void>;
-  assignChannel: (agentId: string, channelType: ChannelType) => Promise<void>;
-  removeChannel: (agentId: string, channelType: ChannelType) => Promise<void>;
+  ) => Promise<boolean>;
+  deleteAgent: (agentId: string) => Promise<boolean>;
+  assignChannel: (agentId: string, channelType: ChannelType) => Promise<boolean>;
+  removeChannel: (agentId: string, channelType: ChannelType) => Promise<boolean>;
   clearError: () => void;
 }
 
@@ -101,6 +102,13 @@ export const useAgentsStore = create<AgentsState>((set) => ({
       };
     },
   ) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     set({ error: null });
     try {
       const snapshot = await hostApiFetch<AgentsSnapshot & { success?: boolean }>('/api/agents', {
@@ -112,6 +120,7 @@ export const useAgentsStore = create<AgentsState>((set) => ({
         }),
       });
       set(applySnapshot(snapshot));
+      return true;
     } catch (error) {
       set({ error: String(error) });
       throw error;
@@ -119,6 +128,13 @@ export const useAgentsStore = create<AgentsState>((set) => ({
   },
 
   updateAgent: async (agentId: string, name: string) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     set({ error: null });
     try {
       const snapshot = await hostApiFetch<AgentsSnapshot & { success?: boolean }>(
@@ -129,6 +145,7 @@ export const useAgentsStore = create<AgentsState>((set) => ({
         }
       );
       set(applySnapshot(snapshot));
+      return true;
     } catch (error) {
       set({ error: String(error) });
       throw error;
@@ -142,6 +159,13 @@ export const useAgentsStore = create<AgentsState>((set) => ({
       setAsDefault?: boolean;
     },
   ) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     set({ error: null });
     try {
       const snapshot = await hostApiFetch<AgentsSnapshot & { success?: boolean }>(
@@ -155,6 +179,7 @@ export const useAgentsStore = create<AgentsState>((set) => ({
         }
       );
       set(applySnapshot(snapshot));
+      return true;
     } catch (error) {
       set({ error: String(error) });
       throw error;
@@ -175,6 +200,13 @@ export const useAgentsStore = create<AgentsState>((set) => ({
       triggerModes?: string[];
     },
   ) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     set({ error: null });
     try {
       const snapshot = await hostApiFetch<AgentsSnapshot & { success?: boolean }>(
@@ -185,6 +217,7 @@ export const useAgentsStore = create<AgentsState>((set) => ({
         }
       );
       set(applySnapshot(snapshot));
+      return true;
     } catch (error) {
       set({ error: String(error) });
       throw error;
@@ -192,6 +225,13 @@ export const useAgentsStore = create<AgentsState>((set) => ({
   },
 
   deleteAgent: async (agentId: string) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'restart',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     set({ error: null });
     try {
       const snapshot = await hostApiFetch<AgentsSnapshot & { success?: boolean }>(
@@ -199,6 +239,7 @@ export const useAgentsStore = create<AgentsState>((set) => ({
         { method: 'DELETE' }
       );
       set(applySnapshot(snapshot));
+      return true;
     } catch (error) {
       set({ error: String(error) });
       throw error;
@@ -206,6 +247,13 @@ export const useAgentsStore = create<AgentsState>((set) => ({
   },
 
   assignChannel: async (agentId: string, channelType: ChannelType) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     set({ error: null });
     try {
       const snapshot = await hostApiFetch<AgentsSnapshot & { success?: boolean }>(
@@ -213,6 +261,7 @@ export const useAgentsStore = create<AgentsState>((set) => ({
         { method: 'PUT' }
       );
       set(applySnapshot(snapshot));
+      return true;
     } catch (error) {
       set({ error: String(error) });
       throw error;
@@ -220,6 +269,13 @@ export const useAgentsStore = create<AgentsState>((set) => ({
   },
 
   removeChannel: async (agentId: string, channelType: ChannelType) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     set({ error: null });
     try {
       const snapshot = await hostApiFetch<AgentsSnapshot & { success?: boolean }>(
@@ -227,6 +283,7 @@ export const useAgentsStore = create<AgentsState>((set) => ({
         { method: 'DELETE' }
       );
       set(applySnapshot(snapshot));
+      return true;
     } catch (error) {
       set({ error: String(error) });
       throw error;

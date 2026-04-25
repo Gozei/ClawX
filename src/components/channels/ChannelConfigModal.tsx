@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { useChannelsStore } from '@/stores/channels';
 
 import { hostApiFetch } from '@/lib/host-api';
+import { confirmGatewayImpact } from '@/lib/gateway-impact-confirm';
 import { subscribeHostEvent } from '@/lib/host-events';
 import { cn } from '@/lib/utils';
 import {
@@ -352,6 +353,14 @@ export function ChannelConfigModal({
 
   const handleConnect = async () => {
     if (!selectedType || !meta) return;
+
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return;
+    }
 
     setConnecting(true);
     setValidationResult(null);

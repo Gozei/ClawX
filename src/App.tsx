@@ -10,6 +10,7 @@ import { Toaster } from 'sonner';
 import i18n from './i18n';
 import { MainLayout } from './components/layout/MainLayout';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { GatewayImpactConfirmProvider } from '@/components/gateway/GatewayImpactConfirmProvider';
 import { PageLoader } from './components/common/LoadingSpinner';
 import { useSettingsStore } from './stores/settings';
 import { useGatewayStore } from './stores/gateway';
@@ -285,27 +286,29 @@ function App() {
   return (
     <ErrorBoundary>
       <TooltipProvider delayDuration={300}>
-        <Suspense fallback={<RouteLoader />}>
-          <Routes>
-            {/* Setup wizard (shown on first launch) */}
-            <Route path="/setup/*" element={<Setup />} />
-            <Route path="/file-preview" element={<ChatFilePreviewWindowPage />} />
+        <GatewayImpactConfirmProvider>
+          <Suspense fallback={<RouteLoader />}>
+            <Routes>
+              {/* Setup wizard (shown on first launch) */}
+              <Route path="/setup/*" element={<Setup />} />
+              <Route path="/file-preview" element={<ChatFilePreviewWindowPage />} />
 
-            {/* Main application routes */}
-            <Route element={<MainLayout />}>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/" element={<Chat />} />
-              <Route path="/models" element={<Models />} />
-              <Route path="/agents" element={<Agents />} />
-              <Route path="/channels" element={<Channels />} />
-              <Route path="/skills" element={<Skills />} />
-              <Route path="/skills/:skillId" element={<SkillDetailPage />} />
-              <Route path="/cron" element={<Cron />} />
-              <Route path="/dream" element={<DreamRoute />} />
-              <Route path="/settings/*" element={<Settings />} />
-            </Route>
-          </Routes>
-        </Suspense>
+              {/* Main application routes */}
+              <Route element={<MainLayout />}>
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/" element={<Chat />} />
+                <Route path="/models" element={<Models />} />
+                <Route path="/agents" element={<Agents />} />
+                <Route path="/channels" element={<Channels />} />
+                <Route path="/skills" element={<Skills />} />
+                <Route path="/skills/:skillId" element={<SkillDetailPage />} />
+                <Route path="/cron" element={<Cron />} />
+                <Route path="/dream" element={<DreamRoute />} />
+                <Route path="/settings/*" element={<Settings />} />
+              </Route>
+            </Routes>
+          </Suspense>
+        </GatewayImpactConfirmProvider>
 
         {/* Global toast notifications */}
         <Toaster
