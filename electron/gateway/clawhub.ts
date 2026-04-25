@@ -180,6 +180,26 @@ export class ClawHubService {
         return message.includes('rate limit') || message.includes('429');
     }
 
+    private isVersionNotFoundInstallError(error: unknown): boolean {
+        const message = String(error).toLowerCase();
+        return message.includes('version not found');
+    }
+
+    private buildInstallArgs(params: ClawHubInstallParams, options?: { omitVersion?: boolean }): string[] {
+        const args = ['install', params.slug];
+        const version = typeof params.version === 'string' ? params.version.trim() : '';
+
+        if (!options?.omitVersion && version && version.toLowerCase() !== 'latest') {
+            args.push('--version', version);
+        }
+
+        if (params.force) {
+            args.push('--force');
+        }
+
+        return args;
+    }
+
     private async delay(ms: number): Promise<void> {
         await new Promise((resolve) => setTimeout(resolve, ms));
     }
@@ -710,15 +730,8 @@ export class ClawHubService {
      */
     async install(params: ClawHubInstallParams): Promise<void> {
         const source = await this.resolveSource(params.sourceId);
-        const args = ['install', params.slug];
-
-        if (params.version) {
-            args.push('--version', params.version);
-        }
-
-        if (params.force) {
-            args.push('--force');
-        }
+        const args = this.buildInstallArgs(params);
+        const hasExplicitVersion = args.includes('--version');
 
         let lastError: unknown;
         for (let attempt = 0; attempt <= ClawHubService.INSTALL_RETRY_COUNT; attempt += 1) {
@@ -728,6 +741,16 @@ export class ClawHubService {
                 return;
             } catch (error) {
                 lastError = error;
+                if (hasExplicitVersion && this.isVersionNotFoundInstallError(error)) {
+                    const latestArgs = this.buildInstallArgs(params, { omitVersion: true });
+                    console.warn(
+                        `ClawHub install version ${params.version} was not found for ${params.slug} from ${source.id}; retrying latest version.`,
+                    );
+                    await this.runCommand(latestArgs, { sourceId: source.id });
+                    await invalidateMarketplaceCacheForSource(source.id);
+                    return;
+                }
+
                 const shouldRetry = this.isRetryableInstallError(error) && attempt < ClawHubService.INSTALL_RETRY_COUNT;
                 if (!shouldRetry) {
                     throw error;

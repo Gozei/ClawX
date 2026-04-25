@@ -370,6 +370,112 @@ describe('Skills page route state', () => {
     expect(screen.queryByTestId('skills-marketplace-panel')).not.toBeInTheDocument();
   });
 
+  it('asks for confirmation and retries with force when the CLI rejects a suspicious skill in non-interactive mode', async () => {
+    installSkillMock
+      .mockRejectedValueOnce(new Error('Command failed: - Resolving zentao-api Error: Use --force to install suspicious skills in non-interactive mode'))
+      .mockResolvedValueOnce(undefined);
+    fetchMarketplaceSkillDetailMock.mockResolvedValue({
+      requestedSlug: 'zentao-api',
+      resolvedSlug: 'zentao-api',
+      moderationInfo: {
+        isSuspicious: true,
+        isMalwareBlocked: false,
+        summary: 'Detected suspicious install behavior.',
+        reasonCodes: ['suspicious.llm_suspicious'],
+      },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/skills?marketplace=1']}>
+        <Routes>
+          <Route path="/skills" element={<Skills />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(marketplaceSheetState.latestProps).not.toBeNull();
+    });
+
+    const marketplaceProps = marketplaceSheetState.latestProps as null | {
+      onInstall?: (slug: string, version?: string, sourceId?: string, force?: boolean) => void;
+    };
+
+    await act(async () => {
+      marketplaceProps?.onInstall?.('zentao-api', '1.0.0', 'clawhub', false);
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Review skill before installing');
+    expect(installSkillMock).toHaveBeenCalledWith('zentao-api', '1.0.0', 'clawhub', false);
+    await waitFor(() => {
+      expect(fetchMarketplaceSkillDetailMock).toHaveBeenCalledWith('zentao-api', 'clawhub');
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toHaveTextContent('Detected suspicious install behavior.');
+    });
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Install anyway' }).click();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(installSkillMock).toHaveBeenCalledWith('zentao-api', '1.0.0', 'clawhub', true);
+    });
+    expect(enableSkillMock).toHaveBeenCalledWith('zentao-api');
+  });
+
+  it('checks moderation before forcing a marketplace update from the card', async () => {
+    fetchMarketplaceSkillDetailMock.mockResolvedValue({
+      requestedSlug: 'zentao-api',
+      resolvedSlug: 'zentao-api',
+      moderationInfo: {
+        isSuspicious: true,
+        isMalwareBlocked: false,
+        summary: 'Detected suspicious update behavior.',
+        reasonCodes: ['suspicious.llm_suspicious'],
+      },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/skills?marketplace=1']}>
+        <Routes>
+          <Route path="/skills" element={<Skills />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(marketplaceSheetState.latestProps).not.toBeNull();
+    });
+
+    const marketplaceProps = marketplaceSheetState.latestProps as null | {
+      onInstall?: (slug: string, version?: string, sourceId?: string, force?: boolean) => void;
+    };
+
+    await act(async () => {
+      marketplaceProps?.onInstall?.('zentao-api', '1.1.0', 'clawhub', true);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(fetchMarketplaceSkillDetailMock).toHaveBeenCalledWith('zentao-api', 'clawhub');
+    });
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Detected suspicious update behavior.');
+    expect(installSkillMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Install anyway' }).click();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(installSkillMock).toHaveBeenCalledWith('zentao-api', '1.1.0', 'clawhub', true);
+    });
+    expect(enableSkillMock).toHaveBeenCalledWith('zentao-api');
+  });
+
   it('ignores transient undefined skill entries when rendering the skills page', async () => {
     skillsState.skills = [
       undefined as unknown as SkillSnapshot,
