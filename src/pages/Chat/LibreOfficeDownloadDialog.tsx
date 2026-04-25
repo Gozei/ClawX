@@ -10,7 +10,7 @@ export type LibreOfficeRuntimeStatusPayload = {
   supported: boolean;
   targetId?: string;
   targetLabel?: string;
-  status: 'idle' | 'downloading' | 'extracting' | 'complete' | 'error';
+  status: 'idle' | 'downloading' | 'extracting' | 'complete' | 'cancelled' | 'error';
   jobId?: string;
   receivedBytes?: number;
   totalBytes?: number | null;
@@ -41,10 +41,12 @@ export function LibreOfficeDownloadDialog({
   const { t } = useTranslation('chat');
   const [runtimeStatus, setRuntimeStatus] = useState<LibreOfficeRuntimeStatusPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [downloadRequested, setDownloadRequested] = useState(false);
   const completedRef = useRef(false);
   const jobId = runtimeStatus?.jobId;
   const percent = runtimeStatus?.percent ?? null;
   const busy = isLibreOfficeRuntimeBusy(runtimeStatus);
+  const isExtracting = runtimeStatus?.status === 'extracting';
 
   const finishDownload = useCallback(() => {
     if (completedRef.current) {
@@ -73,6 +75,7 @@ export function LibreOfficeDownloadDialog({
 
   const handleDownload = useCallback(() => {
     setError(null);
+    setDownloadRequested(true);
     void hostApiFetch<LibreOfficeRuntimeStatusPayload>('/api/files/libreoffice-runtime/download', {
       method: 'POST',
     })
@@ -83,13 +86,26 @@ export function LibreOfficeDownloadDialog({
           return;
         }
         if (!nextStatus.supported || nextStatus.status === 'error') {
+          setDownloadRequested(false);
           setError(nextStatus.error ?? t('filePreview.libreOfficeDownload.unsupported'));
         }
       })
       .catch((downloadError) => {
+        setDownloadRequested(false);
         setError(downloadError instanceof Error ? downloadError.message : String(downloadError));
       });
   }, [finishDownload, t]);
+
+  const handleCancel = useCallback(() => {
+    const activeJobId = runtimeStatus?.jobId;
+    if (downloadRequested || isLibreOfficeRuntimeBusy(runtimeStatus)) {
+      void hostApiFetch<LibreOfficeRuntimeStatusPayload>('/api/files/libreoffice-runtime/cancel', {
+        method: 'POST',
+        body: JSON.stringify(activeJobId ? { jobId: activeJobId } : {}),
+      }).catch(() => undefined);
+    }
+    onCancel();
+  }, [downloadRequested, onCancel, runtimeStatus]);
 
   useEffect(() => {
     void refreshRuntimeStatus().catch(() => undefined);
@@ -141,7 +157,7 @@ export function LibreOfficeDownloadDialog({
         <div className="mt-5">
           <div className="mb-2 flex items-center justify-between text-[12px] text-foreground/56">
             <span>
-              {runtimeStatus?.status === 'extracting'
+              {isExtracting
                 ? t('filePreview.libreOfficeDownload.extracting')
                 : t('filePreview.libreOfficeDownload.downloading')}
             </span>
@@ -169,7 +185,7 @@ export function LibreOfficeDownloadDialog({
         <Button
           type="button"
           variant="ghost"
-          onClick={onCancel}
+          onClick={handleCancel}
           data-testid="chat-file-preview-libreoffice-cancel"
         >
           {t('filePreview.libreOfficeDownload.cancel')}
@@ -183,7 +199,11 @@ export function LibreOfficeDownloadDialog({
           {busy ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : null}
-          {t('filePreview.libreOfficeDownload.download')}
+          {busy
+            ? isExtracting
+              ? t('filePreview.libreOfficeDownload.installBusy')
+              : t('filePreview.libreOfficeDownload.downloadBusy')
+            : t('filePreview.libreOfficeDownload.download')}
         </Button>
       </div>
     </div>

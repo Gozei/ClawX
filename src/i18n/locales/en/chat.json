@@ -94,12 +94,14 @@
     "extraPagesHidden": "Additional pages are not shown in this preview.",
     "libreOfficeDownload": {
       "title": "Office suite required",
-      "message": "This file preview needs to download the LibreOffice office suite. Download now?",
+      "message": "This file preview needs to download and install the LibreOffice preview runtime. Continue?",
       "platform": "Platform: {{platform}}",
       "download": "Download",
+      "downloadBusy": "Downloading",
+      "installBusy": "Installing",
       "cancel": "Cancel",
       "downloading": "Downloading LibreOffice",
-      "extracting": "Installing preview runtime",
+      "extracting": "Extracting and installing the preview runtime. This may take a while.",
       "failed": "LibreOffice download failed. Please try again later.",
       "unsupported": "Automatic LibreOffice download is not supported on this system yet."
     },
