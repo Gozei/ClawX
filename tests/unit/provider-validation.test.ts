@@ -155,3 +155,138 @@ describe('validateApiKeyWithProvider', () => {
     );
   });
 });
+
+describe('testProviderConnection', () => {
+  beforeEach(() => {
+    proxyAwareFetch.mockReset();
+  });
+
+  it('rejects redirected provider test responses', async () => {
+    proxyAwareFetch.mockResolvedValueOnce(
+      new Response('<html>302 Found</html>', {
+        status: 302,
+        headers: {
+          'Content-Type': 'text/html',
+          Location: 'http://www.jd.com/error2.aspx',
+        },
+      })
+    );
+
+    const { testProviderConnection } = await import('@electron/services/providers/provider-validation');
+    const result = await testProviderConnection('custom', 'abc', {
+      baseUrl: 'https://lamnotexist.jd.com/api/saas/openai-u/v1',
+      apiProtocol: 'openai-completions',
+      model: 'qweeeeeen3.5-plus',
+    });
+
+    expect(result).toMatchObject({
+      valid: false,
+      status: 302,
+    });
+    expect(result.error).toContain('redirected');
+    expect(result.error).toContain('www.jd.com/error2.aspx');
+    expect(proxyAwareFetch).toHaveBeenCalledWith(
+      'https://lamnotexist.jd.com/api/saas/openai-u/v1/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        redirect: 'manual',
+      })
+    );
+  });
+
+  it('rejects HTML success pages returned by provider tests', async () => {
+    proxyAwareFetch.mockResolvedValueOnce(
+      new Response('<!doctype html><title>error</title>', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+      })
+    );
+
+    const { testProviderConnection } = await import('@electron/services/providers/provider-validation');
+    const result = await testProviderConnection('custom', 'abc', {
+      baseUrl: 'https://html.example.com/v1',
+      apiProtocol: 'openai-completions',
+      model: 'fake-model',
+    });
+
+    expect(result).toMatchObject({
+      valid: false,
+      status: 200,
+    });
+    expect(result.error).toContain('not JSON');
+  });
+
+  it('rejects JSON responses that do not match the selected OpenAI protocol', async () => {
+    proxyAwareFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const { testProviderConnection } = await import('@electron/services/providers/provider-validation');
+    const result = await testProviderConnection('custom', 'abc', {
+      baseUrl: 'https://api.example.com/v1',
+      apiProtocol: 'openai-completions',
+      model: 'fake-model',
+    });
+
+    expect(result).toMatchObject({
+      valid: false,
+      status: 200,
+    });
+    expect(result.error).toContain('did not match');
+  });
+
+  it('accepts valid OpenAI chat completion responses', async () => {
+    proxyAwareFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: 'Connection succeeded with fake-model',
+            },
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      })
+    );
+
+    const { testProviderConnection } = await import('@electron/services/providers/provider-validation');
+    const result = await testProviderConnection('custom', 'abc', {
+      baseUrl: 'https://api.example.com/v1',
+      apiProtocol: 'openai-completions',
+      model: 'fake-model',
+    });
+
+    expect(result).toMatchObject({
+      valid: true,
+      status: 200,
+      output: 'Connection succeeded with fake-model',
+    });
+  });
+
+  it('does not treat rate limits as a successful connection test', async () => {
+    proxyAwareFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { message: 'rate limit' } }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const { testProviderConnection } = await import('@electron/services/providers/provider-validation');
+    const result = await testProviderConnection('custom', 'abc', {
+      baseUrl: 'https://api.example.com/v1',
+      apiProtocol: 'openai-completions',
+      model: 'fake-model',
+    });
+
+    expect(result).toMatchObject({
+      valid: false,
+      status: 429,
+    });
+    expect(result.error).toContain('rate limited');
+  });
+});

@@ -10,6 +10,7 @@ import type {
   ProviderWithKeyInfo,
 } from '@/lib/providers';
 import { hostApiFetch } from '@/lib/host-api';
+import { confirmGatewayImpact } from '@/lib/gateway-impact-confirm';
 import {
   fetchProviderSnapshot,
 } from '@/lib/provider-accounts';
@@ -36,8 +37,8 @@ interface ProviderState {
   // Actions
   init: () => Promise<void>;
   refreshProviderSnapshot: () => Promise<void>;
-  createAccount: (account: ProviderAccount, apiKey?: string) => Promise<void>;
-  removeAccount: (accountId: string) => Promise<void>;
+  createAccount: (account: ProviderAccount, apiKey?: string) => Promise<boolean>;
+  removeAccount: (accountId: string) => Promise<boolean>;
   validateAccountApiKey: (
     accountId: string,
     apiKey: string,
@@ -47,21 +48,21 @@ interface ProviderState {
 
   // Legacy compatibility aliases
   fetchProviders: () => Promise<void>;
-  addProvider: (config: Omit<ProviderConfig, 'createdAt' | 'updatedAt'>, apiKey?: string) => Promise<void>;
-  addAccount: (account: ProviderAccount, apiKey?: string) => Promise<void>;
-  updateProvider: (providerId: string, updates: Partial<ProviderConfig>, apiKey?: string) => Promise<void>;
-  updateAccount: (accountId: string, updates: Partial<ProviderAccount>, apiKey?: string) => Promise<void>;
-  deleteProvider: (providerId: string) => Promise<void>;
-  deleteAccount: (accountId: string) => Promise<void>;
-  setApiKey: (providerId: string, apiKey: string) => Promise<void>;
+  addProvider: (config: Omit<ProviderConfig, 'createdAt' | 'updatedAt'>, apiKey?: string) => Promise<boolean>;
+  addAccount: (account: ProviderAccount, apiKey?: string) => Promise<boolean>;
+  updateProvider: (providerId: string, updates: Partial<ProviderConfig>, apiKey?: string) => Promise<boolean>;
+  updateAccount: (accountId: string, updates: Partial<ProviderAccount>, apiKey?: string) => Promise<boolean>;
+  deleteProvider: (providerId: string) => Promise<boolean>;
+  deleteAccount: (accountId: string) => Promise<boolean>;
+  setApiKey: (providerId: string, apiKey: string) => Promise<boolean>;
   updateProviderWithKey: (
     providerId: string,
     updates: Partial<ProviderConfig>,
     apiKey?: string
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   deleteApiKey: (providerId: string) => Promise<void>;
-  setDefaultProvider: (providerId: string) => Promise<void>;
-  setDefaultAccount: (accountId: string) => Promise<void>;
+  setDefaultProvider: (providerId: string) => Promise<boolean>;
+  setDefaultAccount: (accountId: string) => Promise<boolean>;
   validateApiKey: (
     providerId: string,
     apiKey: string,
@@ -113,6 +114,13 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   fetchProviders: async () => get().refreshProviderSnapshot(),
   
   addProvider: async (config, apiKey) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     try {
       const fullConfig: ProviderConfig = {
         ...config,
@@ -149,6 +157,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       
       // Refresh the list
       await get().refreshProviderSnapshot();
+      return true;
     } catch (error) {
       console.error('Failed to add provider:', error);
       throw error;
@@ -156,6 +165,13 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   createAccount: async (account, apiKey) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     try {
       const result = await hostApiFetch<{ success: boolean; error?: string }>('/api/provider-accounts', {
         method: 'POST',
@@ -167,6 +183,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       }
 
       await get().refreshProviderSnapshot();
+      return true;
     } catch (error) {
       console.error('Failed to add account:', error);
       throw error;
@@ -176,6 +193,13 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   addAccount: async (account, apiKey) => get().createAccount(account, apiKey),
   
   updateProvider: async (providerId, updates, apiKey) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     try {
       const existing = get().statuses.find((p) => p.id === providerId);
       if (!existing) {
@@ -214,6 +238,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       
       // Refresh the list
       await get().refreshProviderSnapshot();
+      return true;
     } catch (error) {
       console.error('Failed to update provider:', error);
       throw error;
@@ -221,6 +246,13 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   updateAccount: async (accountId, updates, apiKey) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     try {
       const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/provider-accounts/${encodeURIComponent(accountId)}`, {
         method: 'PUT',
@@ -232,6 +264,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       }
 
       await get().refreshProviderSnapshot();
+      return true;
     } catch (error) {
       console.error('Failed to update account:', error);
       throw error;
@@ -239,6 +272,13 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
   
   deleteProvider: async (providerId) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'restart',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     try {
       const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/provider-accounts/${encodeURIComponent(providerId)}`, {
         method: 'DELETE',
@@ -250,6 +290,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       
       // Refresh the list
       await get().refreshProviderSnapshot();
+      return true;
     } catch (error) {
       console.error('Failed to delete provider:', error);
       throw error;
@@ -257,6 +298,13 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   removeAccount: async (accountId) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'restart',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     try {
       const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/provider-accounts/${encodeURIComponent(accountId)}`, {
         method: 'DELETE',
@@ -267,6 +315,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       }
 
       await get().refreshProviderSnapshot();
+      return true;
     } catch (error) {
       console.error('Failed to delete account:', error);
       throw error;
@@ -276,6 +325,13 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   deleteAccount: async (accountId) => get().removeAccount(accountId),
   
   setApiKey: async (providerId, apiKey) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     try {
       const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/provider-accounts/${encodeURIComponent(providerId)}`, {
         method: 'PUT',
@@ -288,6 +344,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       
       // Refresh the list
       await get().refreshProviderSnapshot();
+      return true;
     } catch (error) {
       console.error('Failed to set API key:', error);
       throw error;
@@ -295,6 +352,13 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   updateProviderWithKey: async (providerId, updates, apiKey) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     try {
       const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/provider-accounts/${encodeURIComponent(providerId)}`, {
         method: 'PUT',
@@ -319,6 +383,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       }
 
       await get().refreshProviderSnapshot();
+      return true;
     } catch (error) {
       console.error('Failed to update provider with key:', error);
       throw error;
@@ -345,6 +410,13 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
   
   setDefaultProvider: async (providerId) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     try {
       const result = await hostApiFetch<{ success: boolean; error?: string }>('/api/provider-accounts/default', {
         method: 'PUT',
@@ -356,6 +428,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       }
       
       set({ defaultAccountId: providerId });
+      return true;
     } catch (error) {
       console.error('Failed to set default provider:', error);
       throw error;
@@ -363,6 +436,13 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   setDefaultAccount: async (accountId) => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'refresh',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return false;
+    }
     try {
       const result = await hostApiFetch<{ success: boolean; error?: string }>('/api/provider-accounts/default', {
         method: 'PUT',
@@ -374,6 +454,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       }
 
       set({ defaultAccountId: accountId });
+      return true;
     } catch (error) {
       console.error('Failed to set default account:', error);
       throw error;

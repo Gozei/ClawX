@@ -23,6 +23,7 @@ import {
   resolveStagedUploadFilePath,
 } from '../../utils/session-file-storage';
 import {
+  cancelLibreOfficeRuntimeDownload,
   getLibreOfficeRuntimeStatus,
   resolveLibreOfficeExecutable,
   startLibreOfficeRuntimeDownload,
@@ -2696,6 +2697,17 @@ export async function handleFileRoutes(
     return true;
   }
 
+  if (url.pathname === '/api/files/libreoffice-runtime/cancel' && req.method === 'POST') {
+    try {
+      const body: { jobId?: string } = await parseJsonBody<{ jobId?: string }>(req).catch(() => ({}));
+      const status = await cancelLibreOfficeRuntimeDownload(body.jobId);
+      sendJson(res, 200, status);
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
   if (url.pathname === '/api/files/preview' && req.method === 'POST') {
     try {
       const body = await parseJsonBody<{ filePath: string; fileName?: string; mimeType?: string }>(req);
@@ -2781,6 +2793,26 @@ export async function handleFileRoutes(
       const stat = await fsP.stat(body.filePath);
       const source = await buildDocxPreviewSource(body.filePath, fileName, mimeType, stat.size);
       sendJson(res, 200, source);
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === '/api/files/preview-docx-fallback' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{ filePath: string; fileName?: string; mimeType?: string }>(req);
+      const fsP = await import('node:fs/promises');
+      const fileName = body.fileName || basename(body.filePath) || 'file.docx';
+      const extension = normalizeExtension(body.filePath, fileName, body.mimeType);
+      const mimeType = body.mimeType || getMimeType(extension);
+      if (!WORD_EXTENSIONS.has(extension)) {
+        sendJson(res, 400, { success: false, error: 'Only .docx files support fallback previews' });
+        return true;
+      }
+      const stat = await fsP.stat(body.filePath);
+      const preview = await buildDocxPreview(body.filePath, fileName, mimeType, stat.size);
+      sendJson(res, 200, preview);
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
     }

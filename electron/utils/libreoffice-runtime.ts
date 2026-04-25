@@ -5,6 +5,7 @@ import { basename, dirname, join } from 'node:path';
 import { get as httpGet } from 'node:http';
 import { get as httpsGet } from 'node:https';
 import { homedir, tmpdir } from 'node:os';
+import { pipeline } from 'node:stream/promises';
 import { app } from 'electron';
 
 type LibreOfficeRuntimeDownloadStatus =
@@ -12,6 +13,7 @@ type LibreOfficeRuntimeDownloadStatus =
   | 'downloading'
   | 'extracting'
   | 'complete'
+  | 'cancelled'
   | 'error';
 
 type LibreOfficeRuntimeTarget = {
@@ -31,6 +33,7 @@ type LibreOfficeRuntimeJob = {
   percent: number | null;
   error?: string;
   executablePath?: string;
+  abortController: AbortController;
   updatedAt: number;
 };
 
@@ -47,11 +50,8 @@ export type LibreOfficeRuntimeStatusPayload = {
   error?: string;
 };
 
-const LIBREOFFICE_VERSION = process.env.CLAWX_LIBREOFFICE_VERSION?.trim() || '26.2.2';
-const LIBREOFFICE_DOWNLOAD_BASE_URL = (
-  process.env.CLAWX_LIBREOFFICE_DOWNLOAD_BASE_URL?.trim()
-  || 'https://download.documentfoundation.org/libreoffice/stable'
-).replace(/\/+$/, '');
+const LIBREOFFICE_VERSION = '26.2.2';
+const LIBREOFFICE_DOWNLOAD_BASE_URL = 'https://deep-ai-worker-1253696187.cos.ap-guangzhou.myqcloud.com';
 const LIBREOFFICE_RUNTIME_DOWNLOAD_TIMEOUT_MS = 1000 * 60 * 30;
 const LIBREOFFICE_RUNTIME_INSTALL_TIMEOUT_MS = 1000 * 60 * 12;
 const libreOfficeRuntimeJobs = new Map<string, LibreOfficeRuntimeJob>();
@@ -61,9 +61,10 @@ function execFileAsync(
   file: string,
   args: string[],
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(file, args, { timeout: timeoutMs, windowsHide: true }, (error, stdout, stderr) => {
+    execFile(file, args, { timeout: timeoutMs, windowsHide: true, signal }, (error, stdout, stderr) => {
       if (error) {
         reject(error);
         return;
@@ -90,33 +91,37 @@ function getLibreOfficeRuntimeBaseDir(): string {
 
 function getLibreOfficeRuntimeTarget(): LibreOfficeRuntimeTarget | null {
   const version = LIBREOFFICE_VERSION;
+  const buildDownloadUrl = (archiveName: string) => `${LIBREOFFICE_DOWNLOAD_BASE_URL}/assets/${archiveName}`;
   if (process.platform === 'win32') {
+    const archiveName = `LibreOffice_${version}_Win_x86-64.msi`;
     return {
       id: 'win32-x64',
       label: 'Windows x64',
-      archiveName: `LibreOffice_${version}_Win_x86-64.msi`,
-      downloadUrl: `${LIBREOFFICE_DOWNLOAD_BASE_URL}/${version}/win/x86_64/LibreOffice_${version}_Win_x86-64.msi`,
+      archiveName,
+      downloadUrl: buildDownloadUrl(archiveName),
       extraction: 'msi',
     };
   }
 
   if (process.platform === 'darwin') {
     if (process.arch === 'arm64') {
+      const archiveName = `LibreOffice_${version}_MacOS_aarch64.dmg`;
       return {
         id: 'darwin-arm64',
         label: 'macOS Apple Silicon',
-        archiveName: `LibreOffice_${version}_MacOS_aarch64.dmg`,
-        downloadUrl: `${LIBREOFFICE_DOWNLOAD_BASE_URL}/${version}/mac/aarch64/LibreOffice_${version}_MacOS_aarch64.dmg`,
+        archiveName,
+        downloadUrl: buildDownloadUrl(archiveName),
         extraction: 'dmg',
       };
     }
 
     if (process.arch === 'x64') {
+      const archiveName = `LibreOffice_${version}_MacOS_x86-64.dmg`;
       return {
         id: 'darwin-x64',
         label: 'macOS Intel',
-        archiveName: `LibreOffice_${version}_MacOS_x86-64.dmg`,
-        downloadUrl: `${LIBREOFFICE_DOWNLOAD_BASE_URL}/${version}/mac/x86_64/LibreOffice_${version}_MacOS_x86-64.dmg`,
+        archiveName,
+        downloadUrl: buildDownloadUrl(archiveName),
         extraction: 'dmg',
       };
     }
@@ -124,21 +129,23 @@ function getLibreOfficeRuntimeTarget(): LibreOfficeRuntimeTarget | null {
 
   if (process.platform === 'linux') {
     if (process.arch === 'arm64') {
+      const archiveName = `LibreOffice_${version}_Linux_aarch64_deb.tar.gz`;
       return {
         id: 'linux-arm64',
         label: 'Linux ARM64',
-        archiveName: `LibreOffice_${version}_Linux_aarch64_deb.tar.gz`,
-        downloadUrl: `${LIBREOFFICE_DOWNLOAD_BASE_URL}/${version}/deb/aarch64/LibreOffice_${version}_Linux_aarch64_deb.tar.gz`,
+        archiveName,
+        downloadUrl: buildDownloadUrl(archiveName),
         extraction: 'linux-deb-tar',
       };
     }
 
     if (process.arch === 'x64') {
+      const archiveName = `LibreOffice_${version}_Linux_x86-64_deb.tar.gz`;
       return {
         id: 'linux-x64',
         label: 'Linux x64',
-        archiveName: `LibreOffice_${version}_Linux_x86-64_deb.tar.gz`,
-        downloadUrl: `${LIBREOFFICE_DOWNLOAD_BASE_URL}/${version}/deb/x86_64/LibreOffice_${version}_Linux_x86-64_deb.tar.gz`,
+        archiveName,
+        downloadUrl: buildDownloadUrl(archiveName),
         extraction: 'linux-deb-tar',
       };
     }
@@ -340,71 +347,79 @@ async function downloadFileWithProgress(
   url: string,
   targetPath: string,
   onProgress: (receivedBytes: number, totalBytes: number | null) => void,
+  signal: AbortSignal,
   redirectsRemaining = 5,
 ): Promise<void> {
   const fsP = await import('node:fs/promises');
   await fsP.mkdir(dirname(targetPath), { recursive: true });
 
   await new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error('LibreOffice download cancelled'));
+      return;
+    }
+
+    let output: ReturnType<typeof createWriteStream> | null = null;
+    const rejectOnce = (error: unknown) => {
+      output?.destroy();
+      reject(error);
+    };
+
     const client = url.startsWith('https:') ? httpsGet : httpGet;
     const request = client(url, {
       headers: {
         'User-Agent': 'Deep-AI-Worker LibreOffice Runtime Downloader',
       },
       timeout: LIBREOFFICE_RUNTIME_DOWNLOAD_TIMEOUT_MS,
+      signal,
     }, (response) => {
       const statusCode = response.statusCode ?? 0;
       const location = response.headers.location;
       if (statusCode >= 300 && statusCode < 400 && location && redirectsRemaining > 0) {
         response.resume();
         const redirectedUrl = new URL(location, url).toString();
-        downloadFileWithProgress(redirectedUrl, targetPath, onProgress, redirectsRemaining - 1)
-          .then(resolve, reject);
+        downloadFileWithProgress(redirectedUrl, targetPath, onProgress, signal, redirectsRemaining - 1)
+          .then(resolve, rejectOnce);
         return;
       }
 
       if (statusCode < 200 || statusCode >= 300) {
         response.resume();
-        reject(new Error(`LibreOffice download failed with HTTP ${statusCode}`));
+        rejectOnce(new Error(`LibreOffice download failed with HTTP ${statusCode}`));
         return;
       }
 
       const totalBytes = Number.parseInt(String(response.headers['content-length'] ?? ''), 10);
       const resolvedTotalBytes = Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes : null;
       let receivedBytes = 0;
-      const output = createWriteStream(targetPath);
+      output = createWriteStream(targetPath);
 
       response.on('data', (chunk: Buffer) => {
         receivedBytes += chunk.length;
         onProgress(receivedBytes, resolvedTotalBytes);
       });
-      response.on('error', reject);
-      output.on('error', reject);
-      output.on('finish', () => {
-        output.close((closeError) => {
-          if (closeError) {
-            reject(closeError);
-            return;
-          }
-          resolve();
-        });
-      });
 
-      response.pipe(output);
+      pipeline(response, output, { signal })
+        .then(resolve, rejectOnce);
     });
 
     request.on('timeout', () => {
       request.destroy(new Error('LibreOffice download timed out'));
     });
-    request.on('error', reject);
+    signal.addEventListener('abort', () => {
+      output?.destroy(new Error('LibreOffice download cancelled'));
+      request.destroy(new Error('LibreOffice download cancelled'));
+    }, { once: true });
+    request.on('error', rejectOnce);
   });
 }
 
-async function extractLibreOfficeMsi(archivePath: string, stagingDir: string): Promise<void> {
+async function extractLibreOfficeMsi(archivePath: string, stagingDir: string, signal: AbortSignal): Promise<void> {
   await execFileAsync(
     'msiexec.exe',
     ['/a', archivePath, `TARGETDIR=${stagingDir}`, '/qn', '/norestart'],
     LIBREOFFICE_RUNTIME_INSTALL_TIMEOUT_MS,
+    signal,
   );
 }
 
@@ -420,12 +435,13 @@ function parseMacDmgMountPoint(stdout: string): string | null {
   return null;
 }
 
-async function extractLibreOfficeDmg(archivePath: string, stagingDir: string): Promise<void> {
+async function extractLibreOfficeDmg(archivePath: string, stagingDir: string, signal: AbortSignal): Promise<void> {
   const fsP = await import('node:fs/promises');
   const { stdout } = await execFileAsync(
     'hdiutil',
     ['attach', archivePath, '-nobrowse', '-readonly'],
     LIBREOFFICE_RUNTIME_INSTALL_TIMEOUT_MS,
+    signal,
   );
   const mountPoint = parseMacDmgMountPoint(stdout);
   if (!mountPoint) {
@@ -445,14 +461,14 @@ async function extractLibreOfficeDmg(archivePath: string, stagingDir: string): P
   }
 }
 
-async function extractLibreOfficeLinuxDebTar(archivePath: string, stagingDir: string, tempDir: string): Promise<void> {
+async function extractLibreOfficeLinuxDebTar(archivePath: string, stagingDir: string, tempDir: string, signal: AbortSignal): Promise<void> {
   const fsP = await import('node:fs/promises');
   const extractDir = join(tempDir, 'deb-extract');
   await fsP.mkdir(extractDir, { recursive: true });
-  await execFileAsync('tar', ['-xzf', archivePath, '-C', extractDir], LIBREOFFICE_RUNTIME_INSTALL_TIMEOUT_MS);
+  await execFileAsync('tar', ['-xzf', archivePath, '-C', extractDir], LIBREOFFICE_RUNTIME_INSTALL_TIMEOUT_MS, signal);
 
   try {
-    await execFileAsync('dpkg-deb', ['--version'], 10_000);
+    await execFileAsync('dpkg-deb', ['--version'], 10_000, signal);
   } catch {
     throw new Error('dpkg-deb is required to unpack LibreOffice on Linux. Install LibreOffice from your package manager, or install dpkg-deb and try again.');
   }
@@ -463,7 +479,7 @@ async function extractLibreOfficeLinuxDebTar(archivePath: string, stagingDir: st
   }
 
   for (const debFile of debFiles.sort((left, right) => basename(left).localeCompare(basename(right)))) {
-    await execFileAsync('dpkg-deb', ['-x', debFile, stagingDir], LIBREOFFICE_RUNTIME_INSTALL_TIMEOUT_MS);
+    await execFileAsync('dpkg-deb', ['-x', debFile, stagingDir], LIBREOFFICE_RUNTIME_INSTALL_TIMEOUT_MS, signal);
   }
 }
 
@@ -489,6 +505,7 @@ async function runLibreOfficeRuntimeDownload(job: LibreOfficeRuntimeJob, target:
   const tempDir = join(tmpdir(), `clawx-libreoffice-runtime-${job.id}`);
   const stagingDir = join(tempDir, 'runtime');
   const archivePath = join(tempDir, target.archiveName);
+  const signal = job.abortController.signal;
 
   try {
     await fsP.rm(tempDir, { recursive: true, force: true });
@@ -507,16 +524,16 @@ async function runLibreOfficeRuntimeDownload(job: LibreOfficeRuntimeJob, target:
         totalBytes,
         percent: calculateDownloadPercent(receivedBytes, totalBytes),
       });
-    });
+    }, signal);
 
     updateLibreOfficeRuntimeJob(job, { status: 'extracting', percent: 99 });
 
     if (target.extraction === 'msi') {
-      await extractLibreOfficeMsi(archivePath, stagingDir);
+      await extractLibreOfficeMsi(archivePath, stagingDir, signal);
     } else if (target.extraction === 'dmg') {
-      await extractLibreOfficeDmg(archivePath, stagingDir);
+      await extractLibreOfficeDmg(archivePath, stagingDir, signal);
     } else {
-      await extractLibreOfficeLinuxDebTar(archivePath, stagingDir, tempDir);
+      await extractLibreOfficeLinuxDebTar(archivePath, stagingDir, tempDir, signal);
     }
 
     const executablePath = await findLibreOfficeExecutableUnder(stagingDir);
@@ -532,10 +549,25 @@ async function runLibreOfficeRuntimeDownload(job: LibreOfficeRuntimeJob, target:
       executablePath: installedExecutablePath ?? executablePath,
     });
   } catch (error) {
-    updateLibreOfficeRuntimeJob(job, {
-      status: 'error',
-      error: error instanceof Error ? error.message : String(error),
-    });
+    if (signal.aborted || job.status === 'cancelled') {
+      updateLibreOfficeRuntimeJob(job, {
+        status: 'cancelled',
+        percent: null,
+        error: undefined,
+      });
+      console.info('[libreoffice-runtime] Download cancelled', {
+        jobId: job.id,
+        targetId: job.targetId,
+        archiveName: target.archiveName,
+        receivedBytes: job.receivedBytes,
+        totalBytes: job.totalBytes,
+      });
+    } else {
+      updateLibreOfficeRuntimeJob(job, {
+        status: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   } finally {
     if (activeLibreOfficeRuntimeJobId === job.id) {
       activeLibreOfficeRuntimeJobId = null;
@@ -572,6 +604,7 @@ export async function startLibreOfficeRuntimeDownload(): Promise<LibreOfficeRunt
     receivedBytes: 0,
     totalBytes: null,
     percent: null,
+    abortController: new AbortController(),
     updatedAt: Date.now(),
   };
   libreOfficeRuntimeJobs.set(job.id, job);
@@ -579,4 +612,38 @@ export async function startLibreOfficeRuntimeDownload(): Promise<LibreOfficeRunt
   void runLibreOfficeRuntimeDownload(job, target);
 
   return buildLibreOfficeRuntimeStatus(target, job, false);
+}
+
+export async function cancelLibreOfficeRuntimeDownload(jobId?: string): Promise<LibreOfficeRuntimeStatusPayload> {
+  const target = getLibreOfficeRuntimeTarget();
+  const activeJob = jobId
+    ? libreOfficeRuntimeJobs.get(jobId) ?? null
+    : getActiveLibreOfficeRuntimeJob();
+
+  if (activeJob && (activeJob.status === 'downloading' || activeJob.status === 'extracting')) {
+    console.info('[libreoffice-runtime] Cancelling download', {
+      jobId: activeJob.id,
+      targetId: activeJob.targetId,
+      status: activeJob.status,
+      receivedBytes: activeJob.receivedBytes,
+      totalBytes: activeJob.totalBytes,
+    });
+    updateLibreOfficeRuntimeJob(activeJob, {
+      status: 'cancelled',
+      percent: null,
+      error: undefined,
+    });
+    if (activeLibreOfficeRuntimeJobId === activeJob.id) {
+      activeLibreOfficeRuntimeJobId = null;
+    }
+    activeJob.abortController.abort();
+    return buildLibreOfficeRuntimeStatus(target, activeJob, false);
+  }
+
+  console.info('[libreoffice-runtime] No active download to cancel', {
+    requestedJobId: jobId,
+  });
+
+  const executablePath = await resolveLibreOfficeExecutable();
+  return buildLibreOfficeRuntimeStatus(target, null, Boolean(executablePath));
 }

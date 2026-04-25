@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
@@ -23,6 +24,7 @@ import type { MarketplaceInstalledSkill, MarketplaceSkillDetail, SkillSnapshot, 
 import { SkillDetailMarkdownContent } from './SkillDetailMarkdownContent';
 import { SkillDetailOverviewCard } from './SkillDetailOverviewCard';
 import { compareMarketplaceVersions, resolveInstalledSkillId, resolveMarketplaceAvailability } from '../marketplace-state';
+import { getMarketplaceModerationState } from '../marketplace-security';
 
 type SkillMarketplaceDetailContentProps = {
   detail: MarketplaceSkillDetail;
@@ -41,6 +43,7 @@ export function SkillMarketplaceDetailContent({
 }: SkillMarketplaceDetailContentProps) {
   const { t, i18n } = useTranslation('skills');
   const [installing, setInstalling] = useState(false);
+  const [confirmSuspiciousInstall, setConfirmSuspiciousInstall] = useState(false);
   const [activeTab, setActiveTab] = useState<'docs' | 'details'>('docs');
   const installSkill = useSkillsStore((state) => state.installSkill);
   const enableSkill = useSkillsStore((state) => state.enableSkill);
@@ -65,6 +68,18 @@ export function SkillMarketplaceDetailContent({
   const license = detail.latestVersion?.parsed?.license?.trim() || t('marketplace.licenseUnknown', { defaultValue: 'Unknown' });
   const scan = detail.latestVersion?.staticScan;
   const scanStatus = scan?.status || 'unknown';
+  const moderation = getMarketplaceModerationState(detail);
+  const securityStatus = moderation.isMalwareBlocked
+    ? 'blocked'
+    : moderation.isSuspicious
+      ? 'suspicious'
+      : scanStatus;
+  const suspiciousInstallMessage = moderation.summary
+    || (moderation.reasonCodes.length > 0
+      ? moderation.reasonCodes.join(', ')
+      : t('marketplace.suspiciousInstallMessage', {
+          defaultValue: 'This skill was flagged by security moderation. Confirm that you trust the source and understand the risk before installing.',
+        }));
   const markdown = detail.latestVersion?.rawMarkdown?.trim() || '';
   const { currentInstalledSkill, installedOnCurrentSource, occupiedByOtherSource } = resolveMarketplaceAvailability({
     slug,
@@ -84,12 +99,18 @@ export function SkillMarketplaceDetailContent({
     ].filter(Boolean) as Array<{ label: string; value: string }>;
   }, [detail.skill?.stats, formatInteger, t]);
 
-  const onInstall = async () => {
+  const runInstall = async (force: boolean) => {
     if (!slug) return;
     if (occupiedByOtherSource) return;
+    if (moderation.isMalwareBlocked) {
+      toast.error(t('marketplace.malwareBlockedMessage', {
+        defaultValue: 'This skill is blocked by security moderation and cannot be installed.',
+      }));
+      return;
+    }
     setInstalling(true);
     try {
-      await installSkill(slug, version, sourceId, hasUpdate);
+      await installSkill(slug, version, sourceId, force || hasUpdate);
       const installedSkillId = resolveInstalledSkillId(slug, useSkillsStore.getState().skills ?? [], sourceId);
       await enableSkill(installedSkillId);
       toast.success(t('marketplace.installSuccessDescription', {
@@ -101,6 +122,14 @@ export function SkillMarketplaceDetailContent({
     } finally {
       setInstalling(false);
     }
+  };
+
+  const onInstall = async () => {
+    if (moderation.isSuspicious) {
+      setConfirmSuspiciousInstall(true);
+      return;
+    }
+    await runInstall(hasUpdate);
   };
 
   return (
@@ -124,17 +153,21 @@ export function SkillMarketplaceDetailContent({
             )}
             <Badge variant="secondary" className={cn(
               'rounded-md border-0',
-              scanStatus === 'clean'
+              securityStatus === 'clean'
                 ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-100'
-                : scanStatus === 'unknown'
+                : securityStatus === 'unknown'
                   ? 'bg-slate-500/12 text-slate-700 dark:text-slate-100'
                   : 'bg-amber-500/12 text-amber-700 dark:text-amber-100',
             )}>
-              {scanStatus === 'clean'
+              {securityStatus === 'blocked'
+                ? t('marketplace.malwareBlocked', { defaultValue: 'Blocked by security' })
+                : securityStatus === 'suspicious'
+                  ? t('marketplace.staticScanReview', { defaultValue: 'Review recommended' })
+                  : securityStatus === 'clean'
                 ? t('marketplace.staticScanClean', { defaultValue: 'Security scan clean' })
-                : scanStatus === 'unknown'
-                  ? t('marketplace.staticScanUnknown', { defaultValue: 'Security scan unknown' })
-                  : t('marketplace.staticScanReview', { defaultValue: 'Review recommended' })}
+                    : securityStatus === 'unknown'
+                      ? t('marketplace.staticScanUnknown', { defaultValue: 'Security scan unknown' })
+                      : t('marketplace.staticScanReview', { defaultValue: 'Review recommended' })}
             </Badge>
             {detail.pendingReview && (
               <Badge variant="secondary" className="rounded-md border-0 bg-amber-500/12 text-amber-700 dark:text-amber-100">
@@ -148,7 +181,7 @@ export function SkillMarketplaceDetailContent({
             <Button
               type="button"
               onClick={() => void onInstall()}
-              disabled={installing || !slug || occupiedByOtherSource || (installedOnCurrentSource && !hasUpdate)}
+              disabled={installing || !slug || occupiedByOtherSource || moderation.isMalwareBlocked || (installedOnCurrentSource && !hasUpdate)}
               className="rounded-full bg-sky-600 px-5 text-white hover:bg-sky-700 dark:bg-sky-600 dark:hover:bg-sky-500"
             >
               {installing ? (
@@ -246,12 +279,20 @@ export function SkillMarketplaceDetailContent({
                 <Separator className="my-4 bg-black/8 dark:bg-white/10" />
                 <div className="grid gap-3 text-[14px] leading-7 text-slate-600 dark:text-white/72">
                   <div className="flex items-start gap-3">
-                    {scanStatus === 'clean' ? <ShieldCheck className="mt-1 h-4 w-4 text-emerald-600" /> : <ShieldAlert className="mt-1 h-4 w-4 text-amber-600" />}
+                    {securityStatus === 'clean' ? <ShieldCheck className="mt-1 h-4 w-4 text-emerald-600" /> : <ShieldAlert className="mt-1 h-4 w-4 text-amber-600" />}
                     <div>
-                      <div className="font-medium text-slate-900 dark:text-white">{scan?.summary || t('marketplace.staticScanSummary', { defaultValue: 'No scan summary available.' })}</div>
+                      <div className="font-medium text-slate-900 dark:text-white">
+                        {moderation.summary || scan?.summary || t('marketplace.staticScanSummary', { defaultValue: 'No scan summary available.' })}
+                      </div>
                       <div className="text-slate-400 dark:text-white/52">
-                        {scan?.engineVersion ? `${scan.engineVersion}` : ''}
-                        {scan?.checkedAt ? ` · ${formatDateTime(scan.checkedAt)}` : ''}
+                        {moderation.reasonCodes.length > 0
+                          ? moderation.reasonCodes.join(', ')
+                          : (
+                              <>
+                                {scan?.engineVersion ? `${scan.engineVersion}` : ''}
+                                {scan?.checkedAt ? ` · ${formatDateTime(scan.checkedAt)}` : ''}
+                              </>
+                            )}
                       </div>
                     </div>
                   </div>
@@ -307,6 +348,21 @@ export function SkillMarketplaceDetailContent({
           </div>
         </section>
       </Tabs>
+      <ConfirmDialog
+        open={confirmSuspiciousInstall}
+        title={t('marketplace.suspiciousInstallTitle', { defaultValue: 'Review skill before installing' })}
+        message={t('marketplace.suspiciousInstallMessageWithReason', {
+          reason: suspiciousInstallMessage,
+          defaultValue: `This skill was flagged by security moderation: ${suspiciousInstallMessage}`,
+        })}
+        confirmLabel={t('marketplace.suspiciousInstallConfirm', { defaultValue: 'Install anyway' })}
+        cancelLabel={t('marketplace.suspiciousInstallCancel', { defaultValue: 'Cancel' })}
+        onCancel={() => setConfirmSuspiciousInstall(false)}
+        onConfirm={async () => {
+          setConfirmSuspiciousInstall(false);
+          await runInstall(true);
+        }}
+      />
     </div>
   );
 }

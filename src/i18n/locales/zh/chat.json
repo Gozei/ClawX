@@ -106,12 +106,14 @@
     "extraPagesHidden": "其余页面未在预览中展示。",
     "libreOfficeDownload": {
       "title": "需要下载办公套件",
-      "message": "该文件预览需要下载LibreOffice办公套件，是否下载？",
+      "message": "该文件预览需要下载并安装 LibreOffice 预览运行时，是否继续？",
       "platform": "适用平台：{{platform}}",
       "download": "下载",
+      "downloadBusy": "下载中",
+      "installBusy": "安装中",
       "cancel": "取消",
       "downloading": "正在下载 LibreOffice",
-      "extracting": "正在安装预览运行时",
+      "extracting": "正在解压并安装预览运行时，可能需要一些时间",
       "failed": "LibreOffice 下载失败，请稍后重试。",
       "unsupported": "当前系统暂不支持自动下载 LibreOffice。"
     },

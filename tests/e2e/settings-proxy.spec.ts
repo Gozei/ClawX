@@ -39,12 +39,17 @@ test.describe('Deep AI Worker developer proxy settings', () => {
     await ensureSwitchState(proxyToggle, true);
     await expect(proxySaveButton).toBeEnabled();
     await proxySaveButton.click({ force: true });
+    const confirmDialog = page.getByTestId('gateway-impact-confirm-dialog');
+    await expect(confirmDialog).toBeVisible();
+    await confirmDialog.getByRole('button', { name: /Apply and Restart|应用并重启/ }).click();
     await expect.poll(async () => await readProxyEnabled(page)).toBe(true);
 
     await ensureSwitchState(proxyToggle, false);
     await expect(proxySaveButton).toBeVisible();
     await expect(proxySaveButton).toBeEnabled();
     await proxySaveButton.click({ force: true });
+    await expect(confirmDialog).toBeVisible();
+    await confirmDialog.getByRole('button', { name: /Apply and Restart|应用并重启/ }).click();
     await expect.poll(async () => await readProxyEnabled(page)).toBe(false);
   });
 });

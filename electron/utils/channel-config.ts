@@ -524,6 +524,19 @@ async function ensurePluginAllowlist(currentConfig: OpenClawConfig, channelType:
     }
 }
 
+export async function ensureWeChatPluginRegistration(): Promise<boolean> {
+    return withConfigLock(async () => {
+        const currentConfig = await readOpenClawConfig();
+        const before = JSON.stringify(currentConfig.plugins ?? {});
+        await ensurePluginAllowlist(currentConfig, WECHAT_PLUGIN_ID);
+        const modified = JSON.stringify(currentConfig.plugins ?? {}) !== before;
+        if (modified) {
+            await writeOpenClawConfig(currentConfig);
+        }
+        return modified;
+    });
+}
+
 function transformChannelConfig(
     channelType: string,
     config: ChannelConfigData,
