@@ -420,8 +420,13 @@ function TaskDialog({ job, configuredChannels, onClose, onSave }: TaskDialogProp
   };
 
   return (
-    <div className={modalOverlayClasses} onClick={onClose}>
-      <Card className={cn(modalCardClasses, 'max-w-lg rounded-3xl border-0 shadow-2xl bg-background dark:bg-card')} onClick={(e) => e.stopPropagation()}>
+    <div data-testid="cron-task-dialog-overlay" className={modalOverlayClasses}>
+      <Card
+        data-testid="cron-task-dialog"
+        role="dialog"
+        aria-modal="true"
+        className={cn(modalCardClasses, 'max-w-lg rounded-3xl border-0 shadow-2xl bg-background dark:bg-card')}
+      >
         <CardHeader className="flex flex-row items-start justify-between pb-2 shrink-0">
           <div>
             <CardTitle className="text-2xl font-serif font-normal">{job ? t('dialog.editTitle') : t('dialog.createTitle')}</CardTitle>

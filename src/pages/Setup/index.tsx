@@ -119,6 +119,7 @@ import {
   hasConfiguredCredentials,
   pickPreferredAccount,
 } from '@/lib/provider-accounts';
+import { confirmGatewayImpact } from '@/lib/gateway-impact-confirm';
 import clawxIcon from '@/assets/logo.svg';
 import { useBranding } from '@/lib/branding';
 
@@ -1224,6 +1225,14 @@ function ProviderContent({
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
+
+      const confirmed = await confirmGatewayImpact({
+        mode: 'refresh',
+        willApplyChanges: true,
+      });
+      if (!confirmed) {
+        return;
+      }
 
       const saveResult = selectedAccountId
         ? await hostApiFetch<{ success: boolean; error?: string }>(

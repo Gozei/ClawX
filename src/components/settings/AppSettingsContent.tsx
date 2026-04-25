@@ -31,6 +31,7 @@ import {
 } from '@/lib/telemetry';
 import { useTranslation } from 'react-i18next';
 import { hostApiFetch } from '@/lib/host-api';
+import { confirmGatewayImpact } from '@/lib/gateway-impact-confirm';
 import { cn } from '@/lib/utils';
 import { useBranding } from '@/lib/branding';
 import { AppLogo } from '@/components/branding/AppLogo';
@@ -363,6 +364,14 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
   ]);
 
   const handleSaveProxySettings = async () => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'restart',
+      willApplyChanges: true,
+    });
+    if (!confirmed) {
+      return;
+    }
+
     setSavingProxy(true);
     try {
       const normalizedProxyServer = proxyServerDraft.trim();
@@ -393,6 +402,17 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
     } finally {
       setSavingProxy(false);
     }
+  };
+
+  const handleRestartGateway = async () => {
+    const confirmed = await confirmGatewayImpact({
+      mode: 'restart',
+      willApplyChanges: false,
+    });
+    if (!confirmed) {
+      return;
+    }
+    await restartGateway();
   };
 
   const telemetryStats = useMemo(() => {
@@ -633,7 +653,13 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
                     )} />
                     {gatewayStatus.state}
                   </div>
-                  <Button variant="outline" size="sm" onClick={restartGateway} className="rounded-full h-8 px-4 border-black/10 dark:border-white/10 bg-transparent hover:bg-black/5 dark:hover:bg-white/5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => { void handleRestartGateway(); }}
+                    data-testid="settings-gateway-restart-button"
+                    className="rounded-full h-8 px-4 border-black/10 dark:border-white/10 bg-transparent hover:bg-black/5 dark:hover:bg-white/5"
+                  >
                     <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
                     {t('common:actions.restart')}
                   </Button>
@@ -695,7 +721,7 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
                 </div>
                 <Switch
                   checked={dreamModeEnabled}
-                  onCheckedChange={setDreamModeEnabled}
+                  onCheckedChange={(checked) => { void setDreamModeEnabled(checked); }}
                   data-testid="settings-dream-mode-switch"
                 />
               </div>

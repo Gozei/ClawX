@@ -365,9 +365,11 @@ export function ProviderConfigPanel() {
     try {
       const accountUpdate = removeModelFromAccount(row.account, row.modelId);
       if (accountUpdate) {
-        await updateAccount(row.account.id, accountUpdate);
+        const updated = await updateAccount(row.account.id, accountUpdate);
+        if (!updated) return;
       } else {
-        await removeAccount(row.account.id);
+        const removed = await removeAccount(row.account.id);
+        if (!removed) return;
       }
       await refreshProviderSnapshot();
       toast.success('已删除配置');
@@ -388,12 +390,14 @@ export function ProviderConfigPanel() {
       } else {
         delete nextMetadata.customModels;
       }
-      await updateAccount(row.account.id, {
+      const updated = await updateAccount(row.account.id, {
         model: nextModelIds[0],
         metadata: nextMetadata,
       });
+      if (!updated) return;
       if (defaultAccountId !== row.account.id) {
-        await setDefaultAccount(row.account.id);
+        const setDefault = await setDefaultAccount(row.account.id);
+        if (!setDefault) return;
       }
       await fetchAgents();
       toast.success('已设为全局默认模型');
@@ -438,7 +442,7 @@ export function ProviderConfigPanel() {
 
       if (draft.mode === 'create') {
         const accountId = buildProviderAccountId(draft.vendorId, null, vendors);
-        await createAccount({
+        const created = await createAccount({
           id: accountId,
           vendorId: draft.vendorId,
           label: draft.label.trim(),
@@ -456,14 +460,17 @@ export function ProviderConfigPanel() {
             },
           },
         }, effectiveKey);
+        if (!created) return;
         if (!defaultAccountId) {
-          await setDefaultAccount(accountId);
+          const setDefault = await setDefaultAccount(accountId);
+          if (!setDefault) return;
         }
       } else if (draft.accountId) {
         const account = accounts.find((entry) => entry.id === draft.accountId);
         if (!account) throw new Error('配置不存在');
         const updates = applyModelChangeToAccount(account, draft);
-        await updateAccount(draft.accountId, updates, trimmedKey || undefined);
+        const updated = await updateAccount(draft.accountId, updates, trimmedKey || undefined);
+        if (!updated) return;
       }
 
       const nextResult: TestStatus = {

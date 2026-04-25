@@ -7,6 +7,7 @@ import { getSelectIconStyle, selectBaseClasses } from '@/components/ui/select';
 import { useGatewayStore } from '@/stores/gateway';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { hostApiFetch } from '@/lib/host-api';
+import { confirmGatewayImpact } from '@/lib/gateway-impact-confirm';
 import { subscribeHostEvent } from '@/lib/host-events';
 import { ChannelConfigModal } from '@/components/channels/ChannelConfigModal';
 import { cn } from '@/lib/utils';
@@ -178,6 +179,13 @@ export function Channels({ embedded = false }: ChannelsProps) {
 
   const handleBindAgent = async (channelType: string, accountId: string, agentId: string) => {
     try {
+      const confirmed = await confirmGatewayImpact({
+        mode: 'refresh',
+        willApplyChanges: true,
+      });
+      if (!confirmed) {
+        return;
+      }
       if (!agentId) {
         await hostApiFetch<{ success: boolean; error?: string }>('/api/channels/binding', {
           method: 'DELETE',
@@ -199,6 +207,13 @@ export function Channels({ embedded = false }: ChannelsProps) {
   const handleDelete = async () => {
     if (!deleteTarget) return;
     try {
+      const confirmed = await confirmGatewayImpact({
+        mode: deleteTarget.accountId ? 'refresh' : 'restart',
+        willApplyChanges: true,
+      });
+      if (!confirmed) {
+        return;
+      }
       const suffix = deleteTarget.accountId
         ? `?accountId=${encodeURIComponent(deleteTarget.accountId)}`
         : '';
