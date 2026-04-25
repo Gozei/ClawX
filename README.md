@@ -212,6 +212,7 @@ Notes:
 - Deep AI Worker also syncs the proxy to OpenClaw's Telegram channel config when Telegram is enabled.
 - Gateway restarts preserve an existing Telegram channel proxy if Deep AI Worker proxy is currently disabled.
 - To explicitly clear Telegram channel proxy from OpenClaw config, save proxy settings with proxy disabled.
+- The **OpenClaw Console** entry in the Settings Hub is treated as a developer tool and is only shown after **Developer Mode** is enabled.
 - In **Settings → Advanced → Developer**, you can run **OpenClaw Doctor** to execute `openclaw doctor --json` and inspect the diagnostic output without leaving the app.
 - On packaged Windows builds, the bundled `openclaw` CLI/TUI runs via the shipped `node.exe` entrypoint to keep terminal input behavior stable.
 
