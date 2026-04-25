@@ -10,6 +10,8 @@ const PERSISTED_PREVIEW_LABEL = Array.from(PREVIEW_TEXT).slice(0, AUTO_LABEL_MAX
 
 function buildInjectedPreludeMessage(): string {
   return [
+    '[media attached 1/2: C:/Users/Administrator/.openclaw/media/inbound/test-image-a.png (image/png)]',
+    '[media attached 2/2: C:/Users/Administrator/.openclaw/media/inbound/test-image-b.webp (image/webp)]',
     '# AGENTS.md instructions for D:/AI/Deep AI Worker/ClawX',
     '',
     '<INSTRUCTIONS>',
@@ -22,7 +24,11 @@ function buildInjectedPreludeMessage(): string {
     'To send an image back, prefer the message tool (media/path/filePath). If you must inline, use MEDIA:https://example.com/image.jpg (spaces ok, quote if needed) or a safe relative path like MEDIA:./image.jpg. Absolute and ~ paths only work when they stay inside your allowed file-read boundary; host file:// URLs are blocked. Keep caption in the text body.',
     'Only the files listed in the current attachment note for this turn are newly uploaded inputs for this request. Do not automatically inspect older uploaded files, prior-turn attachments, or unrelated workspace files unless the user explicitly asks for them or the current file directly points to them.',
     'When the current turn includes uploaded attachments, resolve references like "this", "this file", "this output", "这个", "这个文件", and "这个输出" against the current turn attachment set first. Do not default those references to prior assistant outputs, earlier uploaded files, or historical workspace artifacts.',
-    'This turn has exactly one uploaded attachment, so answer about that file unless the user explicitly names another file. Do not summarize prior assistant outputs when the current turn attachment set is present unless the user explicitly asks for that earlier output.',
+    'This turn has 2 uploaded attachments, so stay within that current attachment set unless the user explicitly names an earlier file. Do not summarize prior assistant outputs when the current turn attachment set is present unless the user explicitly asks for that earlier output.',
+    'Sender (untrusted metadata):',
+    '```json',
+    '{"label":"Deep AI Worker","id":"gateway-client","name":"Deep AI Worker"}',
+    '```',
     '',
     '[Wed 2026-04-22 19:54 GMT+8] Conversation info (untrusted metadata): ```json',
     '{"agent":{"id":"main","name":"Main Role","preferredModel":"custom-custombc/qwen3.5-plus"}}',
@@ -164,6 +170,8 @@ test.describe('Session preview labels', () => {
       const userMessage = page.getByTestId('chat-message-content-user').first();
       await expect(userMessage).toContainText(PREVIEW_TEXT, { timeout: 60_000 });
       await expect(userMessage).not.toContainText('AGENTS.md instructions');
+      await expect(userMessage).not.toContainText('media attached');
+      await expect(userMessage).not.toContainText('Sender (untrusted metadata):');
       await expect(userMessage).not.toContainText('Execution playbook:');
     } finally {
       try {

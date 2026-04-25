@@ -18,7 +18,7 @@ import { useProviderStore } from '@/stores/providers';
 import { useSettingsStore, type AssistantMessageStyle } from '@/stores/settings';
 import type { ProviderAccount } from '@/lib/providers';
 import { buildProviderListItems } from '@/lib/provider-accounts';
-import { extractText, extractThinking, extractImages, extractToolUse, formatTimestamp } from './message-utils';
+import { extractText, extractThinking, extractImages, extractToolUse, formatTimestamp, extractAssistantRuntimeErrorText } from './message-utils';
 import { StreamingMarkdownPreview } from './StreamingMarkdownPreview';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ClampedFileName } from './ClampedFileName';
@@ -188,7 +188,7 @@ export const ChatMessage = memo(function ChatMessage({
   streamingTools = [],
 }: ChatMessageProps) {
   const isUser = message.role === 'user';
-  const isErrorMessage = !isUser && message.isError === true;
+  const isErrorMessage = !isUser && (message.isError === true || extractAssistantRuntimeErrorText(message).length > 0);
   const role = typeof message.role === 'string' ? message.role.toLowerCase() : '';
   const isToolResult = role === 'toolresult' || role === 'tool_result';
   const text = useMemo(() => extractText(message), [message]);
@@ -252,7 +252,11 @@ export const ChatMessage = memo(function ChatMessage({
     [effectiveModelRef, modelOptions],
   );
 
-  const attachedFiles = useMemo(() => message._attachedFiles || [], [message._attachedFiles]);
+  const attachedFiles = useMemo(() => {
+    const files = message._attachedFiles || [];
+    if (isUser) return files;
+    return files.filter((file) => file.preview || file.fileSize > 0);
+  }, [isUser, message._attachedFiles]);
   const [lightboxImg, setLightboxImg] = useState<{ src: string; fileName: string; filePath?: string; base64?: string; mimeType?: string } | null>(null);
   const getAttachmentPreviewHandler = useCallback((file: AttachedFileMeta) => {
     if (onOpenAttachmentPreview) {
@@ -858,6 +862,17 @@ type SaveFileResult = {
 const FILE_CONTEXT_MENU_WIDTH = 176;
 const FILE_CONTEXT_MENU_HEIGHT = 104;
 
+function isMissingFileShellResult(result: unknown): boolean {
+  if (typeof result !== 'string' || !result.trim()) {
+    return false;
+  }
+  const normalized = result.trim().toLowerCase();
+  return normalized.includes('file not found:')
+    || normalized.includes('does not exist')
+    || normalized.includes('not found')
+    || normalized.includes('no such file');
+}
+
 function resolveFileContextMenuPosition(clientX: number, clientY: number): { left: number; top: number } {
   if (typeof window === 'undefined') {
     return { left: clientX, top: clientY };
@@ -895,13 +910,7 @@ function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () 
       try {
         const result = await invokeIpc<string>('shell:openPath', file.filePath);
         if (typeof result === 'string' && result.trim()) {
-          const normalized = result.trim().toLowerCase();
-          if (
-            normalized.includes('file not found:')
-            || normalized.includes('does not exist')
-            || normalized.includes('not found')
-            || normalized.includes('no such file')
-          ) {
+          if (isMissingFileShellResult(result)) {
             toast.error(t('attachments.fileMissing', { fileName: file.fileName }));
             return;
           }
@@ -923,7 +932,12 @@ function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () 
     event.stopPropagation();
     if (!file.filePath) return;
     closeContextMenu();
-    void invokeIpc('shell:showItemInFolder', file.filePath)
+    void invokeIpc<string>('shell:showItemInFolder', file.filePath)
+      .then((result) => {
+        if (isMissingFileShellResult(result)) {
+          toast.error(t('filePreview.fileMissing'));
+        }
+      })
       .catch((revealError) => {
         toast.error(t('filePreview.revealFailed', {
           error: revealError instanceof Error ? revealError.message : String(revealError),
@@ -975,13 +989,7 @@ function FileCard({ file, onPreview }: { file: AttachedFileMeta; onPreview?: () 
       if (!result || !result.trim()) {
         return;
       }
-      const normalized = result.trim().toLowerCase();
-      if (
-        normalized.includes('file not found:')
-        || normalized.includes('does not exist')
-        || normalized.includes('not found')
-        || normalized.includes('no such file')
-      ) {
+      if (isMissingFileShellResult(result)) {
         toast.error(t('attachments.fileMissing', { fileName: file.fileName }));
         return;
       }

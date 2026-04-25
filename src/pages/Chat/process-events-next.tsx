@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import type { ContentBlock, RawMessage, ToolStatus } from '@/stores/chat';
 import type { ChatProcessDisplayMode } from '@/stores/settings';
 import { cn } from '@/lib/utils';
+import { sanitizeToolOutputText } from '@/lib/tool-output-text';
 import { StreamingMarkdownPreview } from './StreamingMarkdownPreview';
 
 type ProcessSurface = 'thinking' | 'terminal' | 'code' | 'read' | 'tool' | 'note';
@@ -59,7 +60,7 @@ function formatRetryExhaustedCount(
 }
 
 function truncate(text: string, maxLength = 96): string {
-  const normalized = text.replace(/\s+/g, ' ').trim();
+  const normalized = sanitizeToolOutputText(text).replace(/\s+/g, ' ').trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength - 3)}...`;
 }
@@ -124,9 +125,9 @@ function isInternalHeartbeatReadItem(item: ProcessEventItem): boolean {
 }
 
 function formatUnknownContent(value: unknown): string {
-  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'string') return sanitizeToolOutputText(value);
   if (Array.isArray(value)) {
-    return value
+    return sanitizeToolOutputText(value
       .map((item) => {
         if (!item || typeof item !== 'object') return '';
         const block = item as ContentBlock;
@@ -136,13 +137,13 @@ function formatUnknownContent(value: unknown): string {
       })
       .filter(Boolean)
       .join('\n\n')
-      .trim();
+      .trim());
   }
   if (value == null) return '';
   try {
-    return JSON.stringify(value, null, 2);
+    return sanitizeToolOutputText(JSON.stringify(value, null, 2));
   } catch {
-    return String(value);
+    return sanitizeToolOutputText(String(value));
   }
 }
 
@@ -234,20 +235,20 @@ function getToolPreview(payload: unknown): string | undefined {
   }
   const command = record.command ?? record.cmd ?? record.script;
   if (typeof command === 'string' && command.trim()) {
-    return truncate(command, 88);
+    return truncate(command, 88) || undefined;
   }
 
   const path = record.file_path ?? record.filePath ?? record.path ?? record.file;
   if (typeof path === 'string' && path.trim()) {
-    return truncate(path, 88);
+    return truncate(path, 88) || undefined;
   }
 
   const patch = record.patch ?? record.diff;
   if (typeof patch === 'string' && patch.trim()) {
-    return truncate(patch, 88);
+    return truncate(patch, 88) || undefined;
   }
 
-  return truncate(formatUnknownContent(payload), 88);
+  return truncate(formatUnknownContent(payload), 88) || undefined;
 }
 
 function getStatusByKey(streamingTools: ToolStatus[]): Map<string, ToolStatus> {
@@ -297,7 +298,7 @@ function createToolResultItem(
   const key = block.id || toolName;
   const status = statusMap.get(key) || statusMap.get(toolName);
   const detail = formatUnknownContent(block.content ?? block.text ?? '');
-  const preview = status?.failureMessage || status?.summary || truncate(detail, 88);
+  const preview = status?.failureMessage || status?.summary || truncate(detail, 88) || undefined;
 
   return {
     key: `tool-result-${key}`,

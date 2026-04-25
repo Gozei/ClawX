@@ -1,5 +1,7 @@
 const SYSTEM_LINE_RE = /^System(?: \(untrusted\))?:\s*(?:\[[^\]]+\]\s*)?(.*)$/i;
 const GATEWAY_TIMESTAMP_PREFIX_RE = /^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]+\]\s*/i;
+const MEDIA_ATTACHED_NOTE_RE = /\s*\[media attached(?:\s+\d+\/\d+)?:[^\]]*\]/gi;
+const MESSAGE_ID_NOTE_RE = /\s*\[message_id:\s*[^\]]+\]/gi;
 const INTERNAL_ASYNC_EXEC_COMPLETION_RE =
   /^An async command you ran earlier has completed\.\s*The result is shown in the system messages above\.\s*Handle the result internally\.\s*Do not relay it to the user unless explicitly requested\.\s*$/i;
 const INTERNAL_CRON_NO_CONTENT_RE =
@@ -16,19 +18,22 @@ const INTERNAL_HEARTBEAT_TRAILING_RES = [
   /^Current time:/i,
   /^\u5f53\u524d\u65f6\u95f4\uff1a/i,
 ] as const;
+const COMPACTED_INTERNAL_BOUNDARY_RE =
+  /\s+(?=(?:System(?: \(untrusted\))?:\s*(?:\[[^\]]+\]\s*)?Exec (?:completed|finished)\b|An async command you ran earlier has completed\.|A scheduled cron event was triggered, but no event content was found\.|Current time:|\u5f53\u524d\u65f6\u95f4\uff1a))/gi;
 
 const KNOWN_INBOUND_PRELUDE_RE =
-  /Conversation info\s*\([^)]*\):|Execution playbook:|Sender(?: \(untrusted metadata\))?:|#\s*AGENTS\.md instructions\b|<INSTRUCTIONS>|<environment_context>|To send an image back, prefer the message tool \(media\/path\/filePath\)\.|Only the files listed in the current attachment note for this turn are newly uploaded inputs for this request\.|When the current turn includes uploaded attachments, resolve references like "this"|This turn has exactly (?:one|\d+) uploaded attachment/i;
+  /Conversation info\s*\([^)]*\):|Execution playbook:|Sender(?: \(untrusted metadata\))?:|#\s*AGENTS\.md instructions\b|<INSTRUCTIONS>|<environment_context>|\[media attached(?:\s+\d+\/\d+)?:|To send an image back, prefer the message tool \(media\/path\/filePath\)\.|Only the files listed in the current attachment note for this turn are newly uploaded inputs for this request\.|When the current turn includes uploaded attachments, resolve references like "this"|This turn has (?:exactly )?(?:one|\d+) uploaded attachment/i;
 
 const LEADING_INBOUND_BLOCK_RES = [
   /^Sender(?: \(untrusted metadata\))?:\s*```[a-z]*\s*[\s\S]*?```\s*/i,
   /^Sender(?: \(untrusted metadata\))?:\s*\{[\s\S]*?\}\s*/i,
   /^(?:#\s*AGENTS\.md instructions[^\n]*\r?\n+)?<INSTRUCTIONS>\s*[\s\S]*?<\/INSTRUCTIONS>\s*/i,
   /^<environment_context>\s*[\s\S]*?<\/environment_context>\s*/i,
+  /^(?:\[media attached(?:\s+\d+\/\d+)?:[^\]]*\]\s*)+/i,
   /^To send an image back, prefer the message tool \(media\/path\/filePath\)\.[\s\S]*?Keep caption in the text body\.\s*/i,
   /^Only the files listed in the current attachment note for this turn are newly uploaded inputs for this request\.[\s\S]*?current file directly points to them\.\s*/i,
-  /^When the current turn includes uploaded attachments, resolve references like "this", "this file", "this output", "\u8fd9\u4e2a", "\u8fd9\u4e2a\u6587\u4ef6", and "\u8fd9\u4e2a\u8f93\u51fa" against the current turn attachment set first\.[\s\S]*?historical workspace artifacts\.\s*/i,
-  /^This turn has exactly (?:one|\d+) uploaded attachment(?:s)?[\s\S]*?earlier output\.\s*/i,
+  /^When the current turn includes uploaded attachments, resolve references like "this", "this file", "this output", "\u8fd9\u4e2a", "\u8fd9\u4e2a\u6587\u4ef6", and "\u8fd9\u4e2a\u8f93\u51fa" against the current turn attachment set first\.[\s\S]*?historical workspace artifacts\.(?:\s*This turn has (?:exactly )?(?:one|\d+) uploaded attachment(?:s)?[\s\S]*?earlier output\.)?\s*/i,
+  /^This turn has (?:exactly )?(?:one|\d+) uploaded attachment(?:s)?[\s\S]*?earlier output\.\s*/i,
   /^Conversation info\s*\([^)]*\):\s*```[a-z]*\r?\n[\s\S]*?```\s*/i,
   /^Conversation info\s*\([^)]*\):\s*\{[\s\S]*?\}\s*/i,
   /^Execution playbook:\s*(?:\r?\n- .*)+\s*/i,
@@ -67,10 +72,22 @@ function isInternalHeartbeatTrailingLine(line: string): boolean {
   return INTERNAL_HEARTBEAT_TRAILING_RES.some((pattern) => pattern.test(line));
 }
 
+export function splitCompactedInternalMaintenanceLines(text: string): string {
+  if (!text) return text;
+  return text.replace(COMPACTED_INTERNAL_BOUNDARY_RE, '\n');
+}
+
+export function stripInboundTransportNotes(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(MEDIA_ATTACHED_NOTE_RE, '')
+    .replace(MESSAGE_ID_NOTE_RE, '');
+}
+
 export function stripLeadingInternalHeartbeatMaintenance(text: string): string {
   if (!text) return text;
 
-  const lines = text.split(/\r?\n/);
+  const lines = splitCompactedInternalMaintenanceLines(text).split(/\r?\n/);
   let index = 0;
   let sawMaintenanceDirective = false;
 
@@ -138,4 +155,11 @@ export function stripInjectedInboundPrelude(text: string): string {
 
     current = next;
   }
+}
+
+export function sanitizeInboundUserText(text: string): string {
+  if (!text) return text;
+  return stripLeadingInternalHeartbeatMaintenance(
+    stripInjectedInboundPrelude(stripInboundTransportNotes(text)),
+  ).trim();
 }

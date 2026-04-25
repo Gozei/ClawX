@@ -1,6 +1,7 @@
 import { invokeIpc } from '@/lib/api-client';
 import { hostApiFetch } from '@/lib/host-api';
 import { useAgentsStore } from '@/stores/agents';
+import { sanitizeInboundUserText } from '../../../shared/inbound-user-text';
 import {
   CHAT_HISTORY_LABEL_PREFETCH_LIMIT,
   CHAT_HISTORY_RPC_TIMEOUT_MS,
@@ -75,6 +76,14 @@ function normalizeSessionModelRef(model: unknown, modelProvider: unknown): strin
   return `${normalizedProvider}/${normalizedModel}`;
 }
 
+function getCronRunBaseSessionKey(sessionKey: string): string | null {
+  const parts = sessionKey.split(':');
+  if (parts.length === 6 && parts[0] === 'agent' && parts[2] === 'cron' && parts[4] === 'run' && parts[5]) {
+    return parts.slice(0, 4).join(':');
+  }
+  return null;
+}
+
 export function createSessionActions(
   set: ChatSet,
   get: ChatGet,
@@ -129,7 +138,12 @@ export function createSessionActions(
             createdAt: parseSessionUpdatedAtMs(persistedMetadata[String(s.key || '')]?.createdAt ?? s.createdAt),
           })).filter((s: ChatSession) => s.key);
 
-          const visibleSessions = sessions.filter((session) => !session.archived);
+          const knownSessionKeys = new Set(sessions.map((session) => session.key));
+          const visibleSessions = sessions.filter((session) => {
+            const cronRunBaseSessionKey = getCronRunBaseSessionKey(session.key);
+            return !session.archived
+              && !(cronRunBaseSessionKey && knownSessionKeys.has(cronRunBaseSessionKey));
+          });
 
           const canonicalBySuffix = new Map<string, string>();
           for (const session of visibleSessions) {
@@ -222,7 +236,9 @@ export function createSessionActions(
                 let changed = false;
 
                 for (const session of sessionsToLabel) {
-                  const labelText = result.previews?.[session.key]?.firstUserMessage?.trim();
+                  const labelText = sanitizeInboundUserText(
+                    result.previews?.[session.key]?.firstUserMessage ?? '',
+                  );
                   if (!labelText || s.sessionLabels[session.key] || hasStoredSessionLabel(s.sessions, session.key)) {
                     continue;
                   }
@@ -259,7 +275,7 @@ export function createSessionActions(
                   set((s) => {
                     const next: Partial<typeof s> = {};
                     if (firstUser) {
-                      const labelText = getMessageText(firstUser.content).trim();
+                      const labelText = sanitizeInboundUserText(getMessageText(firstUser.content));
                       if (labelText && !s.sessionLabels[session.key] && !hasStoredSessionLabel(s.sessions, session.key)) {
                         const truncated = labelText.length > 50 ? `${labelText.slice(0, 50)}…` : labelText;
                         next.sessionLabels = { ...s.sessionLabels, [session.key]: truncated };

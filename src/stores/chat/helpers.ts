@@ -2,6 +2,7 @@ import i18n from '@/i18n';
 import { invokeIpc } from '@/lib/api-client';
 import { normalizeAppError } from '@/lib/error-model';
 import { hostApiFetch } from '@/lib/host-api';
+import { sanitizeToolOutputText } from '@/lib/tool-output-text';
 import type { AttachedFileMeta, ChatComposerDraft, ChatSession, ContentBlock, RawMessage, ToolStatus } from './types';
 
 export const CHAT_HISTORY_RPC_TIMEOUT_MS = 60_000;
@@ -326,13 +327,17 @@ function appendAssistantMessage(messages: RawMessage[], nextMessage: RawMessage)
   return hasDuplicate ? messages : [...messages, nextMessage];
 }
 
-/** Extract media file refs from [media attached: <path> (<mime>) | ...] patterns */
+/** Extract media file refs from [media attached 1/2: <path> (<mime>) | ...] patterns */
 function extractMediaRefs(text: string): Array<{ filePath: string; mimeType: string }> {
   const refs: Array<{ filePath: string; mimeType: string }> = [];
-  const regex = /\[media attached:\s*([^\s(]+)\s*\(([^)]+)\)\s*\|[^\]]*\]/g;
+  const regex = /\[media attached(?:\s+\d+\/\d+)?:\s*([\s\S]*?)\s*\(([^()\]]+)\)\s*(?:\|[^\]]*)?\]/gi;
   let match;
   while ((match = regex.exec(text)) !== null) {
-    refs.push({ filePath: match[1], mimeType: match[2] });
+    const filePath = match[1]?.trim();
+    const mimeType = match[2]?.trim();
+    if (filePath && mimeType) {
+      refs.push({ filePath, mimeType });
+    }
   }
   return refs;
 }
@@ -551,6 +556,48 @@ function collectToolCallPaths(msg: RawMessage, paths: Map<string, string>): void
   }
 }
 
+function readToolResultStatus(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function isFailedToolResultMessage(message: RawMessage): boolean {
+  if (!isToolResultRole(message.role)) return false;
+
+  const record = message as RawMessage & {
+    status?: unknown;
+    error?: unknown;
+  };
+  const details = (record.details && typeof record.details === 'object')
+    ? record.details as Record<string, unknown>
+    : null;
+  const status = readToolResultStatus(record.status ?? details?.status);
+  if (status === 'error' || status === 'failed' || status === 'failure') {
+    return true;
+  }
+  if (typeof record.error === 'string' && record.error.trim()) {
+    return true;
+  }
+  if (typeof details?.error === 'string' && details.error.trim()) {
+    return true;
+  }
+
+  if (Array.isArray(message.content)) {
+    const hasFailedBlockStatus = (message.content as ContentBlock[]).some((block) => {
+      if (block.type !== 'tool_result' && block.type !== 'toolResult') return false;
+      const blockStatus = readToolResultStatus(block.status);
+      return blockStatus === 'error' || blockStatus === 'failed' || blockStatus === 'failure';
+    });
+    if (hasFailedBlockStatus) {
+      return true;
+    }
+  }
+
+  const outputText = getMessageText(message.content).trim();
+  return /^(?:error|failed|failure|unable to|could not)\b/i.test(outputText)
+    || /\b(?:error|failed|failure|unable to|could not)\b[^.\n\r]*\b(?:write|create|save|generate|open)\b/i.test(outputText)
+    || /\b(?:write|create|save|generate|open)\b[^.\n\r]*\b(?:error|failed|failure|unable to|could not)\b/i.test(outputText);
+}
+
 /**
  * Before filtering tool_result messages from history, scan them for any file/image
  * content and attach those to the immediately following assistant message.
@@ -571,6 +618,10 @@ function enrichWithToolResultFiles(messages: RawMessage[]): RawMessage[] {
     }
 
     if (isToolResultRole(msg.role)) {
+      if (isFailedToolResultMessage(msg)) {
+        return msg;
+      }
+
       // Resolve file path from the matching tool call
       const matchedPath = msg.toolCallId ? toolCallPaths.get(msg.toolCallId) : undefined;
 
@@ -798,11 +849,24 @@ async function loadMissingPreviews(messages: RawMessage[], sessionKey?: string):
     const thumbnails = await invokeIpc(
       'media:getThumbnails',
       needPreview,
-    ) as Record<string, { preview: string | null; fileSize: number }>;
+    ) as Record<string, { preview: string | null; fileSize: number; exists?: boolean }>;
 
     let updated = false;
     for (const msg of messages) {
       if (!msg._attachedFiles) continue;
+
+      if (msg.role === 'assistant') {
+        const existingFiles = msg._attachedFiles;
+        msg._attachedFiles = existingFiles.filter((file) => {
+          const fp = file.filePath;
+          if (!fp) return true;
+          const thumb = thumbnails[fp];
+          return thumb?.exists !== false;
+        });
+        if (msg._attachedFiles.length !== existingFiles.length) {
+          updated = true;
+        }
+      }
 
       // Update files that have filePath
       for (const file of msg._attachedFiles) {
@@ -937,7 +1001,7 @@ function extractTextFromContent(content: unknown): string {
 }
 
 function summarizeToolOutput(text: string): string | undefined {
-  const trimmed = text.trim();
+  const trimmed = sanitizeToolOutputText(text);
   if (!trimmed) return undefined;
   const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (lines.length === 0) return undefined;
@@ -955,7 +1019,7 @@ function normalizeToolName(name: string | undefined): string {
 
 function normalizeToolFailureMessage(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
-  const normalized = value.trim().replace(/^Error:\s*/i, '');
+  const normalized = sanitizeToolOutputText(value).replace(/^Error:\s*/i, '');
   return normalized || undefined;
 }
 
@@ -1102,7 +1166,7 @@ function createToolResultProcessMessage(message: RawMessage): RawMessage | null 
   const errorText = typeof details?.error === 'string'
     ? details.error
     : (typeof msg.error === 'string' ? msg.error : '');
-  const detailText = outputText.trim() || errorText.trim() || toolName;
+  const detailText = sanitizeToolOutputText(outputText) || sanitizeToolOutputText(errorText) || toolName;
   const status = errorText.trim()
     ? 'error'
     : normalizeToolStatus(msg.status ?? details?.status, 'completed');
@@ -1429,6 +1493,7 @@ export {
   upsertImageCacheEntry,
   getCanonicalPrefixFromSessions,
   getToolCallFilePath,
+  isFailedToolResultMessage,
   createToolResultProcessMessage,
   collectToolUpdates,
   createAssistantDeltaSnapshot,

@@ -2,11 +2,58 @@ import { describe, expect, it } from 'vitest';
 import {
   collectToolUpdates,
   createAssistantDeltaSnapshot,
+  enrichWithCachedImages,
+  enrichWithToolResultFiles,
+  extractMediaRefs,
+  isFailedToolResultMessage,
   shouldContinueAssistantDelta,
   upsertToolStatuses,
 } from '@/stores/chat/helpers';
+import type { RawMessage } from '@/stores/chat';
 
 describe('chat tool status merging', () => {
+  it('extracts all numbered media attachments with paths that contain spaces', () => {
+    const refs = extractMediaRefs([
+      '[media attached 1/3: D:\\AI\\Deep AI Worker\\ClawX\\uploads\\first image.png (image/png)]',
+      '[media attached 2/3: D:\\AI\\Deep AI Worker\\ClawX\\uploads\\report final.docx (application/vnd.openxmlformats-officedocument.wordprocessingml.document) | D:\\AI\\Deep AI Worker\\ClawX\\uploads\\report final.docx]',
+      '[media attached 3/3: C:\\Users\\Administrator\\Desktop\\slides (draft).pptx (application/vnd.openxmlformats-officedocument.presentationml.presentation)]',
+    ].join('\n'));
+
+    expect(refs).toEqual([
+      {
+        filePath: 'D:\\AI\\Deep AI Worker\\ClawX\\uploads\\first image.png',
+        mimeType: 'image/png',
+      },
+      {
+        filePath: 'D:\\AI\\Deep AI Worker\\ClawX\\uploads\\report final.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      },
+      {
+        filePath: 'C:\\Users\\Administrator\\Desktop\\slides (draft).pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      },
+    ]);
+  });
+
+  it('restores every attachment from a multi-file user history message', () => {
+    const [message] = enrichWithCachedImages([
+      {
+        role: 'user',
+        content: [
+          '[media attached 1/2: D:\\AI\\Deep AI Worker\\ClawX\\uploads\\first image.png (image/png)]',
+          '[media attached 2/2: D:\\AI\\Deep AI Worker\\ClawX\\uploads\\report final.pdf (application/pdf)]',
+        ].join('\n'),
+        timestamp: 1_700_000_000,
+      },
+    ]);
+
+    expect(message?._attachedFiles).toHaveLength(2);
+    expect(message?._attachedFiles?.map((file) => file.fileName)).toEqual([
+      'first image.png',
+      'report final.pdf',
+    ]);
+  });
+
   it('turns an error followed by a rerun into retrying and preserves the failure reason', () => {
     const merged = upsertToolStatuses(
       [
@@ -80,6 +127,45 @@ describe('chat tool status merging', () => {
         failureMessage: 'Browser launch timeout',
       }),
     ]);
+  });
+
+  it('does not surface file cards from failed tool results', () => {
+    const failedToolResult = {
+      id: 'tool-result-1',
+      role: 'toolresult',
+      toolCallId: 'write-1',
+      toolName: 'write_file',
+      status: 'error',
+      content: [
+        {
+          type: 'text',
+          text: 'Failed to write C:\\\\tmp\\\\report.txt because the directory does not exist.',
+        },
+      ],
+    } as RawMessage;
+    const messages = enrichWithToolResultFiles([
+      {
+        id: 'assistant-tool-1',
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'write-1',
+            name: 'write_file',
+            input: { file_path: 'C:\\\\tmp\\\\report.txt' },
+          },
+        ],
+      },
+      failedToolResult,
+      {
+        id: 'assistant-final-1',
+        role: 'assistant',
+        content: 'The file could not be created.',
+      },
+    ]);
+
+    expect(isFailedToolResultMessage(failedToolResult)).toBe(true);
+    expect(messages[2]?._attachedFiles).toBeUndefined();
   });
 
   it('treats tool-use plus matching tool-result deltas as one continuing streaming step', () => {

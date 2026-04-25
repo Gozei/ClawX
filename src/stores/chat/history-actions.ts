@@ -1,5 +1,6 @@
 import { invokeIpc } from '@/lib/api-client';
 import { hostApiFetch } from '@/lib/host-api';
+import { sanitizeInboundUserText } from '../../../shared/inbound-user-text';
 import {
   CHAT_HISTORY_RPC_TIMEOUT_MS,
   appendAssistantMessage,
@@ -128,6 +129,54 @@ export function createHistoryActions(
           ? [...loadedMessages, ...missingSuffix]
           : loadedMessages;
       };
+      const preserveSettledLocalAssistantMessages = (
+        currentMessages: RawMessage[],
+        loadedMessages: RawMessage[],
+        lastUserTimestamp: number | null,
+      ): RawMessage[] => {
+        if (!lastUserTimestamp) return loadedMessages;
+
+        const userMs = toMs(lastUserTimestamp);
+        let turnStartIndex = -1;
+        for (let index = currentMessages.length - 1; index >= 0; index -= 1) {
+          const message = currentMessages[index];
+          if (
+            message.role === 'user'
+            && message.timestamp
+            && Math.abs(toMs(message.timestamp) - userMs) < 5000
+          ) {
+            turnStartIndex = index;
+            break;
+          }
+        }
+
+        const localTurnMessages = turnStartIndex >= 0
+          ? currentMessages.slice(turnStartIndex + 1)
+          : currentMessages.filter((message) => message.timestamp && toMs(message.timestamp) >= userMs);
+
+        const localTurnAssistants = localTurnMessages.filter((message) => (
+          message.role === 'assistant'
+          && !isInternalMessage(message)
+          && !isToolResultRole(message.role)
+          && hasNonToolAssistantContent(message)
+        ));
+        if (localTurnAssistants.length === 0) return loadedMessages;
+
+        let lastMatchedLocalIndex = -1;
+        localTurnAssistants.forEach((message, index) => {
+          if (messageExistsIn(loadedMessages, message)) {
+            lastMatchedLocalIndex = index;
+          }
+        });
+
+        const missingSuffix = localTurnAssistants
+          .slice(lastMatchedLocalIndex + 1)
+          .filter((message) => !messageExistsIn(loadedMessages, message));
+
+        return missingSuffix.length > 0
+          ? [...loadedMessages, ...missingSuffix]
+          : loadedMessages;
+      };
       const mergeHydratedMessages = (
         currentMessages: RawMessage[],
         hydratedMessages: RawMessage[],
@@ -193,6 +242,8 @@ export function createHistoryActions(
 
         if (get().sending) {
           finalMessages = preservePendingAssistantMessages(get().messages, finalMessages, userMsgAt);
+        } else if (quiet && userMsgAt) {
+          finalMessages = preserveSettledLocalAssistantMessages(get().messages, finalMessages, userMsgAt);
         }
 
         const {
@@ -280,7 +331,7 @@ export function createHistoryActions(
         if (!isMainSession) {
           const firstUserMsg = finalMessages.find((m) => m.role === 'user');
           if (firstUserMsg) {
-            const labelText = getMessageText(firstUserMsg.content).trim();
+            const labelText = sanitizeInboundUserText(getMessageText(firstUserMsg.content));
             set((s) => {
               const hasStoredLabel = s.sessions.some(
                 (session) => session.key === currentSessionKey && typeof session.label === 'string' && session.label.trim().length > 0,

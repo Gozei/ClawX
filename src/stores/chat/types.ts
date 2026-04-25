@@ -17,6 +17,8 @@ export interface RawMessage {
   model?: string;
   api?: string;
   modelRef?: string;
+  stopReason?: string;
+  errorMessage?: string;
   toolCallId?: string;
   toolName?: string;
   details?: unknown;

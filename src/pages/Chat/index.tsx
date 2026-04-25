@@ -4,11 +4,11 @@
  * via gateway:rpc IPC. Session selector, thinking toggle, and refresh
  * are in the toolbar; messages render with markdown + streaming.
  */
-import { forwardRef, type ForwardedRef, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, type ForwardedRef, type KeyboardEvent as ReactKeyboardEvent, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ChevronDown, ChevronRight, Loader2, Sparkles } from 'lucide-react';
 import { Virtuoso, type ContextProp, type ItemProps, type ListProps, type ScrollerProps, type VirtuosoHandle } from 'react-virtuoso';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useChatStore, type AttachedFileMeta, type RawMessage, type ToolStatus } from '@/stores/chat';
+import { useChatStore, type AttachedFileMeta, type ChatMessageDispatchOptions, type RawMessage, type ToolStatus } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
 import { AppLogo } from '@/components/branding/AppLogo';
@@ -38,6 +38,7 @@ import { getLastChatEventAt } from '@/stores/chat/helpers';
 import { groupMessagesForDisplay, splitFinalMessageForTurnDisplay, type HistoryDisplayItem } from './history-grouping';
 import { getProcessActivityLabel, getProcessEventItems, ProcessEventMessage, ProcessFinalDivider } from './process-events-next';
 import { LibreOfficeDownloadDialog, type LibreOfficeRuntimeStatusPayload } from './LibreOfficeDownloadDialog';
+import { toast } from 'sonner';
 
 const EMPTY_MESSAGES: RawMessage[] = [];
 const ACTIVE_TURN_BOTTOM_OFFSET_PX = 16;
@@ -52,8 +53,12 @@ const PROCESS_ACTIVITY_SOFT_STALL_MS = 12_000;
 const PROCESS_ACTIVITY_LONG_STALL_MS = 30_000;
 const CHAT_CONTENT_COLUMN_WIDTH_CSS = 'min(calc(100% - 1rem), 54rem)';
 const CHAT_PREVIEW_DEFAULT_WIDTH_PERCENT = 50;
-const CHAT_PREVIEW_MIN_WIDTH_PERCENT = 25;
-const CHAT_PREVIEW_MAX_WIDTH_PERCENT = 75;
+const CHAT_PREVIEW_MIN_WIDTH_PERCENT = 16;
+const CHAT_PREVIEW_MAX_WIDTH_PERCENT = 84;
+const CHAT_PREVIEW_MIN_PANE_WIDTH_PX = 280;
+const CHAT_PREVIEW_MIN_MAIN_WIDTH_PX = 280;
+const CHAT_PREVIEW_RESIZE_KEY_STEP_PERCENT = 2;
+const CHAT_PREVIEW_RESIZE_KEY_LARGE_STEP_PERCENT = 8;
 const LIBREOFFICE_BACKED_PREVIEW_EXTENSIONS = new Set(['.pptx', '.docx', '.xlsx', '.xls', '.csv']);
 type ActiveTurnAutoScrollMode = 'idle' | 'follow-bottom';
 
@@ -62,8 +67,25 @@ type LibreOfficeDownloadPrompt = {
   openPreviewAfterDownload: boolean;
 };
 
-function clampPreviewPaneWidth(widthPercent: number): number {
-  return Math.max(CHAT_PREVIEW_MIN_WIDTH_PERCENT, Math.min(CHAT_PREVIEW_MAX_WIDTH_PERCENT, widthPercent));
+type FileExistsPayload = {
+  exists?: boolean;
+};
+
+function clampPreviewPaneWidth(widthPercent: number, containerWidthPx?: number): number {
+  let minPercent = CHAT_PREVIEW_MIN_WIDTH_PERCENT;
+  let maxPercent = CHAT_PREVIEW_MAX_WIDTH_PERCENT;
+
+  if (containerWidthPx && Number.isFinite(containerWidthPx) && containerWidthPx > 0) {
+    minPercent = Math.max(minPercent, (CHAT_PREVIEW_MIN_PANE_WIDTH_PX / containerWidthPx) * 100);
+    maxPercent = Math.min(maxPercent, 100 - ((CHAT_PREVIEW_MIN_MAIN_WIDTH_PX / containerWidthPx) * 100));
+  }
+
+  if (minPercent > maxPercent) {
+    minPercent = CHAT_PREVIEW_MIN_WIDTH_PERCENT;
+    maxPercent = CHAT_PREVIEW_MAX_WIDTH_PERCENT;
+  }
+
+  return Math.round(Math.max(minPercent, Math.min(maxPercent, widthPercent)) * 10) / 10;
 }
 
 function getAttachmentFileExtension(file: AttachedFileMeta): string {
@@ -1325,12 +1347,13 @@ export function Chat() {
     text: string,
     attachments?: Array<{ fileName: string; mimeType: string; fileSize: number; stagedPath: string; preview: string | null }>,
     targetAgentId?: string | null,
+    options?: ChatMessageDispatchOptions,
   ) => {
     pendingSessionEntryBottomRef.current = false;
     pendingSessionEntryUserInterruptedRef.current = false;
     pendingLocalSendFollowBottomRef.current = true;
     resumeFollowingLatest();
-    void sendMessage(text, attachments, targetAgentId);
+    void sendMessage(text, attachments, targetAgentId, options);
   }, [resumeFollowingLatest, sendMessage]);
   const handleJumpToLatest = useCallback(() => {
     if (chatListItems.length === 0) return;
@@ -1386,41 +1409,72 @@ export function Chat() {
     const requestId = libreOfficePromptRequestRef.current + 1;
     libreOfficePromptRequestRef.current = requestId;
 
-    if (!isLibreOfficeBackedPreviewFile(file)) {
-      setLibreOfficeDownloadPrompt(null);
-      openAttachmentPreviewPane(file);
+    const openPreview = () => {
+      if (!isLibreOfficeBackedPreviewFile(file)) {
+        setLibreOfficeDownloadPrompt(null);
+        openAttachmentPreviewPane(file);
+        return;
+      }
+
+      const openPreviewAfterDownload = previewPaneOpenRef.current;
+      void hostApiFetch<LibreOfficeRuntimeStatusPayload>('/api/files/libreoffice-runtime/status')
+        .then((status) => {
+          if (libreOfficePromptRequestRef.current !== requestId) {
+            return;
+          }
+
+          if (status.available || status.status === 'complete') {
+            setLibreOfficeDownloadPrompt(null);
+            openAttachmentPreviewPane(file);
+            return;
+          }
+
+          setLibreOfficeDownloadPrompt({
+            file,
+            openPreviewAfterDownload,
+          });
+        })
+        .catch(() => {
+          if (libreOfficePromptRequestRef.current !== requestId) {
+            return;
+          }
+
+          setLibreOfficeDownloadPrompt({
+            file,
+            openPreviewAfterDownload,
+          });
+        });
+    };
+
+    if (!file.filePath) {
+      openPreview();
       return;
     }
 
-    const openPreviewAfterDownload = previewPaneOpenRef.current;
-    void hostApiFetch<LibreOfficeRuntimeStatusPayload>('/api/files/libreoffice-runtime/status')
-      .then((status) => {
+    void hostApiFetch<FileExistsPayload>('/api/files/exists', {
+      method: 'POST',
+      body: JSON.stringify({ filePath: file.filePath }),
+    })
+      .then((result) => {
         if (libreOfficePromptRequestRef.current !== requestId) {
           return;
         }
 
-        if (status.available || status.status === 'complete') {
+        if (result.exists === false) {
           setLibreOfficeDownloadPrompt(null);
-          openAttachmentPreviewPane(file);
+          toast.error(t('filePreview.fileMissing'));
           return;
         }
 
-        setLibreOfficeDownloadPrompt({
-          file,
-          openPreviewAfterDownload,
-        });
+        openPreview();
       })
       .catch(() => {
         if (libreOfficePromptRequestRef.current !== requestId) {
           return;
         }
-
-        setLibreOfficeDownloadPrompt({
-          file,
-          openPreviewAfterDownload,
-        });
+        openPreview();
       });
-  }, [openAttachmentPreviewPane]);
+  }, [openAttachmentPreviewPane, t]);
 
   const handleLibreOfficePromptComplete = useCallback(() => {
     const prompt = libreOfficeDownloadPrompt;
@@ -1438,30 +1492,93 @@ export function Chat() {
     restoreAutoCollapsedSidebar();
     setSelectedPreviewFile(null);
   }, [restoreAutoCollapsedSidebar]);
+
+  useLayoutEffect(() => {
+    if (!selectedPreviewFile) return;
+    const containerWidth = splitPaneRef.current?.getBoundingClientRect().width;
+    setPreviewPaneWidthPercent((current) => clampPreviewPaneWidth(current, containerWidth));
+  }, [selectedPreviewFile]);
+
+  const resizePreviewPaneBy = useCallback((deltaPercent: number) => {
+    if (!selectedPreviewFile) return;
+    const containerWidth = splitPaneRef.current?.getBoundingClientRect().width;
+    setPreviewPaneWidthPercent((current) => clampPreviewPaneWidth(current + deltaPercent, containerWidth));
+  }, [selectedPreviewFile]);
+
+  const resetPreviewPaneWidth = useCallback(() => {
+    const containerWidth = splitPaneRef.current?.getBoundingClientRect().width;
+    setPreviewPaneWidthPercent(clampPreviewPaneWidth(CHAT_PREVIEW_DEFAULT_WIDTH_PERCENT, containerWidth));
+  }, []);
+
+  const handlePreviewResizeKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!selectedPreviewFile || window.innerWidth < 1024) return;
+
+    const step = event.shiftKey
+      ? CHAT_PREVIEW_RESIZE_KEY_LARGE_STEP_PERCENT
+      : CHAT_PREVIEW_RESIZE_KEY_STEP_PERCENT;
+
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      resizePreviewPaneBy(step);
+      return;
+    }
+
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      resizePreviewPaneBy(-step);
+      return;
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault();
+      const containerWidth = splitPaneRef.current?.getBoundingClientRect().width;
+      setPreviewPaneWidthPercent(clampPreviewPaneWidth(CHAT_PREVIEW_MAX_WIDTH_PERCENT, containerWidth));
+      return;
+    }
+
+    if (event.key === 'End') {
+      event.preventDefault();
+      const containerWidth = splitPaneRef.current?.getBoundingClientRect().width;
+      setPreviewPaneWidthPercent(clampPreviewPaneWidth(CHAT_PREVIEW_MIN_WIDTH_PERCENT, containerWidth));
+      return;
+    }
+
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      resetPreviewPaneWidth();
+    }
+  }, [resetPreviewPaneWidth, resizePreviewPaneBy, selectedPreviewFile]);
+
   const handlePreviewResizeStart = useCallback((event: { clientX: number; preventDefault: () => void }) => {
     if (!selectedPreviewFile || window.innerWidth < 1024) return;
     event.preventDefault();
     previewResizeStartXRef.current = event.clientX;
     previewResizeStartWidthRef.current = previewPaneWidthPercent;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
 
-    const handlePointerMove = (moveEvent: MouseEvent) => {
+    const handlePointerMove = (moveEvent: PointerEvent) => {
       if (previewResizeStartXRef.current == null || !splitPaneRef.current) return;
       const containerWidth = splitPaneRef.current.getBoundingClientRect().width;
       if (!containerWidth) return;
 
       const deltaX = moveEvent.clientX - previewResizeStartXRef.current;
       const deltaPercent = (deltaX / containerWidth) * 100;
-      setPreviewPaneWidthPercent(clampPreviewPaneWidth(previewResizeStartWidthRef.current - deltaPercent));
+      setPreviewPaneWidthPercent(clampPreviewPaneWidth(previewResizeStartWidthRef.current - deltaPercent, containerWidth));
     };
 
     const stopResizing = () => {
       previewResizeStartXRef.current = null;
-      window.removeEventListener('mousemove', handlePointerMove);
-      window.removeEventListener('mouseup', stopResizing);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResizing);
+      window.removeEventListener('pointercancel', stopResizing);
     };
 
-    window.addEventListener('mousemove', handlePointerMove);
-    window.addEventListener('mouseup', stopResizing, { once: true });
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopResizing, { once: true });
+    window.addEventListener('pointercancel', stopResizing, { once: true });
   }, [previewPaneWidthPercent, selectedPreviewFile]);
   const renderChatListItem = useCallback((_: number, item: ChatListItem) => {
     switch (item.type) {
@@ -1833,11 +1950,18 @@ export function Chat() {
               role="separator"
               aria-orientation="vertical"
               aria-label="Resize chat preview"
-              onMouseDown={handlePreviewResizeStart}
-              className="absolute inset-y-0 z-20 hidden w-3 -translate-x-1/2 cursor-col-resize lg:block"
+              aria-valuemin={CHAT_PREVIEW_MIN_WIDTH_PERCENT}
+              aria-valuemax={CHAT_PREVIEW_MAX_WIDTH_PERCENT}
+              aria-valuenow={Math.round(previewPaneWidthPercent)}
+              tabIndex={0}
+              onDoubleClick={resetPreviewPaneWidth}
+              onKeyDown={handlePreviewResizeKeyDown}
+              onPointerDown={handlePreviewResizeStart}
+              className="group absolute inset-y-0 z-20 hidden w-5 -translate-x-1/2 cursor-col-resize touch-none outline-none lg:block"
               style={{ left: `${100 - previewPaneWidthPercent}%` }}
             >
-              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-black/8 transition-colors hover:bg-primary/45 dark:bg-white/10 dark:hover:bg-primary/55" />
+              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-black/8 transition-colors group-hover:bg-primary/45 group-focus-visible:bg-primary/55 dark:bg-white/10 dark:group-hover:bg-primary/55" />
+              <div className="absolute left-1/2 top-1/2 h-12 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-primary/35 group-focus-visible:bg-primary/45" />
             </div>
             <ChatFilePreviewPanel
               key={selectedPreviewFile.filePath ?? `${selectedPreviewFile.fileName}:${selectedPreviewFile.mimeType}:${selectedPreviewFile.fileSize}`}

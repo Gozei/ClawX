@@ -571,7 +571,64 @@ describe('ChatInput agent targeting', () => {
     fireEvent.click(screen.getByTestId('chat-send-button'));
 
     await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith('Hello direct agent', undefined, 'research');
+      expect(onSend).toHaveBeenCalledWith(
+        'Hello direct agent',
+        undefined,
+        'research',
+        {
+          sessionKey: 'agent:research:desk',
+          modelRef: 'openai/gpt-5.4',
+        },
+      );
+    });
+  });
+
+  it('sends the currently selected session model with online messages', async () => {
+    const onSend = vi.fn();
+    agentsState.defaultModelRef = 'custom-custombc/gpt-5.4';
+    providerState.accounts = [
+      {
+        id: 'custom-custombc',
+        vendorId: 'custom',
+        label: 'Jingdong',
+        authMode: 'api_key',
+        model: 'gpt-5.4',
+        metadata: { customModels: ['qwen3.5-plus'] },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [
+      { id: 'custom-custombc', hasKey: true, model: 'gpt-5.4' },
+    ];
+    providerState.vendors = [
+      { id: 'custom', name: 'Custom' },
+    ];
+    providerState.defaultAccountId = 'custom-custombc';
+    chatState.sessions = [{ key: 'agent:main:main', model: 'custom-custombc/qwen3.5-plus' }];
+    chatState.sessionModels = {
+      'agent:main:main': 'custom-custombc/qwen3.5-plus',
+    };
+
+    render(<ChatInput onSend={onSend} />);
+
+    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Jingdong / qwen3.5-plus');
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '在线吗' } });
+    fireEvent.click(screen.getByTestId('chat-send-button'));
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(
+        '在线吗',
+        undefined,
+        null,
+        {
+          sessionKey: 'agent:main:main',
+          modelRef: 'custom-custombc/qwen3.5-plus',
+        },
+      );
     });
   });
 

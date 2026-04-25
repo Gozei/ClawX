@@ -38,7 +38,12 @@ import { ClampedFileName } from './ClampedFileName';
 export type FileAttachment = ComposerFileAttachment;
 
 interface ChatInputProps {
-  onSend: (text: string, attachments?: FileAttachment[], targetAgentId?: string | null) => void;
+  onSend: (
+    text: string,
+    attachments?: FileAttachment[],
+    targetAgentId?: string | null,
+    options?: ChatMessageDispatchOptions,
+  ) => void;
   onQueueOfflineMessage?: (
     text: string,
     attachments?: FileAttachment[],
@@ -756,7 +761,10 @@ export function ChatInput({
       });
       toast.success(isZh ? '已加入待发送队列' : 'Added to the send queue');
     } else {
-      onSend(textToSend, attachmentsToSend, targetAgentId);
+      onSend(textToSend, attachmentsToSend, targetAgentId, {
+        sessionKey: activeComposerSessionKey,
+        modelRef: effectiveModelRef || null,
+      });
     }
     setPickerOpen(false);
   }, [

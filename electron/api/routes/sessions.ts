@@ -1,8 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { join } from 'node:path';
 import {
-  stripInjectedInboundPrelude,
-  stripLeadingInternalHeartbeatMaintenance,
+  sanitizeInboundUserText,
 } from '../../../shared/inbound-user-text';
 import { getOpenClawConfigDir } from '../../utils/paths';
 import { logger } from '../../utils/logger';
@@ -570,7 +569,7 @@ function getCatalogCacheKey(includeArchived: boolean, includePreviews: boolean):
 
 function getStoredSessionPreview(entry: Record<string, unknown>): string | null {
   const preview = typeof entry.firstUserMessagePreview === 'string'
-    ? entry.firstUserMessagePreview.trim()
+    ? cleanUserMessageText(entry.firstUserMessagePreview)
     : '';
   return preview || null;
 }
@@ -754,10 +753,7 @@ async function resolveSessionCreatedAt(
 }
 
 function cleanUserMessageText(text: string): string {
-  const cleaned = stripLeadingInternalHeartbeatMaintenance(stripInjectedInboundPrelude(text
-    .replace(/\s*\[media attached:[^\]]*\]/g, '')
-    .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')))
-    .trim();
+  const cleaned = sanitizeInboundUserText(text);
 
   return isPreCompactionMemoryFlushPrompt(cleaned) ? '' : cleaned;
 }

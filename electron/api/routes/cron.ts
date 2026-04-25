@@ -424,6 +424,10 @@ function getUnsupportedCronDeliveryError(_channel: string | undefined): string |
   return null;
 }
 
+function getStableCronSessionTarget(jobId: string): string {
+  return `session:cron:${jobId}`;
+}
+
 function normalizeCronDelivery(
   rawDelivery: unknown,
   fallbackMode: GatewayCronDelivery['mode'] = 'none',
@@ -622,13 +626,25 @@ export async function handleCronRoutes(
             isIsolatedAgent &&
             job.delivery?.mode === 'announce' &&
             !job.delivery?.channel;
+          const patch: Record<string, unknown> = {};
+          if (isIsolatedAgent) {
+            patch.sessionTarget = getStableCronSessionTarget(job.id);
+          }
           if (needsRepair) {
+            patch.delivery = { mode: 'none' };
+          }
+          if (Object.keys(patch).length > 0) {
             try {
               await ctx.gatewayManager.rpc('cron.update', {
                 id: job.id,
-                patch: { delivery: { mode: 'none' } },
+                patch,
               });
-              job.delivery = { mode: 'none' };
+              if (typeof patch.sessionTarget === 'string') {
+                job.sessionTarget = patch.sessionTarget;
+              }
+              if (patch.delivery) {
+                job.delivery = { mode: 'none' };
+              }
               if (job.state?.lastError?.includes('Channel is required')) {
                 job.state.lastError = undefined;
                 job.state.lastStatus = 'ok';
@@ -666,12 +682,28 @@ export async function handleCronRoutes(
         name: input.name,
         schedule: { kind: 'cron', expr: input.schedule },
         payload: { kind: 'agentTurn', message: input.message },
-        enabled: input.enabled ?? true,
+        enabled: false,
         wakeMode: 'next-heartbeat',
         sessionTarget: 'isolated',
         delivery,
       });
-      const transformed = result && typeof result === 'object' ? transformCronJob(result as GatewayCronJob) : result;
+      let transformed = result && typeof result === 'object' ? transformCronJob(result as GatewayCronJob) : result;
+      if (result && typeof result === 'object' && typeof (result as GatewayCronJob).id === 'string') {
+        const createdJob = result as GatewayCronJob;
+        const patched = await ctx.gatewayManager.rpc('cron.update', {
+          id: createdJob.id,
+          patch: {
+            sessionTarget: getStableCronSessionTarget(createdJob.id),
+            enabled: input.enabled ?? true,
+          },
+        });
+        transformed = patched && typeof patched === 'object'
+          ? transformCronJob(patched as GatewayCronJob)
+          : {
+            ...transformed as Record<string, unknown>,
+            enabled: input.enabled ?? true,
+          };
+      }
       emitMutationAudit(req, ctx, {
         startedAt,
         action: 'cron.job.create',

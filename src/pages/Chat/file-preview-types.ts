@@ -14,6 +14,13 @@ export type FilePreviewUnavailableReasonCode =
 
 export type PresentationRenderMode = 'html' | 'image';
 
+export type SpreadsheetPreviewMerge = {
+  row: number;
+  column: number;
+  rowSpan: number;
+  columnSpan: number;
+};
+
 export type FilePreviewPayload =
   | {
       kind: 'image';
@@ -73,6 +80,9 @@ export type FilePreviewPayload =
         rows: string[][];
         rowCount: number;
         columnCount: number;
+        merges?: SpreadsheetPreviewMerge[];
+        rowOffset?: number;
+        columnOffset?: number;
         truncatedRows: boolean;
         truncatedColumns: boolean;
       }>;

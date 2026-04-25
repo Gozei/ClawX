@@ -328,6 +328,21 @@ describe('ChatMessage', () => {
     expect(screen.getByTestId('chat-assistant-error-message')).toBeInTheDocument();
   });
 
+  it('renders persisted runtime errors that have no assistant content blocks', () => {
+    const message: RawMessage = {
+      id: 'assistant-runtime-error-1',
+      role: 'assistant',
+      content: [],
+      stopReason: 'error',
+      errorMessage: 'Unknown error (no error details in response)',
+    };
+
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
+
+    expect(screen.getByText('Unknown error (no error details in response)')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-assistant-error-message')).toBeInTheDocument();
+  });
+
   it('renders assistant markdown replies inside the shrinkable chat markdown surface', async () => {
     const message: RawMessage = {
       id: 'assistant-overflow-1',

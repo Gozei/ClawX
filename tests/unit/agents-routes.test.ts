@@ -349,6 +349,13 @@ describe('handleAgentRoutes model refresh flow', () => {
       } as never,
     );
 
+    expect(syncAllProviderAuthToRuntime).toHaveBeenCalledTimes(1);
+    expect(syncAgentModelRefToRuntime).toHaveBeenCalledWith('main', 'moonshot/kimi-k2.5');
+    const modelSyncOrder = vi.mocked(syncAgentModelRefToRuntime).mock.invocationCallOrder[0] ?? 0;
+    const configGetOrder = rpc.mock.invocationCallOrder[0] ?? 0;
+    expect(modelSyncOrder).toBeGreaterThan(0);
+    expect(configGetOrder).toBeGreaterThan(0);
+    expect(modelSyncOrder).toBeLessThan(configGetOrder);
     expect(rpc).toHaveBeenNthCalledWith(1, 'config.get', {}, 15000);
     expect(rpc).toHaveBeenNthCalledWith(
       2,
@@ -363,8 +370,6 @@ describe('handleAgentRoutes model refresh flow', () => {
       },
       15000,
     );
-    expect(syncAllProviderAuthToRuntime).toHaveBeenCalledTimes(1);
-    expect(syncAgentModelRefToRuntime).toHaveBeenCalledWith('main', 'moonshot/kimi-k2.5');
     expect(applyPreparedAgentModelUpdate).not.toHaveBeenCalled();
     expect(updateAgentModel).not.toHaveBeenCalled();
     expect(debouncedReload).not.toHaveBeenCalled();
