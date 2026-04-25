@@ -60,6 +60,22 @@ function buildOpenAiModelsUrl(baseUrl: string): string {
   return `${normalizeBaseUrl(baseUrl)}/models?limit=1`;
 }
 
+function isRedirectStatus(status: number): boolean {
+  return status >= 300 && status < 400;
+}
+
+function getRedirectError(response: Response): string {
+  const location = response.headers.get('location');
+  return location
+    ? `Connection test was redirected to ${location}. Check that the Base URL points to a model API endpoint.`
+    : 'Connection test was redirected. Check that the Base URL points to a model API endpoint.';
+}
+
+function isJsonContentType(response: Response): boolean {
+  const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+  return contentType.includes('application/json') || contentType.includes('+json');
+}
+
 function resolveOpenAiProbeUrls(
   baseUrl: string,
   apiProtocol: 'openai-completions' | 'openai-responses',
@@ -129,7 +145,7 @@ async function performProviderValidationRequest(
 ): Promise<ValidationResult> {
   try {
     logValidationRequest(providerLabel, 'GET', url, headers);
-    const response = await proxyAwareFetch(url, { headers });
+    const response = await proxyAwareFetch(url, { headers, redirect: 'manual' });
     logValidationStatus(providerLabel, response.status);
     const data = await response.json().catch(() => ({}));
     const result = classifyAuthResponse(response.status, data);
@@ -223,12 +239,67 @@ async function performConnectionTestRequest(
   const startedAt = Date.now();
   try {
     logValidationRequest(providerLabel, init.method || 'POST', url, (init.headers as Record<string, string>) || {});
-    const response = await proxyAwareFetch(url, init);
+    const response = await proxyAwareFetch(url, { ...init, redirect: 'manual' });
     logValidationStatus(providerLabel, response.status);
-    const data = await response.json().catch(() => ({}));
+    if (response.redirected || isRedirectStatus(response.status)) {
+      return {
+        valid: false,
+        error: response.redirected && response.url
+          ? `Connection test was redirected to ${response.url}. Check that the Base URL points to a model API endpoint.`
+          : getRedirectError(response),
+        status: response.status,
+        model,
+        latencyMs: Date.now() - startedAt,
+      };
+    }
+
+    if (!isJsonContentType(response)) {
+      const contentType = response.headers.get('content-type') || 'unknown content type';
+      return {
+        valid: false,
+        error: `Provider returned ${contentType}, not JSON. Check that the Base URL points to an OpenAI-compatible API endpoint.`,
+        status: response.status,
+        model,
+        latencyMs: Date.now() - startedAt,
+      };
+    }
+
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch {
+      return {
+        valid: false,
+        error: 'Provider returned invalid JSON. Check the Base URL and API protocol.',
+        status: response.status,
+        model,
+        latencyMs: Date.now() - startedAt,
+      };
+    }
     if (response.status < 200 || response.status >= 300) {
+      if (response.status === 429) {
+        return {
+          valid: false,
+          error: 'Provider rate limited the test request. Check quota, limits, or try again later.',
+          status: response.status,
+          model,
+          latencyMs: Date.now() - startedAt,
+        };
+      }
+
       return {
         ...classifyAuthResponse(response.status, data),
+        status: response.status,
+        model,
+        latencyMs: Date.now() - startedAt,
+      };
+    }
+
+    const output = extractOutput(data);
+    if (!output) {
+      return {
+        valid: false,
+        error: 'Provider response did not match the selected API protocol. Check the Base URL, protocol, and model.',
         status: response.status,
         model,
         latencyMs: Date.now() - startedAt,
@@ -289,6 +360,7 @@ async function performResponsesProbe(
     logValidationRequest(providerLabel, 'POST', url, headers);
     const response = await proxyAwareFetch(url, {
       method: 'POST',
+      redirect: 'manual',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'validation-probe',
@@ -326,6 +398,7 @@ async function performChatCompletionsProbe(
     logValidationRequest(providerLabel, 'POST', url, headers);
     const response = await proxyAwareFetch(url, {
       method: 'POST',
+      redirect: 'manual',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'validation-probe',
@@ -364,6 +437,7 @@ async function performAnthropicMessagesProbe(
     logValidationRequest(providerLabel, 'POST', url, headers);
     const response = await proxyAwareFetch(url, {
       method: 'POST',
+      redirect: 'manual',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'validation-probe',
