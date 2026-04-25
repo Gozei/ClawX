@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, ArrowDown, ArrowUp, Bot, Check, Plus, RefreshCw, Settings2, Trash2, X } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowUp, Bot, Check, Plus, RefreshCw, Search, Settings2, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -32,8 +32,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import {
   pageDialogCardClasses,
   pageFormInputClasses,
-  pageSectionCardClasses,
-  pageSectionCardInteractiveClasses,
+  pagePrimaryInputClasses,
 } from '@/components/layout/page-tokens';
 import telegramIcon from '@/assets/channels/telegram.svg';
 import discordIcon from '@/assets/channels/discord.svg';
@@ -108,6 +107,21 @@ function summarizeNames(values: string[], emptyLabel: string): string {
   if (values.length === 0) return emptyLabel;
   if (values.length <= 2) return values.join('、');
   return `${values.slice(0, 2).join('、')} +${values.length - 2}`;
+}
+
+function compareAgentSkillsForInitialDisplay(
+  left: SkillSnapshot,
+  right: SkillSnapshot,
+  initiallySelectedSkillIds: string[],
+): number {
+  const score = (skill: SkillSnapshot) => {
+    if (skill.enabled) return 0;
+    if (initiallySelectedSkillIds.includes(skill.id)) return 1;
+    return 2;
+  };
+  return score(left) - score(right)
+    || left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })
+    || left.id.localeCompare(right.id);
 }
 
 interface WorkflowTemplate {
@@ -846,6 +860,7 @@ function AgentSettingsModal({
   const [boundaries, setBoundaries] = useState(safeBoundaries);
   const [outputContract, setOutputContract] = useState(safeOutputContract);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(safeSkillIds);
+  const [skillDisplayOrderIds, setSkillDisplayOrderIds] = useState<string[]>([]);
   const [workflowNodes, setWorkflowNodes] = useState<AgentWorkflowNode[]>(safeWorkflowNodes);
   const [selectedTriggerModes, setSelectedTriggerModes] = useState<string[]>(safeTriggerModes.length > 0 ? safeTriggerModes : ['manual']);
   const [skillQuery, setSkillQuery] = useState('');
@@ -869,6 +884,7 @@ function AgentSettingsModal({
     setBoundaries(safeBoundaries);
     setOutputContract(safeOutputContract);
     setSelectedSkillIds(safeSkillIds);
+    setSkillDisplayOrderIds([]);
     setWorkflowNodes(safeWorkflowNodes);
     setSelectedTriggerModes(safeTriggerModes.length > 0 ? safeTriggerModes : ['manual']);
     setSkillQuery('');
@@ -888,6 +904,15 @@ function AgentSettingsModal({
   useEffect(() => {
     void fetchSkills();
   }, [fetchSkills]);
+
+  useEffect(() => {
+    if (skillDisplayOrderIds.length > 0 || skills.length === 0) return;
+    setSkillDisplayOrderIds(
+      [...skills]
+        .sort((left, right) => compareAgentSkillsForInitialDisplay(left, right, safeSkillIds))
+        .map((skill) => skill.id),
+    );
+  }, [safeSkillIds, skillDisplayOrderIds.length, skills]);
 
   useEffect(() => {
     let cancelled = false;
@@ -991,11 +1016,12 @@ function AgentSettingsModal({
     }
   };
 
-  const handleToggleSkill = (skillId: string) => {
+  const handleToggleSkill = (skill: SkillSnapshot) => {
+    if (!skill.enabled && !selectedSkillIds.includes(skill.id)) return;
     setSelectedSkillIds((current) => (
-      current.includes(skillId)
-        ? current.filter((id) => id !== skillId)
-        : [...current, skillId]
+      current.includes(skill.id)
+        ? current.filter((id) => id !== skill.id)
+        : [...current, skill.id]
     ));
   };
 
@@ -1058,6 +1084,7 @@ function AgentSettingsModal({
         triggerModes: normalizedTriggerModes,
       });
       toast.success(t('toast.agentStudioUpdated'));
+      onClose();
     } catch (error) {
       toast.error(t('toast.agentStudioUpdateFailed', { error: String(error) }));
     } finally {
@@ -1081,8 +1108,7 @@ function AgentSettingsModal({
   const assignedSkillDetails = selectedSkillIds
     .map((skillId) => skills.find((skill) => skill.id === skillId))
     .filter(Boolean) as SkillSnapshot[];
-  const enabledSkills = skills.filter((skill) => !skill.isCore);
-  const recommendedSkills = enabledSkills.filter((skill) => skill.enabled);
+  const assignableSkills = useMemo(() => skills.filter((skill) => !skill.isCore), [skills]);
   const runtimeProviderOptions = useMemo(
     () => buildRuntimeProviderOptions(
       providerAccounts,
@@ -1092,7 +1118,18 @@ function AgentSettingsModal({
     ),
     [providerAccounts, providerDefaultAccountId, providerStatuses, providerVendors],
   );
-  const visibleSkills = recommendedSkills.length > 0 ? recommendedSkills : skills;
+  const visibleSkills = useMemo(() => {
+    const sourceSkills = assignableSkills.length > 0 ? assignableSkills : skills;
+    const skillById = new Map(sourceSkills.map((skill) => [skill.id, skill]));
+    const ordered = skillDisplayOrderIds
+      .map((skillId) => skillById.get(skillId))
+      .filter(Boolean) as SkillSnapshot[];
+    const orderedIds = new Set(ordered.map((skill) => skill.id));
+    const newSkills = sourceSkills
+      .filter((skill) => !orderedIds.has(skill.id))
+      .sort((left, right) => compareAgentSkillsForInitialDisplay(left, right, safeSkillIds));
+    return [...ordered, ...newSkills];
+  }, [assignableSkills, safeSkillIds, skillDisplayOrderIds, skills]);
   const normalizedSkillQuery = skillQuery.trim().toLowerCase();
   const filteredSkills = visibleSkills
     .filter((skill) => {
@@ -1101,14 +1138,6 @@ function AgentSettingsModal({
         .map((value) => toSafeText(value).toLowerCase())
         .join(' ');
       return haystack.includes(normalizedSkillQuery);
-    })
-    .sort((left, right) => {
-      const leftSelected = selectedSkillIds.includes(left.id) ? 1 : 0;
-      const rightSelected = selectedSkillIds.includes(right.id) ? 1 : 0;
-      if (leftSelected !== rightSelected) {
-        return rightSelected - leftSelected;
-      }
-      return left.name.localeCompare(right.name, 'zh-CN');
     });
   const channelSummary = assignedChannels.map((channel) => `${CHANNEL_NAMES[channel.channelType]} · ${channel.name}`);
   const workflowTemplates = useMemo<WorkflowTemplate[]>(() => [
@@ -1320,8 +1349,8 @@ function AgentSettingsModal({
           </Button>
         </CardHeader>
         <CardContent className="pt-4 overflow-y-auto flex-1 p-6">
-          <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-            <div className="space-y-6">
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_292px]">
+            <div className="min-w-0 space-y-6">
               <div className="space-y-2.5">
                 <Label htmlFor="agent-settings-name" className={labelClasses}>{t('settingsDialog.nameLabel')}</Label>
                 <div className="flex gap-2">
@@ -1484,8 +1513,21 @@ function AgentSettingsModal({
                       {t('skillCount', { count: selectedSkillIds.length })}
                     </Badge>
                   </div>
+
+                  <div className="relative min-w-0">
+                    <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="agent-skill-search"
+                      data-testid="agent-skill-search-input"
+                      value={skillQuery}
+                      onChange={(event) => setSkillQuery(event.target.value)}
+                      placeholder={t('settingsDialog.skillsSearchPlaceholder')}
+                      className={cn(pagePrimaryInputClasses, 'border-[#d6deea] bg-white pl-10 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:border-white/12 dark:bg-transparent')}
+                    />
+                  </div>
+
                   <div className="grid gap-3">
-                    {recommendedSkills.length === 0 && skills.length === 0 ? (
+                    {visibleSkills.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-black/10 bg-black/5 p-4 text-[13px] text-muted-foreground dark:border-white/10 dark:bg-white/5">
                         {t('settingsDialog.skillsEmpty')}
                       </div>
@@ -1494,41 +1536,66 @@ function AgentSettingsModal({
                         {t('settingsDialog.skillsNoMatch')}
                       </div>
                     ) : (
-                      <>
-                        <div className={cn(pageSectionCardClasses, 'p-4')}>
-                          <Label htmlFor="agent-skill-search" className={labelClasses}>
-                            {t('settingsDialog.skillsSearchLabel')}
-                          </Label>
-                          <Input
-                            id="agent-skill-search"
-                            value={skillQuery}
-                            onChange={(event) => setSkillQuery(event.target.value)}
-                            placeholder={t('settingsDialog.skillsSearchPlaceholder')}
-                            className={cn(inputClasses, 'mt-2')}
-                          />
-                        </div>
+                      <div className="flex flex-col gap-3">
                         {filteredSkills.map((skill) => {
                           const selected = selectedSkillIds.includes(skill.id);
+                          const globallyDisabled = !skill.enabled;
+                          const canToggle = skill.enabled || selected;
                           return (
-                            <label key={skill.id} className={cn(pageSectionCardClasses, pageSectionCardInteractiveClasses, 'flex items-start gap-3 p-4')}>
-                              <Switch checked={selected} onCheckedChange={() => handleToggleSkill(skill.id)} />
-                              <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-lg">{skill.icon || '🧩'}</span>
-                                <p className="text-[15px] font-semibold text-foreground">{skill.name}</p>
-                                {!skill.enabled && (
-                                  <Badge variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px]">
-                                    {t('settingsDialog.skillDisabled')}
-                                  </Badge>
-                                )}
+                            <div
+                              key={skill.id}
+                              data-testid={`agent-skill-list-item-${skill.id}`}
+                              className={cn(
+                                'group flex items-center justify-between rounded-2xl bg-white px-4 py-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[transform,box-shadow,background-color] hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)] dark:bg-white/[0.04] dark:shadow-none dark:hover:bg-white/[0.06]',
+                                globallyDisabled && 'bg-slate-100/80 shadow-none hover:translate-y-0 hover:bg-slate-100/80 hover:shadow-none dark:bg-white/[0.025] dark:hover:bg-white/[0.025]',
+                              )}
+                            >
+                              <div className="flex min-w-0 flex-1 items-start gap-4 pr-4">
+                                <div className={cn(
+                                  'flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-50 text-2xl shadow-inner shadow-white/40 dark:bg-white/[0.05] dark:shadow-none',
+                                  globallyDisabled && 'bg-slate-200 text-foreground/50 dark:bg-white/[0.04]',
+                                )}>
+                                  {skill.icon || '📦'}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <h3 className={cn('truncate text-[16px] font-semibold text-foreground', globallyDisabled && 'text-foreground/55')}>
+                                      {skill.name}
+                                    </h3>
+                                    {selected && (
+                                      <Badge variant="secondary" className="border-0 bg-primary/12 text-primary dark:text-primary-foreground">
+                                        {t('settingsDialog.skillAssigned')}
+                                      </Badge>
+                                    )}
+                                    {globallyDisabled && (
+                                      <Badge variant="secondary" className="border-0 bg-slate-300/70 text-slate-700 dark:bg-white/10 dark:text-white/60">
+                                        {t('settingsDialog.skillDisabled')}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className={cn('mt-1 line-clamp-2 text-[14px] text-foreground/68', globallyDisabled && 'text-foreground/45')}>
+                                    {skill.description || skill.id}
+                                  </p>
+                                  {globallyDisabled && selected && (
+                                    <p className="mt-2 text-[12px] text-foreground/50">
+                                      {t('settingsDialog.skillDisabledAssignedHint')}
+                                    </p>
+                                  )}
+                                </div>
                               </div>
-                              <p className="mt-1 text-[13px] text-muted-foreground">{skill.description || skill.id}</p>
-                              <p className="mt-2 font-mono text-[12px] text-foreground/60">{skill.id}</p>
+                              <div className="flex w-[128px] shrink-0 items-center justify-end gap-5">
+                                <span className="min-w-0 truncate text-[13px] font-mono text-foreground/60">v{skill.version || '1.0.0'}</span>
+                                <Switch
+                                  checked={selected}
+                                  disabled={!canToggle}
+                                  onCheckedChange={() => handleToggleSkill(skill)}
+                                  aria-label={t('settingsDialog.skillAssignToggleLabel', { skill: skill.name })}
+                                />
+                              </div>
                             </div>
-                          </label>
                           );
                         })}
-                      </>
+                      </div>
                     )}
                   </div>
                 </TabsContent>
@@ -1974,7 +2041,7 @@ function AgentSettingsModal({
               </Tabs>
             </div>
 
-            <div className="space-y-4">
+            <div className="w-[292px] shrink-0 space-y-4">
               <div className="rounded-3xl border border-black/5 bg-white/70 p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
                 <p className="text-[12px] uppercase tracking-[0.08em] text-muted-foreground">{t('settingsDialog.rightRailTitle')}</p>
                 <div className="mt-4 space-y-4">

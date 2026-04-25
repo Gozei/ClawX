@@ -1,6 +1,6 @@
 import React from 'react';
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SkillMarketplaceDetailContent } from '../../src/pages/Skills/components/SkillMarketplaceDetailContent';
 import type { MarketplaceInstalledSkill, MarketplaceSkillDetail, SkillSnapshot, SkillSource } from '../../src/types/skill';
 
@@ -25,6 +25,11 @@ const translations: Record<string, string> = {
   'marketplace.staticScanClean': 'Security scan clean',
   'marketplace.staticScanUnknown': 'Security scan unknown',
   'marketplace.staticScanReview': 'Review recommended',
+  'marketplace.suspiciousInstallTitle': 'Review skill before installing',
+  'marketplace.suspiciousInstallMessage': 'This skill was flagged by security moderation.',
+  'marketplace.suspiciousInstallMessageWithReason': 'This skill was flagged by security moderation: {{reason}}',
+  'marketplace.suspiciousInstallConfirm': 'Install anyway',
+  'marketplace.suspiciousInstallCancel': 'Cancel',
   'marketplace.pendingReview': 'Pending review',
   'marketplace.detailInfoTab': 'Marketplace details',
   'marketplace.changelogTitle': 'Changelog',
@@ -55,7 +60,10 @@ const sources: SkillSource[] = [
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, options?: { defaultValue?: string }) => translations[key] ?? options?.defaultValue ?? key,
+    t: (key: string, options?: { defaultValue?: string; reason?: string }) => {
+      const template = translations[key] ?? options?.defaultValue ?? key;
+      return options?.reason ? template.replace('{{reason}}', options.reason) : template;
+    },
   }),
 }));
 
@@ -71,6 +79,14 @@ vi.mock('sonner', () => ({
 }));
 
 describe('SkillMarketplaceDetailContent', () => {
+  beforeEach(() => {
+    store.installSkill.mockReset();
+    store.enableSkill.mockReset();
+    store.installSkill.mockResolvedValue(undefined);
+    store.enableSkill.mockResolvedValue(undefined);
+    store.skills = [];
+  });
+
   it('renders the shared tabs shell and marketplace summary fields', () => {
     const detail: MarketplaceSkillDetail = {
       requestedSlug: 'self-improving-agent',
@@ -174,5 +190,100 @@ This is the visible marketplace documentation.`,
     expect(screen.getByText('This is the visible marketplace documentation.')).toBeInTheDocument();
     expect(screen.queryByText('name: Self Improving Agent')).not.toBeInTheDocument();
     expect(screen.queryByText('description: Captures learnings and errors.')).not.toBeInTheDocument();
+  });
+
+  it('shows moderation review over clean static scan and confirms suspicious installs with force', async () => {
+    const detail: MarketplaceSkillDetail = {
+      requestedSlug: 'zentao-api',
+      resolvedSlug: 'zentao-api',
+      moderationInfo: {
+        isSuspicious: true,
+        isMalwareBlocked: false,
+        summary: 'Detected suspicious patterns.',
+        reasonCodes: ['suspicious.llm_suspicious'],
+      },
+      owner: {
+        displayName: 'ClawHub',
+      },
+      skill: {
+        slug: 'zentao-api',
+        displayName: 'Zentao API',
+        description: 'Integrates with Zentao.',
+      },
+      latestVersion: {
+        version: '1.0.0',
+        rawMarkdown: '# Zentao API',
+        staticScan: {
+          status: 'clean',
+          summary: 'No suspicious patterns detected.',
+        },
+      },
+    };
+
+    render(
+      <SkillMarketplaceDetailContent
+        detail={detail}
+        installedSkills={[]}
+        skills={[]}
+        sources={sources}
+        sourceId="deepaiworker"
+      />,
+    );
+
+    expect(screen.getByText('Review recommended')).toBeInTheDocument();
+    expect(screen.queryByText('Security scan clean')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Install/ }));
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Review skill before installing');
+    expect(screen.getByRole('dialog')).toHaveTextContent('Detected suspicious patterns.');
+    expect(store.installSkill).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Install anyway' }));
+
+    await waitFor(() => {
+      expect(store.installSkill).toHaveBeenCalledWith('zentao-api', '1.0.0', 'deepaiworker', true);
+    });
+  });
+
+  it('confirms suspicious updates before installing with force', async () => {
+    const detail: MarketplaceSkillDetail = {
+      requestedSlug: 'zentao-api',
+      resolvedSlug: 'zentao-api',
+      moderationInfo: {
+        isSuspicious: true,
+        isMalwareBlocked: false,
+        summary: 'Detected suspicious update behavior.',
+        reasonCodes: ['suspicious.llm_suspicious'],
+      },
+      skill: {
+        slug: 'zentao-api',
+        displayName: 'Zentao API',
+        description: 'Integrates with Zentao.',
+      },
+      latestVersion: {
+        version: '1.1.0',
+        rawMarkdown: '# Zentao API',
+      },
+    };
+
+    render(
+      <SkillMarketplaceDetailContent
+        detail={detail}
+        installedSkills={[{ slug: 'zentao-api', version: '1.0.0', sourceId: 'deepaiworker' } as MarketplaceInstalledSkill]}
+        skills={[]}
+        sources={sources}
+        sourceId="deepaiworker"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Update skill/ }));
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Detected suspicious update behavior.');
+    expect(store.installSkill).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Install anyway' }));
+
+    await waitFor(() => {
+      expect(store.installSkill).toHaveBeenCalledWith('zentao-api', '1.1.0', 'deepaiworker', true);
+    });
   });
 });

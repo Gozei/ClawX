@@ -29,7 +29,7 @@ import {
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
+import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { invokeIpc } from '@/lib/api-client';
@@ -486,7 +486,7 @@ function buildOfficePagesPdfCacheKey(previewId: string): string {
 }
 
 async function loadPdfDocumentFromDataUrl(dataUrl: string): Promise<PdfDocumentLike> {
-  const pdfjs = await import('pdfjs-dist');
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
   const base64 = extractBase64FromDataUrl(dataUrl);
@@ -1271,19 +1271,27 @@ function OfficePageCanvas({
 }
 
 function OfficePagesPreview({
+  file,
   preview,
   className,
+  mode,
+  language,
 }: {
+  file: AttachedFileMeta;
   preview: Extract<FilePreviewPayload, { kind: 'office-pages' }>;
   className?: string;
+  mode: 'panel' | 'modal';
+  language: string;
 }) {
   const { t } = useTranslation('chat');
   const [pdfDocument, setPdfDocument] = useState<PdfDocumentLike | null>(null);
   const [pageCount, setPageCount] = useState(preview.pageCount);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [docxFallbackPreview, setDocxFallbackPreview] = useState<Extract<FilePreviewPayload, { kind: 'docx' }> | null>(null);
   const [loadedPages, setLoadedPages] = useState<Set<number>>(() => new Set([1, 2, 3]));
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const pageSectionRefs = useRef(new Map<number, HTMLElement>());
+  const shouldTryDocxFallback = Boolean(file.filePath && /\.docx$/i.test(file.fileName || file.filePath || ''));
 
   useEffect(() => {
     let cancelled = false;
@@ -1291,6 +1299,7 @@ function OfficePagesPreview({
     setPdfDocument(null);
     setPageCount(preview.pageCount);
     setLoadError(null);
+    setDocxFallbackPreview(null);
     setLoadedPages(new Set([1, 2, 3]));
 
     const cacheKey = buildOfficePagesPdfCacheKey(preview.previewId);
@@ -1319,7 +1328,29 @@ function OfficePagesPreview({
     })()
       .catch((error) => {
         if (!cancelled) {
-          setLoadError(error instanceof Error ? error.message : String(error));
+          const message = error instanceof Error ? error.message : String(error);
+          if (shouldTryDocxFallback && file.filePath) {
+            void hostApiFetch<Extract<FilePreviewPayload, { kind: 'docx' }>>('/api/files/preview-docx-fallback', {
+              method: 'POST',
+              body: JSON.stringify({
+                filePath: file.filePath,
+                fileName: file.fileName,
+                mimeType: file.mimeType,
+              }),
+            })
+              .then((fallbackPreview) => {
+                if (!cancelled) {
+                  setDocxFallbackPreview(fallbackPreview);
+                }
+              })
+              .catch(() => {
+                if (!cancelled) {
+                  setLoadError(message);
+                }
+              });
+            return;
+          }
+          setLoadError(message);
         }
       });
 
@@ -1327,7 +1358,7 @@ function OfficePagesPreview({
       cancelled = true;
       void loadedDocument?.destroy?.();
     };
-  }, [preview.pageCount, preview.previewId]);
+  }, [file.fileName, file.filePath, file.mimeType, preview.pageCount, preview.previewId, shouldTryDocxFallback]);
 
   const setPageSectionRef = useCallback((pageNumber: number, node: HTMLElement | null) => {
     if (node) {
@@ -1398,6 +1429,10 @@ function OfficePagesPreview({
         {t('filePreview.loadFailed', { error: loadError })}
       </div>
     );
+  }
+
+  if (docxFallbackPreview) {
+    return <DocxPreview file={file} preview={docxFallbackPreview} mode={mode} language={language} />;
   }
 
   return (
@@ -2138,7 +2173,7 @@ function PreviewSurface({
     case 'office-pages':
       return (
         <div className={cn(isModal ? 'flex min-h-0 flex-1 overflow-hidden px-1 py-1 sm:px-2' : 'flex min-h-0 flex-1 overflow-hidden px-4 py-4', contentClassName)}>
-          <OfficePagesPreview preview={preview} />
+          <OfficePagesPreview file={file} preview={preview} mode={mode} language={language} />
         </div>
       );
     case 'presentation':
