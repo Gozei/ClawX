@@ -4,7 +4,11 @@
 
 ### Overview
 
-ClawX is a cross-platform **Electron desktop app** (React 19 + Vite + TypeScript) providing a GUI for the OpenClaw AI agent runtime. It uses pnpm as its package manager (pinned version in `package.json`'s `packageManager` field).
+Deep AI Worker is a cross-platform **Electron desktop app** (React 19 + Vite + TypeScript) providing a GUI for the OpenClaw AI agent runtime. It uses pnpm as its package manager (pinned version in `package.json`'s `packageManager` field).
+
+### Project collaboration
+
+- [GIT_WORKFLOW.md](GIT_WORKFLOW.md): Branch naming, commit message, Pull Request, release, and hotfix workflow guidelines for project collaboration.
 
 ### Quick reference
 
