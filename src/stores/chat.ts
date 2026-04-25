@@ -10,8 +10,7 @@ import { normalizeAppError } from '@/lib/error-model';
 import { hostApiFetch } from '@/lib/host-api';
 import i18n from '@/i18n';
 import {
-  stripInjectedInboundPrelude,
-  stripLeadingInternalHeartbeatMaintenance,
+  sanitizeInboundUserText,
 } from '../../shared/inbound-user-text';
 import { useGatewayStore } from './gateway';
 import { useAgentsStore } from './agents';
@@ -25,6 +24,7 @@ import {
   hasComposerDraftContent,
   hasStoredSessionLabel,
   isUnusedDraftSession,
+  isFailedToolResultMessage,
   shouldContinueAssistantDelta,
 } from './chat/helpers';
 import {
@@ -136,6 +136,8 @@ const _noResponseRecoveryStartedAt = new Map<string, number>();
 const _sessionAutoLabelRequestsInFlight = new Map<string, Promise<string | null>>();
 const _runtimePatchedAgentModels = new Map<string, string | null>();
 const _runtimeAgentModelSyncInFlight = new Map<string, Promise<void>>();
+const SESSION_VIEW_STORAGE_PREFIX = 'clawx:chat-session-view:v1:';
+const SESSION_VIEW_STORAGE_TTL_MS = 2 * 60 * 60_000;
 
 const EMPTY_SESSION_VIEW_SNAPSHOT: SessionViewSnapshot = {
   messages: [],
@@ -152,6 +154,11 @@ const EMPTY_SESSION_VIEW_SNAPSHOT: SessionViewSnapshot = {
   lastUserMessageAt: null,
   pendingToolImages: [],
   thinkingLevel: null,
+};
+
+type PersistedSessionViewSnapshot = {
+  savedAt: number;
+  snapshot: SessionViewSnapshot;
 };
 
 let pendingDeltaMessages: RawMessage[] = [];
@@ -364,6 +371,136 @@ function buildSessionViewSnapshot(
   });
 }
 
+function getSessionViewStorageKey(sessionKey: string): string {
+  return `${SESSION_VIEW_STORAGE_PREFIX}${sessionKey}`;
+}
+
+function canUseSessionViewStorage(): boolean {
+  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+}
+
+function hasRecoverableSessionView(snapshot: SessionViewSnapshot): boolean {
+  if (snapshot.messages.length === 0) return false;
+  if (
+    snapshot.sending
+    || snapshot.pendingFinal
+    || snapshot.streamingMessage != null
+    || (typeof snapshot.streamingText === 'string' && snapshot.streamingText.trim().length > 0)
+  ) {
+    return true;
+  }
+  const lastUserIndex = findLastUserMessageIndex(snapshot.messages);
+  return lastUserIndex >= 0 && snapshot.messages.slice(lastUserIndex + 1).some((message) => message.role === 'assistant');
+}
+
+function persistSessionView(sessionKey: string, snapshot: SessionViewSnapshot): void {
+  if (!sessionKey || !canUseSessionViewStorage() || !hasRecoverableSessionView(snapshot)) return;
+  try {
+    const payload: PersistedSessionViewSnapshot = {
+      savedAt: Date.now(),
+      snapshot,
+    };
+    window.localStorage.setItem(getSessionViewStorageKey(sessionKey), JSON.stringify(payload));
+  } catch {
+    // Ignore storage quota / serialization failures; the in-memory snapshot still works.
+  }
+}
+
+function readPersistedSessionView(sessionKey: string): SessionViewSnapshot | null {
+  if (!sessionKey || !canUseSessionViewStorage()) return null;
+  try {
+    const raw = window.localStorage.getItem(getSessionViewStorageKey(sessionKey));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistedSessionViewSnapshot>;
+    if (typeof parsed.savedAt !== 'number' || Date.now() - parsed.savedAt > SESSION_VIEW_STORAGE_TTL_MS) {
+      window.localStorage.removeItem(getSessionViewStorageKey(sessionKey));
+      return null;
+    }
+    if (!parsed.snapshot || typeof parsed.snapshot !== 'object') return null;
+    return cloneSessionViewSnapshot(parsed.snapshot as SessionViewSnapshot);
+  } catch {
+    return null;
+  }
+}
+
+function readMatchingPersistedSessionView(messages: RawMessage[]): SessionViewSnapshot | null {
+  if (!canUseSessionViewStorage()) return null;
+  const lastUserIndex = findLastUserMessageIndex(messages);
+  if (lastUserIndex < 0) return null;
+  const loadedUser = messages[lastUserIndex];
+  const loadedUserText = getComparableMessageText(loadedUser);
+  const loadedUserMs = typeof loadedUser.timestamp === 'number' ? toMs(loadedUser.timestamp) : 0;
+  let best: PersistedSessionViewSnapshot | null = null;
+
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (!key?.startsWith(SESSION_VIEW_STORAGE_PREFIX)) continue;
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as Partial<PersistedSessionViewSnapshot>;
+      if (typeof parsed.savedAt !== 'number' || Date.now() - parsed.savedAt > SESSION_VIEW_STORAGE_TTL_MS) continue;
+      if (!parsed.snapshot || typeof parsed.snapshot !== 'object') continue;
+      const snapshot = cloneSessionViewSnapshot(parsed.snapshot as SessionViewSnapshot);
+      if (!hasRecoverableSessionView(snapshot)) continue;
+      const snapshotLastUserIndex = findLastUserMessageIndex(snapshot.messages);
+      if (snapshotLastUserIndex < 0) continue;
+      const snapshotUser = snapshot.messages[snapshotLastUserIndex];
+      const snapshotUserText = getComparableMessageText(snapshotUser);
+      const snapshotUserMs = typeof snapshotUser.timestamp === 'number' ? toMs(snapshotUser.timestamp) : 0;
+      const textMatches = loadedUserText.length > 0 && snapshotUserText === loadedUserText;
+      const timeMatches = loadedUserMs > 0 && snapshotUserMs > 0 && Math.abs(loadedUserMs - snapshotUserMs) < 60_000;
+      if (!textMatches && !timeMatches) continue;
+      if (!best || parsed.savedAt > best.savedAt) {
+        best = { savedAt: parsed.savedAt, snapshot };
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return best ? cloneSessionViewSnapshot(best.snapshot) : null;
+}
+
+function readLatestPersistedSessionViewEntry(): { sessionKey: string; snapshot: SessionViewSnapshot } | null {
+  if (!canUseSessionViewStorage()) return null;
+  let best: (PersistedSessionViewSnapshot & { sessionKey: string }) | null = null;
+
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (!key?.startsWith(SESSION_VIEW_STORAGE_PREFIX)) continue;
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as Partial<PersistedSessionViewSnapshot>;
+      if (typeof parsed.savedAt !== 'number' || Date.now() - parsed.savedAt > SESSION_VIEW_STORAGE_TTL_MS) continue;
+      if (!parsed.snapshot || typeof parsed.snapshot !== 'object') continue;
+      const snapshot = cloneSessionViewSnapshot(parsed.snapshot as SessionViewSnapshot);
+      if (!hasRecoverableSessionView(snapshot)) continue;
+      if (!best || parsed.savedAt > best.savedAt) {
+        best = {
+          savedAt: parsed.savedAt,
+          sessionKey: key.slice(SESSION_VIEW_STORAGE_PREFIX.length),
+          snapshot,
+        };
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return best ? { sessionKey: best.sessionKey, snapshot: cloneSessionViewSnapshot(best.snapshot) } : null;
+}
+
+function clearPersistedSessionView(sessionKey: string): void {
+  if (!sessionKey || !canUseSessionViewStorage()) return;
+  try {
+    window.localStorage.removeItem(getSessionViewStorageKey(sessionKey));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 function cacheSessionView(
   state: Pick<
     ChatState,
@@ -384,15 +521,21 @@ function cacheSessionView(
     | 'thinkingLevel'
   >,
 ): void {
-  _sessionViewSnapshots.set(state.currentSessionKey, buildSessionViewSnapshot(state));
+  const snapshot = buildSessionViewSnapshot(state);
+  _sessionViewSnapshots.set(state.currentSessionKey, snapshot);
+  persistSessionView(state.currentSessionKey, snapshot);
 }
 
 function clearSessionView(sessionKey: string): void {
   _sessionViewSnapshots.delete(sessionKey);
+  clearPersistedSessionView(sessionKey);
 }
 
 function restoreSessionView(sessionKey: string): SessionViewSnapshot {
-  const snapshot = _sessionViewSnapshots.get(sessionKey);
+  const snapshot = _sessionViewSnapshots.get(sessionKey) ?? readPersistedSessionView(sessionKey);
+  if (snapshot) {
+    _sessionViewSnapshots.set(sessionKey, cloneSessionViewSnapshot(snapshot));
+  }
   return cloneSessionViewSnapshot(snapshot ?? EMPTY_SESSION_VIEW_SNAPSHOT);
 }
 
@@ -672,6 +815,113 @@ function isEquivalentRecentAssistantMessage(
   });
 }
 
+function messageExistsByIdentityOrText(messages: RawMessage[], candidate: RawMessage): boolean {
+  if (candidate.id && messages.some((message) => message.id === candidate.id)) return true;
+  const candidateText = getComparableMessageText(candidate);
+  const candidateContentKey = buildMessageContentKey(candidate.content);
+  return messages.some((message) => {
+    if (message.role !== candidate.role) return false;
+    if (candidateText && getComparableMessageText(message) === candidateText) return true;
+    return !!candidateContentKey && buildMessageContentKey(message.content) === candidateContentKey;
+  });
+}
+
+function mergeRecoverableSessionView(
+  loadedMessages: RawMessage[],
+  snapshot: SessionViewSnapshot,
+): { messages: RawMessage[]; recovered: boolean } {
+  if (!hasRecoverableSessionView(snapshot)) {
+    return { messages: loadedMessages, recovered: false };
+  }
+
+  const snapshotLastUserIndex = findLastUserMessageIndex(snapshot.messages);
+  if (snapshotLastUserIndex < 0) {
+    return { messages: loadedMessages, recovered: false };
+  }
+
+  const snapshotUser = snapshot.messages[snapshotLastUserIndex];
+  const snapshotUserMs = typeof snapshotUser.timestamp === 'number' ? toMs(snapshotUser.timestamp) : 0;
+  if (snapshotUserMs && Date.now() - snapshotUserMs > SESSION_VIEW_STORAGE_TTL_MS) {
+    return { messages: loadedMessages, recovered: false };
+  }
+
+  const loadedUserIndex = (() => {
+    for (let index = loadedMessages.length - 1; index >= 0; index -= 1) {
+      const message = loadedMessages[index];
+      if (message.role !== 'user') continue;
+      if (snapshotUser.id && message.id === snapshotUser.id) return index;
+      const loadedText = getComparableMessageText(message);
+      const snapshotText = getComparableMessageText(snapshotUser);
+      if (snapshotText && loadedText === snapshotText) return index;
+      if (
+        snapshotUserMs
+        && typeof message.timestamp === 'number'
+        && Math.abs(toMs(message.timestamp) - snapshotUserMs) < 60_000
+      ) {
+        return index;
+      }
+    }
+    return -1;
+  })();
+
+  const loadedTurnTail = loadedUserIndex >= 0 ? loadedMessages.slice(loadedUserIndex + 1) : [];
+  const loadedHasAssistantAfterUser = loadedTurnTail.some((message) => (
+    message.role === 'assistant' && hasNonToolAssistantContent(message)
+  ));
+  const snapshotTurnMessages = snapshot.messages.slice(snapshotLastUserIndex);
+  const snapshotStreamingText = typeof snapshot.streamingText === 'string' ? snapshot.streamingText.trim() : '';
+  const snapshotHasAssistantAfterUser = snapshotTurnMessages.slice(1).some((message) => message.role === 'assistant')
+    || snapshot.streamingMessage != null
+    || snapshotStreamingText.length > 0;
+
+  if (!snapshotHasAssistantAfterUser) {
+    return { messages: loadedMessages, recovered: false };
+  }
+  if (loadedHasAssistantAfterUser) {
+    return { messages: loadedMessages, recovered: false };
+  }
+
+  const baseMessages = loadedUserIndex >= 0
+    ? loadedMessages
+    : [...loadedMessages, snapshotUser];
+  const missingMessages = snapshotTurnMessages
+    .slice(loadedUserIndex >= 0 ? 1 : 0)
+    .filter((message) => !messageExistsByIdentityOrText(baseMessages, message));
+
+  const streamingAssistant = snapshot.streamingMessage && typeof snapshot.streamingMessage === 'object'
+    ? snapshot.streamingMessage as RawMessage
+    : null;
+  const recoveredStreamingMessage = streamingAssistant
+    && !isToolResultRole(streamingAssistant.role)
+    && (streamingAssistant.role === 'assistant' || streamingAssistant.role === undefined)
+    && !messageExistsByIdentityOrText([...baseMessages, ...missingMessages], { ...streamingAssistant, role: 'assistant' })
+      ? {
+          ...streamingAssistant,
+          role: 'assistant' as const,
+          id: streamingAssistant.id || `recovered-stream-${Date.now()}`,
+          timestamp: streamingAssistant.timestamp ?? (snapshotUserMs ? (snapshotUserMs + 1) / 1000 : Date.now() / 1000),
+        }
+      : null;
+  const recoveredStreamingTextMessage = !recoveredStreamingMessage && snapshotStreamingText.length > 0
+    ? {
+        id: `recovered-stream-${Date.now()}`,
+        role: 'assistant' as const,
+        content: snapshotStreamingText,
+        timestamp: snapshotUserMs ? (snapshotUserMs + 1) / 1000 : Date.now() / 1000,
+      }
+    : null;
+
+  const recoveredAssistantMessage = recoveredStreamingMessage || recoveredStreamingTextMessage;
+  const merged = recoveredAssistantMessage
+    ? [...baseMessages, ...missingMessages, recoveredAssistantMessage]
+    : [...baseMessages, ...missingMessages];
+
+  return {
+    messages: merged,
+    recovered: merged.length !== loadedMessages.length,
+  };
+}
+
 function schedulePendingFinalRecovery(
   set: ChatStoreSet,
   get: () => ChatState,
@@ -838,10 +1088,7 @@ function getMessageText(content: unknown): string {
 }
 
 function cleanUserMessageText(text: string): string {
-  const cleaned = stripLeadingInternalHeartbeatMaintenance(stripInjectedInboundPrelude(text
-    .replace(/\s*\[media attached:[^\]]*\]/g, '')
-    .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')))
-    .trim();
+  const cleaned = sanitizeInboundUserText(text);
 
   return isPreCompactionMemoryFlushPrompt(cleaned) ? '' : cleaned;
 }
@@ -1010,13 +1257,17 @@ function appendAssistantMessage(messages: RawMessage[], nextMessage: RawMessage)
   return hasDuplicate ? messages : [...messages, nextMessage];
 }
 
-/** Extract media file refs from [media attached: <path> (<mime>) | ...] patterns */
+/** Extract media file refs from [media attached 1/2: <path> (<mime>) | ...] patterns */
 function extractMediaRefs(text: string): Array<{ filePath: string; mimeType: string }> {
   const refs: Array<{ filePath: string; mimeType: string }> = [];
-  const regex = /\[media attached:\s*([^\s(]+)\s*\(([^)]+)\)\s*\|[^\]]*\]/g;
+  const regex = /\[media attached(?:\s+\d+\/\d+)?:\s*([\s\S]*?)\s*\(([^()\]]+)\)\s*(?:\|[^\]]*)?\]/gi;
   let match;
   while ((match = regex.exec(text)) !== null) {
-    refs.push({ filePath: match[1], mimeType: match[2] });
+    const filePath = match[1]?.trim();
+    const mimeType = match[2]?.trim();
+    if (filePath && mimeType) {
+      refs.push({ filePath, mimeType });
+    }
   }
   return refs;
 }
@@ -1574,6 +1825,14 @@ function parseSessionArchived(value: unknown): boolean {
 
 function parseSessionArchivedAt(value: unknown): number | undefined {
   return parseSessionUpdatedAtMs(value);
+}
+
+function getCronRunBaseSessionKey(sessionKey: string): string | null {
+  const parts = sessionKey.split(':');
+  if (parts.length === 6 && parts[0] === 'agent' && parts[2] === 'cron' && parts[4] === 'run' && parts[5]) {
+    return parts.slice(0, 4).join(':');
+  }
+  return null;
 }
 
 function normalizeSessionModelRef(model: unknown, modelProvider: unknown): string | undefined {
@@ -2599,6 +2858,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     baseSet((state) => {
       const patch = typeof partial === 'function' ? partial(state) : partial;
       const nextState = { ...state, ...patch } as ChatState;
+      cacheSessionView(nextState);
       return {
         ...patch,
         activeTurnBuffer: shouldRecomputeActiveTurnBuffer(state, nextState)
@@ -2800,7 +3060,12 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             createdAt: parseSessionUpdatedAtMs(persistedMetadata[String(s.key || '')]?.createdAt ?? s.createdAt),
           })).filter((s: ChatSession) => s.key);
 
-          const visibleSessions = sessions.filter((session) => !session.archived);
+          const knownSessionKeys = new Set(sessions.map((session) => session.key));
+          const visibleSessions = sessions.filter((session) => {
+            const cronRunBaseSessionKey = getCronRunBaseSessionKey(session.key);
+            return !session.archived
+              && !(cronRunBaseSessionKey && knownSessionKeys.has(cronRunBaseSessionKey));
+          });
 
           const canonicalBySuffix = new Map<string, string>();
           for (const session of visibleSessions) {
@@ -2833,6 +3098,13 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           const currentState = get();
           const currentIsUnusedDraft = isUnusedDraftSession(currentState, nextSessionKey);
           const hasLocalSessionEntry = localSessions.some((session) => session.key === nextSessionKey);
+          const latestRecoverableView = currentIsUnusedDraft ? readLatestPersistedSessionViewEntry() : null;
+          if (
+            latestRecoverableView
+            && dedupedSessions.some((session) => session.key === latestRecoverableView.sessionKey)
+          ) {
+            nextSessionKey = latestRecoverableView.sessionKey;
+          }
           if (!dedupedSessions.find((s) => s.key === nextSessionKey) && dedupedSessions.length > 0) {
             // Preserve locally-created blank drafts and pending local sessions.
             // The initial ghost key (`agent:main:main`) is neither, so it still
@@ -3440,6 +3712,53 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           ? [...loadedMessages, ...missingSuffix]
           : loadedMessages;
       };
+      const preserveLocalUnpersistedTurnSuffix = (
+        currentMessages: RawMessage[],
+        loadedMessages: RawMessage[],
+      ): RawMessage[] => {
+        if (currentMessages.length === 0 || loadedMessages.length === 0) return loadedMessages;
+
+        let lastLoadedMatchIndex = -1;
+        for (let index = currentMessages.length - 1; index >= 0; index -= 1) {
+          if (messageExistsIn(loadedMessages, currentMessages[index])) {
+            lastLoadedMatchIndex = index;
+            break;
+          }
+        }
+
+        if (lastLoadedMatchIndex < 0 || lastLoadedMatchIndex >= currentMessages.length - 1) {
+          return loadedMessages;
+        }
+
+        const localSuffix = currentMessages
+          .slice(lastLoadedMatchIndex + 1)
+          .filter((message) => (
+            !isInternalMessage(message)
+            && !messageExistsIn(loadedMessages, message)
+          ));
+        if (!localSuffix.some((message) => message.role === 'user')) {
+          return loadedMessages;
+        }
+        if (!localSuffix.some((message) => message.role === 'assistant')) {
+          return loadedMessages;
+        }
+
+        const latestLoadedTimestamp = loadedMessages.reduce((latest, message) => (
+          typeof message.timestamp === 'number'
+            ? Math.max(latest, toMs(message.timestamp))
+            : latest
+        ), 0);
+        const suffixHasNewerUser = localSuffix.some((message) => (
+          message.role === 'user'
+          && typeof message.timestamp === 'number'
+          && (!latestLoadedTimestamp || toMs(message.timestamp) >= latestLoadedTimestamp)
+        ));
+        if (!suffixHasNewerUser) {
+          return loadedMessages;
+        }
+
+        return [...loadedMessages, ...localSuffix];
+      };
       const mergeHydratedMessages = (
         currentMessages: RawMessage[],
         hydratedMessages: RawMessage[],
@@ -3540,6 +3859,15 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         }
         return hasAssistantFinalTextContent(message) || isEmptyAssistantResponse(message);
       });
+      const loadedHistoryOrderedAssistantAfterUser = (() => {
+        const userIndex = findLastUserMessageIndex(filteredMessages);
+        if (userIndex < 0) return undefined;
+        return [...filteredMessages.slice(userIndex + 1)].reverse().find((message) => (
+          message.role === 'assistant'
+          && (hasAssistantFinalTextContent(message) || isEmptyAssistantResponse(message))
+        ));
+      })();
+      const loadedHistoryHasOrderedAssistantAfterUser = loadedHistoryOrderedAssistantAfterUser != null;
       if (get().sending && userMsgAt) {
         const userMsMs = toMs(userMsgAt);
         const currentMsgs = get().messages;
@@ -3566,6 +3894,26 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       }
       if (get().sending && !loadedHistoryHasSettledAssistant) {
         finalMessages = preservePendingAssistantMessages(get().messages, finalMessages, userMsgAt);
+      } else if (quiet && userMsgAt && !loadedHistoryHasSettledAssistant) {
+        finalMessages = preservePendingAssistantMessages(get().messages, finalMessages, userMsgAt);
+      }
+      finalMessages = preserveLocalUnpersistedTurnSuffix(get().messages, finalMessages);
+      let recoveredSessionView = restoreSessionView(currentSessionKey);
+      if (!hasRecoverableSessionView(recoveredSessionView)) {
+        recoveredSessionView = readMatchingPersistedSessionView(finalMessages) ?? recoveredSessionView;
+      }
+      const recoveredMerge = mergeRecoverableSessionView(finalMessages, recoveredSessionView);
+      const restoredViewStillWaiting = recoveredMerge.recovered
+        && (
+          recoveredSessionView.sending
+          || recoveredSessionView.pendingFinal
+          || recoveredSessionView.streamingMessage != null
+          || (typeof recoveredSessionView.streamingText === 'string' && recoveredSessionView.streamingText.trim().length > 0)
+        )
+        && !loadedHistoryHasSettledAssistant
+        && !loadedHistoryHasOrderedAssistantAfterUser;
+      if (recoveredMerge.recovered) {
+        finalMessages = recoveredMerge.messages;
       }
 
       const currentHistoryState = get();
@@ -3574,21 +3922,23 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         lastUserMessageAt: historyLastUserMessageAt,
         sending: historyIsSendingNow,
       } = currentHistoryState;
+      const effectiveHistoryIsSendingNow = historyIsSendingNow || restoredViewStillWaiting;
+      const effectiveHistoryLastUserMessageAt = historyLastUserMessageAt ?? recoveredSessionView.lastUserMessageAt;
       const liveTurnSignal = hasLiveTurnSignal(currentHistoryState);
       const hasBlockingLiveTurnSignal = liveTurnSignal
         && Date.now() - _lastChatEventAt < HISTORY_POLL_SILENCE_WINDOW_MS;
       const trailingUserIndex = findLastUserMessageIndex(finalMessages);
       const trailingUser = trailingUserIndex >= 0 ? finalMessages[trailingUserIndex] : undefined;
 
-      const historyReferenceUserMs = historyLastUserMessageAt
-        ? toMs(historyLastUserMessageAt)
+      const historyReferenceUserMs = effectiveHistoryLastUserMessageAt
+        ? toMs(effectiveHistoryLastUserMessageAt)
         : (typeof trailingUser?.timestamp === 'number' ? toMs(trailingUser.timestamp) : 0);
       const isAfterCurrentTurnUserMsg = (msg: RawMessage): boolean => {
         if (!historyReferenceUserMs || !msg.timestamp) return true;
         return isTimestampAtOrAfter(historyReferenceUserMs, msg.timestamp);
       };
 
-      const shouldEnterHistoryPendingFinal = historyIsSendingNow && !historyPendingFinal && !hasBlockingLiveTurnSignal && [...filteredMessages].reverse().some((msg) => {
+      const shouldEnterHistoryPendingFinal = effectiveHistoryIsSendingNow && !historyPendingFinal && !hasBlockingLiveTurnSignal && [...filteredMessages].reverse().some((msg) => {
         if (msg.role !== 'assistant') return false;
         return isAfterCurrentTurnUserMsg(msg);
       });
@@ -3596,14 +3946,14 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       const observedHistoryRecentAssistant = [...filteredMessages].reverse().find((msg) => {
         if (msg.role !== 'assistant') return false;
         if (!hasAssistantFinalTextContent(msg)) return false;
-        return isAfterCurrentTurnUserMsg(msg);
+        return isAfterCurrentTurnUserMsg(msg) || msg === loadedHistoryOrderedAssistantAfterUser;
       });
       const observedHistoryEmptyAssistant = [...filteredMessages].reverse().find((msg) => (
         msg.role === 'assistant'
-        && isAfterCurrentTurnUserMsg(msg)
+        && (isAfterCurrentTurnUserMsg(msg) || msg === loadedHistoryOrderedAssistantAfterUser)
         && isEmptyAssistantResponse(msg)
       ));
-      const shouldDeferSettledHistoryFinal = historyIsSendingNow
+      const shouldDeferSettledHistoryFinal = effectiveHistoryIsSendingNow
         && !historyPendingFinal
         && hasBlockingLiveTurnSignal
         && !!(observedHistoryRecentAssistant || observedHistoryEmptyAssistant);
@@ -3624,9 +3974,9 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             return toMs(streamingTimestamp);
           }
         }
-        return historyLastUserMessageAt ? toMs(historyLastUserMessageAt) : 0;
+        return effectiveHistoryLastUserMessageAt ? toMs(effectiveHistoryLastUserMessageAt) : 0;
       })();
-      const historySettledAssistant = !historyIsSendingNow
+      const historySettledAssistant = !effectiveHistoryIsSendingNow
         ? [...filteredMessages].reverse().find((msg) => {
             if (msg.role !== 'assistant') return false;
             if (!hasAssistantFinalTextContent(msg)) return false;
@@ -3638,7 +3988,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       const historySettledAssistantError = historySettledAssistant
         ? getAssistantRuntimeErrorNotice(historySettledAssistant)
         : null;
-      const shouldClearSettledStreamingState = !historyIsSendingNow
+      const shouldClearSettledStreamingState = !effectiveHistoryIsSendingNow
         && !!historySettledAssistant
         && (
           currentHistoryState.streamingMessage != null
@@ -3646,7 +3996,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           || currentHistoryState.streamingTools.length > 0
           || currentHistoryState.pendingToolImages.length > 0
         );
-      const shouldSyncSettledHistoryResult = !historyIsSendingNow
+      const shouldSyncSettledHistoryResult = !effectiveHistoryIsSendingNow
         && !!historySettledAssistant
         && !shouldClearSettledStreamingState
         && (
@@ -3657,23 +4007,23 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           || currentHistoryState.sendStage != null
           || currentHistoryState.lastUserMessageAt != null
         );
-      const shouldRetryIncompleteHistory = !historyIsSendingNow
+      const shouldRetryIncompleteHistory = !effectiveHistoryIsSendingNow
         && !historyPendingFinal
         && !!trailingUser
         && typeof trailingUser.timestamp === 'number'
         && Date.now() - toMs(trailingUser.timestamp) <= HISTORY_INCOMPLETE_RETRY_WINDOW_MS
         && !finalMessages.slice(trailingUserIndex + 1).some((message) => message.role === 'assistant');
 
-      const shouldDeferHistoryCurrentTurn = historyIsSendingNow && !historyPendingFinal && hasBlockingLiveTurnSignal;
+      const shouldDeferHistoryCurrentTurn = effectiveHistoryIsSendingNow && !historyPendingFinal && hasBlockingLiveTurnSignal;
       const deferredMergeResult = shouldDeferHistoryCurrentTurn
-        ? mergeDeferredCurrentTurnMessages(get().messages, finalMessages, historyLastUserMessageAt)
+        ? mergeDeferredCurrentTurnMessages(get().messages, finalMessages, effectiveHistoryLastUserMessageAt)
         : { messages: finalMessages, appendedProcessCount: 0 };
       const mergedMessagesForActiveSend = deferredMergeResult.messages;
 
-      if (historyRecentAssistant || historyEmptyAssistant || shouldDeferSettledHistoryFinal) {
+      if (historyRecentAssistant || historyEmptyAssistant || historySettledAssistant || loadedHistoryHasOrderedAssistantAfterUser || shouldDeferSettledHistoryFinal) {
         clearHistoryPoll();
       }
-      if (historyRecentAssistant || historyEmptyAssistant || historySettledAssistant) {
+      if (historyRecentAssistant || historyEmptyAssistant || historySettledAssistant || loadedHistoryHasOrderedAssistantAfterUser) {
         clearNoResponseRecovery(currentSessionKey);
       }
       if (shouldRetryIncompleteHistory) {
@@ -3687,7 +4037,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         const shouldFinalizeEmptyAssistant = historyEmptyAssistant && !shouldDeferHistoryCurrentTurn;
         const nextIsRunning = shouldFinalizeFromHistory || shouldFinalizeEmptyAssistant
           ? false
-          : historyIsSendingNow;
+          : effectiveHistoryIsSendingNow;
 
         return {
           messages: mergedMessagesForActiveSend,
@@ -3725,6 +4075,20 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                   sessionNotice: null,
                   error: EMPTY_ASSISTANT_RESPONSE_ERROR,
                 }
+            : restoredViewStillWaiting
+              ? {
+                  sending: true,
+                  activeRunId: recoveredSessionView.activeRunId,
+                  sendStage: recoveredSessionView.sendStage ?? 'running',
+                  pendingFinal: true,
+                  lastUserMessageAt: recoveredSessionView.lastUserMessageAt,
+                  streamingText: '',
+                  streamingMessage: null,
+                  streamingTools: recoveredSessionView.streamingTools,
+                  pendingToolImages: recoveredSessionView.pendingToolImages,
+                  sessionNotice: recoveredSessionView.sessionNotice,
+                  error: recoveredSessionView.error,
+                }
             : shouldEnterHistoryPendingFinal
               || shouldDeferSettledHistoryFinal
               || (shouldDeferHistoryCurrentTurn && deferredMergeResult.appendedProcessCount > 0)
@@ -3746,6 +4110,19 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                 : {}),
         };
       });
+
+      if (loadedHistoryHasOrderedAssistantAfterUser) {
+        set((state) => (
+          state.currentSessionKey === currentSessionKey && state.sessionNotice
+            ? { sessionNotice: null }
+            : {}
+        ));
+      }
+
+      if (restoredViewStillWaiting) {
+        startHistoryPoll(get, currentSessionKey);
+        scheduleNoResponseRecovery(set, get, currentSessionKey);
+      }
 
       if (shouldDeferSettledHistoryFinal) {
         const lastChatEventAgeMs = _lastChatEventAt > 0
@@ -4310,10 +4687,13 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
               : undefined;
 
             // Mirror enrichWithToolResultFiles: collect images + file refs for next assistant msg
-            const toolFiles: AttachedFileMeta[] = [
-              ...extractImagesAsAttachedFiles(finalMsg.content),
-            ];
-            if (matchedPath) {
+            const failedToolResult = isFailedToolResultMessage(finalMsg);
+            const toolFiles: AttachedFileMeta[] = failedToolResult
+              ? []
+              : [
+                ...extractImagesAsAttachedFiles(finalMsg.content),
+              ];
+            if (matchedPath && !failedToolResult) {
               for (const f of toolFiles) {
                 if (!f.filePath) {
                   f.filePath = matchedPath;
@@ -4322,7 +4702,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
               }
             }
             const text = getMessageText(finalMsg.content);
-            if (text) {
+            if (text && !failedToolResult) {
               const mediaRefs = extractMediaRefs(text);
               const mediaRefPaths = new Set(mediaRefs.map(r => r.filePath));
               for (const ref of mediaRefs) toolFiles.push(makeAttachedFile(ref));

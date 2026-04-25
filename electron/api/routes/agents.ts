@@ -278,8 +278,8 @@ export async function handleAgentRoutes(
         };
 
         await syncAllProviderAuthToRuntime();
-        await tryHotPatchRuntimeAgentModel(ctx, agentId, body.modelRef ?? null, updateOptions);
         await syncAgentModelRefToRuntime(agentId, body.modelRef ?? null);
+        await tryHotPatchRuntimeAgentModel(ctx, agentId, body.modelRef ?? null, updateOptions);
 
         sendJson(res, 200, {
           success: true,

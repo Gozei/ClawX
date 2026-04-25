@@ -527,7 +527,7 @@ function registerUnifiedRequestHandlers(gatewayManager: GatewayManager): void {
               name: input.name,
               schedule: { kind: 'cron', expr: input.schedule },
               payload: { kind: 'agentTurn', message: input.message },
-              enabled: input.enabled ?? true,
+              enabled: false,
               wakeMode: 'next-heartbeat',
               sessionTarget: 'isolated',
               delivery: normalizeCronDelivery(input.delivery),
@@ -537,7 +537,21 @@ function registerUnifiedRequestHandlers(gatewayManager: GatewayManager): void {
               throw new Error(unsupportedDeliveryError);
             }
             const created = await gatewayManager.rpc('cron.add', gatewayInput);
-            data = created && typeof created === 'object' ? transformCronJob(created as GatewayCronJob) : created;
+            if (created && typeof created === 'object' && typeof (created as GatewayCronJob).id === 'string') {
+              const createdJob = created as GatewayCronJob;
+              const patched = await gatewayManager.rpc('cron.update', {
+                id: createdJob.id,
+                patch: {
+                  sessionTarget: getStableCronSessionTarget(createdJob.id),
+                  enabled: input.enabled ?? true,
+                },
+              });
+              data = patched && typeof patched === 'object'
+                ? transformCronJob(patched as GatewayCronJob)
+                : transformCronJob({ ...createdJob, enabled: input.enabled ?? true });
+            } else {
+              data = created;
+            }
             break;
           }
           if (request.action === 'update') {
@@ -761,6 +775,10 @@ function getUnsupportedCronDeliveryError(_channel: string | undefined): string |
   return null;
 }
 
+function getStableCronSessionTarget(jobId: string): string {
+  return `session:cron:${jobId}`;
+}
+
 function normalizeCronDelivery(
   rawDelivery: unknown,
   fallbackMode: GatewayCronDelivery['mode'] = 'none',
@@ -914,14 +932,26 @@ function registerCronHandlers(gatewayManager: GatewayManager): void {
           isIsolatedAgent &&
           job.delivery?.mode === 'announce' &&
           !job.delivery?.channel;
-
+        const patch: Record<string, unknown> = {};
+        if (isIsolatedAgent) {
+          patch.sessionTarget = getStableCronSessionTarget(job.id);
+        }
         if (needsRepair) {
+          patch.delivery = { mode: 'none' };
+        }
+
+        if (Object.keys(patch).length > 0) {
           try {
             await gatewayManager.rpc('cron.update', {
               id: job.id,
-              patch: { delivery: { mode: 'none' } },
+              patch,
             });
-            job.delivery = { mode: 'none' };
+            if (typeof patch.sessionTarget === 'string') {
+              job.sessionTarget = patch.sessionTarget;
+            }
+            if (patch.delivery) {
+              job.delivery = { mode: 'none' };
+            }
             // Clear stale channel-resolution error from the last run
             if (job.state?.lastError?.includes('Channel is required')) {
               job.state.lastError = undefined;
@@ -957,7 +987,7 @@ function registerCronHandlers(gatewayManager: GatewayManager): void {
         name: input.name,
         schedule: { kind: 'cron', expr: input.schedule },
         payload: { kind: 'agentTurn', message: input.message },
-        enabled: input.enabled ?? true,
+        enabled: false,
         wakeMode: 'next-heartbeat',
         sessionTarget: 'isolated',
         // UI-created jobs deliver results via ClawX WebSocket chat events,
@@ -971,9 +1001,25 @@ function registerCronHandlers(gatewayManager: GatewayManager): void {
         throw new Error(unsupportedDeliveryError);
       }
       const result = await gatewayManager.rpc('cron.add', gatewayInput);
+      if (result && typeof result === 'object' && typeof (result as GatewayCronJob).id === 'string') {
+        const createdJob = result as GatewayCronJob;
+        const patched = await gatewayManager.rpc('cron.update', {
+          id: createdJob.id,
+          patch: {
+            sessionTarget: getStableCronSessionTarget(createdJob.id),
+            enabled: input.enabled ?? true,
+          },
+        });
+        if (patched && typeof patched === 'object') {
+          return transformCronJob(patched as GatewayCronJob);
+        }
+      }
       // Transform the returned job to frontend format
       if (result && typeof result === 'object') {
-        return transformCronJob(result as GatewayCronJob);
+        return transformCronJob({
+          ...(result as GatewayCronJob),
+          enabled: input.enabled ?? true,
+        });
       }
       return result;
     } catch (error) {
@@ -2011,7 +2057,11 @@ function registerShellHandlers(): void {
 
   // Open path in file explorer
   ipcMain.handle('shell:showItemInFolder', async (_, path: string) => {
+    if (!path || !existsSync(path)) {
+      return `File not found: ${path}`;
+    }
     shell.showItemInFolder(path);
+    return '';
   });
 
   // Open path
@@ -2363,8 +2413,13 @@ function mimeToExt(mimeType: string): string {
  */
 async function generateImagePreview(filePath: string, mimeType: string): Promise<string | null> {
   try {
-    const img = nativeImage.createFromPath(filePath);
-    if (img.isEmpty()) return null;
+    const { readFile: readFileAsync } = await import('fs/promises');
+    const buf = await readFileAsync(filePath);
+    const img = nativeImage.createFromBuffer(buf);
+    if (img.isEmpty()) {
+      return `data:${mimeType};base64,${buf.toString('base64')}`;
+    }
+
     const size = img.getSize();
     const maxDim = 512; // keep enough resolution for crisp display on Retina
     // Only resize if larger than threshold — specify ONE dimension to keep ratio
@@ -2375,8 +2430,6 @@ async function generateImagePreview(filePath: string, mimeType: string): Promise
       return `data:image/png;base64,${resized.toPNG().toString('base64')}`;
     }
     // Small image — use original (async read to avoid blocking)
-    const { readFile: readFileAsync } = await import('fs/promises');
-    const buf = await readFileAsync(filePath);
     return `data:${mimeType};base64,${buf.toString('base64')}`;
   } catch {
     return null;
@@ -2499,9 +2552,11 @@ function registerFileHandlers(): void {
       let image: Electron.NativeImage | null = null;
 
       if (params.filePath) {
-        const fromPath = nativeImage.createFromPath(params.filePath);
-        if (!fromPath.isEmpty()) {
-          image = fromPath;
+        const fsP = await import('fs/promises');
+        const buffer = await fsP.readFile(params.filePath);
+        const fromBuffer = nativeImage.createFromBuffer(buffer);
+        if (!fromBuffer.isEmpty()) {
+          image = fromBuffer;
         }
       }
 
@@ -2528,7 +2583,7 @@ function registerFileHandlers(): void {
 
   ipcMain.handle('media:getThumbnails', async (_, paths: Array<{ filePath: string; mimeType: string }>) => {
     const fsP = await import('fs/promises');
-    const results: Record<string, { preview: string | null; fileSize: number }> = {};
+    const results: Record<string, { preview: string | null; fileSize: number; exists: boolean }> = {};
     for (const { filePath, mimeType } of paths) {
       try {
         const s = await fsP.stat(filePath);
@@ -2536,9 +2591,9 @@ function registerFileHandlers(): void {
         if (mimeType.startsWith('image/')) {
           preview = await generateImagePreview(filePath, mimeType);
         }
-        results[filePath] = { preview, fileSize: s.size };
+        results[filePath] = { preview, fileSize: s.size, exists: true };
       } catch {
-        results[filePath] = { preview: null, fileSize: 0 };
+        results[filePath] = { preview: null, fileSize: 0, exists: false };
       }
     }
     return results;

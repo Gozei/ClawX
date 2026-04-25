@@ -69,7 +69,7 @@ async function seedAttachmentSession(homeDir: string, attachmentPath: string): P
 }
 
 test.describe('Missing attachment feedback', () => {
-  test('shows a toast when an attached file has already been deleted', async ({ launchElectronApp, homeDir }) => {
+  test('shows a toast and keeps preview closed when an attached file has already been deleted', async ({ launchElectronApp, homeDir }) => {
     const attachmentPath = join(homeDir, ATTACHMENT_NAME);
     await writeFile(attachmentPath, 'temporary attachment contents');
     await seedAttachmentSession(homeDir, attachmentPath);
@@ -90,7 +90,12 @@ test.describe('Missing attachment feedback', () => {
       await rm(attachmentPath, { force: true });
       await fileCard.click();
 
-      await expect(page.getByText(/文件“missing-file\.txt”已被删除或找不到。|"missing-file\.txt" was deleted or could not be found\./)).toBeVisible();
+      await expect(page.getByText('该文件不存在')).toBeVisible();
+      await expect(page.getByTestId('chat-file-preview-panel')).toHaveCount(0);
+
+      await fileCard.hover();
+      await fileCard.getByTestId('chat-file-card-reveal').click({ force: true });
+      await expect(page.getByText('该文件不存在').first()).toBeVisible();
     } finally {
       await closeElectronApp(app);
     }

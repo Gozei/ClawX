@@ -7,53 +7,120 @@ import { DEFAULT_BRANDING } from '../../shared/branding';
 import { logger } from '../utils/logger';
 import { appendNodeRequireToNodeOptions } from '../utils/paths';
 
-function getGatewayFetchPreloadSource(requestTitle: string): string {
+export function getGatewayFetchPreloadSource(requestTitle: string): string {
   return `'use strict';
 (function () {
-  var _f = globalThis.fetch;
-  if (typeof _f !== 'function') return;
-  if (globalThis.__clawxFetchPatched) return;
-  globalThis.__clawxFetchPatched = true;
+  function isPowerShellExecutable(command) {
+    if (typeof command !== 'string') return false;
+    var normalized = command.replace(/\\\\/g, '/').toLowerCase();
+    var base = normalized.slice(normalized.lastIndexOf('/') + 1);
+    return base === 'powershell' || base === 'powershell.exe' || base === 'pwsh' || base === 'pwsh.exe';
+  }
 
-  globalThis.fetch = function clawxFetch(input, init) {
-    var url =
-      typeof input === 'string' ? input
-        : input && typeof input === 'object' && typeof input.url === 'string'
-          ? input.url : '';
+  function findArgIndex(argv, names) {
+    if (!Array.isArray(argv)) return -1;
+    for (var i = 0; i < argv.length; i++) {
+      var value = typeof argv[i] === 'string' ? argv[i].toLowerCase() : '';
+      if (names.indexOf(value) !== -1) return i;
+    }
+    return -1;
+  }
+
+  function encodePowerShellCommand(command) {
+    return Buffer.from(command, 'utf16le').toString('base64');
+  }
+
+  function decodePowerShellCommand(command) {
+    return Buffer.from(command, 'base64').toString('utf16le');
+  }
+
+  function ensurePowerShellUtf8Args(command, argv) {
+    if (!isPowerShellExecutable(command) || !Array.isArray(argv)) return argv;
+
+    var prefix = '[Console]::InputEncoding=[Text.UTF8Encoding]::new($false);'
+      + '[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);'
+      + '$OutputEncoding=[Text.UTF8Encoding]::new($false);';
+    var encodedIndex = findArgIndex(argv, ['-encodedcommand', '-enc', '-e']);
+    if (encodedIndex >= 0 && typeof argv[encodedIndex + 1] === 'string') {
+      try {
+        var decoded = decodePowerShellCommand(argv[encodedIndex + 1]);
+        if (decoded.indexOf('[Console]::OutputEncoding') === -1) {
+          var nextEncodedArgs = argv.slice();
+          nextEncodedArgs[encodedIndex + 1] = encodePowerShellCommand(prefix + decoded);
+          return nextEncodedArgs;
+        }
+      } catch (e) {
+        return argv;
+      }
+    }
+
+    var commandIndex = findArgIndex(argv, ['-command', '-c']);
+    if (commandIndex >= 0 && typeof argv[commandIndex + 1] === 'string') {
+      if (argv[commandIndex + 1].indexOf('[Console]::OutputEncoding') !== -1) return argv;
+      var nextCommandArgs = argv.slice();
+      nextCommandArgs[commandIndex + 1] = prefix + nextCommandArgs[commandIndex + 1];
+      return nextCommandArgs;
+    }
+
+    return argv;
+  }
+
+  function ensureUtf8ChildEnv(options) {
+    var next = options && typeof options === 'object' ? Object.assign({}, options) : {};
+    next.env = Object.assign({}, process.env, next.env || {}, {
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1',
+      LANG: 'C.UTF-8',
+      LC_ALL: 'C.UTF-8',
+      LC_CTYPE: 'C.UTF-8'
+    });
+    return next;
+  }
+
+  var _f = globalThis.fetch;
+  if (typeof _f === 'function' && !globalThis.__clawxFetchPatched) {
+    globalThis.__clawxFetchPatched = true;
+
+    globalThis.fetch = function clawxFetch(input, init) {
+      var url =
+        typeof input === 'string' ? input
+          : input && typeof input === 'object' && typeof input.url === 'string'
+            ? input.url : '';
 
     // The Gateway boot path warms a model-pricing cache from OpenRouter's
     // public catalog. In this app's Windows dev environment that fetch can
     // hang badly enough to delay or destabilize the local Gateway handshake.
     // Returning an empty catalog keeps chat startup responsive; pricing can
     // still fall back to local model metadata where available.
-    if (url.indexOf('openrouter.ai/api/v1/models') !== -1) {
-      if (typeof globalThis.Response === 'function') {
-        return Promise.resolve(new globalThis.Response(JSON.stringify({ data: [] }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' }
-        }));
+      if (url.indexOf('openrouter.ai/api/v1/models') !== -1) {
+        if (typeof globalThis.Response === 'function') {
+          return Promise.resolve(new globalThis.Response(JSON.stringify({ data: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        }
       }
-    }
 
-    if (url.indexOf('openrouter.ai') !== -1) {
-      init = init ? Object.assign({}, init) : {};
-      var prev = init.headers;
-      var flat = {};
-      if (prev && typeof prev.forEach === 'function') {
-        prev.forEach(function (v, k) { flat[k] = v; });
-      } else if (prev && typeof prev === 'object') {
-        Object.assign(flat, prev);
+      if (url.indexOf('openrouter.ai') !== -1) {
+        init = init ? Object.assign({}, init) : {};
+        var prev = init.headers;
+        var flat = {};
+        if (prev && typeof prev.forEach === 'function') {
+          prev.forEach(function (v, k) { flat[k] = v; });
+        } else if (prev && typeof prev === 'object') {
+          Object.assign(flat, prev);
+        }
+        delete flat['http-referer'];
+        delete flat['HTTP-Referer'];
+        delete flat['x-title'];
+        delete flat['X-Title'];
+        flat['HTTP-Referer'] = 'https://claw-x.com';
+        flat['X-Title'] = ${JSON.stringify(requestTitle)};
+        init.headers = flat;
       }
-      delete flat['http-referer'];
-      delete flat['HTTP-Referer'];
-      delete flat['x-title'];
-      delete flat['X-Title'];
-      flat['HTTP-Referer'] = 'https://claw-x.com';
-      flat['X-Title'] = ${JSON.stringify(requestTitle)};
-      init.headers = flat;
-    }
-    return _f.call(globalThis, input, init);
-  };
+      return _f.call(globalThis, input, init);
+    };
+  }
 
   if (process.platform === 'win32') {
     try {
@@ -65,6 +132,10 @@ function getGatewayFetchPreloadSource(requestTitle: string): string {
           if (typeof original !== 'function') return;
           cp[method] = function() {
             var args = Array.prototype.slice.call(arguments);
+            if ((method === 'spawn' || method === 'execFile' || method === 'spawnSync' || method === 'execFileSync')
+              && Array.isArray(args[1])) {
+              args[1] = ensurePowerShellUtf8Args(args[0], args[1]);
+            }
             var optIdx = -1;
             for (var i = 1; i < args.length; i++) {
               var a = args[i];
@@ -74,9 +145,10 @@ function getGatewayFetchPreloadSource(requestTitle: string): string {
               }
             }
             if (optIdx >= 0) {
+              args[optIdx] = ensureUtf8ChildEnv(args[optIdx]);
               args[optIdx].windowsHide = true;
             } else {
-              var opts = { windowsHide: true };
+              var opts = ensureUtf8ChildEnv({ windowsHide: true });
               if (typeof args[args.length - 1] === 'function') {
                 args.splice(args.length - 1, 0, opts);
               } else {

@@ -5,6 +5,30 @@ import type { RawMessage } from '@/stores/chat';
 const FULLY_INJECTED_VISIBLE_TEXT = 'Only this sentence should be shown in chat.';
 
 describe('chat message utils', () => {
+  it('surfaces runtime assistant errors that were persisted without content', () => {
+    const message: RawMessage = {
+      id: 'assistant-runtime-error-1',
+      role: 'assistant',
+      content: [],
+      stopReason: 'error',
+      errorMessage: 'Unknown error (no error details in response)',
+      timestamp: 1777110442148,
+    };
+
+    expect(extractText(message)).toBe('Unknown error (no error details in response)');
+  });
+
+  it('keeps contentless assistant messages hidden when they are not runtime errors', () => {
+    const message: RawMessage = {
+      id: 'assistant-empty-1',
+      role: 'assistant',
+      content: [],
+      timestamp: 1777110442148,
+    };
+
+    expect(extractText(message)).toBe('');
+  });
+
   it('hides heartbeat-only prompt injection from user-visible chat text', () => {
     const message: RawMessage = {
       id: 'heartbeat-only-1',
@@ -66,6 +90,23 @@ describe('chat message utils', () => {
         },
       ],
       timestamp: 1713920522,
+    };
+
+    expect(extractText(message)).toBe('');
+    expect(isInternalMaintenanceTurnUserMessage(message)).toBe(true);
+  });
+
+  it('hides compacted async command completion turns when system notices are on one line', () => {
+    const message: RawMessage = {
+      id: 'async-exec-heartbeat-compacted-1',
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: 'System (untrusted): [2026-04-25 10:26:10 GMT+8] Exec completed (warm-wil, code 0) :: Folder SizeGB Windows 31.12 Users 16.31 System (untrusted): [2026-04-25 10:26:33 GMT+8] Exec completed (warm-nud, code 0) :: .cache 0.71 Downloads 0 An async command you ran earlier has completed. The result is shown in the system messages above. Handle the result internally. Do not relay it to the user unless explicitly requested. Current time: Saturday, April 25th, 2026 - 10:27 (Asia/Shanghai)',
+        },
+      ],
+      timestamp: 1777084036,
     };
 
     expect(extractText(message)).toBe('');
@@ -144,6 +185,8 @@ describe('chat message utils', () => {
         {
           type: 'text',
           text: [
+            '[media attached 1/2: C:/Users/Administrator/.openclaw/media/inbound/test-image-a.png (image/png)]',
+            '[media attached 2/2: C:/Users/Administrator/.openclaw/media/inbound/test-image-b.webp (image/webp)]',
             '# AGENTS.md instructions for D:/AI/Deep AI Worker/ClawX',
             '',
             '<INSTRUCTIONS>',
@@ -156,7 +199,11 @@ describe('chat message utils', () => {
             'To send an image back, prefer the message tool (media/path/filePath). If you must inline, use MEDIA:https://example.com/image.jpg (spaces ok, quote if needed) or a safe relative path like MEDIA:./image.jpg. Absolute and ~ paths only work when they stay inside your allowed file-read boundary; host file:// URLs are blocked. Keep caption in the text body.',
             'Only the files listed in the current attachment note for this turn are newly uploaded inputs for this request. Do not automatically inspect older uploaded files, prior-turn attachments, or unrelated workspace files unless the user explicitly asks for them or the current file directly points to them.',
             'When the current turn includes uploaded attachments, resolve references like "this", "this file", "this output", "这个", "这个文件", and "这个输出" against the current turn attachment set first. Do not default those references to prior assistant outputs, earlier uploaded files, or historical workspace artifacts.',
-            'This turn has exactly one uploaded attachment, so answer about that file unless the user explicitly names another file. Do not summarize prior assistant outputs when the current turn attachment set is present unless the user explicitly asks for that earlier output.',
+            'This turn has 2 uploaded attachments, so stay within that current attachment set unless the user explicitly names an earlier file. Do not summarize prior assistant outputs when the current turn attachment set is present unless the user explicitly asks for that earlier output.',
+            'Sender (untrusted metadata):',
+            '```json',
+            '{"label":"Deep AI Worker","id":"gateway-client","name":"Deep AI Worker"}',
+            '```',
             '',
             '[Wed 2026-04-22 19:54 GMT+8] Conversation info (untrusted metadata): ```json',
             '{"agent":{"id":"main","name":"Main Role","preferredModel":"custom-custombc/qwen3.5-plus"}}',
@@ -174,6 +221,27 @@ describe('chat message utils', () => {
     };
 
     expect(extractText(message)).toBe(FULLY_INJECTED_VISIBLE_TEXT);
+  });
+
+  it('keeps attachment-only user turns visible after stripping transport notes', () => {
+    const message: RawMessage = {
+      id: 'attachment-only-user-turn-1',
+      role: 'user',
+      content: '[media attached 1/1: C:/Users/Administrator/.openclaw/media/inbound/test-image-a.png (image/png)]',
+      _attachedFiles: [
+        {
+          fileName: 'test-image-a.png',
+          mimeType: 'image/png',
+          fileSize: 1024,
+          preview: null,
+          filePath: 'C:/Users/Administrator/.openclaw/media/inbound/test-image-a.png',
+        },
+      ],
+      timestamp: 1713000009,
+    };
+
+    expect(extractText(message)).toBe('');
+    expect(isInternalMaintenanceTurnUserMessage(message)).toBe(false);
   });
 
   it('strips injected leading system and conversation metadata from user-visible text', () => {

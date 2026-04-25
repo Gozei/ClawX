@@ -102,7 +102,16 @@ describe('handleCronRoutes', () => {
     expect(handled).toBe(true);
     expect(rpc).toHaveBeenCalledWith('cron.add', expect.objectContaining({
       delivery: { mode: 'announce', channel: 'feishu', to: 'user:ou_weather' },
+      enabled: false,
+      sessionTarget: 'isolated',
     }));
+    expect(rpc).toHaveBeenCalledWith('cron.update', {
+      id: 'job-1',
+      patch: {
+        sessionTarget: 'session:cron:job-1',
+        enabled: true,
+      },
+    });
     expect(sendJsonMock).toHaveBeenCalledWith(
       expect.anything(),
       200,
@@ -111,6 +120,63 @@ describe('handleCronRoutes', () => {
         delivery: { mode: 'announce', channel: 'feishu', to: 'user:ou_weather' },
       }),
     );
+  });
+
+  it('binds newly created app cron jobs to a stable session before enabling them', async () => {
+    parseJsonBodyMock.mockResolvedValue({
+      name: 'Daily report',
+      message: 'Summarize yesterday',
+      schedule: '0 9 * * *',
+      enabled: true,
+    });
+
+    const rpc = vi.fn()
+      .mockResolvedValueOnce({
+        id: 'daily-report',
+        name: 'Daily report',
+        enabled: false,
+        createdAtMs: 1,
+        updatedAtMs: 1,
+        schedule: { kind: 'cron', expr: '0 9 * * *' },
+        payload: { kind: 'agentTurn', message: 'Summarize yesterday' },
+        delivery: { mode: 'none' },
+        sessionTarget: 'isolated',
+        state: {},
+      })
+      .mockResolvedValueOnce({
+        id: 'daily-report',
+        name: 'Daily report',
+        enabled: true,
+        createdAtMs: 1,
+        updatedAtMs: 2,
+        schedule: { kind: 'cron', expr: '0 9 * * *' },
+        payload: { kind: 'agentTurn', message: 'Summarize yesterday' },
+        delivery: { mode: 'none' },
+        sessionTarget: 'session:cron:daily-report',
+        state: {},
+      });
+
+    const { handleCronRoutes } = await import('@electron/api/routes/cron');
+    await handleCronRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/cron/jobs'),
+      {
+        gatewayManager: { rpc },
+      } as never,
+    );
+
+    expect(rpc).toHaveBeenNthCalledWith(1, 'cron.add', expect.objectContaining({
+      enabled: false,
+      sessionTarget: 'isolated',
+    }));
+    expect(rpc).toHaveBeenNthCalledWith(2, 'cron.update', {
+      id: 'daily-report',
+      patch: {
+        sessionTarget: 'session:cron:daily-report',
+        enabled: true,
+      },
+    });
   });
 
   it('updates cron jobs with transformed payload and delivery fields', async () => {

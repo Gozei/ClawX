@@ -385,6 +385,39 @@ describe('chat session actions', () => {
     });
   });
 
+  it('hides cron run aliases when the stable cron session exists', async () => {
+    const { createSessionActions } = await import('@/stores/chat/session-actions');
+    const h = makeHarness({
+      currentSessionKey: 'agent:main:main',
+      sessions: [],
+    });
+    const actions = createSessionActions(h.set as never, h.get as never);
+
+    invokeIpcMock.mockResolvedValueOnce({
+      success: true,
+      result: {
+        sessions: [
+          {
+            key: 'agent:main:cron:job-1:run:session-uuid',
+            label: 'Cron: Daily report',
+            updatedAt: 1773281733000,
+          },
+          {
+            key: 'agent:main:cron:job-1',
+            label: 'Cron: Daily report',
+            updatedAt: 1773281733000,
+          },
+        ],
+      },
+    });
+
+    await actions.loadSessions();
+
+    expect(h.read().sessions.map((session) => session.key)).toEqual([
+      'agent:main:cron:job-1',
+    ]);
+  });
+
   it('loadSessions merges persisted pin metadata from the host session store', async () => {
     const { createSessionActions } = await import('@/stores/chat/session-actions');
     const h = makeHarness({

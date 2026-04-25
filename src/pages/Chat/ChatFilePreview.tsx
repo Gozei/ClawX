@@ -1,13 +1,12 @@
 import {
-  createElement,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type ComponentPropsWithoutRef,
   type CSSProperties,
   type MouseEvent,
+  type UIEvent as ReactUIEvent,
   type WheelEvent as ReactWheelEvent,
 } from 'react';
 import {
@@ -58,6 +57,12 @@ const PRESENTATION_SCROLL_SETTLE_THRESHOLD_PX = 28;
 const PRESENTATION_ACTIVE_SLIDE_OFFSET_PX = 96;
 const PRESENTATION_PRELOAD_RADIUS = 2;
 const PRESENTATION_LOAD_ROOT_MARGIN = '180% 0px';
+const OFFICE_PAGE_INITIAL_RENDERED_PAGES = [1];
+const SPREADSHEET_PAGE_ROW_COUNT = 120;
+const SPREADSHEET_PAGE_COLUMN_COUNT = 18;
+const SPREADSHEET_LOAD_MORE_THRESHOLD_PX = 96;
+const SPREADSHEET_MAX_LOADED_ROWS = 1000;
+const SPREADSHEET_MAX_LOADED_COLUMNS = 80;
 const SYSTEM_UI_FONT_FAMILY = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif';
 const SYSTEM_MONO_FONT_FAMILY = 'ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
 const PREVIEW_PANEL_BACKGROUND_CLASS = 'bg-[linear-gradient(180deg,rgba(255,255,255,0.97),rgba(248,250,252,0.96))] dark:bg-[linear-gradient(180deg,rgba(10,14,22,0.96),rgba(12,17,26,0.94))]';
@@ -75,6 +80,15 @@ const DOCX_PREVIEW_HEADING_SELECTOR = [
 type DocxPreviewSourcePayload = {
   base64: string;
 };
+
+type SpreadsheetPreviewSheet = Extract<FilePreviewPayload, { kind: 'spreadsheet' }>['sheets'][number];
+
+type SpreadsheetRangePayload = SpreadsheetPreviewSheet & {
+  rowOffset: number;
+  columnOffset: number;
+};
+
+type SpreadsheetPreviewMerge = NonNullable<SpreadsheetRangePayload['merges']>[number];
 
 type PdfViewportLike = {
   width: number;
@@ -119,6 +133,17 @@ function isTransientPreviewLoadError(error: unknown): boolean {
     || normalized.includes('econnrefused')
     || normalized.includes('socket hang up')
     || normalized.includes('network');
+}
+
+function isMissingFileShellResult(result: unknown): boolean {
+  if (typeof result !== 'string' || !result.trim()) {
+    return false;
+  }
+  const normalized = result.trim().toLowerCase();
+  return normalized.includes('file not found:')
+    || normalized.includes('does not exist')
+    || normalized.includes('not found')
+    || normalized.includes('no such file');
 }
 
 function wait(ms: number): Promise<void> {
@@ -501,6 +526,59 @@ async function loadPdfDocumentFromDataUrl(dataUrl: string): Promise<PdfDocumentL
   return await loadingTask.promise as unknown as PdfDocumentLike;
 }
 
+function scrollElementIntoContainerView(
+  container: HTMLElement | null,
+  target: HTMLElement | null,
+  behavior: ScrollBehavior,
+): void {
+  if (!container || !target) {
+    return;
+  }
+
+  const containerRect = container.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  container.scrollTo({
+    top: Math.max(0, container.scrollTop + targetRect.top - containerRect.top - 24),
+    behavior,
+  });
+}
+
+const MARKDOWN_HEADING_SELECTOR = 'h1,h2,h3,h4,h5,h6';
+
+function assignMarkdownHeadingAnchors(
+  container: HTMLElement | null,
+  outline: FilePreviewOutlineItem[],
+): void {
+  if (!container || outline.length === 0) {
+    return;
+  }
+
+  const headings = Array.from(container.querySelectorAll<HTMLElement>(MARKDOWN_HEADING_SELECTOR));
+  headings.forEach((heading, index) => {
+    const item = outline[index];
+    if (!item) {
+      heading.removeAttribute('data-markdown-outline-id');
+      return;
+    }
+
+    heading.id = item.id;
+    heading.setAttribute('data-markdown-outline-id', item.id);
+    heading.classList.add('scroll-mt-6');
+  });
+}
+
+function findMarkdownHeadingAnchor(
+  container: HTMLElement | null,
+  id: string,
+): HTMLElement | null {
+  if (!container) {
+    return null;
+  }
+
+  return container.querySelector<HTMLElement>(`[data-markdown-outline-id="${id}"]`)
+    ?? container.querySelector<HTMLElement>(`[id="${id}"]`);
+}
+
 function buildPresentationSlideSrcDoc(
   rawHtml: string,
   slideWidth: number,
@@ -813,38 +891,16 @@ function MarkdownPreview({
     setActiveId(outline[0]?.id ?? null);
   }, [outline]);
 
+  useEffect(() => {
+    assignMarkdownHeadingAnchors(containerRef.current, outline);
+  }, [outline, preview.content]);
+
   const handleSelectOutline = useCallback((id: string) => {
     setActiveId(id);
-    const target = containerRef.current?.querySelector<HTMLElement>(`[id="${id}"]`);
-    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, []);
-
-  const markdownComponents = useMemo(() => {
-    let headingIndex = 0;
-    const renderHeading = (tag: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6') => {
-      return ({
-        children,
-        className,
-        ...props
-      }: ComponentPropsWithoutRef<'h1'>) => {
-        const outlineItem = outline[headingIndex] ?? null;
-        headingIndex += 1;
-        return createElement(tag, {
-          ...props,
-          id: outlineItem?.id,
-          className: cn(className, 'scroll-mt-6'),
-        }, children);
-      };
-    };
-
-    return {
-      h1: renderHeading('h1'),
-      h2: renderHeading('h2'),
-      h3: renderHeading('h3'),
-      h4: renderHeading('h4'),
-      h5: renderHeading('h5'),
-      h6: renderHeading('h6'),
-    };
+    const container = containerRef.current;
+    assignMarkdownHeadingAnchors(container, outline);
+    const target = findMarkdownHeadingAnchor(container, id);
+    scrollElementIntoContainerView(container, target, 'auto');
   }, [outline]);
 
   if (outline.length === 0) {
@@ -873,7 +929,7 @@ function MarkdownPreview({
         )}
         style={{ fontFamily: SYSTEM_UI_FONT_FAMILY }}
       >
-        <MarkdownRenderer content={preview.content} components={markdownComponents} />
+        <MarkdownRenderer content={preview.content} />
       </div>
     </div>
   );
@@ -892,13 +948,17 @@ function TextualPreview({
       data-testid="chat-file-preview-textual-content"
       data-kind={preview.kind}
       className={cn(
-        'min-h-full bg-transparent p-0 text-[13px] leading-6 text-foreground/86',
-        isCode ? 'overflow-x-auto whitespace-pre font-mono' : 'whitespace-pre-wrap break-words',
+        'min-h-full max-w-full whitespace-pre-wrap break-words bg-transparent p-0 text-[13px] leading-6 text-foreground/86 [overflow-wrap:anywhere]',
+        isCode && 'font-mono',
         className,
       )}
-      style={{ fontFamily: isCode ? SYSTEM_MONO_FONT_FAMILY : SYSTEM_UI_FONT_FAMILY }}
+      style={{
+        fontFamily: isCode ? SYSTEM_MONO_FONT_FAMILY : SYSTEM_UI_FONT_FAMILY,
+        overflowWrap: 'anywhere',
+        wordBreak: 'break-word',
+      }}
     >
-      {isCode ? <code>{preview.content}</code> : preview.content}
+      {isCode ? <code className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{preview.content}</code> : preview.content}
     </pre>
   );
 }
@@ -1090,11 +1150,47 @@ function DocxPreview({
   );
 }
 
+function createSpreadsheetRangeFromSheet(sheet: SpreadsheetPreviewSheet): SpreadsheetRangePayload {
+  return {
+    ...sheet,
+    merges: sheet.merges ?? [],
+    rowOffset: sheet.rowOffset ?? 0,
+    columnOffset: sheet.columnOffset ?? 0,
+  };
+}
+
+function createSpreadsheetMergeLookup(merges: SpreadsheetPreviewMerge[] | undefined) {
+  const owners = new Map<string, SpreadsheetPreviewMerge>();
+  const covered = new Set<string>();
+
+  for (const merge of merges ?? []) {
+    const rowSpan = Math.max(1, merge.rowSpan);
+    const columnSpan = Math.max(1, merge.columnSpan);
+    if (rowSpan === 1 && columnSpan === 1) {
+      continue;
+    }
+
+    owners.set(`${merge.row}:${merge.column}`, { ...merge, rowSpan, columnSpan });
+    for (let rowIndex = merge.row; rowIndex < merge.row + rowSpan; rowIndex += 1) {
+      for (let columnIndex = merge.column; columnIndex < merge.column + columnSpan; columnIndex += 1) {
+        if (rowIndex === merge.row && columnIndex === merge.column) {
+          continue;
+        }
+        covered.add(`${rowIndex}:${columnIndex}`);
+      }
+    }
+  }
+
+  return { owners, covered };
+}
+
 function SpreadsheetPreview({
+  file,
   preview,
   className,
   mode,
 }: {
+  file: AttachedFileMeta;
   preview: Extract<FilePreviewPayload, { kind: 'spreadsheet' }>;
   className?: string;
   mode: 'panel' | 'modal';
@@ -1102,10 +1198,113 @@ function SpreadsheetPreview({
   const { t } = useTranslation('chat');
   const defaultSheet = preview.sheets[0]?.name ?? '';
   const [activeSheet, setActiveSheet] = useState(defaultSheet);
+  const initialRanges = useMemo(() => {
+    return Object.fromEntries(preview.sheets.map((sheet) => [sheet.name, createSpreadsheetRangeFromSheet(sheet)]));
+  }, [preview.sheets]);
+  const [ranges, setRanges] = useState<Record<string, SpreadsheetRangePayload>>(() => initialRanges);
+  const [loadingRangeKey, setLoadingRangeKey] = useState<string | null>(null);
+  const [rangeError, setRangeError] = useState<string | null>(null);
   const selectedSheet = preview.sheets.some((sheet) => sheet.name === activeSheet)
     ? activeSheet
     : defaultSheet;
+  const selectedSheetMeta = preview.sheets.find((sheet) => sheet.name === selectedSheet) ?? preview.sheets[0] ?? null;
+  const selectedRange = selectedSheetMeta
+    ? ranges[selectedSheetMeta.name] ?? createSpreadsheetRangeFromSheet(selectedSheetMeta)
+    : null;
   void mode;
+
+  useEffect(() => {
+    setActiveSheet(defaultSheet);
+    setRanges(initialRanges);
+    setLoadingRangeKey(null);
+    setRangeError(null);
+  }, [defaultSheet, initialRanges]);
+
+  const loadSpreadsheetRange = useCallback(async (
+    sheetName: string,
+    nextRowLimit: number,
+    nextColumnLimit: number,
+  ) => {
+    const sheet = preview.sheets.find((candidate) => candidate.name === sheetName);
+    if (!file.filePath || !sheet) {
+      return;
+    }
+
+    const maxRowLimit = Math.min(Math.max(SPREADSHEET_PAGE_ROW_COUNT, sheet.rowCount), SPREADSHEET_MAX_LOADED_ROWS);
+    const maxColumnLimit = Math.min(Math.max(SPREADSHEET_PAGE_COLUMN_COUNT, sheet.columnCount), SPREADSHEET_MAX_LOADED_COLUMNS);
+    const rowLimit = Math.min(Math.max(SPREADSHEET_PAGE_ROW_COUNT, nextRowLimit), maxRowLimit);
+    const columnLimit = Math.min(Math.max(SPREADSHEET_PAGE_COLUMN_COUNT, nextColumnLimit), maxColumnLimit);
+    const rangeKey = `${sheetName}:${rowLimit}:${columnLimit}`;
+    setLoadingRangeKey(rangeKey);
+    setRangeError(null);
+
+    try {
+      const range = await hostApiFetch<SpreadsheetRangePayload>('/api/files/preview-spreadsheet-range', {
+        method: 'POST',
+        body: JSON.stringify({
+          filePath: file.filePath,
+          fileName: preview.fileName,
+          mimeType: preview.mimeType,
+          sheetName,
+          rowOffset: 0,
+          columnOffset: 0,
+          rowLimit,
+          columnLimit,
+        }),
+      });
+      setRanges((current) => ({ ...current, [sheetName]: range }));
+    } catch (error) {
+      setRangeError(t('filePreview.spreadsheetRangeLoadFailed', {
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      setLoadingRangeKey((current) => (current === rangeKey ? null : current));
+    }
+  }, [file.filePath, preview.fileName, preview.mimeType, preview.sheets, t]);
+
+  const isLoadingRange = loadingRangeKey !== null;
+
+  const handleSpreadsheetScroll = useCallback((
+    event: ReactUIEvent<HTMLDivElement>,
+    range: SpreadsheetRangePayload,
+  ) => {
+    if (isLoadingRange || !file.filePath) {
+      return;
+    }
+
+    const target = event.currentTarget;
+    const loadedRows = range.rows.length;
+    const loadedColumns = Math.max(0, ...range.rows.map((row) => row.length));
+    const nearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < SPREADSHEET_LOAD_MORE_THRESHOLD_PX;
+    const nearRight = target.scrollWidth - target.scrollLeft - target.clientWidth < SPREADSHEET_LOAD_MORE_THRESHOLD_PX;
+    const maxLoadedRows = Math.min(range.rowCount, SPREADSHEET_MAX_LOADED_ROWS);
+    const maxLoadedColumns = Math.min(range.columnCount, SPREADSHEET_MAX_LOADED_COLUMNS);
+    const shouldLoadRows = nearBottom && loadedRows < maxLoadedRows;
+    const shouldLoadColumns = nearRight && loadedColumns < maxLoadedColumns;
+    if (!shouldLoadRows && !shouldLoadColumns) {
+      return;
+    }
+
+    const nextRowLimit = shouldLoadRows
+      ? Math.min(maxLoadedRows, loadedRows + SPREADSHEET_PAGE_ROW_COUNT)
+      : Math.max(loadedRows, SPREADSHEET_PAGE_ROW_COUNT);
+    const nextColumnLimit = shouldLoadColumns
+      ? Math.min(maxLoadedColumns, loadedColumns + SPREADSHEET_PAGE_COLUMN_COUNT)
+      : Math.max(loadedColumns, SPREADSHEET_PAGE_COLUMN_COUNT);
+    void loadSpreadsheetRange(range.name, nextRowLimit, nextColumnLimit);
+  }, [file.filePath, isLoadingRange, loadSpreadsheetRange]);
+
+  if (!selectedRange) {
+    return (
+      <div
+        data-testid="chat-file-preview-spreadsheet"
+        className={cn('flex min-h-0 flex-1 items-center justify-center text-[13px] text-foreground/58', className)}
+        style={{ fontFamily: SYSTEM_UI_FONT_FAMILY }}
+      >
+        {t('filePreview.emptySpreadsheet')}
+      </div>
+    );
+  }
 
   return (
     <Tabs
@@ -1122,45 +1321,103 @@ function SpreadsheetPreview({
           </TabsTrigger>
         ))}
       </TabsList>
-      {preview.sheets.map((sheet) => (
+      {preview.sheets.map((sheet) => {
+        const range = sheet.name === selectedRange.name
+          ? selectedRange
+          : ranges[sheet.name] ?? createSpreadsheetRangeFromSheet(sheet);
+        const loadedRowCount = range.rows.length;
+        const loadedColumnCount = Math.max(0, ...range.rows.map((row) => row.length));
+        const rowStart = range.rowCount === 0 ? 0 : 1;
+        const rowEnd = Math.min(loadedRowCount, range.rowCount);
+        const columnStart = range.columnCount === 0 ? 0 : 1;
+        const columnEnd = Math.min(loadedColumnCount, range.columnCount);
+        const mergeLookup = createSpreadsheetMergeLookup(range.merges);
+        return (
         <TabsContent key={sheet.name} value={sheet.name} className="mt-4 min-h-0 flex-1 outline-none">
           <div className="flex h-full min-h-0 flex-col overflow-hidden" style={{ fontFamily: SYSTEM_UI_FONT_FAMILY }}>
-            <div className="flex items-center gap-2 border-b border-black/6 px-1 py-3 text-[12px] text-foreground/60 dark:border-white/8">
-              <Table2 className="h-4 w-4" />
-              <span>{t('filePreview.rows', { count: sheet.rowCount })}</span>
-              <span>|</span>
-              <span>{t('filePreview.columns', { count: sheet.columnCount })}</span>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/6 px-1 py-3 text-[12px] text-foreground/60 dark:border-white/8">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Table2 className="h-4 w-4" />
+                <span>{t('filePreview.rows', { count: range.rowCount })}</span>
+                <span>|</span>
+                <span>{t('filePreview.columns', { count: range.columnCount })}</span>
+                {(range.rows.length < range.rowCount || Math.max(0, ...range.rows.map((row) => row.length)) < range.columnCount) ? (
+                  <span className="text-foreground/46">{t('filePreview.largeSpreadsheetHint')}</span>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-foreground/54">
+                <span>{t('filePreview.rowWindow', { start: rowStart, end: rowEnd, total: range.rowCount })}</span>
+                <span>|</span>
+                <span>{t('filePreview.columnWindow', { start: columnStart, end: columnEnd, total: range.columnCount })}</span>
+              </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-auto">
+            {(isLoadingRange || rangeError) ? (
+              <div className="border-b border-black/6 px-1 py-2 text-[12px] text-foreground/58 dark:border-white/8">
+                {isLoadingRange ? t('filePreview.loadingSpreadsheetRange') : rangeError}
+              </div>
+            ) : null}
+            <div
+              data-testid="chat-file-preview-spreadsheet-grid"
+              className="min-h-0 flex-1 overflow-auto"
+              onScroll={(event) => handleSpreadsheetScroll(event, range)}
+            >
               <table className="w-full border-collapse text-left text-[13px]">
                 <tbody>
-                  {sheet.rows.map((row, rowIndex) => (
-                    <tr key={`${sheet.name}-${rowIndex}`} className="align-top odd:bg-black/[0.015] dark:odd:bg-white/[0.03]">
-                      <td className="sticky left-0 w-12 min-w-12 border-b border-r border-black/6 bg-slate-50 px-3 py-2 text-[11px] text-foreground/46 dark:border-white/8 dark:bg-slate-900">
-                        {rowIndex + 1}
-                      </td>
-                      {row.map((cell, cellIndex) => (
-                        <td key={`${sheet.name}-${rowIndex}-${cellIndex}`} className="min-w-[140px] border-b border-r border-black/6 px-3 py-2 text-foreground/82 dark:border-white/8">
-                          {cell}
-                        </td>
-                      ))}
+                  {range.rows.map((row, rowIndex) => (
+                    <tr key={`${range.name}-${range.rowOffset}-${range.columnOffset}-${rowIndex}`} className="align-top odd:bg-black/[0.015] dark:odd:bg-white/[0.03]">
+                      <th
+                        data-testid={rowIndex === 0 ? 'chat-file-preview-spreadsheet-header-row' : undefined}
+                        className={cn(
+                          'sticky left-0 w-12 min-w-12 border-b border-r border-black/6 bg-slate-50 px-3 py-2 text-left text-[11px] font-medium text-foreground/46 dark:border-white/8 dark:bg-slate-900',
+                          rowIndex === 0 ? 'top-0 z-30' : 'z-10',
+                        )}
+                        scope="row"
+                      >
+                        {range.rowOffset + rowIndex + 1}
+                      </th>
+                      {row.map((cell, cellIndex) => {
+                        const mergeKey = `${rowIndex}:${cellIndex}`;
+                        if (mergeLookup.covered.has(mergeKey)) {
+                          return null;
+                        }
+
+                        const merge = mergeLookup.owners.get(mergeKey);
+                        const CellTag = rowIndex === 0 ? 'th' : 'td';
+                        return (
+                          <CellTag
+                            key={`${range.name}-${rowIndex}-${range.columnOffset + cellIndex}`}
+                            rowSpan={merge?.rowSpan}
+                            colSpan={merge?.columnSpan}
+                            className={cn(
+                              'min-w-[140px] border-b border-r border-black/6 px-3 py-2 text-left dark:border-white/8',
+                              rowIndex === 0
+                                ? 'sticky top-0 z-20 bg-slate-50 font-semibold text-foreground/86 shadow-[0_1px_0_rgba(15,23,42,0.08)] dark:bg-slate-900'
+                                : 'text-foreground/82',
+                            )}
+                            scope={rowIndex === 0 ? 'col' : undefined}
+                          >
+                            {cell}
+                          </CellTag>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            {(sheet.truncatedRows || sheet.truncatedColumns || preview.truncatedSheets) && (
+            {(range.truncatedRows || range.truncatedColumns || preview.truncatedSheets) && (
               <div className="border-t border-black/6 px-1 py-3 text-[12px] text-foreground/58 dark:border-white/8">
-                {sheet.truncatedRows ? t('filePreview.firstRowsOnly') : null}
-                {sheet.truncatedRows && sheet.truncatedColumns ? ' ' : null}
-                {sheet.truncatedColumns ? t('filePreview.trailingColumnsHidden') : null}
-                {(sheet.truncatedRows || sheet.truncatedColumns) && preview.truncatedSheets ? ' ' : null}
+                {range.truncatedRows ? t('filePreview.firstRowsOnly') : null}
+                {range.truncatedRows && range.truncatedColumns ? ' ' : null}
+                {range.truncatedColumns ? t('filePreview.trailingColumnsHidden') : null}
+                {(range.truncatedRows || range.truncatedColumns) && preview.truncatedSheets ? ' ' : null}
                 {preview.truncatedSheets ? t('filePreview.extraSheetsHidden') : null}
               </div>
             )}
           </div>
         </TabsContent>
-      ))}
+        );
+      })}
     </Tabs>
   );
 }
@@ -1205,7 +1462,7 @@ function OfficePageCanvas({
       }
 
       const baseViewport = page.getViewport({ scale: 1 });
-      const targetWidth = Math.min(1800, Math.max(1200, Math.round(baseViewport.width * 2)));
+      const targetWidth = Math.min(1400, Math.max(900, Math.round(baseViewport.width * 1.6)));
       const scale = targetWidth / Math.max(1, baseViewport.width);
       const viewport = page.getViewport({ scale });
       const canvas = canvasRef.current;
@@ -1288,7 +1545,7 @@ function OfficePagesPreview({
   const [pageCount, setPageCount] = useState(preview.pageCount);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [docxFallbackPreview, setDocxFallbackPreview] = useState<Extract<FilePreviewPayload, { kind: 'docx' }> | null>(null);
-  const [loadedPages, setLoadedPages] = useState<Set<number>>(() => new Set([1, 2, 3]));
+  const [loadedPages, setLoadedPages] = useState<Set<number>>(() => new Set(OFFICE_PAGE_INITIAL_RENDERED_PAGES));
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const pageSectionRefs = useRef(new Map<number, HTMLElement>());
   const shouldTryDocxFallback = Boolean(file.filePath && /\.docx$/i.test(file.fileName || file.filePath || ''));
@@ -1300,7 +1557,7 @@ function OfficePagesPreview({
     setPageCount(preview.pageCount);
     setLoadError(null);
     setDocxFallbackPreview(null);
-    setLoadedPages(new Set([1, 2, 3]));
+    setLoadedPages(new Set(OFFICE_PAGE_INITIAL_RENDERED_PAGES));
 
     const cacheKey = buildOfficePagesPdfCacheKey(preview.previewId);
     void (async () => {
@@ -2167,7 +2424,7 @@ function PreviewSurface({
     case 'spreadsheet':
       return (
         <div className={cn(isModal ? 'min-h-0 flex-1 px-1 py-1 sm:px-2' : 'min-h-full px-4 py-4', contentClassName)}>
-          <SpreadsheetPreview preview={preview} className="h-full" mode={mode} />
+          <SpreadsheetPreview file={file} preview={preview} className="h-full" mode={mode} />
         </div>
       );
     case 'office-pages':
@@ -2435,7 +2692,12 @@ function useResolvedFilePreview(file: AttachedFileMeta) {
 
   const handleRevealInFolder = useCallback(() => {
     if (!file.filePath) return;
-    void invokeIpc('shell:showItemInFolder', file.filePath)
+    void invokeIpc<string>('shell:showItemInFolder', file.filePath)
+      .then((result) => {
+        if (isMissingFileShellResult(result)) {
+          toast.error(t('filePreview.fileMissing'));
+        }
+      })
       .catch((revealError) => {
         toast.error(t('filePreview.revealFailed', {
           error: revealError instanceof Error ? revealError.message : String(revealError),
@@ -2600,12 +2862,12 @@ export function ChatFilePreviewPanel({
   return (
     <aside
       data-testid="chat-file-preview-panel"
-      className={cn(
-        'flex h-full min-h-0 w-full shrink-0 flex-col border-l border-black/6 dark:border-white/8',
-        PREVIEW_PANEL_BACKGROUND_CLASS,
-        'lg:flex-none lg:min-w-[25%] lg:max-w-[75%]',
-        'max-lg:absolute max-lg:inset-0 max-lg:z-30 max-lg:!w-full max-lg:!basis-full',
-      )}
+        className={cn(
+          'flex h-full min-h-0 w-full shrink-0 flex-col border-l border-black/6 dark:border-white/8',
+          PREVIEW_PANEL_BACKGROUND_CLASS,
+          'lg:flex-none lg:min-w-[16%] lg:max-w-[84%]',
+          'max-lg:absolute max-lg:inset-0 max-lg:z-30 max-lg:!w-full max-lg:!basis-full',
+        )}
       style={panelStyle}
     >
       <div

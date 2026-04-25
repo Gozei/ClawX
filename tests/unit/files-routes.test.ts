@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const PPTX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+const originalPlatform = process.platform;
 
 const {
   accessMock,
@@ -14,6 +15,8 @@ const {
   pptxToHtmlMock,
   readdirMock,
   readFileMock,
+  resolveStagedUploadFilePathMock,
+  resolveUserUploadStorageDirMock,
   rmMock,
   sendJsonMock,
   statMock,
@@ -26,6 +29,8 @@ const {
   pptxToHtmlMock: vi.fn(),
   readdirMock: vi.fn(),
   readFileMock: vi.fn(),
+  resolveStagedUploadFilePathMock: vi.fn(),
+  resolveUserUploadStorageDirMock: vi.fn(),
   rmMock: vi.fn(),
   sendJsonMock: vi.fn(),
   statMock: vi.fn(),
@@ -41,6 +46,14 @@ vi.mock('electron', () => ({
   },
   nativeImage: {
     createFromPath: vi.fn(() => ({
+      isEmpty: () => true,
+      getSize: () => ({ width: 0, height: 0 }),
+      resize: () => ({
+        toPNG: () => Buffer.alloc(0),
+      }),
+      toPNG: () => Buffer.alloc(0),
+    })),
+    createFromBuffer: vi.fn(() => ({
       isEmpty: () => true,
       getSize: () => ({ width: 0, height: 0 }),
       resize: () => ({
@@ -94,6 +107,20 @@ vi.mock('../../electron/api/route-utils', () => ({
   sendJson: (...args: unknown[]) => sendJsonMock(...args),
 }));
 
+vi.mock('@electron/utils/session-file-storage', () => ({
+  materializeAssistantOutputFiles: vi.fn(),
+  resolveAssistantOutputStorageDir: vi.fn(),
+  resolveUserUploadStorageDir: (...args: unknown[]) => resolveUserUploadStorageDirMock(...args),
+  resolveStagedUploadFilePath: (...args: unknown[]) => resolveStagedUploadFilePathMock(...args),
+}));
+
+vi.mock('../../electron/utils/session-file-storage', () => ({
+  materializeAssistantOutputFiles: vi.fn(),
+  resolveAssistantOutputStorageDir: vi.fn(),
+  resolveUserUploadStorageDir: (...args: unknown[]) => resolveUserUploadStorageDirMock(...args),
+  resolveStagedUploadFilePath: (...args: unknown[]) => resolveStagedUploadFilePathMock(...args),
+}));
+
 describe('handleFileRoutes presentation previews', () => {
   const storedPreviewFiles = new Map<string, string>();
   const testGlobal = globalThis as typeof globalThis & {
@@ -108,6 +135,9 @@ describe('handleFileRoutes presentation previews', () => {
       slideCount: number;
       truncatedSlides: boolean;
     } | null>;
+    __clawxOfficePagesPdfExporter?: (
+      options: { filePath: string; dirPath: string; extension: string },
+    ) => Promise<string | null>;
   };
 
   beforeEach(() => {
@@ -131,12 +161,60 @@ describe('handleFileRoutes presentation previews', () => {
     copyFileMock.mockResolvedValue(undefined);
     mkdirMock.mockResolvedValue(undefined);
     readdirMock.mockResolvedValue([]);
+    resolveUserUploadStorageDirMock.mockResolvedValue('D:\\staged');
+    resolveStagedUploadFilePathMock.mockImplementation(async (_targetDir: string, fileName: string) => {
+      return `D:\\staged\\${String(fileName).split(/[\\/]/).pop() ?? 'file'}`;
+    });
     rmMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     delete testGlobal.__clawxPptxToHtmlModule;
     delete testGlobal.__clawxPresentationImageExporter;
+    delete testGlobal.__clawxOfficePagesPdfExporter;
+    Object.defineProperty(process, 'platform', {
+      value: originalPlatform,
+    });
+  });
+
+  it('prefers LibreOffice office-page rendering for pptx previews when PDF output is available', async () => {
+    const filePath = 'D:\\fixtures\\office-pages-review.pptx';
+    const fileSize = 22 * 1024 * 1024;
+
+    testGlobal.__clawxOfficePagesPdfExporter = vi.fn(async ({ dirPath }) => {
+      return join(dirPath, 'document.pdf');
+    });
+    parseJsonBodyMock.mockResolvedValue({
+      filePath,
+      fileName: 'office-pages-review.pptx',
+      mimeType: PPTX_MIME_TYPE,
+    });
+    statMock.mockResolvedValue({
+      size: fileSize,
+      mtimeMs: 1_710_000_000_111,
+    });
+
+    const { handleFileRoutes } = await import('@electron/api/routes/files');
+
+    const handled = await handleFileRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1/api/files/preview'),
+      { store: {}, gateway: {} },
+    );
+
+    expect(handled).toBe(true);
+    expect(pptxToHtmlMock).not.toHaveBeenCalled();
+    expect(testGlobal.__clawxPresentationImageExporter).toBeUndefined();
+    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, expect.objectContaining({
+      kind: 'office-pages',
+      fileName: 'office-pages-review.pptx',
+      mimeType: PPTX_MIME_TYPE,
+      fileSize,
+      previewId: expect.any(String),
+      pageCount: 1,
+      truncatedPages: false,
+    }));
   });
 
   it('builds a cached visual pptx preview with slide metadata', async () => {
@@ -200,6 +278,49 @@ describe('handleFileRoutes presentation previews', () => {
         },
       ],
       truncatedSlides: false,
+    }));
+  });
+
+  it('uses LibreOffice office-page rendering when previewing pptx on Linux if PDF output is available', async () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'linux',
+    });
+    const filePath = '/fixtures/linux-review.pptx';
+    const fileSize = 22 * 1024 * 1024;
+
+    testGlobal.__clawxOfficePagesPdfExporter = vi.fn(async ({ dirPath }) => {
+      return join(dirPath, 'document.pdf');
+    });
+    parseJsonBodyMock.mockResolvedValue({
+      filePath,
+      fileName: 'linux-review.pptx',
+      mimeType: PPTX_MIME_TYPE,
+    });
+    statMock.mockResolvedValue({
+      size: fileSize,
+      mtimeMs: 1_710_000_000_222,
+    });
+
+    const { handleFileRoutes } = await import('@electron/api/routes/files');
+
+    const handled = await handleFileRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1/api/files/preview'),
+      { store: {}, gateway: {} },
+    );
+
+    expect(handled).toBe(true);
+    expect(testGlobal.__clawxOfficePagesPdfExporter).toHaveBeenCalledTimes(1);
+    expect(pptxToHtmlMock).not.toHaveBeenCalled();
+    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, expect.objectContaining({
+      kind: 'office-pages',
+      fileName: 'linux-review.pptx',
+      mimeType: PPTX_MIME_TYPE,
+      fileSize,
+      previewId: expect.any(String),
+      pageCount: 1,
+      truncatedPages: false,
     }));
   });
 
@@ -431,6 +552,90 @@ describe('handleFileRoutes presentation previews', () => {
       reasonCode: 'tooLarge',
     });
   });
+
+  it('does not warm LibreOffice previews in the background when staging pptx uploads', async () => {
+    const filePath = 'D:\\fixtures\\upload-review.pptx';
+    const stagedPath = 'D:\\staged\\upload-review.pptx';
+    const fileSize = 18 * 1024 * 1024;
+
+    testGlobal.__clawxOfficePagesPdfExporter = vi.fn(async ({ dirPath }) => {
+      return join(dirPath, 'document.pdf');
+    });
+    parseJsonBodyMock.mockResolvedValue({
+      filePaths: [filePath],
+      sessionKey: 'agent:main:session-123',
+    });
+    resolveUserUploadStorageDirMock.mockResolvedValue('D:\\staged');
+    resolveStagedUploadFilePathMock.mockResolvedValue(stagedPath);
+    statMock.mockResolvedValue({
+      size: fileSize,
+      mtimeMs: 1_710_000_000_333,
+    });
+
+    const { handleFileRoutes } = await import('@electron/api/routes/files');
+
+    const handled = await handleFileRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1/api/files/stage-paths'),
+      { store: {}, gateway: {} },
+    );
+
+    await Promise.resolve();
+
+    expect(handled).toBe(true);
+    expect(testGlobal.__clawxOfficePagesPdfExporter).not.toHaveBeenCalled();
+    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, [
+      {
+        id: expect.any(String),
+        fileName: 'upload-review.pptx',
+        mimeType: PPTX_MIME_TYPE,
+        fileSize,
+        stagedPath,
+        preview: null,
+      },
+    ]);
+  });
+
+  it('falls back to file bytes for image previews when native decoding cannot read a unicode path', async () => {
+    const filePath = 'D:\\资料\\图片.png';
+    const stagedPath = 'D:\\staged\\图片.png';
+    const imageBytes = Buffer.from('png-data');
+
+    parseJsonBodyMock.mockResolvedValue({
+      filePaths: [filePath],
+      sessionKey: 'agent:main:session-123',
+    });
+    resolveUserUploadStorageDirMock.mockResolvedValue('D:\\staged');
+    resolveStagedUploadFilePathMock.mockResolvedValue(stagedPath);
+    statMock.mockResolvedValue({
+      size: imageBytes.length,
+      mtimeMs: 1_710_000_000_444,
+    });
+    readFileMock.mockResolvedValue(imageBytes);
+
+    const { handleFileRoutes } = await import('@electron/api/routes/files');
+
+    const handled = await handleFileRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1/api/files/stage-paths'),
+      { store: {}, gateway: {} },
+    );
+
+    expect(handled).toBe(true);
+    expect(readFileMock).toHaveBeenCalledWith(stagedPath);
+    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, [
+      {
+        id: expect.any(String),
+        fileName: '图片.png',
+        mimeType: 'image/png',
+        fileSize: imageBytes.length,
+        stagedPath,
+        preview: `data:image/png;base64,${imageBytes.toString('base64')}`,
+      },
+    ]);
+  });
 });
 
 describe('handleFileRoutes text preview classification', () => {
@@ -585,6 +790,9 @@ describe('handleFileRoutes csv spreadsheet preview decoding', () => {
           ],
           rowCount: 2,
           columnCount: 3,
+          merges: [],
+          rowOffset: 0,
+          columnOffset: 0,
           truncatedRows: false,
           truncatedColumns: false,
         },
@@ -632,11 +840,113 @@ describe('handleFileRoutes csv spreadsheet preview decoding', () => {
           ],
           rowCount: 2,
           columnCount: 3,
+          merges: [],
+          rowOffset: 0,
+          columnOffset: 0,
           truncatedRows: false,
           truncatedColumns: false,
         },
       ],
       truncatedSheets: false,
     }));
+  });
+
+  it('includes xlsx merge ranges in spreadsheet previews', async () => {
+    const XLSX = await import('xlsx');
+    const worksheet = XLSX.utils.aoa_to_sheet([
+      ['Merged title', '', 'Status', ''],
+      ['', '', 'Open', 'Closed'],
+      ['Owner', 'Count', 'Regional summary', ''],
+    ]);
+    worksheet['!merges'] = [
+      XLSX.utils.decode_range('A1:B2'),
+      XLSX.utils.decode_range('C3:D3'),
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Merged');
+    const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' }) as Buffer;
+
+    readFileMock.mockResolvedValue(buffer);
+    statMock.mockResolvedValue({
+      size: buffer.length,
+      mtimeMs: 1_710_000_000_000,
+    });
+    parseJsonBodyMock.mockResolvedValue({
+      filePath: 'D:\\fixtures\\merged.xlsx',
+      fileName: 'merged.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+
+    const { handleFileRoutes } = await import('@electron/api/routes/files');
+
+    const handled = await handleFileRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/files/preview'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, expect.objectContaining({
+      kind: 'spreadsheet',
+      sheets: [
+        expect.objectContaining({
+          name: 'Merged',
+          merges: [
+            { row: 0, column: 0, rowSpan: 2, columnSpan: 2 },
+            { row: 2, column: 2, rowSpan: 1, columnSpan: 2 },
+          ],
+        }),
+      ],
+    }));
+  });
+
+  it('returns a requested spreadsheet row and column window', async () => {
+    const csvBuffer = Buffer.from([
+      'A1,B1,C1,D1',
+      'A2,B2,C2,D2',
+      'A3,B3,C3,D3',
+      'A4,B4,C4,D4',
+    ].join('\n'), 'utf8');
+    readFileMock.mockResolvedValue(csvBuffer);
+    statMock.mockResolvedValue({
+      size: csvBuffer.length,
+      mtimeMs: 1_710_000_000_000,
+    });
+    parseJsonBodyMock.mockResolvedValue({
+      filePath: 'D:\\fixtures\\windowed.csv',
+      fileName: 'windowed.csv',
+      mimeType: 'text/csv',
+      sheetName: 'Sheet1',
+      rowOffset: 2,
+      columnOffset: 1,
+      rowLimit: 2,
+      columnLimit: 2,
+    });
+
+    const { handleFileRoutes } = await import('@electron/api/routes/files');
+
+    const handled = await handleFileRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/files/preview-spreadsheet-range'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, {
+      name: 'Sheet1',
+      rows: [
+        ['B3', 'C3'],
+        ['B4', 'C4'],
+      ],
+      rowCount: 4,
+      columnCount: 4,
+      merges: [],
+      rowOffset: 2,
+      columnOffset: 1,
+      truncatedRows: false,
+      truncatedColumns: true,
+    });
   });
 });

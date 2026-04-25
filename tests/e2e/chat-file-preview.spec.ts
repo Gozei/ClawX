@@ -161,9 +161,18 @@ async function installHostApiPreviewMocks(
       rows: string[][];
       rowCount: number;
       columnCount: number;
+      merges?: Array<{
+        row: number;
+        column: number;
+        rowSpan: number;
+        columnSpan: number;
+      }>;
+      rowOffset?: number;
+      columnOffset?: number;
       truncatedRows: boolean;
       truncatedColumns: boolean;
     }>;
+    spreadsheetRangeRowsBySheet?: Record<string, string[][]>;
     spreadsheetTruncatedSheets?: boolean;
     spreadsheetOfficePages?: boolean;
     spreadsheetOfficePdfDataUrl?: string;
@@ -411,6 +420,29 @@ async function installHostApiPreviewMocks(
               };
             }
 
+            if (path === '/api/files/exists' && method === 'POST') {
+              const parsed = request?.body ? JSON.parse(request.body) as { filePath?: string } : {};
+              const knownPaths = [
+                config.markdownFilePath,
+                config.textFilePath,
+                config.codeFilePath,
+                config.docxFilePath,
+                config.spreadsheetFilePath,
+                config.imageFilePath,
+                config.presentationFilePath,
+              ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+              return {
+                ok: true,
+                data: {
+                  status: 200,
+                  ok: true,
+                  json: {
+                    exists: typeof parsed.filePath === 'string' && knownPaths.includes(parsed.filePath),
+                  },
+                },
+              };
+            }
+
             if (path === '/api/files/preview' && method === 'POST') {
               const parsed = request?.body ? JSON.parse(request.body) as { filePath?: string } : {};
 
@@ -614,6 +646,74 @@ async function installHostApiPreviewMocks(
               }
             }
 
+            if (path === '/api/files/preview-spreadsheet-range' && method === 'POST') {
+              const parsed = request?.body ? JSON.parse(request.body) as {
+                filePath?: string;
+                sheetName?: string;
+                rowOffset?: number;
+                columnOffset?: number;
+                rowLimit?: number;
+                columnLimit?: number;
+              } : {};
+              const sheetName = parsed.sheetName ?? '';
+              if (parsed.filePath && parsed.filePath === config.spreadsheetFilePath && sheetName) {
+                const sourceRows = config.spreadsheetRangeRowsBySheet?.[sheetName]
+                  ?? config.spreadsheetSheets?.find((sheet) => sheet.name === sheetName)?.rows
+                  ?? [];
+                const sheetMeta = config.spreadsheetSheets?.find((sheet) => sheet.name === sheetName);
+                const rowOffset = Math.max(0, parsed.rowOffset ?? 0);
+                const columnOffset = Math.max(0, parsed.columnOffset ?? 0);
+                const rowLimit = Math.max(1, parsed.rowLimit ?? 120);
+                const columnLimit = Math.max(1, parsed.columnLimit ?? 18);
+                const rowCount = sheetMeta?.rowCount ?? sourceRows.length;
+                const columnCount = sheetMeta?.columnCount ?? Math.max(0, ...sourceRows.map((row) => row.length));
+                const merges = (sheetMeta?.merges ?? []).flatMap((merge) => {
+                  const startsInsideRange = merge.row >= rowOffset
+                    && merge.row < rowOffset + rowLimit
+                    && merge.column >= columnOffset
+                    && merge.column < columnOffset + columnLimit;
+                  if (!startsInsideRange) {
+                    return [];
+                  }
+
+                  const visibleEndRow = Math.min(merge.row + merge.rowSpan - 1, rowOffset + rowLimit - 1);
+                  const visibleEndColumn = Math.min(merge.column + merge.columnSpan - 1, columnOffset + columnLimit - 1);
+                  const rowSpan = visibleEndRow - merge.row + 1;
+                  const columnSpan = visibleEndColumn - merge.column + 1;
+                  if (rowSpan <= 1 && columnSpan <= 1) {
+                    return [];
+                  }
+
+                  return {
+                    row: merge.row - rowOffset,
+                    column: merge.column - columnOffset,
+                    rowSpan,
+                    columnSpan,
+                  };
+                });
+                return {
+                  ok: true,
+                  data: {
+                    status: 200,
+                    ok: true,
+                    json: {
+                      name: sheetName,
+                      rows: sourceRows
+                        .slice(rowOffset, rowOffset + rowLimit)
+                        .map((row) => row.slice(columnOffset, columnOffset + columnLimit)),
+                      rowCount,
+                      columnCount,
+                      merges,
+                      rowOffset,
+                      columnOffset,
+                      truncatedRows: rowOffset + rowLimit < rowCount,
+                      truncatedColumns: columnOffset + columnLimit < columnCount,
+                    },
+                  },
+                };
+              }
+            }
+
             if (path === '/api/files/preview-docx-source' && method === 'POST') {
               const parsed = request?.body ? JSON.parse(request.body) as { filePath?: string } : {};
               if (parsed.filePath && parsed.filePath === config.docxFilePath && config.docxBinaryBase64) {
@@ -800,6 +900,12 @@ test.describe('Chat file preview window', () => {
       '',
       '- Important bullet',
       '- Another bullet',
+      '',
+      ...Array.from({ length: 32 }, (_unused, index) => `Spacer paragraph ${index + 1} keeps the markdown surface scrollable.`),
+      '',
+      '## Deep Section',
+      '',
+      'The outline should scroll this nested preview surface directly.',
     ].join('\n');
     await writeFile(markdownPath, markdownBody, 'utf8');
     const app = await launchElectronApp({ skipSetup: true });
@@ -927,7 +1033,7 @@ test.describe('Chat file preview window', () => {
         return state.openWithRequests;
       }, { timeout: 20_000 }).toEqual([markdownPath]);
 
-      await revealButton.click();
+      await revealButton.click({ force: true });
       await expect(page.getByTestId('chat-file-preview-panel')).toHaveCount(0);
       await expect.poll(async () => {
         return await page.evaluate(async () => {
@@ -946,6 +1052,13 @@ test.describe('Chat file preview window', () => {
       await expect(page.getByTestId('chat-file-preview-header')).toContainText(longCardFileName);
       await expect(page.getByTestId('chat-file-preview-body')).toContainText('Preview Fixture');
       await expect(page.getByTestId('chat-file-preview-body')).toContainText('Important bullet');
+      const markdownSurface = page.getByTestId('chat-file-preview-markdown-surface');
+      await expect(markdownSurface).toBeVisible({ timeout: 20_000 });
+      const markdownScrollTopBeforeOutlineClick = await markdownSurface.evaluate((element: HTMLDivElement) => element.scrollTop);
+      await page.getByTestId('chat-file-preview-outline-item-1').click();
+      await expect.poll(async () => {
+        return await markdownSurface.evaluate((element: HTMLDivElement) => element.scrollTop);
+      }, { timeout: 20_000 }).toBeGreaterThan(markdownScrollTopBeforeOutlineClick + 120);
       await expect(page.getByTestId('chat-toolbar-header')).toBeVisible({ timeout: 20_000 });
       await expect(page.getByTestId('chat-file-preview-expand')).toHaveCSS('width', '36px');
       await expect(page.getByTestId('chat-file-preview-reveal')).toHaveCSS('width', '36px');
@@ -966,6 +1079,42 @@ test.describe('Chat file preview window', () => {
       expect(mainPaneBox).not.toBeNull();
       expect(previewPanelBox).not.toBeNull();
       expect(Math.abs((mainPaneBox?.width ?? 0) - (previewPanelBox?.width ?? 0))).toBeLessThanOrEqual(2);
+
+      const resizeHandle = page.getByTestId('chat-preview-resize-handle');
+      await expect(resizeHandle).toBeVisible({ timeout: 20_000 });
+      const splitLeft = Math.min(mainPaneBox?.x ?? 0, previewPanelBox?.x ?? 0);
+      const splitRight = Math.max(
+        (mainPaneBox?.x ?? 0) + (mainPaneBox?.width ?? 0),
+        (previewPanelBox?.x ?? 0) + (previewPanelBox?.width ?? 0),
+      );
+      const splitWidth = splitRight - splitLeft;
+      const handleBox = await resizeHandle.boundingBox();
+      expect(handleBox).not.toBeNull();
+
+      await page.mouse.move((handleBox?.x ?? 0) + ((handleBox?.width ?? 0) / 2), (handleBox?.y ?? 0) + ((handleBox?.height ?? 0) / 2));
+      await page.mouse.down();
+      await page.mouse.move(splitLeft + 280, (handleBox?.y ?? 0) + ((handleBox?.height ?? 0) / 2), { steps: 8 });
+      await page.mouse.up();
+
+      const expandedPreviewBox = await previewPanel.boundingBox();
+      const compressedMainBox = await mainPane.boundingBox();
+      expect(expandedPreviewBox).not.toBeNull();
+      expect(compressedMainBox).not.toBeNull();
+      expect(expandedPreviewBox?.width ?? 0).toBeGreaterThan((previewPanelBox?.width ?? 0) + 100);
+      expect(compressedMainBox?.width ?? 0).toBeGreaterThanOrEqual(276);
+      expect((expandedPreviewBox?.width ?? 0) / splitWidth).toBeGreaterThan(0.7);
+
+      await resizeHandle.press('Enter');
+      await expect.poll(async () => (await previewPanel.boundingBox())?.width ?? 0, { timeout: 20_000 })
+        .toBeGreaterThan((previewPanelBox?.width ?? 0) - 6);
+      await expect.poll(async () => (await previewPanel.boundingBox())?.width ?? 0, { timeout: 20_000 })
+        .toBeLessThan((previewPanelBox?.width ?? 0) + 6);
+
+      await resizeHandle.press('ArrowRight');
+      await resizeHandle.press('ArrowRight');
+      const narrowedPreviewBox = await previewPanel.boundingBox();
+      expect(narrowedPreviewBox).not.toBeNull();
+      expect(narrowedPreviewBox?.width ?? 0).toBeLessThan((previewPanelBox?.width ?? 0) - 20);
 
       await expect.poll(async () => await app.evaluate(({ BrowserWindow }) => {
         return BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()).length;
@@ -1417,10 +1566,16 @@ test.describe('Chat file preview window', () => {
     }
   });
 
-  test('renders docx previews through the office pages renderer when LibreOffice output is available', async ({ launchElectronApp, homeDir }) => {
+  test('keeps docx previews interactive instead of using office page images', async ({ launchElectronApp, homeDir }) => {
     test.setTimeout(180_000);
 
-    const docxPath = join(homeDir, 'office-pages-preview.docx');
+    const docxPath = join(homeDir, 'interactive-docx-preview.docx');
+    const docxHtml = [
+      '<h1 id="chapter-1">Chapter 1 Intro</h1>',
+      '<p>Word previews should keep selectable HTML content.</p>',
+      '<h2 id="chapter-2">Chapter 2 Details</h2>',
+      '<p>The outline should remain visible for document navigation.</p>',
+    ].join('');
     await writeFile(docxPath, 'docx placeholder', 'utf8');
     const app = await launchElectronApp({ skipSetup: true });
     const page = await getStableWindow(app);
@@ -1442,7 +1597,7 @@ test.describe('Chat file preview window', () => {
             timestamp: Math.floor(Date.now() / 1000),
             _attachedFiles: [
               {
-                fileName: 'office-pages-preview.docx',
+                fileName: 'interactive-docx-preview.docx',
                 mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                 fileSize: 2048,
                 preview: null,
@@ -1454,11 +1609,23 @@ test.describe('Chat file preview window', () => {
       });
       await installHostApiPreviewMocks(app, {
         docxFilePath: docxPath,
-        docxFileName: 'office-pages-preview.docx',
+        docxFileName: 'interactive-docx-preview.docx',
         docxFileSize: 2048,
-        docxOfficePages: true,
-        docxOfficePdfDataUrl: createSimplePdfDataUrl('DOCX office pages preview'),
-        docxOfficePageCount: 1,
+        docxHtml,
+        docxOutline: [
+          {
+            id: 'chapter-1',
+            text: 'Chapter 1 Intro',
+            level: 1,
+            isBold: true,
+          },
+          {
+            id: 'chapter-2',
+            text: 'Chapter 2 Details',
+            level: 2,
+            isBold: true,
+          },
+        ],
       });
 
       await page.reload();
@@ -1475,14 +1642,20 @@ test.describe('Chat file preview window', () => {
       });
 
       await page.getByTestId(`sidebar-session-${SESSION_KEY}`).click({ force: true });
-      const docxCard = page.getByTestId('chat-file-card').filter({ hasText: 'office-pages-preview.docx' }).first();
+      const docxCard = page.getByTestId('chat-file-card').filter({ hasText: 'interactive-docx-preview.docx' }).first();
       await expect(docxCard).toBeVisible({ timeout: 20_000 });
       await docxCard.click({ force: true });
 
-      const officePagesSurface = page.getByTestId('chat-file-preview-office-pages-scroller');
-      await expect(officePagesSurface).toBeVisible({ timeout: 20_000 });
-      await expect(page.getByTestId('chat-file-preview-office-page-0')).toBeVisible({ timeout: 20_000 });
-      await expect(page.getByTestId('chat-file-preview-office-page-section-0')).toContainText('第1页/共1页');
+      await expect(page.getByTestId('chat-file-preview-office-pages-scroller')).toHaveCount(0);
+      await expect(page.getByTestId('chat-file-preview-outline')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('chat-file-preview-outline-item-0')).toContainText('Chapter 1 Intro');
+      await expect(page.getByTestId('chat-file-preview-outline-item-1')).toContainText('Chapter 2 Details');
+      const docxFrame = page.getByTestId('chat-file-preview-docx-frame');
+      await expect.poll(async () => {
+        return await docxFrame.evaluate((element: HTMLIFrameElement) => {
+          return element.contentWindow?.document.body?.textContent ?? '';
+        });
+      }, { timeout: 20_000 }).toContain('Word previews should keep selectable HTML content.');
     } finally {
       await closeElectronApp(app);
     }
@@ -1498,7 +1671,11 @@ test.describe('Chat file preview window', () => {
     const docxPath = join(homeDir, 'system-font-preview.docx');
     const presentationPath = join(homeDir, 'system-font-preview.pptx');
     const markdownBody = '# System Font Preview\n\nThis markdown preview should stay on the system UI font stack.\n';
-    const textBody = 'Plain text preview should follow the same system font stack.\nSecond line for preview coverage.\n';
+    const textBody = [
+      'Plain text preview should follow the same system font stack.',
+      'Second line for preview coverage.',
+      `Unbroken long line: ${'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.repeat(18)}`,
+    ].join('\n');
     const codeBody = 'export const previewFont = "monospace";\n';
     const docxHtml = '<h1 id="chapter-1">System Font Preview</h1><p>The document iframe should inherit the same system stack.</p>';
 
@@ -1587,9 +1764,16 @@ test.describe('Chat file preview window', () => {
         spreadsheetFilePath: spreadsheetPath,
         spreadsheetFileName: 'system-font-preview.xlsx',
         spreadsheetFileSize: 2048,
-        spreadsheetOfficePages: true,
-        spreadsheetOfficePdfDataUrl: createSimplePdfDataUrl('Spreadsheet office pages preview'),
-        spreadsheetOfficePageCount: 1,
+        spreadsheetSheets: [
+          {
+            name: 'Summary',
+            rows: [['Metric', 'Value'], ['Revenue', '18%']],
+            rowCount: 2,
+            columnCount: 2,
+            truncatedRows: false,
+            truncatedColumns: false,
+          },
+        ],
         docxFilePath: docxPath,
         docxHtml,
         presentationFilePath: presentationPath,
@@ -1641,6 +1825,9 @@ test.describe('Chat file preview window', () => {
       const textFont = normalizeFontFamily(await textSurface.evaluate((element) => {
         return window.getComputedStyle(element).fontFamily;
       }));
+      await expect.poll(async () => {
+        return await textSurface.evaluate((element: HTMLElement) => element.scrollWidth - element.clientWidth);
+      }, { timeout: 20_000 }).toBeLessThanOrEqual(4);
 
       const codeCard = attachmentList.getByTestId('chat-file-card').filter({ hasText: 'system-font-preview.ts' }).first();
       await codeCard.click({ force: true });
@@ -1652,9 +1839,9 @@ test.describe('Chat file preview window', () => {
 
       const spreadsheetCard = attachmentList.getByTestId('chat-file-card').filter({ hasText: 'system-font-preview.xlsx' }).first();
       await spreadsheetCard.click({ force: true });
-      const spreadsheetSurface = page.getByTestId('chat-file-preview-office-pages-scroller');
+      const spreadsheetSurface = page.getByTestId('chat-file-preview-spreadsheet');
       await expect(spreadsheetSurface).toBeVisible({ timeout: 20_000 });
-      await expect(page.getByTestId('chat-file-preview-office-page-0')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('chat-file-preview-office-pages-scroller')).toHaveCount(0);
       const spreadsheetFont = normalizeFontFamily(await spreadsheetSurface.evaluate((element) => {
         return window.getComputedStyle(element).fontFamily;
       }));
@@ -1695,7 +1882,7 @@ test.describe('Chat file preview window', () => {
     }
   });
 
-  test('renders csv previews through the office pages renderer in the chat panel', async ({ launchElectronApp, homeDir }) => {
+  test('renders csv previews as an interactive spreadsheet table in the chat panel', async ({ launchElectronApp, homeDir }) => {
     test.setTimeout(180_000);
 
     const csvPath = join(homeDir, 'contacts-preview.csv');
@@ -1736,9 +1923,19 @@ test.describe('Chat file preview window', () => {
         spreadsheetFileName: 'contacts-preview.csv',
         spreadsheetMimeType: 'text/csv',
         spreadsheetFileSize: 256,
-        spreadsheetOfficePages: true,
-        spreadsheetOfficePdfDataUrl: createSimplePdfDataUrl('CSV office pages preview with long text'),
-        spreadsheetOfficePageCount: 1,
+        spreadsheetSheets: [
+          {
+            name: 'Sheet1',
+            rows: [
+              ['姓名', '城市', '备注'],
+              ['张三', '北京', '这是一段很长但仍应保留在可滚动表格中的文本'],
+            ],
+            rowCount: 2,
+            columnCount: 3,
+            truncatedRows: false,
+            truncatedColumns: false,
+          },
+        ],
       });
 
       await expect(page.getByTestId('main-layout')).toBeVisible({ timeout: 60_000 });
@@ -1760,10 +1957,119 @@ test.describe('Chat file preview window', () => {
       await expect(csvCard).toBeVisible({ timeout: 20_000 });
       await csvCard.click({ force: true });
 
-      const officePagesSurface = page.getByTestId('chat-file-preview-office-pages-scroller');
-      await expect(officePagesSurface).toBeVisible({ timeout: 20_000 });
-      await expect(page.getByTestId('chat-file-preview-office-page-0')).toBeVisible({ timeout: 20_000 });
-      await expect(page.getByTestId('chat-file-preview-office-page-section-0')).toContainText('第1页/共1页');
+      const spreadsheetSurface = page.getByTestId('chat-file-preview-spreadsheet');
+      await expect(spreadsheetSurface).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('chat-file-preview-office-pages-scroller')).toHaveCount(0);
+      await expect(spreadsheetSurface).toContainText('张三');
+      await expect(spreadsheetSurface).toContainText('这是一段很长但仍应保留在可滚动表格中的文本');
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
+  test('lazy loads large spreadsheet rows and columns while keeping the first row sticky', async ({ launchElectronApp, homeDir }) => {
+    test.setTimeout(180_000);
+
+    const spreadsheetPath = join(homeDir, 'large-grid-preview.xlsx');
+    await writeFile(spreadsheetPath, 'spreadsheet placeholder', 'utf8');
+    const allRows = Array.from({ length: 130 }, (_row, rowIndex) => {
+      return Array.from({ length: 20 }, (_cell, columnIndex) => `R${rowIndex + 1}C${columnIndex + 1}`);
+    });
+
+    const app = await launchElectronApp({ skipSetup: true });
+    const page = await getStableWindow(app);
+
+    try {
+      await installGatewaySessionMocks(app, {
+        sessionKey: SESSION_KEY,
+        messages: [
+          {
+            id: 'assistant-large-spreadsheet-intro',
+            role: 'assistant',
+            content: 'Open the large spreadsheet attachment.',
+            timestamp: Math.floor(Date.now() / 1000) - 10,
+          },
+          {
+            id: 'user-large-spreadsheet-message',
+            role: 'user',
+            content: 'Preview this large sheet.',
+            timestamp: Math.floor(Date.now() / 1000),
+            _attachedFiles: [
+              {
+                fileName: 'large-grid-preview.xlsx',
+                mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                fileSize: 8192,
+                preview: null,
+                filePath: spreadsheetPath,
+              },
+            ],
+          },
+        ],
+      });
+      await installHostApiPreviewMocks(app, {
+        spreadsheetFilePath: spreadsheetPath,
+        spreadsheetFileName: 'large-grid-preview.xlsx',
+        spreadsheetFileSize: 8192,
+        spreadsheetSheets: [
+          {
+            name: 'Huge',
+            rows: allRows.slice(0, 120).map((row) => row.slice(0, 18)),
+            rowCount: 130,
+            columnCount: 20,
+            merges: [
+              { row: 0, column: 0, rowSpan: 2, columnSpan: 2 },
+            ],
+            truncatedRows: true,
+            truncatedColumns: true,
+          },
+        ],
+        spreadsheetRangeRowsBySheet: {
+          Huge: allRows,
+        },
+      });
+
+      await expect(page.getByTestId('main-layout')).toBeVisible({ timeout: 60_000 });
+      await app.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().at(-1);
+        window?.webContents.send('gateway:status-changed', {
+          state: 'running',
+          port: 18789,
+          pid: 12345,
+          connectedAt: Date.now(),
+        });
+      });
+
+      await page.getByTestId(`sidebar-session-${SESSION_KEY}`).click({ force: true });
+      const attachmentList = page.getByTestId('chat-user-attachments');
+      await expect(attachmentList).toBeVisible({ timeout: 20_000 });
+      const spreadsheetCard = attachmentList.getByTestId('chat-file-card').filter({ hasText: 'large-grid-preview.xlsx' }).first();
+      await spreadsheetCard.click({ force: true });
+
+      const spreadsheetSurface = page.getByTestId('chat-file-preview-spreadsheet');
+      await expect(spreadsheetSurface).toBeVisible({ timeout: 20_000 });
+      await expect(spreadsheetSurface).toContainText('R1C1');
+      await expect(spreadsheetSurface).toContainText('R120C18');
+      await expect(spreadsheetSurface).not.toContainText('R121C19');
+      const mergedCell = spreadsheetSurface.getByText('R1C1').first();
+      await expect(mergedCell).toHaveAttribute('rowspan', '2');
+      await expect(mergedCell).toHaveAttribute('colspan', '2');
+      await expect(spreadsheetSurface).not.toContainText('R2C2');
+
+      const spreadsheetGrid = page.getByTestId('chat-file-preview-spreadsheet-grid');
+      await spreadsheetGrid.evaluate((element: HTMLDivElement) => {
+        element.scrollTop = element.scrollHeight;
+        element.dispatchEvent(new Event('scroll', { bubbles: true }));
+      });
+      await expect(spreadsheetSurface).toContainText('R121C1', { timeout: 20_000 });
+      await expect(spreadsheetSurface).toContainText('R130C18');
+
+      await spreadsheetGrid.evaluate((element: HTMLDivElement) => {
+        element.scrollLeft = element.scrollWidth;
+        element.dispatchEvent(new Event('scroll', { bubbles: true }));
+      });
+      await expect(spreadsheetSurface).toContainText('R121C19', { timeout: 20_000 });
+      await expect(spreadsheetSurface).toContainText('R130C20');
+      await expect(page.getByTestId('chat-file-preview-spreadsheet-header-row')).toHaveCSS('position', 'sticky');
     } finally {
       await closeElectronApp(app);
     }

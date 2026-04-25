@@ -5,8 +5,8 @@
  */
 import type { RawMessage, ContentBlock } from '@/stores/chat';
 import {
-  stripInjectedInboundPrelude,
-  stripLeadingInternalHeartbeatMaintenance,
+  splitCompactedInternalMaintenanceLines,
+  sanitizeInboundUserText,
 } from '../../../shared/inbound-user-text';
 
 /** 不参与正文回退拼接的工具/思考类块（避免重复与噪音） */
@@ -47,7 +47,7 @@ function isHeartbeatMaintenanceLine(line: string): boolean {
 }
 
 function summarizeSystemHeartbeatNoise(text: string): string {
-  const lines = text
+  const lines = splitCompactedInternalMaintenanceLines(text)
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
@@ -121,7 +121,7 @@ function summarizeSystemHeartbeatNoise(text: string): string {
 }
 
 function isHeartbeatMaintenanceOnlyText(text: string): boolean {
-  const lines = text
+  const lines = splitCompactedInternalMaintenanceLines(text)
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
@@ -152,12 +152,7 @@ function isHeartbeatMaintenanceOnlyText(text: string): boolean {
  * and the timestamp prefix [Day Date Time Timezone].
  */
 function cleanUserText(text: string): string {
-  const cleaned = stripLeadingInternalHeartbeatMaintenance(stripInjectedInboundPrelude(text
-    // Remove [media attached: path (mime) | path] references
-    .replace(/\s*\[media attached:[^\]]*\]/g, '')
-    // Remove [message_id: uuid]
-    .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')))
-    .trim();
+  const cleaned = sanitizeInboundUserText(text);
 
   if (isPreCompactionMemoryFlushPrompt(cleaned)) {
     return '';
@@ -189,6 +184,44 @@ function extractRawText(message: RawMessage | unknown): string {
   return '';
 }
 
+function firstNonEmptyString(values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return '';
+}
+
+export function extractAssistantRuntimeErrorText(message: RawMessage | unknown): string {
+  if (!message || typeof message !== 'object') return '';
+  const msg = message as Record<string, unknown>;
+  if (msg.role !== 'assistant') return '';
+
+  const details = msg.details && typeof msg.details === 'object'
+    ? msg.details as Record<string, unknown>
+    : null;
+  const stopReason = typeof msg.stopReason === 'string' ? msg.stopReason.trim().toLowerCase() : '';
+  const errorText = firstNonEmptyString([
+    msg.errorMessage,
+    msg.error_message,
+    msg.error,
+    msg.reason,
+    details?.errorMessage,
+    details?.error_message,
+    details?.error,
+    details?.reason,
+  ]);
+
+  if (errorText) {
+    return errorText;
+  }
+
+  return stopReason === 'error'
+    ? 'The model stopped with an error before returning content.'
+    : '';
+}
+
 export function isInternalMaintenanceTurnUserMessage(message: RawMessage | unknown): boolean {
   if (!message || typeof message !== 'object') return false;
   const msg = message as Record<string, unknown>;
@@ -197,12 +230,11 @@ export function isInternalMaintenanceTurnUserMessage(message: RawMessage | unkno
   const rawText = extractRawText(message);
   if (!rawText.trim()) return false;
 
-  const normalized = stripLeadingInternalHeartbeatMaintenance(stripInjectedInboundPrelude(rawText
-    .replace(/\s*\[media attached:[^\]]*\]/g, '')
-    .replace(/\s*\[message_id:\s*[^\]]+\]/g, '')))
-    .trim();
+  const normalized = sanitizeInboundUserText(rawText);
 
-  if (!normalized) return true;
+  if (!normalized) {
+    return !Array.isArray(msg._attachedFiles) || msg._attachedFiles.length === 0;
+  }
 
   return isPreCompactionMemoryFlushPrompt(normalized) || isHeartbeatMaintenanceOnlyText(normalized);
 }
@@ -264,6 +296,10 @@ export function extractText(message: RawMessage | unknown): string {
   // Strip Gateway metadata from user messages for clean display
   if (isUser && result) {
     result = cleanUserText(result);
+  }
+
+  if (!isUser && !result) {
+    return extractAssistantRuntimeErrorText(message);
   }
 
   return result;

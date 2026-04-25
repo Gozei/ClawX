@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stripSystemdSupervisorEnv } from '@electron/gateway/config-sync-env';
+import { stripSystemdSupervisorEnv, withUtf8RuntimeEnv } from '@electron/gateway/config-sync-env';
 
 describe('stripSystemdSupervisorEnv', () => {
   it('removes systemd supervisor marker env vars', () => {
@@ -41,5 +41,24 @@ describe('stripSystemdSupervisorEnv', () => {
 
     expect(env).toEqual(before);
     expect(result).toEqual({ VALUE: '1' });
+  });
+});
+
+describe('withUtf8RuntimeEnv', () => {
+  it('sets UTF-8 defaults without removing existing env vars', () => {
+    const result = withUtf8RuntimeEnv({
+      PATH: '/usr/bin:/bin',
+      OPENCLAW_GATEWAY_TOKEN: 'token',
+    });
+
+    expect(result).toMatchObject({
+      PATH: '/usr/bin:/bin',
+      OPENCLAW_GATEWAY_TOKEN: 'token',
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1',
+      LANG: 'C.UTF-8',
+      LC_ALL: 'C.UTF-8',
+      LC_CTYPE: 'C.UTF-8',
+    });
   });
 });

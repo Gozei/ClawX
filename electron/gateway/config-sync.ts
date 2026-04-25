@@ -28,7 +28,7 @@ import { syncDreamModeToOpenClawConfig } from '../utils/dream-mode';
 import { logger } from '../utils/logger';
 import { prependPathEntry } from '../utils/env-path';
 import { copyPluginFromNodeModules, fixupPluginManifest, cpSyncSafe } from '../utils/plugin-install';
-import { stripSystemdSupervisorEnv } from './config-sync-env';
+import { stripSystemdSupervisorEnv, withUtf8RuntimeEnv } from './config-sync-env';
 import { shouldDisableManagedGatewayBonjour, summarizeManagedGatewayDiscovery } from './discovery-defaults';
 
 
@@ -488,7 +488,7 @@ export async function prepareGatewayLaunchContext(port: number): Promise<Gateway
   const baseEnvPatched = binPathExists
     ? prependPathEntry(baseEnvRecord, binPath).env
     : baseEnvRecord;
-  const forkEnv: Record<string, string | undefined> = {
+  const forkEnv: Record<string, string | undefined> = withUtf8RuntimeEnv({
     ...stripSystemdSupervisorEnv(baseEnvPatched),
     ...providerEnv,
     ...uvEnv,
@@ -509,7 +509,7 @@ export async function prepareGatewayLaunchContext(port: number): Promise<Gateway
     CLAWDBOT_SKIP_CHANNELS: skipChannels ? '1' : '',
     OPENCLAW_NO_RESPAWN: '1',
     ...(disableBonjour ? { OPENCLAW_DISABLE_BONJOUR: '1' } : {}),
-  };
+  });
 
   return {
     appSettings,

@@ -74,6 +74,63 @@ async function installGatewaySessionMocks(
 }
 
 test.describe('Chat file card layout', () => {
+  test('restores every numbered media attachment from history text with spaced paths', async ({ launchElectronApp, homeDir }) => {
+    test.setTimeout(120_000);
+
+    const sessionKey = 'agent:main:file-card-multi-history';
+    const firstFileName = 'first multi attachment.txt';
+    const secondFileName = 'second multi attachment.md';
+    const firstPath = join(homeDir, firstFileName);
+    const secondPath = join(homeDir, secondFileName);
+
+    await Promise.all([
+      writeFile(firstPath, 'first attachment', 'utf8'),
+      writeFile(secondPath, '# second attachment\n', 'utf8'),
+    ]);
+
+    const app = await launchElectronApp({ skipSetup: true });
+    const page = await getStableWindow(app);
+
+    try {
+      await installGatewaySessionMocks(app, {
+        sessionKey,
+        messages: [
+          {
+            id: 'user-file-multi-history',
+            role: 'user',
+            content: [
+              `Please review these files.`,
+              `[media attached 1/2: ${firstPath} (text/plain) | ${firstPath}]`,
+              `[media attached 2/2: ${secondPath} (text/markdown) | ${secondPath}]`,
+            ].join('\n'),
+            timestamp: Math.floor(Date.now() / 1000),
+          },
+        ],
+      });
+
+      await expect(page.getByTestId('main-layout')).toBeVisible({ timeout: 60_000 });
+      await app.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().at(-1);
+        window?.webContents.send('gateway:status-changed', {
+          state: 'running',
+          port: 18789,
+          pid: 12345,
+          connectedAt: Date.now(),
+        });
+      });
+
+      await page.getByTestId(`sidebar-session-${sessionKey}`).click({ force: true });
+
+      const attachmentList = page.getByTestId('chat-user-attachments');
+      await expect(attachmentList).toBeVisible({ timeout: 20_000 });
+      await expect(attachmentList.getByTestId('chat-file-card')).toHaveCount(2);
+      await expect(attachmentList).toContainText(firstFileName);
+      await expect(attachmentList).toContainText(secondFileName);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
   test('centers short file names without reserving a blank second row', async ({ launchElectronApp, homeDir }) => {
     test.setTimeout(120_000);
 

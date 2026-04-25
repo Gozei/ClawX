@@ -203,6 +203,293 @@ describe('chat store session resume', () => {
     expect(next.pendingFinal).toBe(true);
   });
 
+  it('keeps a just-finished assistant reply when quiet history refresh lags behind persistence', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [
+            { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+          ],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+        {
+          id: 'assistant-local-final',
+          role: 'assistant',
+          content: 'Visible final answer',
+          timestamp: assistantTimestampSeconds,
+        },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: null,
+    });
+
+    await useChatStore.getState().loadHistory(true);
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual([
+      'user-1',
+      'assistant-local-final',
+    ]);
+    expect(next.sending).toBe(false);
+    expect(next.pendingFinal).toBe(false);
+  });
+
+  it('keeps local failed turns when an explicit history reload only has older transcript messages', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [
+            { id: 'user-old', role: 'user', content: '在线吗', timestamp: userTimestampSeconds },
+            {
+              id: 'assistant-old-error',
+              role: 'assistant',
+              content: 'Unknown error (no error details in response)',
+              timestamp: assistantTimestampSeconds,
+              isError: true,
+            },
+          ],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+    const newerUserTimestampSeconds = userTimestampSeconds + 100;
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        { id: 'user-old', role: 'user', content: '在线吗', timestamp: userTimestampSeconds },
+        {
+          id: 'assistant-old-error',
+          role: 'assistant',
+          content: 'Unknown error (no error details in response)',
+          timestamp: assistantTimestampSeconds,
+          isError: true,
+        },
+        { id: 'user-new', role: 'user', content: '你是什么模型', timestamp: newerUserTimestampSeconds },
+        {
+          id: 'assistant-new-timeout',
+          role: 'assistant',
+          content: '消息发送失败：请求超时，请稍后重试。',
+          timestamp: newerUserTimestampSeconds + 1,
+          isError: true,
+        },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: null,
+    });
+
+    await useChatStore.getState().loadHistory();
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual([
+      'user-old',
+      'assistant-old-error',
+      'user-new',
+      'assistant-new-timeout',
+    ]);
+    expect(next.sending).toBe(false);
+    expect(next.pendingFinal).toBe(false);
+  });
+
+  it('restores the last visible in-flight reply from local storage after refresh while history is behind', async () => {
+    vi.setSystemTime(new Date('2026-04-25T02:49:00.000Z'));
+    const sessionKey = 'agent:main:main';
+    const userMessage = {
+      id: 'user-visible',
+      role: 'user',
+      content: 'Generate every file type',
+      timestamp: Date.now() / 1000,
+    };
+    const assistantDraft = {
+      id: 'assistant-visible-draft',
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'Creating the first batch of files.' },
+        { type: 'text', text: '斌哥，我来生成所有这些类型的测试文件。' },
+      ],
+      timestamp: (Date.now() + 1000) / 1000,
+    };
+
+    window.localStorage.setItem(`clawx:chat-session-view:v1:${sessionKey}`, JSON.stringify({
+      savedAt: Date.now(),
+      snapshot: {
+        messages: [userMessage, assistantDraft],
+        loading: false,
+        error: null,
+        sessionNotice: null,
+        sending: true,
+        activeRunId: 'run-visible',
+        streamingText: '',
+        streamingMessage: null,
+        streamingTools: [],
+        sendStage: 'running',
+        pendingFinal: false,
+        lastUserMessageAt: Date.now(),
+        pendingToolImages: [],
+        thinkingLevel: null,
+      },
+    }));
+
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [userMessage],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+    useChatStore.setState({
+      currentSessionKey: sessionKey,
+      currentAgentId: 'main',
+      sessions: [{ key: sessionKey }],
+      messages: [],
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      sendStage: null,
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().loadHistory(true);
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual(['user-visible', 'assistant-visible-draft']);
+    expect(next.sending).toBe(true);
+    expect(next.pendingFinal).toBe(true);
+    expect(next.sendStage).toBe('running');
+  });
+
+  it('restores visible streaming text from local storage after refresh while history is behind', async () => {
+    vi.setSystemTime(new Date('2026-04-25T02:49:00.000Z'));
+    const sessionKey = 'agent:main:main';
+    const persistedSessionKey = 'agent:main:session-live';
+    const userMessage = {
+      id: 'user-visible-stream',
+      role: 'user',
+      content: 'Find flights',
+      timestamp: Date.now() / 1000,
+    };
+    const streamingText = 'Opening the travel site and checking tomorrow flights now.';
+
+    window.localStorage.setItem(`clawx:chat-session-view:v1:${persistedSessionKey}`, JSON.stringify({
+      savedAt: Date.now(),
+      snapshot: {
+        messages: [userMessage],
+        loading: false,
+        error: null,
+        sessionNotice: null,
+        sending: true,
+        activeRunId: 'run-visible-stream',
+        streamingText,
+        streamingMessage: null,
+        streamingTools: [],
+        sendStage: 'running',
+        pendingFinal: false,
+        lastUserMessageAt: Date.now(),
+        pendingToolImages: [],
+        thinkingLevel: null,
+      },
+    }));
+
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [userMessage],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+    useChatStore.setState({
+      currentSessionKey: sessionKey,
+      currentAgentId: 'main',
+      sessions: [{ key: sessionKey }],
+      messages: [],
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      sendStage: null,
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().loadHistory(true);
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.content)).toEqual(['Find flights', streamingText]);
+    expect(next.sending).toBe(true);
+    expect(next.pendingFinal).toBe(true);
+    expect(next.sendStage).toBe('running');
+  });
+
   it('clears the running state when history already includes the final assistant reply even without pendingFinal', async () => {
     gatewayRpcMock.mockReset();
     gatewayRpcMock.mockImplementation((method: string) => {

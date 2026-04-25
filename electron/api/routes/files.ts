@@ -117,6 +117,8 @@ const MAX_PRESENTATION_PREVIEW_FILE_SIZE_BYTES = 150 * 1024 * 1024;
 const MAX_TEXT_PREVIEW_CHARS = 160_000;
 const MAX_SPREADSHEET_PREVIEW_ROWS = 120;
 const MAX_SPREADSHEET_PREVIEW_COLUMNS = 18;
+const MAX_SPREADSHEET_RANGE_ROWS = 1000;
+const MAX_SPREADSHEET_RANGE_COLUMNS = 80;
 const MAX_PRESENTATION_PREVIEW_SLIDES = 40;
 const MAX_PRESENTATION_SLIDE_PARAGRAPHS = 16;
 const POWERPOINT_EXPORT_TARGET_LONG_EDGE_PX = 1600;
@@ -204,6 +206,9 @@ function execFileAsync(
   file: string,
   args: string[],
   timeoutMs: number,
+  options?: {
+    env?: NodeJS.ProcessEnv;
+  },
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     execFile(
@@ -214,6 +219,7 @@ function execFileAsync(
         timeout: timeoutMs,
         windowsHide: true,
         maxBuffer: 1024 * 1024 * 8,
+        env: options?.env,
       },
       (error, stdout, stderr) => {
         if (error) {
@@ -311,6 +317,9 @@ type FilePreviewPayload =
         rows: string[][];
         rowCount: number;
         columnCount: number;
+        merges: SpreadsheetPreviewMerge[];
+        rowOffset?: number;
+        columnOffset?: number;
         truncatedRows: boolean;
         truncatedColumns: boolean;
       }>;
@@ -387,6 +396,30 @@ type PresentationImageExportResult = {
   slideHeight: number;
   slideCount: number;
   truncatedSlides: boolean;
+};
+
+type SpreadsheetPreviewRange = {
+  name: string;
+  rows: string[][];
+  rowCount: number;
+  columnCount: number;
+  merges: SpreadsheetPreviewMerge[];
+  rowOffset: number;
+  columnOffset: number;
+  truncatedRows: boolean;
+  truncatedColumns: boolean;
+};
+
+type SpreadsheetPreviewMerge = {
+  row: number;
+  column: number;
+  rowSpan: number;
+  columnSpan: number;
+};
+
+type SpreadsheetRangeLike = {
+  s: { r: number; c: number };
+  e: { r: number; c: number };
 };
 
 type PresentationSlideSize = {
@@ -681,6 +714,18 @@ function clampTextPreview(content: string): { content: string; truncated: boolea
   };
 }
 
+function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, Math.floor(numeric)));
+}
+
+function clampSpreadsheetOffset(value: unknown, totalCount: number): number {
+  return clampInteger(value, 0, 0, Math.max(0, totalCount - 1));
+}
+
 function stripLeadingBom(value: string): string {
   return value.replace(/^\uFEFF/, '');
 }
@@ -815,9 +860,7 @@ function createUnavailablePreview(
 }
 
 function isLibreOfficeBackedPreviewExtension(extension: string): boolean {
-  return PRESENTATION_EXTENSIONS.has(extension)
-    || WORD_EXTENSIONS.has(extension)
-    || SPREADSHEET_EXTENSIONS.has(extension);
+  return PRESENTATION_EXTENSIONS.has(extension);
 }
 
 async function shouldPromptForLibreOfficePreview(extension: string): Promise<boolean> {
@@ -995,6 +1038,50 @@ function encodePowerShellCommand(script: string): string {
 
 function quotePowerShellString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
+}
+
+function formatChildProcessError(error: unknown): string {
+  if (!error || typeof error !== 'object') {
+    return String(error);
+  }
+
+  const candidate = error as {
+    message?: unknown;
+    code?: unknown;
+    signal?: unknown;
+    stderr?: unknown;
+    stdout?: unknown;
+  };
+  const parts = [
+    typeof candidate.message === 'string' ? candidate.message : null,
+    candidate.code ? `code=${String(candidate.code)}` : null,
+    candidate.signal ? `signal=${String(candidate.signal)}` : null,
+    typeof candidate.stderr === 'string' && candidate.stderr.trim()
+      ? `stderr=${candidate.stderr.trim().slice(0, 2000)}`
+      : null,
+    typeof candidate.stdout === 'string' && candidate.stdout.trim()
+      ? `stdout=${candidate.stdout.trim().slice(0, 1000)}`
+      : null,
+  ].filter(Boolean);
+
+  return parts.join('; ') || String(error);
+}
+
+function buildLibreOfficePreviewEnv(profileDir: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    OOO_DISABLE_RECOVERY: '1',
+  };
+
+  if (process.platform === 'linux') {
+    env.SAL_USE_VCLPLUGIN = env.SAL_USE_VCLPLUGIN || 'svp';
+    env.FONTCONFIG_USE_MMAP = env.FONTCONFIG_USE_MMAP || '0';
+    env.HOME = profileDir;
+  } else if (process.platform === 'darwin') {
+    env.HOME = profileDir;
+  }
+
+  return env;
 }
 
 function extractSlideNumberFromFileName(fileName: string, fallback: number): number {
@@ -1213,8 +1300,13 @@ async function runLibreOfficePresentationImageExport(options: {
         options.filePath,
       ],
       LIBREOFFICE_EXPORT_TIMEOUT_MS,
+      { env: buildLibreOfficePreviewEnv(options.profileDir) },
     );
-  } catch {
+  } catch (error) {
+    console.warn('[file-preview] LibreOffice presentation image export failed', {
+      filePath: options.filePath,
+      error: formatChildProcessError(error),
+    });
     return false;
   }
 
@@ -1608,48 +1700,6 @@ function buildPresentationPreviewPayload(
   };
 }
 
-async function warmPresentationPreviewCache(
-  filePath: string,
-  fileName: string,
-  mimeType: string,
-  fileSize: number,
-): Promise<void> {
-  const extension = normalizeExtension(filePath, fileName, mimeType);
-  if (!PRESENTATION_EXTENSIONS.has(extension)) {
-    return;
-  }
-
-  try {
-    const fsP = await import('node:fs/promises');
-    const stat = await fsP.stat(filePath);
-    const previewId = buildPresentationPreviewId(filePath, fileSize, stat.mtimeMs);
-    const cachedEntry = await loadPresentationPreviewCacheEntry(previewId);
-    if (cachedEntry) {
-      return;
-    }
-
-    const inFlight = presentationPreviewBuilds.get(previewId);
-    if (inFlight) {
-      await inFlight;
-      return;
-    }
-
-    const buffer = await fsP.readFile(filePath);
-    await ensurePresentationPreviewCache({
-      buffer,
-      filePath,
-      fileSize,
-      modifiedAtMs: stat.mtimeMs,
-    });
-  } catch (error) {
-    console.warn('[file-preview] Background PPT preview warmup failed', {
-      filePath,
-      fileSize,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
 function buildOfficePagesPreviewId(filePath: string, fileSize: number, modifiedAtMs: number): string {
   return crypto
     .createHash('sha256')
@@ -1810,16 +1860,19 @@ async function materializeLibreOfficeInputForPreview(options: {
   extension: string;
   workDir: string;
 }): Promise<string> {
-  if (options.extension !== '.csv') {
-    return options.filePath;
+  const fsP = await import('node:fs/promises');
+  const extension = options.extension || extname(options.filePath) || '.bin';
+  const sourcePath = join(options.workDir, `source${extension}`);
+
+  if (options.extension === '.csv') {
+    const buffer = await fsP.readFile(options.filePath);
+    const decoded = decodeCsvBuffer(buffer);
+    await fsP.writeFile(sourcePath, decoded, 'utf8');
+    return sourcePath;
   }
 
-  const fsP = await import('node:fs/promises');
-  const buffer = await fsP.readFile(options.filePath);
-  const decoded = decodeCsvBuffer(buffer);
-  const csvPath = join(options.workDir, 'source.csv');
-  await fsP.writeFile(csvPath, decoded, 'utf8');
-  return csvPath;
+  await fsP.copyFile(options.filePath, sourcePath);
+  return sourcePath;
 }
 
 async function convertOfficeDocumentToPdfWithLibreOffice(options: {
@@ -1874,6 +1927,7 @@ async function convertOfficeDocumentToPdfWithLibreOffice(options: {
         sourcePath,
       ],
       LIBREOFFICE_PDF_EXPORT_TIMEOUT_MS,
+      { env: buildLibreOfficePreviewEnv(profileDir) },
     );
 
     const exportedPdf = (await fsP.readdir(exportDir, { withFileTypes: true }))
@@ -1887,6 +1941,13 @@ async function convertOfficeDocumentToPdfWithLibreOffice(options: {
     const targetPdfPath = buildOfficePagesPreviewPdfPath(options.dirPath);
     await fsP.copyFile(exportedPdf, targetPdfPath);
     return targetPdfPath;
+  } catch (error) {
+    console.warn('[file-preview] LibreOffice PDF export failed', {
+      filePath: options.filePath,
+      extension: options.extension,
+      error: formatChildProcessError(error),
+    });
+    return null;
   } finally {
     await fsP.rm(exportDir, { recursive: true, force: true }).catch(() => undefined);
     await fsP.rm(profileDir, { recursive: true, force: true }).catch(() => undefined);
@@ -2060,8 +2121,13 @@ function addDocxHeadingAnchors(html: string): {
 }
 async function generateImagePreview(filePath: string, mimeType: string): Promise<string | null> {
   try {
-    const img = nativeImage.createFromPath(filePath);
-    if (img.isEmpty()) return null;
+    const { readFile } = await import('node:fs/promises');
+    const buf = await readFile(filePath);
+    const img = nativeImage.createFromBuffer(buf);
+    if (img.isEmpty()) {
+      return `data:${mimeType};base64,${buf.toString('base64')}`;
+    }
+
     const size = img.getSize();
     const maxDim = 512;
     if (size.width > maxDim || size.height > maxDim) {
@@ -2070,8 +2136,6 @@ async function generateImagePreview(filePath: string, mimeType: string): Promise
         : img.resize({ height: maxDim });
       return `data:image/png;base64,${resized.toPNG().toString('base64')}`;
     }
-    const { readFile } = await import('node:fs/promises');
-    const buf = await readFile(filePath);
     return `data:${mimeType};base64,${buf.toString('base64')}`;
   } catch {
     return null;
@@ -2172,12 +2236,11 @@ async function buildDocxPreviewSource(
   };
 }
 
-async function buildSpreadsheetPreview(
+async function readSpreadsheetWorkbook(
   filePath: string,
   fileName: string,
   mimeType: string,
-  fileSize: number,
-): Promise<FilePreviewPayload> {
+): Promise<{ XLSX: typeof import('xlsx'); workbook: import('xlsx').WorkBook }> {
   const { readFile } = await import('node:fs/promises');
   const XLSX = await import('xlsx');
   const buffer = await readFile(filePath);
@@ -2186,29 +2249,156 @@ async function buildSpreadsheetPreview(
     ? XLSX.read(decodeCsvBuffer(buffer), { type: 'string', cellDates: false })
     : XLSX.read(buffer, { type: 'buffer', cellDates: false });
 
-  const sheets = workbook.SheetNames.slice(0, 8).map((sheetName) => {
-    const sheet = workbook.Sheets[sheetName];
-    const range = sheet?.['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : null;
-    const rowCount = range ? range.e.r - range.s.r + 1 : 0;
-    const columnCount = range ? range.e.c - range.s.c + 1 : 0;
-    const rows = (XLSX.utils.sheet_to_json(sheet, {
-      header: 1,
-      raw: false,
-      defval: '',
-      blankrows: false,
-    }) as unknown[][])
-      .slice(0, MAX_SPREADSHEET_PREVIEW_ROWS)
-      .map((row) => row.slice(0, MAX_SPREADSHEET_PREVIEW_COLUMNS).map((cell) => String(cell ?? '')));
+  return { XLSX, workbook };
+}
+
+function isSpreadsheetRangeLike(value: unknown): value is SpreadsheetRangeLike {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<SpreadsheetRangeLike>;
+  return typeof candidate.s?.r === 'number'
+    && typeof candidate.s?.c === 'number'
+    && typeof candidate.e?.r === 'number'
+    && typeof candidate.e?.c === 'number';
+}
+
+function extractSpreadsheetPreviewMerges(
+  sheet: import('xlsx').WorkSheet,
+  requestedRange: SpreadsheetRangeLike,
+): SpreadsheetPreviewMerge[] {
+  const mergeRanges = Array.isArray(sheet['!merges'])
+    ? sheet['!merges'].filter(isSpreadsheetRangeLike)
+    : [];
+
+  return mergeRanges.flatMap((merge) => {
+    const startsInsideRequestedRange = merge.s.r >= requestedRange.s.r
+      && merge.s.r <= requestedRange.e.r
+      && merge.s.c >= requestedRange.s.c
+      && merge.s.c <= requestedRange.e.c;
+    if (!startsInsideRequestedRange) {
+      return [];
+    }
+
+    const visibleEndRow = Math.min(merge.e.r, requestedRange.e.r);
+    const visibleEndColumn = Math.min(merge.e.c, requestedRange.e.c);
+    const rowSpan = visibleEndRow - merge.s.r + 1;
+    const columnSpan = visibleEndColumn - merge.s.c + 1;
+    if (rowSpan <= 1 && columnSpan <= 1) {
+      return [];
+    }
 
     return {
-      name: sheetName,
-      rows,
-      rowCount,
-      columnCount,
-      truncatedRows: rowCount > MAX_SPREADSHEET_PREVIEW_ROWS,
-      truncatedColumns: columnCount > MAX_SPREADSHEET_PREVIEW_COLUMNS,
+      row: merge.s.r - requestedRange.s.r,
+      column: merge.s.c - requestedRange.s.c,
+      rowSpan,
+      columnSpan,
     };
   });
+}
+
+function extractSpreadsheetPreviewRange(
+  XLSX: typeof import('xlsx'),
+  workbook: import('xlsx').WorkBook,
+  sheetName: string,
+  rowOffsetInput: unknown,
+  columnOffsetInput: unknown,
+  rowLimitInput: unknown = MAX_SPREADSHEET_PREVIEW_ROWS,
+  columnLimitInput: unknown = MAX_SPREADSHEET_PREVIEW_COLUMNS,
+): SpreadsheetPreviewRange | null {
+  const sheet = workbook.Sheets[sheetName];
+  if (!sheet) {
+    return null;
+  }
+
+  const range = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : null;
+  const rowCount = range ? range.e.r - range.s.r + 1 : 0;
+  const columnCount = range ? range.e.c - range.s.c + 1 : 0;
+  const rowLimit = clampInteger(rowLimitInput, MAX_SPREADSHEET_PREVIEW_ROWS, 1, MAX_SPREADSHEET_RANGE_ROWS);
+  const columnLimit = clampInteger(columnLimitInput, MAX_SPREADSHEET_PREVIEW_COLUMNS, 1, MAX_SPREADSHEET_RANGE_COLUMNS);
+  const rowOffset = clampSpreadsheetOffset(rowOffsetInput, rowCount);
+  const columnOffset = clampSpreadsheetOffset(columnOffsetInput, columnCount);
+
+  if (!range || rowCount === 0 || columnCount === 0) {
+    return {
+      name: sheetName,
+      rows: [],
+      rowCount,
+      columnCount,
+      merges: [],
+      rowOffset: 0,
+      columnOffset: 0,
+      truncatedRows: false,
+      truncatedColumns: false,
+    };
+  }
+
+  const requestedRange = {
+    s: {
+      r: range.s.r + rowOffset,
+      c: range.s.c + columnOffset,
+    },
+    e: {
+      r: Math.min(range.e.r, range.s.r + rowOffset + rowLimit - 1),
+      c: Math.min(range.e.c, range.s.c + columnOffset + columnLimit - 1),
+    },
+  };
+  const rows = (XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    raw: false,
+    defval: '',
+    blankrows: true,
+    range: requestedRange,
+  }) as unknown[][])
+    .map((row) => row.slice(0, columnLimit).map((cell) => String(cell ?? '')));
+  const merges = extractSpreadsheetPreviewMerges(sheet, requestedRange);
+
+  return {
+    name: sheetName,
+    rows,
+    rowCount,
+    columnCount,
+    merges,
+    rowOffset,
+    columnOffset,
+    truncatedRows: rowOffset + rowLimit < rowCount,
+    truncatedColumns: columnOffset + columnLimit < columnCount,
+  };
+}
+
+async function buildSpreadsheetRangePreview(
+  filePath: string,
+  fileName: string,
+  mimeType: string,
+  sheetName: string,
+  rowOffset: unknown,
+  columnOffset: unknown,
+  rowLimit?: unknown,
+  columnLimit?: unknown,
+): Promise<SpreadsheetPreviewRange | null> {
+  const { XLSX, workbook } = await readSpreadsheetWorkbook(filePath, fileName, mimeType);
+  return extractSpreadsheetPreviewRange(
+    XLSX,
+    workbook,
+    sheetName,
+    rowOffset,
+    columnOffset,
+    rowLimit,
+    columnLimit,
+  );
+}
+
+async function buildSpreadsheetPreview(
+  filePath: string,
+  fileName: string,
+  mimeType: string,
+  fileSize: number,
+): Promise<FilePreviewPayload> {
+  const { XLSX, workbook } = await readSpreadsheetWorkbook(filePath, fileName, mimeType);
+  const sheets = workbook.SheetNames.slice(0, 8)
+    .map((sheetName) => extractSpreadsheetPreviewRange(XLSX, workbook, sheetName, 0, 0))
+    .filter((sheet): sheet is SpreadsheetPreviewRange => Boolean(sheet));
 
   return {
     kind: 'spreadsheet',
@@ -2228,6 +2418,12 @@ async function buildPresentationPreview(
 ): Promise<FilePreviewPayload> {
   const fsP = await import('node:fs/promises');
   const stat = await fsP.stat(filePath);
+  const extension = normalizeExtension(filePath, fileName, mimeType);
+  const officePagesPreview = await buildOfficePagesPreview(filePath, fileName, mimeType, fileSize, extension);
+  if (officePagesPreview) {
+    return officePagesPreview;
+  }
+
   const previewId = buildPresentationPreviewId(filePath, fileSize, stat.mtimeMs);
 
   const cachedEntry = await loadPresentationPreviewCacheEntry(previewId);
@@ -2307,18 +2503,10 @@ async function buildFilePreview(
   }
 
   if (WORD_EXTENSIONS.has(extension)) {
-    const officePagesPreview = await buildOfficePagesPreview(filePath, fileName, mimeType, fileSize, extension);
-    if (officePagesPreview) {
-      return officePagesPreview;
-    }
     return await buildDocxPreview(filePath, fileName, mimeType, fileSize);
   }
 
   if (SPREADSHEET_EXTENSIONS.has(extension)) {
-    const officePagesPreview = await buildOfficePagesPreview(filePath, fileName, mimeType, fileSize, extension);
-    if (officePagesPreview) {
-      return officePagesPreview;
-    }
     return await buildSpreadsheetPreview(filePath, fileName, mimeType, fileSize);
   }
 
@@ -2414,7 +2602,6 @@ export async function handleFileRoutes(
           ? await generateImagePreview(stagedPath, mimeType)
           : null;
         results.push({ id, fileName, mimeType, fileSize: s.size, stagedPath, preview });
-        void warmPresentationPreviewCache(stagedPath, fileName, mimeType, s.size);
       }
       sendJson(res, 200, results);
     } catch (error) {
@@ -2443,7 +2630,6 @@ export async function handleFileRoutes(
       const preview = mimeType.startsWith('image/')
         ? await generateImagePreview(stagedPath, mimeType)
         : null;
-      void warmPresentationPreviewCache(stagedPath, body.fileName, mimeType, buffer.length);
       sendJson(res, 200, {
         id,
         fileName: body.fileName,
@@ -2501,6 +2687,16 @@ export async function handleFileRoutes(
     return true;
   }
 
+  if (url.pathname === '/api/files/exists' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{ filePath?: string }>(req);
+      sendJson(res, 200, { exists: typeof body.filePath === 'string' && existsSync(body.filePath) });
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
   if (url.pathname === '/api/files/libreoffice-runtime/cancel' && req.method === 'POST') {
     try {
       const body: { jobId?: string } = await parseJsonBody<{ jobId?: string }>(req).catch(() => ({}));
@@ -2522,6 +2718,61 @@ export async function handleFileRoutes(
       const stat = await fsP.stat(body.filePath);
       const preview = await buildFilePreview(body.filePath, fileName, mimeType, stat.size);
       sendJson(res, 200, preview);
+    } catch (error) {
+      sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === '/api/files/preview-spreadsheet-range' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody<{
+        filePath: string;
+        fileName?: string;
+        mimeType?: string;
+        sheetName?: string;
+        rowOffset?: number;
+        columnOffset?: number;
+        rowLimit?: number;
+        columnLimit?: number;
+      }>(req);
+      const fsP = await import('node:fs/promises');
+      const fileName = body.fileName || basename(body.filePath) || 'file.xlsx';
+      const extension = normalizeExtension(body.filePath, fileName, body.mimeType);
+      const mimeType = body.mimeType || getMimeType(extension);
+      if (!SPREADSHEET_EXTENSIONS.has(extension)) {
+        sendJson(res, 400, { success: false, error: 'Only spreadsheet files support range preview requests' });
+        return true;
+      }
+
+      const stat = await fsP.stat(body.filePath);
+      if (stat.size > MAX_OFFICE_DOCUMENT_PREVIEW_FILE_SIZE_BYTES) {
+        sendJson(res, 413, { success: false, error: 'Spreadsheet file exceeds the inline preview size limit' });
+        return true;
+      }
+
+      const sheetName = body.sheetName?.trim();
+      if (!sheetName) {
+        sendJson(res, 400, { success: false, error: 'Missing spreadsheet sheet name' });
+        return true;
+      }
+
+      const range = await buildSpreadsheetRangePreview(
+        body.filePath,
+        fileName,
+        mimeType,
+        sheetName,
+        body.rowOffset,
+        body.columnOffset,
+        body.rowLimit,
+        body.columnLimit,
+      );
+      if (!range) {
+        sendJson(res, 404, { success: false, error: 'Spreadsheet sheet not found' });
+        return true;
+      }
+
+      sendJson(res, 200, range);
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
     }
