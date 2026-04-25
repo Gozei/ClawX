@@ -6,6 +6,8 @@ import { join } from 'node:path';
 
 const parseJsonBodyMock = vi.fn();
 const sendJsonMock = vi.fn();
+const ensureWeChatPluginInstalledMock = vi.fn();
+const ensureWeChatPluginRegistrationMock = vi.fn();
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
 let tempHomeDir: string | null = null;
@@ -14,6 +16,18 @@ vi.mock('@electron/api/route-utils', () => ({
   parseJsonBody: (...args: unknown[]) => parseJsonBodyMock(...args),
   sendJson: (...args: unknown[]) => sendJsonMock(...args),
 }));
+
+vi.mock('@electron/utils/plugin-install', () => ({
+  ensureWeChatPluginInstalled: (...args: unknown[]) => ensureWeChatPluginInstalledMock(...args),
+}));
+
+vi.mock('@electron/utils/channel-config', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@electron/utils/channel-config')>();
+  return {
+    ...actual,
+    ensureWeChatPluginRegistration: (...args: unknown[]) => ensureWeChatPluginRegistrationMock(...args),
+  };
+});
 
 async function seedCronJobs(jobs: unknown[]) {
   tempHomeDir = await mkdtemp(join(tmpdir(), 'clawx-cron-route-'));
@@ -33,6 +47,8 @@ describe('handleCronRoutes', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.resetAllMocks();
+    ensureWeChatPluginInstalledMock.mockReturnValue({ installed: true });
+    ensureWeChatPluginRegistrationMock.mockResolvedValue(false);
     tempHomeDir = null;
     process.env.HOME = originalHome;
     process.env.USERPROFILE = originalUserProfile;
@@ -217,6 +233,7 @@ describe('handleCronRoutes', () => {
       delivery: { mode: 'announce', channel: 'openclaw-weixin', to: 'wechat:wxid_target', accountId: 'wechat-bot' },
       state: {},
     });
+    const debouncedRestart = vi.fn();
 
     const { handleCronRoutes } = await import('@electron/api/routes/cron');
     const handled = await handleCronRoutes(
@@ -224,20 +241,117 @@ describe('handleCronRoutes', () => {
       {} as ServerResponse,
       new URL('http://127.0.0.1:13210/api/cron/jobs'),
       {
-        gatewayManager: { rpc },
+        gatewayManager: { rpc, debouncedRestart, getStatus: () => ({ state: 'running' }) },
       } as never,
     );
 
     expect(handled).toBe(true);
+    expect(ensureWeChatPluginInstalledMock).toHaveBeenCalled();
+    expect(ensureWeChatPluginRegistrationMock).toHaveBeenCalled();
     expect(rpc).toHaveBeenCalledWith('cron.add', expect.objectContaining({
-      delivery: expect.objectContaining({ mode: 'announce', to: 'wechat:wxid_target' }),
+      delivery: {
+        mode: 'announce',
+        channel: 'openclaw-weixin',
+        to: 'wechat:wxid_target',
+        accountId: 'wechat-bot',
+      },
     }));
+    expect(debouncedRestart).not.toHaveBeenCalled();
     expect(sendJsonMock).toHaveBeenCalledWith(
       expect.anything(),
       200,
       expect.objectContaining({
         id: 'job-wechat',
       }),
+    );
+  });
+
+  it('restarts after creating a WeChat cron job only when plugin registration changed', async () => {
+    ensureWeChatPluginRegistrationMock.mockResolvedValueOnce(true);
+    parseJsonBodyMock.mockResolvedValue({
+      name: 'WeChat delivery',
+      message: 'Send update',
+      schedule: '0 10 * * *',
+      delivery: {
+        mode: 'announce',
+        channel: 'wechat',
+        to: 'wechat:wxid_target',
+        accountId: 'wechat-bot',
+      },
+      enabled: true,
+    });
+
+    const rpc = vi.fn().mockResolvedValue({
+      id: 'job-wechat',
+      name: 'WeChat delivery',
+      enabled: true,
+      createdAtMs: 1,
+      updatedAtMs: 2,
+      schedule: { kind: 'cron', expr: '0 10 * * *' },
+      payload: { kind: 'agentTurn', message: 'Send update' },
+      delivery: { mode: 'announce', channel: 'openclaw-weixin', to: 'wechat:wxid_target', accountId: 'wechat-bot' },
+      state: {},
+    });
+    const debouncedRestart = vi.fn();
+
+    const { handleCronRoutes } = await import('@electron/api/routes/cron');
+    await handleCronRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/cron/jobs'),
+      {
+        gatewayManager: { rpc, debouncedRestart, getStatus: () => ({ state: 'running' }) },
+      } as never,
+    );
+
+    expect(ensureWeChatPluginRegistrationMock).toHaveBeenCalled();
+    expect(debouncedRestart).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers WeChat cron jobs when the gateway reports missing outbound configuration', async () => {
+    const debouncedRestart = vi.fn();
+    const rpc = vi.fn().mockResolvedValue({
+      jobs: [
+        {
+          id: 'job-wechat-recover',
+          name: 'WeChat recovery',
+          enabled: true,
+          createdAtMs: 1,
+          updatedAtMs: 2,
+          schedule: { kind: 'cron', expr: '*/5 * * * *' },
+          payload: { kind: 'agentTurn', message: 'Send update' },
+          delivery: { mode: 'announce', channel: 'openclaw-weixin', to: 'wechat:wxid_target', accountId: 'wechat-bot' },
+          state: {
+            lastRunAtMs: 3,
+            lastStatus: 'error',
+            lastError: 'Error: Outbound not configured for channel: openclaw-weixin',
+          },
+        },
+      ],
+    });
+
+    const { handleCronRoutes } = await import('@electron/api/routes/cron');
+    await handleCronRoutes(
+      { method: 'GET' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/cron/jobs'),
+      {
+        gatewayManager: { rpc, debouncedRestart, getStatus: () => ({ state: 'running' }) },
+      } as never,
+    );
+
+    expect(ensureWeChatPluginInstalledMock).toHaveBeenCalled();
+    expect(ensureWeChatPluginRegistrationMock).toHaveBeenCalled();
+    expect(debouncedRestart).toHaveBeenCalledTimes(1);
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      200,
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'job-wechat-recover',
+          delivery: expect.objectContaining({ channel: 'wechat' }),
+        }),
+      ]),
     );
   });
 
