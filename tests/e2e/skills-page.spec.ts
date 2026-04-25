@@ -444,6 +444,227 @@ test.describe('Skills page baseline', () => {
     }
   });
 
+  test('confirms suspicious marketplace install and retries with force', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      await app.evaluate(({ ipcMain }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (globalThis as any).__clawxE2eInstallBodies = [];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (globalThis as any).__clawxE2eInstalledZentao = false;
+
+        ipcMain.removeHandler('hostapi:fetch');
+        ipcMain.handle('hostapi:fetch', async (_event, request: { path?: string; method?: string; body?: string | null }) => {
+          const method = request?.method ?? 'GET';
+          const path = request?.path ?? '';
+          const body = request?.body ? JSON.parse(request.body) : null;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const installed = Boolean((globalThis as any).__clawxE2eInstalledZentao);
+
+          if (path === '/api/gateway/status' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: { state: 'running', port: 18789, pid: 12345 },
+              },
+            };
+          }
+
+          if (path === '/api/skills' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: installed
+                  ? [{
+                    id: 'zentao-api',
+                    slug: 'zentao-api',
+                    name: 'Zentao API',
+                    description: 'Zentao integration.',
+                    enabled: false,
+                    ready: true,
+                    version: '1.0.0',
+                    sourceId: 'clawhub',
+                  }]
+                  : [],
+              },
+            };
+          }
+
+          if (path === '/api/clawhub/sources' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: {
+                  success: true,
+                  results: [
+                    { id: 'clawhub', label: 'ClawHub', enabled: true, site: 'https://clawhub.ai', workdir: '/tmp/clawhub' },
+                  ],
+                },
+              },
+            };
+          }
+
+          if (path === '/api/clawhub/source-counts' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: { success: true, results: [{ sourceId: 'clawhub', sourceLabel: 'ClawHub', total: 1 }] },
+              },
+            };
+          }
+
+          if (path === '/api/clawhub/list' && method === 'GET') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: {
+                  success: true,
+                  results: installed ? [{ sourceId: 'clawhub', slug: 'zentao-api', version: '1.0.0' }] : [],
+                },
+              },
+            };
+          }
+
+          if (path === '/api/clawhub/search' && method === 'POST') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: {
+                  success: true,
+                  results: [
+                    {
+                      slug: 'zentao-api',
+                      name: 'Zentao API',
+                      description: 'Zentao integration.',
+                      version: '1.0.0',
+                      author: 'clawhub',
+                      sourceId: 'clawhub',
+                      sourceLabel: 'ClawHub',
+                    },
+                  ],
+                  nextCursor: null,
+                },
+              },
+            };
+          }
+
+          if (path === '/api/clawhub/install' && method === 'POST') {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (globalThis as any).__clawxE2eInstallBodies.push(body);
+            if (!body?.force) {
+              return {
+                ok: true,
+                data: {
+                  status: 200,
+                  ok: true,
+                  json: {
+                    success: false,
+                    error: 'Command failed: - Resolving zentao-api Error: Use --force to install suspicious skills in non-interactive mode',
+                  },
+                },
+              };
+            }
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (globalThis as any).__clawxE2eInstalledZentao = true;
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: { success: true },
+              },
+            };
+          }
+
+          if (path === '/api/clawhub/skill-detail' && method === 'POST') {
+            return {
+              ok: true,
+              data: {
+                status: 200,
+                ok: true,
+                json: {
+                  success: true,
+                  detail: {
+                    requestedSlug: 'zentao-api',
+                    resolvedSlug: 'zentao-api',
+                    moderationInfo: {
+                      isSuspicious: true,
+                      isMalwareBlocked: false,
+                      summary: 'Detected suspicious install behavior.',
+                      reasonCodes: ['suspicious.llm_suspicious'],
+                    },
+                    skill: {
+                      slug: 'zentao-api',
+                      displayName: 'Zentao API',
+                    },
+                    latestVersion: {
+                      version: '1.0.0',
+                    },
+                  },
+                },
+              },
+            };
+          }
+
+          return {
+            ok: false,
+            error: { message: `Unexpected hostapi:fetch request: ${method} ${path}` },
+          };
+        });
+      });
+
+      const page = await getStableWindow(app);
+      await page.reload();
+
+      await expect(page.getByTestId('main-layout')).toBeVisible();
+      await app.evaluate(({ BrowserWindow }) => {
+        BrowserWindow.getAllWindows().forEach((window) => {
+          window.webContents.send('gateway:status-changed', {
+            state: 'running',
+            port: 18789,
+            pid: 12345,
+          });
+        });
+      });
+
+      await page.getByTestId('sidebar-nav-skills').click();
+      await expect(page.getByTestId('skills-page')).toBeVisible();
+      await page.getByTestId('skills-discover-button').click();
+      await expect(page.getByTestId('skills-marketplace-item-clawhub-zentao-api')).toBeVisible();
+      await page.getByTestId('skills-marketplace-item-clawhub-zentao-api').getByRole('button', { name: /Install|安装/ }).click();
+
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible();
+      await expect(dialog).toContainText(/Review skill before installing|安装前请确认风险/);
+      await expect(dialog).toContainText('Detected suspicious install behavior.');
+      await dialog.getByRole('button', { name: /Install anyway|仍然安装/ }).click();
+
+      await expect.poll(async () => await app.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (globalThis as any).__clawxE2eInstallBodies ?? [];
+      })).toEqual([
+        { slug: 'zentao-api', version: '1.0.0', sourceId: 'clawhub', force: false },
+        { slug: 'zentao-api', version: '1.0.0', sourceId: 'clawhub', force: true },
+      ]);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
   test('preserves list search and filters after leaving the page and coming back', async ({ launchElectronApp }) => {
     const app = await launchElectronApp({ skipSetup: true });
 

@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import { AlertCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -20,6 +21,7 @@ import { SkillMarketplaceSheet } from './components/SkillMarketplaceSheet';
 import { SkillsToolbar } from './components/SkillsToolbar';
 import { useSkillFilters } from './hooks/useSkillFilters';
 import { resolveInstalledSkillId } from './marketplace-state';
+import { getMarketplaceModerationState, isSuspiciousInstallForceError } from './marketplace-security';
 import { type MissingFilter, type SkillSourceCategory, type StatusFilter } from './filters';
 
 const DEFAULT_QUERY = '';
@@ -92,6 +94,13 @@ export function Skills() {
   const [installQuery, setInstallQuery] = useState('');
   const [installSourceId, setInstallSourceId] = useState('');
   const [selectedMarketplaceSkill, setSelectedMarketplaceSkill] = useState<{ slug: string; sourceId?: string } | null>(null);
+  const [pendingSuspiciousInstall, setPendingSuspiciousInstall] = useState<{
+    slug: string;
+    version?: string;
+    sourceId?: string;
+    force?: boolean;
+    message?: string;
+  } | null>(null);
   const effectiveInstallSourceId = installSourceId || sources[0]?.id || '';
   const sourceCategory = readEnumParam(
     searchParams.get('source'),
@@ -246,9 +255,25 @@ export function Skills() {
     }
   }, [disableSkill, enableSkill]);
 
-  const onInstall = useCallback(async (slug: string, version?: string, sourceId?: string, force = false) => {
+  const onInstall = useCallback(async (
+    slug: string,
+    version?: string,
+    sourceId?: string,
+    force = false,
+    confirmedSuspicious = false,
+  ) => {
     const skillName = searchResults.find((skill) => skill.slug === slug && skill.sourceId === sourceId)?.name;
     try {
+      if (force && !confirmedSuspicious) {
+        const detail = await fetchMarketplaceSkillDetail(slug, sourceId);
+        const moderation = getMarketplaceModerationState(detail);
+        if (moderation.isSuspicious) {
+          const message = moderation.summary
+            || (moderation.reasonCodes.length > 0 ? moderation.reasonCodes.join(', ') : undefined);
+          setPendingSuspiciousInstall({ slug, version, sourceId, force, message });
+          return;
+        }
+      }
       await installSkill(slug, version, sourceId, force);
       const refreshedSkills = useSkillsStore.getState().skills ?? [];
       const installedSkillId = resolveInstalledSkillId(slug, refreshedSkills, sourceId);
@@ -257,9 +282,26 @@ export function Skills() {
         skill: skillName || slug,
       }));
     } catch (error) {
+      if (!confirmedSuspicious && isSuspiciousInstallForceError(error)) {
+        setPendingSuspiciousInstall({ slug, version, sourceId, force: true });
+        fetchMarketplaceSkillDetail(slug, sourceId)
+          .then((detail) => {
+            const moderation = getMarketplaceModerationState(detail);
+            const message = moderation.summary
+              || (moderation.reasonCodes.length > 0 ? moderation.reasonCodes.join(', ') : undefined);
+            if (!message) return;
+            setPendingSuspiciousInstall((current) => (
+              current?.slug === slug && current.sourceId === sourceId
+                ? { ...current, message }
+                : current
+            ));
+          })
+          .catch(() => undefined);
+        return;
+      }
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [enableSkill, installSkill, searchResults, t]);
+  }, [enableSkill, fetchMarketplaceSkillDetail, installSkill, searchResults, t]);
 
   const onSelectMarketplaceSkill = useCallback((slug: string, sourceId?: string) => {
     setSelectedMarketplaceSkill({ slug, sourceId });
@@ -526,6 +568,27 @@ export function Skills() {
           )}
         </div>
       </div>
+      <ConfirmDialog
+        open={Boolean(pendingSuspiciousInstall)}
+        title={t('marketplace.suspiciousInstallTitle', { defaultValue: 'Review skill before installing' })}
+        message={pendingSuspiciousInstall?.message
+          ? t('marketplace.suspiciousInstallMessageWithReason', {
+              reason: pendingSuspiciousInstall.message,
+              defaultValue: `This skill was flagged by security moderation: ${pendingSuspiciousInstall.message}`,
+            })
+          : t('marketplace.suspiciousInstallMessage', {
+              defaultValue: 'This skill was flagged by security moderation. Confirm that you trust the source and understand the risk before installing.',
+            })}
+        confirmLabel={t('marketplace.suspiciousInstallConfirm', { defaultValue: 'Install anyway' })}
+        cancelLabel={t('marketplace.suspiciousInstallCancel', { defaultValue: 'Cancel' })}
+        onCancel={() => setPendingSuspiciousInstall(null)}
+        onConfirm={async () => {
+          const pending = pendingSuspiciousInstall;
+          if (!pending) return;
+          setPendingSuspiciousInstall(null);
+          await onInstall(pending.slug, pending.version, pending.sourceId, pending.force ?? true, true);
+        }}
+      />
     </div>
   );
 }
