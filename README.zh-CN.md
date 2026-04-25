@@ -405,7 +405,7 @@ CI 中的 `comms-regression` 会校验必选场景与阈值。
 ### 如何贡献
 
 1. **Fork** 本仓库
-2. **创建** 功能分支（`git checkout -b feature/amazing-feature`）
+2. **创建** 带有个人或团队标识前缀的功能分支，例如 `tommy/feature-name`、`tom/feature-name` 或 `xxxxx/feature-name`
 3. **提交** 清晰描述的变更
 4. **推送** 到你的分支
 5. **创建** Pull Request

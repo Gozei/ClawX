@@ -427,7 +427,7 @@ We welcome contributions from the community! Whether it's bug fixes, new feature
 ### How to Contribute
 
 1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+2. **Create** a feature branch with your own contributor prefix, such as `tommy/feature-name`, `tom/feature-name`, or `xxxxx/feature-name`
 3. **Commit** your changes with clear messages
 4. **Push** to your branch
 5. **Open** a Pull Request
