@@ -23,6 +23,7 @@ import { useChannelsStore } from '@/stores/channels';
 
 import { hostApiFetch } from '@/lib/host-api';
 import { subscribeHostEvent } from '@/lib/host-events';
+import { useBranding } from '@/lib/branding';
 import { cn } from '@/lib/utils';
 import {
   CHANNEL_ICONS,
@@ -82,6 +83,7 @@ export function ChannelConfigModal({
   onChannelSaved,
 }: ChannelConfigModalProps) {
   const { t } = useTranslation('channels');
+  const branding = useBranding();
   const { channels, addChannel, fetchChannels } = useChannelsStore();
   const [selectedType, setSelectedType] = useState<ChannelType | null>(initialSelectedType);
   const [configValues, setConfigValues] = useState<Record<string, string>>({});
@@ -638,7 +640,7 @@ export function ChannelConfigModal({
                 </div>
                 <ol className="list-decimal pl-5 text-[13px] text-muted-foreground leading-relaxed space-y-1.5">
                   {meta?.instructions.map((instruction, index) => (
-                    <li key={index}>{t(instruction)}</li>
+                    <li key={index}>{t(instruction, { appName: branding.productName })}</li>
                   ))}
                 </ol>
               </div>
