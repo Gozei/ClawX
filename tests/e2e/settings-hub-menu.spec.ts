@@ -43,7 +43,7 @@ test.describe('Settings hub menu', () => {
       await expect(page.getByTestId('settings-hub-menu-language')).toBeVisible();
       await expect(page.getByTestId('settings-hub-menu-settings')).toBeVisible();
       await expect(page.getByTestId('settings-hub-menu-check-updates')).toBeVisible();
-      await expect(page.getByTestId('settings-hub-menu-console')).toBeVisible();
+      await expect(page.getByTestId('settings-hub-menu-console')).toHaveCount(0);
 
       await page.getByTestId('settings-hub-menu-dashboard').click();
       await expect(page.getByTestId('settings-hub-sheet-container')).toHaveCount(0);
@@ -81,13 +81,11 @@ test.describe('Settings hub menu', () => {
       await expect(page.getByTestId('settings-hub-menu-channels')).toHaveAttribute('data-selected', 'false');
       await expect(page.getByTestId('settings-hub-menu-check-updates')).toHaveAttribute('data-selected', 'false');
       await page.getByTestId('settings-hub-menu-check-updates').click({ force: true });
-      await expect(page.getByTestId('settings-hub-sheet-container')).toHaveCount(0);
+      await expect(page.getByTestId('settings-hub-sheet-container')).toBeVisible();
       await expect(page.getByTestId('settings-page')).toBeVisible();
       await expect(page.getByTestId('settings-updates-section')).toBeVisible();
-
-      await openSettingsHub(page);
-      await expect(page.getByTestId('settings-hub-menu-check-updates')).toHaveAttribute('data-selected', 'true');
-      await expect(page.getByTestId('settings-hub-menu-settings')).toHaveAttribute('data-selected', 'false');
+      await expect(page.getByTestId('settings-hub-menu-check-updates')).toHaveAttribute('data-selected', 'false');
+      await expect(page.getByTestId('settings-hub-menu-settings')).toHaveAttribute('data-selected', 'true');
     } finally {
       await closeElectronApp(app);
     }
