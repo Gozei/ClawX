@@ -207,22 +207,21 @@ export async function launchGatewayProcess(options: {
   const lastSpawnSummary = `mode=${mode}, entry="${entryScript}", args="${options.sanitizeSpawnArgs(gatewayArgs).join(' ')}", cwd="${openclawDir}"`;
 
   const runtimeEnv = { ...forkEnv };
-  // Only apply the fetch/child_process preload in dev mode.
-  // In packaged builds Electron's UtilityProcess rejects NODE_OPTIONS
-  // with --require, logging "Most NODE_OPTIONs are not supported in
-  // packaged apps" and the preload never loads.
-  if (!app.isPackaged) {
-    try {
-      const preloadPath = ensureGatewayFetchPreload();
-      if (existsSync(preloadPath)) {
+  let forkExecArgv: string[] = [];
+  try {
+    const preloadPath = ensureGatewayFetchPreload();
+    if (existsSync(preloadPath)) {
+      if (app.isPackaged) {
+        forkExecArgv = ['--require', preloadPath];
+      } else {
         runtimeEnv.NODE_OPTIONS = appendNodeRequireToNodeOptions(
           runtimeEnv.NODE_OPTIONS,
           preloadPath,
         );
       }
-    } catch (err) {
-      logger.warn('Failed to set up OpenRouter headers preload:', err);
     }
+  } catch (err) {
+    logger.warn('Failed to set up OpenRouter headers preload:', err);
   }
 
   return await new Promise<{ child: Electron.UtilityProcess; lastSpawnSummary: string }>((resolve, reject) => {
@@ -231,6 +230,7 @@ export async function launchGatewayProcess(options: {
       stdio: 'pipe',
       env: runtimeEnv as NodeJS.ProcessEnv,
       serviceName: 'OpenClaw Gateway',
+      execArgv: forkExecArgv,
     });
 
     let settled = false;

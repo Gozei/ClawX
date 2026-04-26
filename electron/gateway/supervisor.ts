@@ -125,11 +125,30 @@ export async function unloadLaunchctlGatewayService(): Promise<void> {
   }
 }
 
-export async function waitForPortFree(port: number, timeoutMs = 30000): Promise<void> {
+export async function waitForPortFree(
+  port: number,
+  timeoutMs = 30000,
+  options?: { quickCheckFirst?: boolean },
+): Promise<void> {
   const net = await import('net');
+  const quickCheckFirst = options?.quickCheckFirst ?? true;
   const start = Date.now();
   const pollInterval = 500;
   let logged = false;
+
+  if (quickCheckFirst) {
+    const available = await new Promise<boolean>((resolve) => {
+      const server = net.createServer();
+      server.once('error', () => resolve(false));
+      server.once('listening', () => {
+        server.close(() => resolve(true));
+      });
+      server.listen(port, '127.0.0.1');
+    });
+    if (available) {
+      return;
+    }
+  }
 
   while (Date.now() - start < timeoutMs) {
     const available = await new Promise<boolean>((resolve) => {

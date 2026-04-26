@@ -10,11 +10,7 @@ import { DEFAULT_BRANDING } from '../../shared/branding';
 import { logger } from '../utils/logger';
 
 export const GATEWAY_CHALLENGE_TIMEOUT_MS = 10_000;
-// Gateway 内部 model-pricing 等初始化可能阻塞事件循环 60-70 秒，
-// 其自身 ws handshake timeout 会在 ~67s 后关闭连接。
-// 此超时需大于 Gateway 侧的超时，让 Gateway 先关闭 WS 触发
-// connectGatewaySocket 的自动重连（此时 model-pricing 已完成）。
-export const GATEWAY_CONNECT_HANDSHAKE_TIMEOUT_MS = 90_000;
+export const GATEWAY_CONNECT_HANDSHAKE_TIMEOUT_MS = 30_000;
 
 export async function probeGatewayReady(
   port: number,
@@ -72,7 +68,12 @@ export async function probeGatewayReady(
 
 // 分阶段探测间隔：启动早期慢探测减少对 Gateway 的干扰，
 // 接近就绪时加速以降低响应延迟。
-function getDynamicProbeInterval(elapsedMs: number): number {
+export function getDynamicProbeInterval(elapsedMs: number, platform?: string): number {
+  if (platform === 'win32') {
+    if (elapsedMs < 5_000) return 500;
+    if (elapsedMs < 15_000) return 1000;
+    return 500;
+  }
   if (elapsedMs < 30_000) return 2000;
   if (elapsedMs < 120_000) return 1000;
   return 500;
@@ -119,7 +120,7 @@ export async function waitForGatewayReady(options: {
       );
     }
 
-    const interval = getDynamicProbeInterval(Date.now() - startTime);
+    const interval = getDynamicProbeInterval(Date.now() - startTime, process.platform);
     await new Promise((resolve) => setTimeout(resolve, interval));
   }
 
@@ -197,8 +198,8 @@ export function buildGatewayConnectFrame(options: {
 // 在此期间 Gateway 能发 connect.challenge 但无法处理 connect RPC，
 // 其自身的 ws handshake timeout 会先关闭连接。
 // 此函数在握手阶段被 Gateway 关闭时自动重试，避免上层重启进程。
-const CONNECT_MAX_RETRIES = 3;
-const CONNECT_RETRY_DELAY_MS = 5_000;
+const CONNECT_MAX_RETRIES = 2;
+const CONNECT_RETRY_DELAY_MS = 2_000;
 
 function attemptSingleConnect(options: {
   port: number;
