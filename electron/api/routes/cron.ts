@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { join } from 'node:path';
 import type { HostApiContext } from '../context';
@@ -18,20 +18,29 @@ interface GatewayCronJob {
   id: string;
   name: string;
   description?: string;
+  agentId?: string | null;
+  sessionKey?: string | null;
   enabled: boolean;
+  deleteAfterRun?: boolean;
   createdAtMs?: number;
   updatedAtMs?: number;
-  schedule: { kind: string; expr?: string; everyMs?: number; anchorMs?: number; at?: string; tz?: string };
-  payload?: { kind: string; message?: string; text?: string };
-  delivery?: { mode: string; channel?: string; to?: string; accountId?: string };
+  schedule: { kind: string; expr?: string; everyMs?: number; anchorMs?: number; at?: string; tz?: string; staggerMs?: number };
+  payload?: { kind: string; message?: string; text?: string; model?: string; thinking?: string; timeoutSeconds?: number; lightContext?: boolean };
+  delivery?: { mode: string; channel?: string; to?: string; accountId?: string; bestEffort?: boolean };
+  failureAlert?: boolean | { after?: number; channel?: string; to?: string; mode?: string; accountId?: string; cooldownMs?: number };
   sessionTarget?: string;
+  wakeMode?: string;
   state?: {
     nextRunAtMs?: number;
     runningAtMs?: number;
     lastRunAtMs?: number;
+    lastRunStatus?: string;
     lastStatus?: string;
     lastError?: string;
     lastDurationMs?: number;
+    lastDelivered?: boolean;
+    lastDeliveryStatus?: string;
+    consecutiveErrors?: number;
   };
 }
 
@@ -41,6 +50,8 @@ interface CronRunLogEntry {
   status?: string;
   error?: string;
   summary?: string;
+  delivered?: boolean;
+  deliveryStatus?: string;
   sessionId?: string;
   sessionKey?: string;
   ts?: number;
@@ -48,6 +59,7 @@ interface CronRunLogEntry {
   durationMs?: number;
   model?: string;
   provider?: string;
+  usage?: Record<string, unknown>;
 }
 
 interface CronSessionKeyParts {
@@ -136,7 +148,12 @@ function buildCronRunMessage(entry: CronRunLogEntry, index: number): CronSession
   }
 
   return {
-    id: `cron-run-${entry.sessionId ?? entry.ts ?? index}`,
+    id: [
+      'cron-run',
+      entry.sessionId ?? entry.jobId ?? 'unknown',
+      timestamp,
+      index,
+    ].join('-'),
     role: status === 'error' ? 'system' : 'assistant',
     content,
     timestamp,
@@ -161,6 +178,18 @@ async function readCronRunLog(jobId: string): Promise<CronRunLogEntry[]> {
     } catch {
       // Ignore malformed log lines so one bad entry does not hide the rest.
     }
+  }
+  return entries;
+}
+
+async function readAllCronRunLogs(): Promise<CronRunLogEntry[]> {
+  const runsDir = join(getOpenClawConfigDir(), 'cron', 'runs');
+  const files = await readdir(runsDir).catch(() => []);
+  const entries: CronRunLogEntry[] = [];
+  for (const file of files) {
+    if (!file.endsWith('.jsonl')) continue;
+    const jobId = file.slice(0, -'.jsonl'.length);
+    entries.push(...await readCronRunLog(jobId));
   }
   return entries;
 }
@@ -273,6 +302,26 @@ export function buildCronSessionFallbackMessages(params: {
 type JsonRecord = Record<string, unknown>;
 type GatewayCronDelivery = NonNullable<GatewayCronJob['delivery']>;
 
+function parsePositiveInt(value: string | null, fallback: number, max = 500): number {
+  if (value == null || value.trim() === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(Math.floor(parsed), 0), max);
+}
+
+function buildPage<T>(items: T[], offset: number, limit: number) {
+  const total = items.length;
+  const page = items.slice(offset, offset + limit);
+  const nextOffset = offset + page.length < total ? offset + page.length : null;
+  return {
+    page,
+    total,
+    offset,
+    nextOffset,
+    hasMore: nextOffset !== null,
+  };
+}
+
 function asRecord(value: unknown): JsonRecord | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as JsonRecord
@@ -335,24 +384,46 @@ async function readLocalCronJobs(): Promise<GatewayCronJob[]> {
 
 async function listCronJobsWithFallback(
   gatewayManager: Pick<HostApiContext['gatewayManager'], 'rpc'>,
-): Promise<{ jobs: GatewayCronJob[]; gatewayAvailable: boolean }> {
+  params?: Record<string, unknown>,
+): Promise<{ jobs: GatewayCronJob[]; gatewayAvailable: boolean; page?: { total?: number; offset?: number; nextOffset?: number | null; hasMore?: boolean } }> {
   let gatewayJobs: GatewayCronJob[] = [];
   let gatewayAvailable = false;
   let gatewayError: unknown;
+  let page: { total?: number; offset?: number; nextOffset?: number | null; hasMore?: boolean } | undefined;
 
   try {
-    const result = await gatewayManager.rpc('cron.list', { includeDisabled: true });
+    const result = await gatewayManager.rpc('cron.list', params ?? { includeDisabled: true });
     gatewayJobs = extractCronJobs(result);
+    const record = asRecord(result);
+    if (record) {
+      page = {
+        total: typeof record.total === 'number' ? record.total : undefined,
+        offset: typeof record.offset === 'number' ? record.offset : undefined,
+        nextOffset: typeof record.nextOffset === 'number' || record.nextOffset === null ? record.nextOffset : undefined,
+        hasMore: typeof record.hasMore === 'boolean' ? record.hasMore : undefined,
+      };
+    }
     gatewayAvailable = true;
   } catch (error) {
     gatewayError = error;
   }
 
   const localJobs = await readLocalCronJobs();
+  const shouldMergeLocalJobs = !gatewayAvailable
+    || (
+      gatewayJobs.length === 0
+      && (!params || (
+        !params.query
+        && (!params.offset || params.offset === 0)
+        && (!params.enabled || params.enabled === 'all')
+      ))
+    );
   const mergedJobs = new Map<string, GatewayCronJob>();
 
-  for (const job of localJobs) {
-    mergedJobs.set(job.id, job);
+  if (shouldMergeLocalJobs) {
+    for (const job of localJobs) {
+      mergedJobs.set(job.id, job);
+    }
   }
 
   for (const job of gatewayJobs) {
@@ -364,6 +435,7 @@ async function listCronJobsWithFallback(
     return {
       jobs: Array.from(mergedJobs.values()),
       gatewayAvailable,
+      page,
     };
   }
 
@@ -371,7 +443,7 @@ async function listCronJobsWithFallback(
     throw gatewayError;
   }
 
-  return { jobs: [], gatewayAvailable };
+  return { jobs: [], gatewayAvailable, page };
 }
 
 function resolveCronJobTimestampMs(...candidates: unknown[]): number {
@@ -419,7 +491,10 @@ function normalizeCronSchedule(schedule: unknown): GatewayCronJob['schedule'] {
     const tz = typeof record.tz === 'string' && record.tz.trim()
       ? record.tz.trim()
       : undefined;
-    return { kind: 'cron', expr, ...(tz ? { tz } : {}) };
+    const staggerMs = typeof record.staggerMs === 'number' && Number.isFinite(record.staggerMs)
+      ? Math.max(0, Math.floor(record.staggerMs))
+      : undefined;
+    return { kind: 'cron', expr, ...(tz ? { tz } : {}), ...(staggerMs !== undefined ? { staggerMs } : {}) };
   }
 
   return { kind: 'cron', expr: '0 9 * * *' };
@@ -484,6 +559,9 @@ function normalizeCronDelivery(
   const accountId = typeof delivery.accountId === 'string' && delivery.accountId.trim()
     ? delivery.accountId.trim()
     : undefined;
+  const bestEffort = typeof delivery.bestEffort === 'boolean'
+    ? delivery.bestEffort
+    : undefined;
 
   if (mode === 'announce' && !channel) {
     return { mode: 'none' };
@@ -494,6 +572,7 @@ function normalizeCronDelivery(
     ...(channel ? { channel } : {}),
     ...(to ? { to } : {}),
     ...(accountId ? { accountId } : {}),
+    ...(bestEffort !== undefined ? { bestEffort } : {}),
   };
 }
 
@@ -520,14 +599,17 @@ function normalizeCronDeliveryPatch(rawDelivery: unknown): Record<string, unknow
   if ('accountId' in delivery) {
     patch.accountId = typeof delivery.accountId === 'string' ? delivery.accountId : '';
   }
+  if ('bestEffort' in delivery) {
+    patch.bestEffort = delivery.bestEffort === true;
+  }
   return patch;
 }
 
 function buildCronUpdatePatch(input: Record<string, unknown>): Record<string, unknown> {
   const patch = { ...input };
 
-  if (typeof patch.schedule === 'string') {
-    patch.schedule = { kind: 'cron', expr: patch.schedule };
+  if ('schedule' in patch) {
+    patch.schedule = normalizeCronSchedule(patch.schedule);
   }
 
   if (typeof patch.message === 'string') {
@@ -560,7 +642,7 @@ function transformCronJob(job: GatewayCronJob) {
   const lastRun = job.state?.lastRunAtMs
     ? {
       time: new Date(job.state.lastRunAtMs).toISOString(),
-      success: job.state.lastStatus === 'ok',
+      success: (job.state.lastStatus ?? job.state.lastRunStatus) === 'ok',
       error: job.state.lastError,
       duration: job.state.lastDurationMs,
     }
@@ -592,15 +674,33 @@ function transformCronJob(job: GatewayCronJob) {
   return {
     id: job.id,
     name,
+    description: job.description,
+    agentId: job.agentId ?? undefined,
+    sessionKey: job.sessionKey ?? undefined,
+    sessionTarget: job.sessionTarget,
+    wakeMode: job.wakeMode,
     message,
+    payload: job.payload,
     schedule: normalizeCronSchedule(job.schedule),
     delivery,
+    failureAlert: job.failureAlert,
+    deleteAfterRun: job.deleteAfterRun,
     target,
     enabled: job.enabled ?? true,
     createdAt: new Date(createdAtMs).toISOString(),
     updatedAt: new Date(updatedAtMs).toISOString(),
     lastRun,
     nextRun,
+    state: job.state,
+  };
+}
+
+function transformCronRunEntry(entry: CronRunLogEntry, job?: GatewayCronJob) {
+  return {
+    id: `cron-run-${entry.jobId ?? job?.id ?? 'unknown'}-${entry.ts ?? entry.runAtMs ?? Math.random()}`,
+    ...entry,
+    jobName: job?.name,
+    deliveryStatus: entry.deliveryStatus ?? (entry.delivered === true ? 'delivered' : entry.delivered === false ? 'not-delivered' : 'not-requested'),
   };
 }
 
@@ -610,6 +710,30 @@ export async function handleCronRoutes(
   url: URL,
   ctx: HostApiContext,
 ): Promise<boolean> {
+  if (url.pathname === '/api/cron/status' && req.method === 'GET') {
+    try {
+      const status = await ctx.gatewayManager.rpc('cron.status', {});
+      sendJson(res, 200, {
+        ...(asRecord(status) ?? {}),
+        gatewayAvailable: true,
+      });
+    } catch (error) {
+      const localJobs = await readLocalCronJobs();
+      const nextWakeAtMs = localJobs
+        .map((job) => normalizeTimestampMs(job.state?.nextRunAtMs))
+        .filter((value): value is number => typeof value === 'number')
+        .sort((a, b) => a - b)[0];
+      sendJson(res, 200, {
+        enabled: false,
+        jobs: localJobs.length,
+        nextWakeAtMs,
+        gatewayAvailable: false,
+        error: String(error),
+      });
+    }
+    return true;
+  }
+
   if (url.pathname === '/api/cron/session-history' && req.method === 'GET') {
     const sessionKey = url.searchParams.get('sessionKey')?.trim() || '';
     const parsedSession = parseCronSessionKey(sessionKey);
@@ -651,7 +775,23 @@ export async function handleCronRoutes(
 
   if (url.pathname === '/api/cron/jobs' && req.method === 'GET') {
     try {
-      const { jobs, gatewayAvailable } = await listCronJobsWithFallback(ctx.gatewayManager);
+      const limit = parsePositiveInt(url.searchParams.get('limit'), 100, 500);
+      const offset = parsePositiveInt(url.searchParams.get('offset'), 0, Number.MAX_SAFE_INTEGER);
+      const query = url.searchParams.get('query')?.trim() || '';
+      const enabled = url.searchParams.get('enabled')?.trim() || 'all';
+      const sortBy = url.searchParams.get('sortBy')?.trim() || 'nextRunAtMs';
+      const sortDir = url.searchParams.get('sortDir')?.trim() === 'desc' ? 'desc' : 'asc';
+      const includeDisabled = url.searchParams.get('includeDisabled') !== 'false';
+      const requestParams: Record<string, unknown> = {
+        includeDisabled,
+        limit,
+        offset,
+        enabled,
+        sortBy,
+        sortDir,
+      };
+      if (query) requestParams.query = query;
+      const { jobs, gatewayAvailable, page } = await listCronJobsWithFallback(ctx.gatewayManager, requestParams);
       if (gatewayAvailable) {
         for (const job of jobs) {
           const isIsolatedAgent =
@@ -698,9 +838,112 @@ export async function handleCronRoutes(
           // Listing jobs should not fail because recovery could not complete.
         }
       }
-      sendJson(res, 200, jobs.map(transformCronJob));
+      let transformed = jobs.map(transformCronJob);
+      if (!gatewayAvailable) {
+        const normalizedQuery = query.toLowerCase();
+        transformed = transformed
+          .filter((job) => {
+            if (enabled === 'enabled' && !job.enabled) return false;
+            if (enabled === 'disabled' && job.enabled) return false;
+            if (!normalizedQuery) return true;
+            return [job.name, job.description, job.message, job.id]
+              .filter(Boolean)
+              .some((value) => String(value).toLowerCase().includes(normalizedQuery));
+          })
+          .sort((left, right) => {
+            const direction = sortDir === 'desc' ? -1 : 1;
+            if (sortBy === 'name') return left.name.localeCompare(right.name) * direction;
+            if (sortBy === 'updatedAtMs') return (new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime()) * direction;
+            const leftNext = left.nextRun ? new Date(left.nextRun).getTime() : Number.MAX_SAFE_INTEGER;
+            const rightNext = right.nextRun ? new Date(right.nextRun).getTime() : Number.MAX_SAFE_INTEGER;
+            return (leftNext - rightNext) * direction;
+          });
+      }
+      const localPage = buildPage(transformed, gatewayAvailable ? 0 : offset, gatewayAvailable ? transformed.length : limit);
+      sendJson(res, 200, {
+        jobs: gatewayAvailable ? transformed : localPage.page,
+        total: page?.total ?? localPage.total,
+        offset: page?.offset ?? offset,
+        nextOffset: page?.nextOffset ?? localPage.nextOffset,
+        hasMore: page?.hasMore ?? localPage.hasMore,
+        gatewayAvailable,
+      });
     } catch (error) {
       sendJson(res, 500, { success: false, error: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === '/api/cron/runs' && req.method === 'GET') {
+    const limit = parsePositiveInt(url.searchParams.get('limit'), 100, 500);
+    const offset = parsePositiveInt(url.searchParams.get('offset'), 0, Number.MAX_SAFE_INTEGER);
+    const scope = url.searchParams.get('scope') === 'job' ? 'job' : 'all';
+    const id = url.searchParams.get('id')?.trim() || undefined;
+    const query = url.searchParams.get('query')?.trim() || '';
+    const sortDir = url.searchParams.get('sortDir') === 'asc' ? 'asc' : 'desc';
+    const statuses = url.searchParams.get('statuses')?.split(',').map((item) => item.trim()).filter(Boolean);
+    const deliveryStatuses = url.searchParams.get('deliveryStatuses')?.split(',').map((item) => item.trim()).filter(Boolean);
+    let gatewayAvailable = false;
+    try {
+      const params: Record<string, unknown> = {
+        scope,
+        limit,
+        offset,
+        sortDir,
+      };
+      if (scope === 'job' && id) params.id = id;
+      if (statuses?.length) params.statuses = statuses;
+      if (deliveryStatuses?.length) params.deliveryStatuses = deliveryStatuses;
+      if (query) params.query = query;
+      const result = await ctx.gatewayManager.rpc('cron.runs', params);
+      gatewayAvailable = true;
+      const record = asRecord(result);
+      const entries = Array.isArray(record?.entries) ? record.entries : [];
+      sendJson(res, 200, {
+        entries,
+        total: typeof record?.total === 'number' ? record.total : entries.length,
+        offset: typeof record?.offset === 'number' ? record.offset : offset,
+        nextOffset: typeof record?.nextOffset === 'number' || record?.nextOffset === null ? record.nextOffset : null,
+        hasMore: typeof record?.hasMore === 'boolean' ? record.hasMore : false,
+        gatewayAvailable,
+      });
+    } catch {
+      try {
+        const [{ jobs }, rawRuns] = await Promise.all([
+          listCronJobsWithFallback(ctx.gatewayManager).catch(() => ({ jobs: [] as GatewayCronJob[], gatewayAvailable: false })),
+          scope === 'job' && id ? readCronRunLog(id) : readAllCronRunLogs(),
+        ]);
+        const jobsById = new Map(jobs.map((job) => [job.id, job]));
+        const normalizedQuery = query.toLowerCase();
+        const filtered = rawRuns
+          .filter((entry) => {
+            if (scope === 'job' && id && entry.jobId !== id) return false;
+            if (statuses?.length && !statuses.includes(String(entry.status ?? 'unknown'))) return false;
+            const deliveryStatus = entry.deliveryStatus ?? (entry.delivered === true ? 'delivered' : entry.delivered === false ? 'not-delivered' : 'not-requested');
+            if (deliveryStatuses?.length && !deliveryStatuses.includes(deliveryStatus)) return false;
+            if (!normalizedQuery) return true;
+            return [entry.summary, entry.error, entry.sessionKey, entry.jobId, jobsById.get(entry.jobId ?? '')?.name]
+              .filter(Boolean)
+              .some((value) => String(value).toLowerCase().includes(normalizedQuery));
+          })
+          .sort((left, right) => {
+            const leftTime = normalizeTimestampMs(left.ts) ?? normalizeTimestampMs(left.runAtMs) ?? 0;
+            const rightTime = normalizeTimestampMs(right.ts) ?? normalizeTimestampMs(right.runAtMs) ?? 0;
+            return sortDir === 'asc' ? leftTime - rightTime : rightTime - leftTime;
+          })
+          .map((entry) => transformCronRunEntry(entry, jobsById.get(entry.jobId ?? '')));
+        const page = buildPage(filtered, offset, limit);
+        sendJson(res, 200, {
+          entries: page.page,
+          total: page.total,
+          offset: page.offset,
+          nextOffset: page.nextOffset,
+          hasMore: page.hasMore,
+          gatewayAvailable: false,
+        });
+      } catch (error) {
+        sendJson(res, 500, { success: false, error: String(error) });
+      }
     }
     return true;
   }
@@ -710,9 +953,17 @@ export async function handleCronRoutes(
     try {
       const input = await parseJsonBody<{
         name: string;
+        description?: string;
+        agentId?: string | null;
+        sessionKey?: string | null;
+        sessionTarget?: string;
+        wakeMode?: string;
         message: string;
-        schedule: string;
+        payload?: GatewayCronJob['payload'];
+        schedule: string | GatewayCronJob['schedule'];
         delivery?: GatewayCronDelivery;
+        failureAlert?: GatewayCronJob['failureAlert'];
+        deleteAfterRun?: boolean;
         enabled?: boolean;
       }>(req);
       const delivery = normalizeCronDelivery(input.delivery);
@@ -728,12 +979,17 @@ export async function handleCronRoutes(
       }
       const result = await ctx.gatewayManager.rpc('cron.add', {
         name: input.name,
-        schedule: { kind: 'cron', expr: input.schedule },
-        payload: { kind: 'agentTurn', message: input.message },
+        description: input.description,
+        agentId: input.agentId,
+        sessionKey: input.sessionKey,
+        schedule: normalizeCronSchedule(input.schedule),
+        payload: input.payload ?? { kind: 'agentTurn', message: input.message },
         enabled: false,
-        wakeMode: 'next-heartbeat',
-        sessionTarget: 'isolated',
+        deleteAfterRun: input.deleteAfterRun,
+        wakeMode: input.wakeMode ?? 'next-heartbeat',
+        sessionTarget: input.sessionTarget ?? 'isolated',
         delivery,
+        failureAlert: input.failureAlert,
       });
       if (shouldRestartGatewayForWeChatDelivery) {
         scheduleGatewayRestartForWeChatCronDelivery(ctx, 'cron:create WeChat delivery');
@@ -741,10 +997,13 @@ export async function handleCronRoutes(
       let transformed = result && typeof result === 'object' ? transformCronJob(result as GatewayCronJob) : result;
       if (result && typeof result === 'object' && typeof (result as GatewayCronJob).id === 'string') {
         const createdJob = result as GatewayCronJob;
+        const stableSessionTarget = input.sessionTarget && input.sessionTarget !== 'isolated'
+          ? input.sessionTarget
+          : getStableCronSessionTarget(createdJob.id);
         const patched = await ctx.gatewayManager.rpc('cron.update', {
           id: createdJob.id,
           patch: {
-            sessionTarget: getStableCronSessionTarget(createdJob.id),
+            sessionTarget: stableSessionTarget,
             enabled: input.enabled ?? true,
           },
         });

@@ -43,6 +43,22 @@ async function seedCronJobs(jobs: unknown[]) {
   );
 }
 
+async function seedCronRuns(jobId: string, entries: unknown[]) {
+  if (!tempHomeDir) {
+    tempHomeDir = await mkdtemp(join(tmpdir(), 'clawx-cron-route-'));
+    process.env.HOME = tempHomeDir;
+    process.env.USERPROFILE = tempHomeDir;
+  }
+
+  const runsDir = join(tempHomeDir, '.openclaw', 'cron', 'runs');
+  await mkdir(runsDir, { recursive: true });
+  await writeFile(
+    join(runsDir, `${jobId}.jsonl`),
+    entries.map((entry) => JSON.stringify(entry)).join('\n'),
+    'utf8',
+  );
+}
+
 describe('handleCronRoutes', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -62,6 +78,163 @@ describe('handleCronRoutes', () => {
       await rm(tempHomeDir, { recursive: true, force: true });
       tempHomeDir = null;
     }
+  });
+
+  it('returns cron status with gateway availability', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      enabled: true,
+      jobs: 2,
+      nextWakeAtMs: 1776913200000,
+    });
+
+    const { handleCronRoutes } = await import('@electron/api/routes/cron');
+    await handleCronRoutes(
+      { method: 'GET' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/cron/status'),
+      {
+        gatewayManager: { rpc },
+      } as never,
+    );
+
+    expect(rpc).toHaveBeenCalledWith('cron.status', {});
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      200,
+      expect.objectContaining({
+        enabled: true,
+        jobs: 2,
+        gatewayAvailable: true,
+      }),
+    );
+  });
+
+  it('passes cron list pagination and sort params through', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      jobs: [],
+      total: 0,
+      offset: 10,
+      nextOffset: null,
+      hasMore: false,
+    });
+
+    const { handleCronRoutes } = await import('@electron/api/routes/cron');
+    await handleCronRoutes(
+      { method: 'GET' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/cron/jobs?limit=25&offset=10&query=report&enabled=enabled&sortBy=name&sortDir=desc'),
+      {
+        gatewayManager: { rpc },
+      } as never,
+    );
+
+    expect(rpc).toHaveBeenCalledWith('cron.list', {
+      includeDisabled: true,
+      limit: 25,
+      offset: 10,
+      enabled: 'enabled',
+      sortBy: 'name',
+      sortDir: 'desc',
+      query: 'report',
+    });
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      200,
+      expect.objectContaining({
+        jobs: [],
+        total: 0,
+        offset: 10,
+        hasMore: false,
+      }),
+    );
+  });
+
+  it('lists cron runs through the gateway with filters', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      entries: [{ jobId: 'job-1', status: 'error', deliveryStatus: 'not-delivered' }],
+      total: 1,
+      offset: 0,
+      nextOffset: null,
+      hasMore: false,
+    });
+
+    const { handleCronRoutes } = await import('@electron/api/routes/cron');
+    await handleCronRoutes(
+      { method: 'GET' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/cron/runs?scope=job&id=job-1&statuses=error&deliveryStatuses=not-delivered&query=boom&sortDir=asc'),
+      {
+        gatewayManager: { rpc },
+      } as never,
+    );
+
+    expect(rpc).toHaveBeenCalledWith('cron.runs', expect.objectContaining({
+      scope: 'job',
+      id: 'job-1',
+      statuses: ['error'],
+      deliveryStatuses: ['not-delivered'],
+      query: 'boom',
+      sortDir: 'asc',
+    }));
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      200,
+      expect.objectContaining({
+        entries: expect.arrayContaining([expect.objectContaining({ jobId: 'job-1' })]),
+        gatewayAvailable: true,
+      }),
+    );
+  });
+
+  it('falls back to local cron run logs when cron.runs throws', async () => {
+    await seedCronJobs([
+      {
+        id: 'job-runs',
+        name: 'Run history job',
+        enabled: true,
+        schedule: { kind: 'cron', expr: '0 9 * * *' },
+        payload: { kind: 'agentTurn', message: 'Prompt' },
+      },
+    ]);
+    await seedCronRuns('job-runs', [
+      {
+        ts: 1776913200000,
+        jobId: 'job-runs',
+        action: 'finished',
+        status: 'ok',
+        summary: 'Done',
+        delivered: true,
+        deliveryStatus: 'delivered',
+        runAtMs: 1776913190000,
+      },
+    ]);
+
+    const rpc = vi.fn()
+      .mockRejectedValueOnce(new Error('Gateway not connected'))
+      .mockRejectedValueOnce(new Error('Gateway not connected'));
+
+    const { handleCronRoutes } = await import('@electron/api/routes/cron');
+    await handleCronRoutes(
+      { method: 'GET' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/cron/runs?scope=job&id=job-runs'),
+      {
+        gatewayManager: { rpc },
+      } as never,
+    );
+
+    const lastCall = sendJsonMock.mock.calls.at(-1);
+    expect(lastCall?.[1]).toBe(200);
+    expect(lastCall?.[2]).toEqual(expect.objectContaining({
+      gatewayAvailable: false,
+      entries: expect.arrayContaining([
+        expect.objectContaining({
+          jobId: 'job-runs',
+          jobName: 'Run history job',
+          deliveryStatus: 'delivered',
+        }),
+      ]),
+    }));
   });
 
   it('creates cron jobs with external delivery configuration', async () => {
@@ -412,12 +585,14 @@ describe('handleCronRoutes', () => {
     expect(sendJsonMock).toHaveBeenCalledWith(
       expect.anything(),
       200,
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'job-wechat-recover',
-          delivery: expect.objectContaining({ channel: 'wechat' }),
-        }),
-      ]),
+      expect.objectContaining({
+        jobs: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'job-wechat-recover',
+            delivery: expect.objectContaining({ channel: 'wechat' }),
+          }),
+        ]),
+      }),
     );
   });
 
@@ -448,11 +623,13 @@ describe('handleCronRoutes', () => {
     );
 
     expect(handled).toBe(true);
-    expect(rpc).toHaveBeenCalledWith('cron.list', { includeDisabled: true });
+    expect(rpc).toHaveBeenCalledWith('cron.list', expect.objectContaining({ includeDisabled: true }));
 
     const lastCall = sendJsonMock.mock.calls.at(-1);
     expect(lastCall?.[1]).toBe(200);
-    expect(lastCall?.[2]).toEqual(expect.arrayContaining([
+    expect(lastCall?.[2]).toEqual(expect.objectContaining({
+      gatewayAvailable: true,
+      jobs: expect.arrayContaining([
       expect.objectContaining({
         id: 'daily-computing-power-report',
         name: 'Daily Computing Power Report',
@@ -465,9 +642,10 @@ describe('handleCronRoutes', () => {
           tz: 'Asia/Shanghai',
         }),
       }),
-    ]));
+    ]),
+    }));
 
-    const [job] = lastCall?.[2] as Array<Record<string, unknown>>;
+    const [job] = (lastCall?.[2] as { jobs: Array<Record<string, unknown>> }).jobs;
     expect(typeof job.createdAt).toBe('string');
     expect(typeof job.updatedAt).toBe('string');
   });
@@ -498,12 +676,15 @@ describe('handleCronRoutes', () => {
 
     const lastCall = sendJsonMock.mock.calls.at(-1);
     expect(lastCall?.[1]).toBe(200);
-    expect(lastCall?.[2]).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: 'job-from-disk',
-        name: 'Recovered Job',
-        message: 'Recovered prompt',
-      }),
-    ]));
+    expect(lastCall?.[2]).toEqual(expect.objectContaining({
+      gatewayAvailable: false,
+      jobs: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'job-from-disk',
+          name: 'Recovered Job',
+          message: 'Recovered prompt',
+        }),
+      ]),
+    }));
   });
 });

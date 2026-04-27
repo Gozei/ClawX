@@ -27,12 +27,29 @@ test.describe('Cron page', () => {
               },
             },
           },
-          '["/api/cron/jobs","GET"]': {
+          '["/api/cron/status","GET"]': {
             ok: true,
             data: {
               status: 200,
               ok: true,
-              json: [
+              json: { enabled: true, jobs: 1, nextWakeAtMs: 1776913200000, gatewayAvailable: true },
+            },
+          },
+          '["/api/cron/runs?scope=all&limit=50&offset=0&sortDir=desc","GET"]': {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: { entries: [], total: 0, offset: 0, nextOffset: null, hasMore: false, gatewayAvailable: true },
+            },
+          },
+          '["/api/cron/jobs?limit=50&offset=0&includeDisabled=true&enabled=all&sortBy=nextRunAtMs&sortDir=asc","GET"]': {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                jobs: [
                 {
                   id: 'daily-computing-power-report',
                   name: 'Daily Computing Power Report',
@@ -49,6 +66,12 @@ test.describe('Cron page', () => {
                   nextRun: '2026-04-23T03:00:00.000Z',
                 },
               ],
+                total: 1,
+                offset: 0,
+                nextOffset: null,
+                hasMore: false,
+                gatewayAvailable: true,
+              },
             },
           },
         },
