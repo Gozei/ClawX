@@ -59,6 +59,7 @@ describe('wechat login utility', () => {
           ilink_bot_id: 'bot@im.bot',
           baseurl: 'https://ilinkai.weixin.qq.com',
           ilink_user_id: 'user-123',
+          ilink_user_name: 'Alice WeChat',
         }),
       });
     vi.stubGlobal('fetch', fetchMock);
@@ -80,25 +81,56 @@ describe('wechat login utility', () => {
     expect(waitResult.connected).toBe(true);
     expect(waitResult.accountId).toBe('bot@im.bot');
     expect(waitResult.botToken).toBe('secret-token');
+    expect(waitResult.displayName).toBe('Alice WeChat');
 
     const normalizedAccountId = await saveWeChatAccountState(waitResult.accountId!, {
       token: waitResult.botToken!,
       baseUrl: waitResult.baseUrl,
       userId: waitResult.userId,
+      displayName: waitResult.displayName,
     });
 
     expect(normalizedAccountId).toBe('bot-im-bot');
 
     const accountFile = JSON.parse(
       await readFile(join(testHome, '.openclaw', 'openclaw-weixin', 'accounts', 'bot-im-bot.json'), 'utf-8'),
-    ) as { token?: string; baseUrl?: string; userId?: string };
+    ) as { token?: string; baseUrl?: string; userId?: string; displayName?: string };
     expect(accountFile.token).toBe('secret-token');
     expect(accountFile.baseUrl).toBe('https://ilinkai.weixin.qq.com');
     expect(accountFile.userId).toBe('user-123');
+    expect(accountFile.displayName).toBe('Alice WeChat');
 
     const accountIndex = JSON.parse(
       await readFile(join(testHome, '.openclaw', 'openclaw-weixin', 'accounts.json'), 'utf-8'),
     ) as string[];
     expect(accountIndex).toEqual(['bot-im-bot']);
+  });
+
+  it('replaces older bot state when the same WeChat user links again', async () => {
+    const { findWeChatAccountIdsByUserId, saveWeChatAccountState } = await import('@electron/utils/wechat-login');
+
+    await saveWeChatAccountState('old-bot@im.bot', {
+      token: 'old-token',
+      userId: 'user-123',
+    });
+
+    expect(await findWeChatAccountIdsByUserId('user-123')).toEqual(['old-bot-im-bot']);
+
+    const nextAccountId = await saveWeChatAccountState('new-bot@im.bot', {
+      token: 'new-token',
+      userId: 'user-123',
+    });
+
+    expect(nextAccountId).toBe('new-bot-im-bot');
+    expect(await findWeChatAccountIdsByUserId('user-123')).toEqual(['new-bot-im-bot']);
+
+    const accountIndex = JSON.parse(
+      await readFile(join(testHome, '.openclaw', 'openclaw-weixin', 'accounts.json'), 'utf-8'),
+    ) as string[];
+    expect(accountIndex).toEqual(['new-bot-im-bot']);
+
+    await expect(
+      readFile(join(testHome, '.openclaw', 'openclaw-weixin', 'accounts', 'old-bot-im-bot.json'), 'utf-8'),
+    ).rejects.toThrow();
   });
 });

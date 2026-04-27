@@ -723,15 +723,24 @@ function upsertBindingsForChannel(
   channelType: string,
   agentId: string | null,
   accountId?: string,
+  options: { replaceExistingAgentChannelBinding?: boolean; clearChannelWideBinding?: boolean } = {},
 ): BindingConfig[] | undefined {
   const normalizedAgentId = agentId ? normalizeAgentIdForBinding(agentId) : '';
+  const replaceExistingAgentChannelBinding = options.replaceExistingAgentChannelBinding !== false;
   const nextBindings = Array.isArray(bindings)
     ? [...bindings as BindingConfig[]].filter((binding) => {
       if (!isChannelBinding(binding)) return true;
       if (binding.match?.channel !== channelType) return true;
+      if (options.clearChannelWideBinding && !binding.match?.accountId) {
+        return false;
+      }
       // Keep a single account binding per (agent, channelType). Rebinding to
       // another account should replace the previous one.
-      if (normalizedAgentId && normalizeAgentIdForBinding(binding.agentId || '') === normalizedAgentId) {
+      if (
+        replaceExistingAgentChannelBinding
+        && normalizedAgentId
+        && normalizeAgentIdForBinding(binding.agentId || '') === normalizedAgentId
+      ) {
         return false;
       }
       // Only remove binding that matches the exact accountId scope
@@ -749,6 +758,25 @@ function upsertBindingsForChannel(
       match.accountId = accountId;
     }
     nextBindings.push({ agentId, match });
+  }
+
+  return nextBindings.length > 0 ? nextBindings : undefined;
+}
+
+function replaceChannelBindings(
+  bindings: unknown,
+  channelType: string,
+  agentId: string | null,
+): BindingConfig[] | undefined {
+  const nextBindings = Array.isArray(bindings)
+    ? [...bindings as BindingConfig[]].filter((binding) => {
+      if (!isChannelBinding(binding)) return true;
+      return binding.match?.channel !== channelType;
+    })
+    : [];
+
+  if (agentId) {
+    nextBindings.push({ agentId, match: { channel: channelType } });
   }
 
   return nextBindings.length > 0 ? nextBindings : undefined;
@@ -919,7 +947,7 @@ async function buildSnapshotFromConfig(config: AgentConfigDocument): Promise<Age
       const owner =
         accountToAgent.get(`${channelType}:${accountId}`)
         || (
-          accountId === DEFAULT_ACCOUNT_ID && !hasExplicitAccountBindingForChannel
+          !hasExplicitAccountBindingForChannel
             ? channelToAgent.get(channelType)
             : undefined
         );
@@ -1316,6 +1344,7 @@ export async function assignChannelAccountToAgent(
   agentId: string,
   channelType: string,
   accountId: string,
+  options: { replaceExistingAgentChannelBinding?: boolean; clearChannelWideBinding?: boolean } = {},
 ): Promise<AgentsSnapshot> {
   return withConfigLock(async () => {
     const config = await readOpenClawConfig() as AgentConfigDocument;
@@ -1329,12 +1358,35 @@ export async function assignChannelAccountToAgent(
       throw new Error('accountId is required');
     }
 
-    config.bindings = upsertBindingsForChannel(config.bindings, channelType, agentId, accountId.trim());
+    config.bindings = upsertBindingsForChannel(config.bindings, channelType, agentId, accountId.trim(), options);
     await writeOpenClawConfig(config);
     if (resolvedState.changed) {
       await writeAgentStudioMetadata(studioByAgentId);
     }
     logger.info('Assigned channel account to agent', { agentId, channelType, accountId: accountId.trim() });
+    return buildSnapshotFromConfig(config);
+  });
+}
+
+export async function assignEntireChannelToAgent(
+  agentId: string,
+  channelType: string,
+): Promise<AgentsSnapshot> {
+  return withConfigLock(async () => {
+    const config = await readOpenClawConfig() as AgentConfigDocument;
+    const resolvedState = await resolveAgentStudioState(config);
+    const studioByAgentId = resolvedState.studioByAgentId;
+    const { entries } = normalizeAgentsConfig(config);
+    if (!entries.some((entry) => entry.id === agentId)) {
+      throw new Error(`Agent "${agentId}" not found`);
+    }
+
+    config.bindings = replaceChannelBindings(config.bindings, channelType, agentId);
+    await writeOpenClawConfig(config);
+    if (resolvedState.changed) {
+      await writeAgentStudioMetadata(studioByAgentId);
+    }
+    logger.info('Assigned entire channel to agent', { agentId, channelType });
     return buildSnapshotFromConfig(config);
   });
 }

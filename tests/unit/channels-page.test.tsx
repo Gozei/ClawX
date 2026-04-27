@@ -26,7 +26,15 @@ vi.mock('@/lib/host-events', () => ({
   subscribeHostEvent: (...args: unknown[]) => subscribeHostEventMock(...args),
 }));
 
+vi.mock('@/lib/gateway-impact-confirm', () => ({
+  confirmGatewayImpact: vi.fn().mockResolvedValue(true),
+}));
+
 vi.mock('react-i18next', () => ({
+  initReactI18next: {
+    type: '3rdParty',
+    init: vi.fn(),
+  },
   useTranslation: () => ({
     t: (key: string) => key,
   }),
@@ -278,6 +286,84 @@ describe('Channels page status refresh', () => {
     });
 
     expect(screen.queryByLabelText('account.customIdLabel')).not.toBeInTheDocument();
+  });
+
+  it('renders WeChat accounts without exposing bot IDs and binds each account Role', async () => {
+    subscribeHostEventMock.mockImplementation(() => vi.fn());
+    hostApiFetchMock.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/api/channels/accounts') {
+        return {
+          success: true,
+          channels: [
+            {
+              channelType: 'wechat',
+              defaultAccountId: 'wx-a-im-bot',
+              status: 'connected',
+              accounts: [
+                {
+                  accountId: 'wx-a-im-bot',
+                  name: 'Alice WeChat',
+                  configured: true,
+                  status: 'connected',
+                  isDefault: true,
+                  agentId: 'sales',
+                  lastError: "Cannot read properties of undefined (reading 'logger')",
+                },
+                {
+                  accountId: 'wx-b-im-bot',
+                  name: 'Bob WeChat',
+                  configured: true,
+                  status: 'connected',
+                  isDefault: false,
+                  agentId: 'main',
+                },
+              ],
+            },
+          ],
+        };
+      }
+
+      if (path === '/api/agents') {
+        return {
+          success: true,
+          agents: [
+            { id: 'main', name: 'Main Role' },
+            { id: 'sales', name: 'Sales Role' },
+          ],
+        };
+      }
+
+      if (path === '/api/channels/binding' && init?.method === 'PUT') {
+        return { success: true };
+      }
+
+      throw new Error(`Unexpected host API path: ${path}`);
+    });
+
+    render(<Channels />);
+
+    await waitFor(() => {
+      expect(screen.getByText('WeChat')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('wx-a-im-bot')).not.toBeInTheDocument();
+    expect(screen.queryByText('wx-b-im-bot')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Cannot read properties of undefined/)).not.toBeInTheDocument();
+    expect(screen.getByText('Alice WeChat')).toBeInTheDocument();
+    expect(screen.getByText('Bob WeChat')).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'account.unassigned' })).not.toBeInTheDocument();
+    expect(screen.getAllByText('account.bindAgentLabel')).toHaveLength(2);
+
+    fireEvent.change(screen.getAllByRole('combobox')[1], {
+      target: { value: 'sales' },
+    });
+
+    await waitFor(() => {
+      expect(hostApiFetchMock).toHaveBeenCalledWith('/api/channels/binding', expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ channelType: 'wechat', accountId: 'wx-b-im-bot', agentId: 'sales' }),
+      }));
+    });
   });
 
   it('keeps the last channel snapshot visible while refresh is pending', async () => {

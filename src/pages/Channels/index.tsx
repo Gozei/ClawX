@@ -76,6 +76,10 @@ function removeDeletedTarget(groups: ChannelGroupItem[], target: DeleteTarget): 
   return groups.filter((group) => group.channelType !== target.channelType);
 }
 
+function usesUnifiedRoleBinding(channelType: string): boolean {
+  return channelType === 'wechat';
+}
+
 type ChannelsProps = {
   embedded?: boolean;
 };
@@ -311,6 +315,11 @@ export function Channels({ embedded = false }: ChannelsProps) {
               <div className="space-y-4">
                 {configuredGroups.map((group) => (
                   <div key={group.channelType} className="rounded-xl border border-black/10 dark:border-white/10 p-4 bg-transparent">
+                    {(() => {
+                      const isUnifiedRoleGroup = usesUnifiedRoleBinding(group.channelType);
+
+                      return (
+                      <>
                     <div className="flex items-center justify-between gap-2 mb-3">
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="h-[40px] w-[40px] shrink-0 flex items-center justify-center text-foreground bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 rounded-xl shadow-sm">
@@ -376,6 +385,9 @@ export function Channels({ embedded = false }: ChannelsProps) {
                     <div className="space-y-2">
                       {group.accounts.map((account) => {
                         const displayName =
+                          isUnifiedRoleGroup
+                            ? (account.name === account.accountId ? t('account.wechatFallbackName') : account.name)
+                            :
                           account.accountId === 'default' && account.name === account.accountId
                             ? t('account.mainAccount')
                             : account.name;
@@ -386,7 +398,7 @@ export function Channels({ embedded = false }: ChannelsProps) {
                               <div className="flex items-center gap-2">
                                 <p className="text-[13px] font-medium text-foreground truncate">{displayName}</p>
                               </div>
-                              {account.lastError && (
+                              {!isUnifiedRoleGroup && account.lastError && (
                                 <div className="text-[12px] text-destructive mt-1">{account.lastError}</div>
                               )}
                             </div>
@@ -396,20 +408,21 @@ export function Channels({ embedded = false }: ChannelsProps) {
                               <select
                                 className={cn(selectBaseClasses, 'h-8 w-auto rounded-lg border-black/10 bg-background px-2 pr-7 text-[12px] leading-4 dark:border-white/10 [background-position:right_8px_center] [background-size:14px_14px]')}
                                 style={compactSelectIconStyle}
-                                value={account.agentId || ''}
+                                value={account.agentId || (isUnifiedRoleGroup ? (visibleAgents.find((agent) => agent.id === 'main')?.id || visibleAgents[0]?.id || '') : '')}
                                 onChange={(event) => {
                                   void handleBindAgent(group.channelType, account.accountId, event.target.value);
                                 }}
                               >
-                                <option value="">{t('account.unassigned')}</option>
+                                {!isUnifiedRoleGroup && <option value="">{t('account.unassigned')}</option>}
                                 {visibleAgents.map((agent) => (
                                   <option key={agent.id} value={agent.id}>{agent.name}</option>
                                 ))}
                               </select>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-8 text-xs rounded-full"
+                              {!isUnifiedRoleGroup && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 text-xs rounded-full"
                                   onClick={() => {
                                     void (async () => {
                                       try {
@@ -431,8 +444,9 @@ export function Channels({ embedded = false }: ChannelsProps) {
                                     })();
                                   }}
                                 >
-                                {t('account.edit')}
-                              </Button>
+                                  {t('account.edit')}
+                                </Button>
+                              )}
                               <Button
                                 size="icon"
                                 variant="ghost"
@@ -448,6 +462,9 @@ export function Channels({ embedded = false }: ChannelsProps) {
                         );
                       })}
                     </div>
+                    </>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>

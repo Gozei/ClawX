@@ -686,4 +686,34 @@ describe('agent config lifecycle', () => {
     expect(snapshot.channelAccountOwners['feishu:default']).toBeUndefined();
     expect(snapshot.channelAccountOwners['telegram:default']).toBe('main');
   });
+
+  it('maps channel-wide bindings to every configured account', async () => {
+    await writeOpenClawJson({
+      agents: {
+        list: [
+          { id: 'main', name: 'Main', default: true },
+          { id: 'sales', name: 'Sales' },
+        ],
+      },
+      channels: {
+        'openclaw-weixin': {
+          enabled: true,
+          defaultAccount: 'wx-a-im-bot',
+          accounts: {
+            'wx-a-im-bot': { enabled: true },
+            'wx-b-im-bot': { enabled: true },
+          },
+        },
+      },
+    });
+
+    const { assignEntireChannelToAgent, listAgentsSnapshot } = await import('@electron/utils/agent-config');
+
+    await assignEntireChannelToAgent('sales', 'openclaw-weixin');
+
+    const snapshot = await listAgentsSnapshot();
+    expect(snapshot.channelAccountOwners['openclaw-weixin:wx-a-im-bot']).toBe('sales');
+    expect(snapshot.channelAccountOwners['openclaw-weixin:wx-b-im-bot']).toBe('sales');
+    expect(snapshot.channelOwners['openclaw-weixin']).toBe('sales');
+  });
 });

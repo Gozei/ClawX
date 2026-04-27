@@ -1443,7 +1443,7 @@ function registerOpenClawHandlers(gatewayManager: GatewayManager): void {
   // Plugin-based channels require a full Gateway process restart to properly
   // initialize / tear-down plugin connections.  SIGUSR1 in-process reload is
   // not sufficient for channel plugins (see restartGatewayForAgentDeletion).
-  const forceRestartChannels = new Set(['dingtalk', 'wecom', 'whatsapp', 'feishu', 'qqbot']);
+  const forceRestartChannels = new Set(['dingtalk', 'wecom', 'whatsapp', 'feishu', 'qqbot', 'openclaw-weixin']);
 
   const scheduleGatewayChannelRestart = (reason: string): void => {
     if (gatewayManager.getStatus().state !== 'stopped') {

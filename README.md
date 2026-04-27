@@ -107,7 +107,7 @@ In **Settings → General**, you can now choose a dedicated upload directory for
 
 ### 📡 Multi-Channel Management
 Configure and monitor multiple AI channels simultaneously. Each channel operates independently, allowing you to run specialized agents for different tasks.
-Each channel now supports multiple accounts, per-account agent binding, and switching the channel default account directly from the Channels page.
+Each channel now supports multiple accounts, per-account agent binding, and switching the channel default account directly from the Channels page. WeChat shows linked WeChat accounts without exposing internal bot IDs, and each WeChat account has its own Role binding.
 Deep AI Worker now also bundles Tencent's official personal WeChat channel plugin, so you can link WeChat directly from the Channels page with an in-app QR flow.
 
 ### ⏰ Cron-Based Automation

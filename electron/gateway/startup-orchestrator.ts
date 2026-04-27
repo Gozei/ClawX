@@ -182,6 +182,11 @@ export async function runGatewayStartupSequence(hooks: StartupHooks): Promise<vo
       if (recoveryAction === 'retry') {
         logger.warn(`Transient start error: ${String(error)}. Retrying... (${startAttempts}/${maxStartAttempts})`);
         // 重试前终止旧 Gateway 进程，避免端口冲突死锁
+        if (hooks.isProcessAlive?.()) {
+          logger.warn('Gateway process is still alive after transient start error; retrying without killing it');
+          await hooks.delay(5000);
+          continue;
+        }
         hooks.killOwnedProcess?.();
         await hooks.delay(1000);
         continue;
