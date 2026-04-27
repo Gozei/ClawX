@@ -97,6 +97,7 @@ test.describe('WeChat channel role binding', () => {
                         status: 'connected',
                         isDefault: true,
                         agentId: 'sales',
+                        lastError: "Cannot read properties of undefined (reading 'logger')",
                       },
                       {
                         accountId: 'wx-b-im-bot',
@@ -145,6 +146,7 @@ test.describe('WeChat channel role binding', () => {
       await expect(page.getByRole('heading', { name: 'WeChat' })).toBeVisible();
       await expect(page.getByText('wx-a-im-bot')).toHaveCount(0);
       await expect(page.getByText('wx-b-im-bot')).toHaveCount(0);
+      await expect(page.getByText(/Cannot read properties of undefined/)).toHaveCount(0);
       await expect(page.getByText('Alice WeChat')).toBeVisible();
       await expect(page.getByText('Bob WeChat')).toBeVisible();
 

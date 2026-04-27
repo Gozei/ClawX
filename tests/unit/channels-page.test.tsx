@@ -307,6 +307,7 @@ describe('Channels page status refresh', () => {
                   status: 'connected',
                   isDefault: true,
                   agentId: 'sales',
+                  lastError: "Cannot read properties of undefined (reading 'logger')",
                 },
                 {
                   accountId: 'wx-b-im-bot',
@@ -347,6 +348,7 @@ describe('Channels page status refresh', () => {
 
     expect(screen.queryByText('wx-a-im-bot')).not.toBeInTheDocument();
     expect(screen.queryByText('wx-b-im-bot')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Cannot read properties of undefined/)).not.toBeInTheDocument();
     expect(screen.getByText('Alice WeChat')).toBeInTheDocument();
     expect(screen.getByText('Bob WeChat')).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'account.unassigned' })).not.toBeInTheDocument();

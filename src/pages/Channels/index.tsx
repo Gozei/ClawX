@@ -398,7 +398,7 @@ export function Channels({ embedded = false }: ChannelsProps) {
                               <div className="flex items-center gap-2">
                                 <p className="text-[13px] font-medium text-foreground truncate">{displayName}</p>
                               </div>
-                              {account.lastError && (
+                              {!isUnifiedRoleGroup && account.lastError && (
                                 <div className="text-[12px] text-destructive mt-1">{account.lastError}</div>
                               )}
                             </div>
