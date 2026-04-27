@@ -76,6 +76,15 @@ function removeDeletedTarget(groups: ChannelGroupItem[], target: DeleteTarget): 
   return groups.filter((group) => group.channelType !== target.channelType);
 }
 
+function usesUnifiedRoleBinding(channelType: string): boolean {
+  return channelType === 'wechat';
+}
+
+function getCompactAccountFingerprint(accountId: string): string {
+  const compact = accountId.replace(/[^a-zA-Z0-9]/g, '');
+  return (compact || accountId).slice(-6).toUpperCase();
+}
+
 type ChannelsProps = {
   embedded?: boolean;
 };
@@ -311,6 +320,11 @@ export function Channels({ embedded = false }: ChannelsProps) {
               <div className="space-y-4">
                 {configuredGroups.map((group) => (
                   <div key={group.channelType} className="rounded-xl border border-black/10 dark:border-white/10 p-4 bg-transparent">
+                    {(() => {
+                      const isUnifiedRoleGroup = usesUnifiedRoleBinding(group.channelType);
+
+                      return (
+                      <>
                     <div className="flex items-center justify-between gap-2 mb-3">
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="h-[40px] w-[40px] shrink-0 flex items-center justify-center text-foreground bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 rounded-xl shadow-sm">
@@ -374,8 +388,11 @@ export function Channels({ embedded = false }: ChannelsProps) {
                     </div>
 
                     <div className="space-y-2">
-                      {group.accounts.map((account) => {
+                      {group.accounts.map((account, accountIndex) => {
                         const displayName =
+                          isUnifiedRoleGroup
+                            ? t('account.wechatAccountName', { index: accountIndex + 1 })
+                            :
                           account.accountId === 'default' && account.name === account.accountId
                             ? t('account.mainAccount')
                             : account.name;
@@ -386,6 +403,11 @@ export function Channels({ embedded = false }: ChannelsProps) {
                               <div className="flex items-center gap-2">
                                 <p className="text-[13px] font-medium text-foreground truncate">{displayName}</p>
                               </div>
+                              {isUnifiedRoleGroup && (
+                                <div className="text-[12px] text-muted-foreground mt-1">
+                                  {t('account.wechatAccountIdentity', { id: getCompactAccountFingerprint(account.accountId) })}
+                                </div>
+                              )}
                               {account.lastError && (
                                 <div className="text-[12px] text-destructive mt-1">{account.lastError}</div>
                               )}
@@ -448,6 +470,9 @@ export function Channels({ embedded = false }: ChannelsProps) {
                         );
                       })}
                     </div>
+                    </>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>

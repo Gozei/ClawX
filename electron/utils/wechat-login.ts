@@ -304,6 +304,33 @@ async function writeAccountIndex(accountIds: string[]): Promise<void> {
   await writeFile(WECHAT_ACCOUNT_INDEX_FILE, JSON.stringify(accountIds, null, 2), 'utf-8');
 }
 
+async function readStoredAccountState(accountId: string): Promise<{ userId?: string } | undefined> {
+  try {
+    const raw = await readFile(join(WECHAT_ACCOUNTS_DIR, `${accountId}.json`), 'utf-8');
+    const parsed = JSON.parse(raw) as { userId?: unknown };
+    return {
+      userId: typeof parsed.userId === 'string' ? parsed.userId.trim() : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function findWeChatAccountIdsByUserId(userId?: string): Promise<string[]> {
+  const normalizedUserId = userId?.trim();
+  if (!normalizedUserId) return [];
+
+  const accountIds = await readAccountIndex();
+  const matches: string[] = [];
+  for (const accountId of accountIds) {
+    const state = await readStoredAccountState(accountId);
+    if (state?.userId === normalizedUserId) {
+      matches.push(accountId);
+    }
+  }
+  return matches;
+}
+
 export async function saveWeChatAccountState(rawAccountId: string, payload: {
   token: string;
   baseUrl?: string;
@@ -311,6 +338,12 @@ export async function saveWeChatAccountState(rawAccountId: string, payload: {
 }): Promise<string> {
   const accountId = normalizeOpenClawAccountId(rawAccountId);
   await mkdir(WECHAT_ACCOUNTS_DIR, { recursive: true });
+  const replacedAccountIds = new Set(
+    (await findWeChatAccountIdsByUserId(payload.userId)).filter((existingAccountId) => existingAccountId !== accountId),
+  );
+  for (const replacedAccountId of replacedAccountIds) {
+    await rm(join(WECHAT_ACCOUNTS_DIR, `${replacedAccountId}.json`), { force: true });
+  }
 
   const filePath = join(WECHAT_ACCOUNTS_DIR, `${accountId}.json`);
   const data = {
@@ -327,8 +360,17 @@ export async function saveWeChatAccountState(rawAccountId: string, payload: {
   }
 
   const existingAccountIds = await readAccountIndex();
-  if (!existingAccountIds.includes(accountId)) {
-    await writeAccountIndex([...existingAccountIds, accountId]);
+  const nextAccountIds = existingAccountIds.filter((existingAccountId) => (
+    existingAccountId === accountId || !replacedAccountIds.has(existingAccountId)
+  ));
+  if (!nextAccountIds.includes(accountId)) {
+    nextAccountIds.push(accountId);
+  }
+  if (
+    nextAccountIds.length !== existingAccountIds.length
+    || !existingAccountIds.includes(accountId)
+  ) {
+    await writeAccountIndex(nextAccountIds);
   }
 
   return accountId;

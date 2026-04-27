@@ -43,6 +43,7 @@ import {
 import { getOpenClawConfigDir } from '../../utils/paths';
 import {
   cancelWeChatLoginSession,
+  findWeChatAccountIdsByUserId,
   saveWeChatAccountState,
   startWeChatLoginSession,
   waitForWeChatLoginSession,
@@ -194,11 +195,17 @@ async function awaitWeChatQrLogin(
       return;
     }
 
+    const replacedAccountIds = await findWeChatAccountIdsByUserId(result.userId);
     const normalizedAccountId = await saveWeChatAccountState(result.accountId, {
       token: result.botToken,
       baseUrl: result.baseUrl,
       userId: result.userId,
     });
+    const staleAccountIds = replacedAccountIds.filter((accountId) => accountId !== normalizedAccountId);
+    for (const staleAccountId of staleAccountIds) {
+      await deleteChannelAccountConfig(UI_WECHAT_CHANNEL_TYPE, staleAccountId);
+      await clearChannelBinding(OPENCLAW_WECHAT_CHANNEL_TYPE, staleAccountId);
+    }
     await saveChannelConfig(UI_WECHAT_CHANNEL_TYPE, { enabled: true }, normalizedAccountId);
     await ensureScopedChannelBinding(UI_WECHAT_CHANNEL_TYPE, normalizedAccountId);
     scheduleGatewayChannelSaveRefresh(ctx, OPENCLAW_WECHAT_CHANNEL_TYPE, `wechat:loginSuccess:${normalizedAccountId}`);
@@ -312,6 +319,22 @@ async function ensureScopedChannelBinding(channelType: string, accountId?: strin
   // Legacy compatibility: if accountId matches an existing agentId, keep auto-binding.
   if (agents.agents.some((entry) => entry.id === accountId)) {
     await assignChannelAccountToAgent(accountId, storedChannelType, accountId);
+    return;
+  }
+
+  if (storedChannelType === OPENCLAW_WECHAT_CHANNEL_TYPE) {
+    const existingOwner = agents.channelAccountOwners[`${storedChannelType}:${accountId}`]
+      || Object.entries(agents.channelAccountOwners)
+        .find(([key]) => key.startsWith(`${storedChannelType}:`))?.[1]
+      || agents.channelOwners[storedChannelType]
+      || agents.defaultAgentId
+      || 'main';
+    if (agents.agents.some((entry) => entry.id === existingOwner)) {
+      await assignChannelAccountToAgent(existingOwner, storedChannelType, accountId, {
+        replaceExistingAgentChannelBinding: false,
+        clearChannelWideBinding: true,
+      });
+    }
   }
 }
 
@@ -1144,7 +1167,15 @@ export async function handleChannelRoutes(
       if (!validAccountId) {
         return true;
       }
-      await assignChannelAccountToAgent(body.agentId, resolveStoredChannelType(body.channelType), body.accountId);
+      const storedChannelType = resolveStoredChannelType(body.channelType);
+      if (storedChannelType === OPENCLAW_WECHAT_CHANNEL_TYPE) {
+        await assignChannelAccountToAgent(body.agentId, storedChannelType, body.accountId, {
+          replaceExistingAgentChannelBinding: false,
+          clearChannelWideBinding: true,
+        });
+      } else {
+        await assignChannelAccountToAgent(body.agentId, storedChannelType, body.accountId);
+      }
       scheduleGatewayChannelSaveRefresh(ctx, body.channelType, `channel:setBinding:${body.channelType}`);
       emitMutationAudit(req, ctx, {
         startedAt,
@@ -1180,7 +1211,8 @@ export async function handleChannelRoutes(
       if (!validAccountId) {
         return true;
       }
-      await clearChannelBinding(resolveStoredChannelType(body.channelType), body.accountId);
+      const storedChannelType = resolveStoredChannelType(body.channelType);
+      await clearChannelBinding(storedChannelType, body.accountId);
       scheduleGatewayChannelSaveRefresh(ctx, body.channelType, `channel:clearBinding:${body.channelType}`);
       emitMutationAudit(req, ctx, {
         startedAt,

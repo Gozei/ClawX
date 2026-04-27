@@ -14,6 +14,7 @@ const saveChannelConfigMock = vi.fn();
 const setChannelDefaultAccountMock = vi.fn();
 const assignChannelAccountToAgentMock = vi.fn();
 const clearChannelBindingMock = vi.fn();
+const clearAllBindingsForChannelMock = vi.fn();
 const parseJsonBodyMock = vi.fn();
 const testOpenClawConfigDir = join(tmpdir(), 'clawx-tests', 'channel-routes-openclaw');
 
@@ -34,7 +35,7 @@ vi.mock('@electron/utils/channel-config', () => ({
 
 vi.mock('@electron/utils/agent-config', () => ({
   assignChannelAccountToAgent: (...args: unknown[]) => assignChannelAccountToAgentMock(...args),
-  clearAllBindingsForChannel: vi.fn(),
+  clearAllBindingsForChannel: (...args: unknown[]) => clearAllBindingsForChannelMock(...args),
   clearChannelBinding: (...args: unknown[]) => clearChannelBindingMock(...args),
   listAgentsSnapshot: (...args: unknown[]) => listAgentsSnapshotMock(...args),
 }));
@@ -48,6 +49,7 @@ vi.mock('@electron/utils/plugin-install', () => ({
 
 vi.mock('@electron/utils/wechat-login', () => ({
   cancelWeChatLoginSession: vi.fn(),
+  findWeChatAccountIdsByUserId: vi.fn().mockResolvedValue([]),
   saveWeChatAccountState: vi.fn(),
   startWeChatLoginSession: vi.fn(),
   waitForWeChatLoginSession: vi.fn(),
@@ -404,6 +406,61 @@ describe('handleChannelRoutes', () => {
       } as never,
     );
     expect(assignChannelAccountToAgentMock).toHaveBeenCalledWith('main', 'feishu', 'Legacy_Account');
+  });
+
+  it('applies WeChat bindings to the selected account and clears channel-wide fallback', async () => {
+    listConfiguredChannelAccountsMock.mockReturnValue({
+      'openclaw-weixin': {
+        defaultAccountId: 'wx-a-im-bot',
+        accountIds: ['wx-a-im-bot', 'wx-b-im-bot'],
+      },
+    });
+
+    parseJsonBodyMock.mockResolvedValue({
+      channelType: 'wechat',
+      accountId: 'wx-a-im-bot',
+      agentId: 'sales',
+    });
+    const { handleChannelRoutes } = await import('@electron/api/routes/channels');
+    await handleChannelRoutes(
+      { method: 'PUT' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/channels/binding'),
+      {
+        gatewayManager: {
+          rpc: vi.fn(),
+          getStatus: () => ({ state: 'running' }),
+          debouncedReload: vi.fn(),
+          debouncedRestart: vi.fn(),
+        },
+      } as never,
+    );
+
+    expect(assignChannelAccountToAgentMock).toHaveBeenCalledWith('sales', 'openclaw-weixin', 'wx-a-im-bot', {
+      replaceExistingAgentChannelBinding: false,
+      clearChannelWideBinding: true,
+    });
+
+    parseJsonBodyMock.mockResolvedValue({
+      channelType: 'wechat',
+      accountId: 'wx-a-im-bot',
+    });
+    await handleChannelRoutes(
+      { method: 'DELETE' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/channels/binding'),
+      {
+        gatewayManager: {
+          rpc: vi.fn(),
+          getStatus: () => ({ state: 'running' }),
+          debouncedReload: vi.fn(),
+          debouncedRestart: vi.fn(),
+        },
+      } as never,
+    );
+
+    expect(clearAllBindingsForChannelMock).not.toHaveBeenCalled();
+    expect(clearChannelBindingMock).toHaveBeenCalledWith('openclaw-weixin', 'wx-a-im-bot');
   });
 
   it('keeps channel connected when one account is healthy and another errors', async () => {

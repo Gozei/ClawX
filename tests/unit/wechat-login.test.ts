@@ -101,4 +101,32 @@ describe('wechat login utility', () => {
     ) as string[];
     expect(accountIndex).toEqual(['bot-im-bot']);
   });
+
+  it('replaces older bot state when the same WeChat user links again', async () => {
+    const { findWeChatAccountIdsByUserId, saveWeChatAccountState } = await import('@electron/utils/wechat-login');
+
+    await saveWeChatAccountState('old-bot@im.bot', {
+      token: 'old-token',
+      userId: 'user-123',
+    });
+
+    expect(await findWeChatAccountIdsByUserId('user-123')).toEqual(['old-bot-im-bot']);
+
+    const nextAccountId = await saveWeChatAccountState('new-bot@im.bot', {
+      token: 'new-token',
+      userId: 'user-123',
+    });
+
+    expect(nextAccountId).toBe('new-bot-im-bot');
+    expect(await findWeChatAccountIdsByUserId('user-123')).toEqual(['new-bot-im-bot']);
+
+    const accountIndex = JSON.parse(
+      await readFile(join(testHome, '.openclaw', 'openclaw-weixin', 'accounts.json'), 'utf-8'),
+    ) as string[];
+    expect(accountIndex).toEqual(['new-bot-im-bot']);
+
+    await expect(
+      readFile(join(testHome, '.openclaw', 'openclaw-weixin', 'accounts', 'old-bot-im-bot.json'), 'utf-8'),
+    ).rejects.toThrow();
+  });
 });
