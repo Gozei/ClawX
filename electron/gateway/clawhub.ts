@@ -206,7 +206,7 @@ export class ClawHubService {
 
     private extractFrontmatterName(skillManifestPath: string): string | null {
         try {
-            const raw = fs.readFileSync(skillManifestPath, 'utf8');
+            const raw = fs.readFileSync(skillManifestPath, 'utf8').replace(/^\uFEFF/, '');
             // Match the first frontmatter block and read `name: ...`
             const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---/);
             if (!frontmatterMatch) return null;

@@ -37,12 +37,28 @@ test.describe('Cron task dialog dismissal guard', () => {
               },
             },
           },
-          '["/api/cron/jobs","GET"]': {
+          '["/api/cron/status","GET"]': {
             ok: true,
             data: {
               status: 200,
               ok: true,
-              json: [],
+              json: { enabled: true, jobs: 0, gatewayAvailable: true },
+            },
+          },
+          '["/api/cron/runs?scope=all&limit=50&offset=0&sortDir=desc","GET"]': {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: { entries: [], total: 0, offset: 0, nextOffset: null, hasMore: false, gatewayAvailable: true },
+            },
+          },
+          '["/api/cron/jobs?limit=50&offset=0&includeDisabled=true&enabled=all&sortBy=nextRunAtMs&sortDir=asc","GET"]': {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: { jobs: [], total: 0, offset: 0, nextOffset: null, hasMore: false, gatewayAvailable: true },
             },
           },
         },
