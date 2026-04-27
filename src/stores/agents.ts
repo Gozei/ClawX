@@ -49,7 +49,12 @@ interface AgentsState {
       triggerModes?: string[];
     }
   ) => Promise<boolean>;
-  deleteAgent: (agentId: string) => Promise<boolean>;
+  deleteAgent: (
+    agentId: string,
+    options?: {
+      skipImpactConfirm?: boolean;
+    },
+  ) => Promise<boolean>;
   assignChannel: (agentId: string, channelType: ChannelType) => Promise<boolean>;
   removeChannel: (agentId: string, channelType: ChannelType) => Promise<boolean>;
   clearError: () => void;
@@ -224,13 +229,15 @@ export const useAgentsStore = create<AgentsState>((set) => ({
     }
   },
 
-  deleteAgent: async (agentId: string) => {
-    const confirmed = await confirmGatewayImpact({
-      mode: 'restart',
-      willApplyChanges: true,
-    });
-    if (!confirmed) {
-      return false;
+  deleteAgent: async (agentId: string, options?: { skipImpactConfirm?: boolean }) => {
+    if (!options?.skipImpactConfirm) {
+      const confirmed = await confirmGatewayImpact({
+        mode: 'restart',
+        willApplyChanges: true,
+      });
+      if (!confirmed) {
+        return false;
+      }
     }
     set({ error: null });
     try {

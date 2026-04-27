@@ -190,6 +190,7 @@ export interface ChatState {
   archiveSession: (key: string) => Promise<void>;
   restoreSession: (key: string) => Promise<void>;
   deleteSession: (key: string) => Promise<void>;
+  purgeAgentSessions: (agentId: string) => void;
   cleanupEmptySession: () => void;
   loadHistory: (quiet?: boolean) => Promise<void>;
   sendMessage: (
