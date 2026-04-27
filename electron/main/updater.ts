@@ -92,6 +92,7 @@ export class AppUpdater extends EventEmitter {
   private status: UpdateStatus = { status: 'idle' };
   private autoInstallTimer: NodeJS.Timeout | null = null;
   private autoInstallCountdown = 0;
+  private shouldAutoInstallAfterDownload = false;
   private updaterModulePromise: Promise<ElectronUpdaterModule | null> | null = null;
   private updaterModule: ElectronUpdaterModule | null = null;
   private autoUpdater: AutoUpdaterInstance | null = null;
@@ -171,7 +172,7 @@ export class AppUpdater extends EventEmitter {
       this.updateStatus({ status: 'downloaded', info: event });
       this.emit('update-downloaded', event);
 
-      if (autoUpdater.autoDownload) {
+      if (this.shouldAutoInstallAfterDownload) {
         this.startAutoInstallCountdown();
       }
     });
@@ -331,7 +332,8 @@ export class AppUpdater extends EventEmitter {
   /**
    * Download available update
    */
-  async downloadUpdate(): Promise<void> {
+  async downloadUpdate(autoInstallAfterDownload = false): Promise<void> {
+    this.shouldAutoInstallAfterDownload = autoInstallAfterDownload;
     if (!app?.isPackaged) {
       throw new Error('Update download is unavailable in development mode');
     }
@@ -483,9 +485,10 @@ export function registerUpdateHandlers(
   });
 
   // Download update
-  ipcMain.handle('update:download', async () => {
+  ipcMain.handle('update:download', async (_, payload?: { autoInstallAfterDownload?: boolean }) => {
+    const autoInstallAfterDownload = payload?.autoInstallAfterDownload === true;
     try {
-      await updater.downloadUpdate();
+      await updater.downloadUpdate(autoInstallAfterDownload);
       return { success: true };
     } catch (error) {
       return { success: false, error: String(error) };

@@ -5,10 +5,13 @@
 import { Navigate, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { Component, lazy, Suspense, useEffect, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
-import { Loader2, Rocket } from 'lucide-react';
+import { Download, Loader2, Rocket } from 'lucide-react';
 import { Toaster } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import i18n from './i18n';
 import { MainLayout } from './components/layout/MainLayout';
+import { Progress } from './components/ui/progress';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { GatewayImpactConfirmProvider } from '@/components/gateway/GatewayImpactConfirmProvider';
 import { PageLoader } from './components/common/LoadingSpinner';
@@ -32,6 +35,15 @@ const Dream = lazy(() => import('./pages/Dream').then((module) => ({ default: mo
 const Settings = lazy(() => import('./pages/Settings').then((module) => ({ default: module.Settings })));
 const Setup = lazy(() => import('./pages/Setup').then((module) => ({ default: module.Setup })));
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+}
+
 function RouteLoader() {
   return (
     <div className="flex h-screen items-center justify-center">
@@ -45,10 +57,12 @@ function DreamRoute() {
   return dreamModeEnabled ? <Dream /> : <Navigate to="/" replace />;
 }
 
-function UpdateInstallOverlay() {
+function UpdateProgressOverlay() {
   const status = useUpdateStore((state) => state.status);
+  const progress = useUpdateStore((state) => state.progress);
   const installPhaseStartedAt = useUpdateStore((state) => state.installPhaseStartedAt);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const { t } = useTranslation('settings');
 
   useEffect(() => {
     if (status !== 'installing' || !installPhaseStartedAt) return;
@@ -62,8 +76,13 @@ function UpdateInstallOverlay() {
   const elapsedSeconds = status === 'installing' && installPhaseStartedAt
     ? Math.max(0, Math.floor((nowMs - installPhaseStartedAt) / 1000))
     : 0;
+  const isDownloading = status === 'downloading';
+  const hasTransferStats = Boolean(
+    progress && Number.isFinite(progress.transferred) && Number.isFinite(progress.total) && progress.total > 0
+  );
+  const percent = typeof progress?.percent === 'number' ? Math.min(Math.max(progress.percent, 0), 100) : 0;
 
-  if (status !== 'installing') {
+  if (status !== 'downloading' && status !== 'installing') {
     return null;
   }
 
@@ -73,49 +92,150 @@ function UpdateInstallOverlay() {
     : platform === 'darwin'
       ? 'updates.installOverlay.detailMac'
       : 'updates.installOverlay.detailWindows';
+  const title = isDownloading
+    ? t('updates.status.downloading')
+    : t('updates.installOverlay.title');
 
   return (
-    <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-slate-950/56 px-6 backdrop-blur-sm">
-      <div className="w-full max-w-[520px] rounded-[28px] border border-white/15 bg-[#0f1726]/96 p-7 text-white shadow-[0_32px_120px_rgba(15,23,42,0.42)]">
+    <div
+      className="fixed inset-0 z-[100000] flex items-center justify-center bg-slate-950/35 px-6 backdrop-blur-md dark:bg-black/60"
+      data-testid="app-update-progress-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-live="polite"
+      aria-label={title}
+    >
+      <div
+        className="w-full max-w-[520px] rounded-lg border border-border/80 bg-card/95 p-6 text-card-foreground shadow-[0_24px_90px_rgba(15,23,42,0.22)] ring-1 ring-black/5 backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/95 dark:text-white dark:shadow-[0_24px_90px_rgba(0,0,0,0.48)] dark:ring-white/10 sm:p-7"
+        data-testid="app-update-progress-card"
+      >
         <div className="flex items-start gap-4">
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-500/18 text-blue-200 ring-1 ring-blue-300/20">
-            <Rocket className="h-6 w-6" />
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/20 dark:bg-primary/15 dark:text-blue-200 dark:ring-blue-300/20">
+            {isDownloading ? <Download className="h-6 w-6" /> : <Rocket className="h-6 w-6" />}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-blue-100/90">
+            <div className="flex items-center gap-2 text-primary dark:text-blue-200">
               <Loader2 className="h-4 w-4 animate-spin" />
               <span className="text-[13px] font-medium">
-                {i18n.t('settings:updates.installOverlay.badge')}
+                {isDownloading
+                  ? t('updates.installOverlay.downloadBadge')
+                  : t('updates.installOverlay.badge')}
               </span>
             </div>
-            <h2 className="mt-3 text-[24px] font-semibold tracking-[-0.02em] text-white">
-              {i18n.t('settings:updates.installOverlay.title')}
+            <h2
+              className="mt-3 text-[22px] font-semibold tracking-normal text-card-foreground dark:text-white"
+              data-testid="app-update-progress-title"
+            >
+              {title}
             </h2>
-            <p className="mt-3 text-[15px] leading-7 text-slate-200/88">
-              {i18n.t('settings:updates.installOverlay.description')}
-            </p>
-            <p className="mt-3 text-[14px] leading-6 text-amber-100/88">
-              {i18n.t(`settings:${detailKey}`)}
-            </p>
-            <div className="mt-5 flex flex-wrap items-center gap-3">
-              <div className="rounded-full bg-white/10 px-3 py-1.5 text-[12px] font-medium text-white/90 ring-1 ring-white/12">
-                {i18n.t('settings:updates.installOverlay.elapsed', { seconds: elapsedSeconds })}
+            {isDownloading ? (
+              <>
+                <p
+                  className="mt-3 text-[15px] leading-7 text-muted-foreground dark:text-slate-300"
+                  data-testid="app-update-progress-description"
+                >
+                  {t('updates.installOverlay.downloadingDescription')}
+                </p>
+                {hasTransferStats ? (
+                  <div className="mt-4 space-y-2" data-testid="app-update-download-progress">
+                    <div className="flex justify-between gap-4 text-sm text-foreground/75 dark:text-slate-200/90">
+                      <span>
+                        {formatBytes(progress?.transferred ?? 0)} / {formatBytes(progress?.total ?? 0)}
+                      </span>
+                      <span>{formatBytes(progress?.bytesPerSecond ?? 0)}/s</span>
+                    </div>
+                    <Progress value={percent} className="h-2 bg-primary/15 dark:bg-white/10" />
+                    <p className="text-center text-xs text-muted-foreground dark:text-slate-300">
+                      {Math.round(percent)}%
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-[15px] leading-7 text-muted-foreground dark:text-slate-300">
+                    {t('updates.installOverlay.downloadStarting')}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="mt-3 text-[15px] leading-7 text-muted-foreground dark:text-slate-300">
+                  {t('updates.installOverlay.description')}
+                </p>
+                <p className="mt-3 text-[14px] leading-6 text-amber-700 dark:text-amber-200">
+                  {t(detailKey)}
+                </p>
+              </>
+            )}
+            {status === 'installing' ? (
+              <div className="mt-5 flex flex-wrap items-center gap-3">
+                <div className="rounded-full bg-muted px-3 py-1.5 text-[12px] font-medium text-foreground ring-1 ring-border dark:bg-white/10 dark:text-white/90 dark:ring-white/10">
+                  {t('updates.installOverlay.elapsed', { seconds: elapsedSeconds })}
+                </div>
+                <div className={cn(
+                  'rounded-full px-3 py-1.5 text-[12px] font-medium ring-1',
+                  elapsedSeconds >= 8
+                    ? 'bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-400/10 dark:text-amber-100 dark:ring-amber-300/20'
+                    : 'bg-muted text-muted-foreground ring-border dark:bg-white/10 dark:text-white/80 dark:ring-white/10',
+                )}>
+                  {elapsedSeconds >= 8
+                    ? t('updates.installOverlay.slowHint')
+                    : t('updates.installOverlay.waitHint')}
+                </div>
               </div>
-              <div className={cn(
-                'rounded-full px-3 py-1.5 text-[12px] font-medium ring-1',
-                elapsedSeconds >= 8
-                  ? 'bg-amber-400/12 text-amber-100 ring-amber-300/20'
-                  : 'bg-white/8 text-white/82 ring-white/10',
-              )}>
-                {elapsedSeconds >= 8
-                  ? i18n.t('settings:updates.installOverlay.slowHint')
-                  : i18n.t('settings:updates.installOverlay.waitHint')}
-              </div>
-            </div>
+            ) : null}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function UpdateDialogs() {
+  const { t } = useTranslation('settings');
+  const updateInfo = useUpdateStore((state) => state.updateInfo);
+  const isUpdateAvailableDialogOpen = useUpdateStore((state) => state.isUpdateAvailableDialogOpen);
+  const isUpdateInstallDialogOpen = useUpdateStore((state) => state.isUpdateInstallDialogOpen);
+  const setUpdateAvailableDialogOpen = useUpdateStore((state) => state.setUpdateAvailableDialogOpen);
+  const setUpdateInstallDialogOpen = useUpdateStore((state) => state.setUpdateInstallDialogOpen);
+  const downloadUpdate = useUpdateStore((state) => state.downloadUpdate);
+  const installUpdate = useUpdateStore((state) => state.installUpdate);
+
+  const handleDownloadConfirm = async () => {
+    setUpdateAvailableDialogOpen(false);
+    await downloadUpdate({ autoInstallAfterDownload: false });
+  };
+
+  const handleInstallNow = async () => {
+    setUpdateInstallDialogOpen(false);
+    await installUpdate();
+  };
+
+  return (
+    <>
+      <ConfirmDialog
+        open={isUpdateAvailableDialogOpen}
+        overlayClassName="!z-[100000]"
+        title={t('settingsHub.update.dialogTitle')}
+        message={t('settingsHub.update.dialogMessage')}
+        confirmLabel={t('settingsHub.update.confirm')}
+        cancelLabel={t('settingsHub.update.cancel')}
+        onConfirm={handleDownloadConfirm}
+        onCancel={() => setUpdateAvailableDialogOpen(false)}
+        testId="app-update-available-dialog"
+      />
+      <ConfirmDialog
+        open={isUpdateInstallDialogOpen}
+        overlayClassName="!z-[100000]"
+        title={t('settingsHub.update.installTitle')}
+        message={t('settingsHub.update.downloadedReady', {
+          version: updateInfo?.version,
+        })}
+        confirmLabel={t('settingsHub.update.installNow')}
+        cancelLabel={t('settingsHub.update.installLater')}
+        onConfirm={handleInstallNow}
+        onCancel={() => setUpdateInstallDialogOpen(false)}
+        testId="app-update-install-dialog"
+      />
+    </>
   );
 }
 
@@ -317,7 +437,8 @@ function App() {
           closeButton
           style={{ zIndex: 99999 }}
         />
-        <UpdateInstallOverlay />
+        <UpdateProgressOverlay />
+        <UpdateDialogs />
       </TooltipProvider>
     </ErrorBoundary>
   );

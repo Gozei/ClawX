@@ -33,6 +33,10 @@ vi.mock('@electron/utils/channel-config', () => ({
   deleteChannelAccountConfig: vi.fn(),
 }));
 
+vi.mock('@electron/utils/openclaw-auth', () => ({
+  getOpenClawProvidersConfig: vi.fn(),
+}));
+
 vi.mock('@electron/services/providers/provider-runtime-sync', () => ({
   syncAgentModelRefToRuntime: vi.fn(),
   syncAgentModelOverrideToRuntime: vi.fn(),
@@ -42,6 +46,7 @@ vi.mock('@electron/services/providers/provider-runtime-sync', () => ({
 vi.mock('@electron/api/route-utils', () => ({
   parseJsonBody: vi.fn(),
   sendJson: vi.fn(),
+  isGatewayTransitioning: vi.fn(() => false),
 }));
 
 import {
@@ -59,6 +64,7 @@ import {
   syncAgentModelOverrideToRuntime,
   syncAllProviderAuthToRuntime,
 } from '@electron/services/providers/provider-runtime-sync';
+import { getOpenClawProvidersConfig } from '@electron/utils/openclaw-auth';
 import { parseJsonBody, sendJson } from '@electron/api/route-utils';
 
 function setPlatform(platform: string): void {
@@ -257,6 +263,15 @@ describe('handleAgentRoutes model refresh flow', () => {
     } as never);
     vi.mocked(syncAllProviderAuthToRuntime).mockResolvedValue(undefined);
     vi.mocked(syncAgentModelOverrideToRuntime).mockResolvedValue(undefined);
+    vi.mocked(getOpenClawProvidersConfig).mockResolvedValue({
+      providers: {
+        moonshot: {
+          baseUrl: 'https://api.moonshot.cn/v1',
+          api: 'openai-completions',
+          models: [{ id: 'kimi-k2.5', name: 'kimi-k2.5', api: 'openai-completions' }],
+        },
+      },
+    } as never);
 
     const rpc = vi
       .fn()
@@ -292,6 +307,15 @@ describe('handleAgentRoutes model refresh flow', () => {
         raw: JSON.stringify({
           agents: {
             list: [{ id: 'main', model: { primary: 'moonshot/kimi-k2.5' } }],
+          },
+          models: {
+            providers: {
+              moonshot: {
+                baseUrl: 'https://api.moonshot.cn/v1',
+                api: 'openai-completions',
+                models: [{ id: 'kimi-k2.5', name: 'kimi-k2.5', api: 'openai-completions' }],
+              },
+            },
           },
         }),
       },
@@ -392,6 +416,15 @@ describe('handleAgentRoutes model refresh flow', () => {
     } as never);
     vi.mocked(syncAllProviderAuthToRuntime).mockResolvedValue(undefined);
     vi.mocked(syncAgentModelRefToRuntime).mockResolvedValue(undefined);
+    vi.mocked(getOpenClawProvidersConfig).mockResolvedValue({
+      providers: {
+        moonshot: {
+          baseUrl: 'https://api.moonshot.cn/v1',
+          api: 'openai-completions',
+          models: [{ id: 'kimi-k2.5', name: 'kimi-k2.5', api: 'openai-completions' }],
+        },
+      },
+    } as never);
 
     const debouncedReload = vi.fn();
     const restart = vi.fn();

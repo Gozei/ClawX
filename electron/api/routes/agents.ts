@@ -16,6 +16,7 @@ import {
   updateAgentName,
 } from '../../utils/agent-config';
 import { deleteChannelAccountConfig } from '../../utils/channel-config';
+import { getOpenClawProvidersConfig } from '../../utils/openclaw-auth';
 import {
   syncAgentModelRefToRuntime,
   syncAgentModelOverrideToRuntime,
@@ -39,6 +40,39 @@ type GatewayConfigSnapshot = {
   config?: Record<string, unknown>;
 };
 
+function parseModelProviderKey(modelRef: string | null): string | null {
+  const trimmed = (modelRef || '').trim();
+  const separatorIndex = trimmed.indexOf('/');
+  if (separatorIndex <= 0 || separatorIndex >= trimmed.length - 1) {
+    return null;
+  }
+  return trimmed.slice(0, separatorIndex);
+}
+
+async function buildAgentModelHotPatch(
+  agentsConfig: unknown,
+  modelRef: string | null,
+): Promise<Record<string, unknown>> {
+  const patch: Record<string, unknown> = {
+    agents: agentsConfig ?? {},
+  };
+  const providerKey = parseModelProviderKey(modelRef);
+  if (!providerKey) {
+    return patch;
+  }
+
+  const providerSnapshot = await getOpenClawProvidersConfig();
+  const providerEntry = providerSnapshot.providers[providerKey];
+  if (providerEntry && typeof providerEntry === 'object' && !Array.isArray(providerEntry)) {
+    patch.models = {
+      providers: {
+        [providerKey]: providerEntry,
+      },
+    };
+  }
+  return patch;
+}
+
 async function tryHotPatchAgentModel(
   ctx: HostApiContext,
   agentId: string,
@@ -55,11 +89,12 @@ async function tryHotPatchAgentModel(
   }
 
   const prepared = await prepareAgentModelUpdate(snapshot.config, agentId, modelRef, options);
+  const patch = await buildAgentModelHotPatch(prepared.config.agents, modelRef);
   await ctx.gatewayManager.rpc(
     'config.patch',
     {
       baseHash: snapshot.hash,
-      raw: JSON.stringify({ agents: prepared.config.agents ?? {} }),
+      raw: JSON.stringify(patch),
     },
     15000,
   );
