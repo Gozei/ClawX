@@ -55,7 +55,8 @@
     "gateway": {
         "notRunning": "网关未运行",
         "notRunningDesc": "OpenClaw 网关需要运行才能使用此功能。它将自动启动，或者您可以从设置中启动。",
-        "warning": "网关未运行。"
+        "warning": "网关未运行。",
+        "restarting": "网关正在重启，请稍后重试。"
     },
     "gatewayImpact": {
         "titleRestart": "此操作会重启网关",

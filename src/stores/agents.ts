@@ -3,6 +3,7 @@ import { hostApiFetch } from '@/lib/host-api';
 import { confirmGatewayImpact } from '@/lib/gateway-impact-confirm';
 import type { ChannelType } from '@/types/channel';
 import type { AgentProfileType, AgentSummary, AgentsSnapshot, AgentWorkflowNode } from '@/types/agent';
+import { guardGatewayTransitioning } from './gateway';
 
 interface AgentsState {
   agents: AgentSummary[];
@@ -102,6 +103,7 @@ export const useAgentsStore = create<AgentsState>((set) => ({
       };
     },
   ) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'refresh',
       willApplyChanges: true,
@@ -128,6 +130,7 @@ export const useAgentsStore = create<AgentsState>((set) => ({
   },
 
   updateAgent: async (agentId: string, name: string) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'refresh',
       willApplyChanges: true,
@@ -159,6 +162,7 @@ export const useAgentsStore = create<AgentsState>((set) => ({
       setAsDefault?: boolean;
     },
   ) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'refresh',
       willApplyChanges: true,
@@ -200,6 +204,7 @@ export const useAgentsStore = create<AgentsState>((set) => ({
       triggerModes?: string[];
     },
   ) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'refresh',
       willApplyChanges: true,
@@ -225,6 +230,7 @@ export const useAgentsStore = create<AgentsState>((set) => ({
   },
 
   deleteAgent: async (agentId: string) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'restart',
       willApplyChanges: true,
@@ -247,6 +253,7 @@ export const useAgentsStore = create<AgentsState>((set) => ({
   },
 
   assignChannel: async (agentId: string, channelType: ChannelType) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'refresh',
       willApplyChanges: true,
@@ -269,6 +276,7 @@ export const useAgentsStore = create<AgentsState>((set) => ({
   },
 
   removeChannel: async (agentId: string, channelType: ChannelType) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'refresh',
       willApplyChanges: true,
