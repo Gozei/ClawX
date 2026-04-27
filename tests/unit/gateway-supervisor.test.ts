@@ -135,3 +135,128 @@ describe('gateway supervisor process cleanup', () => {
     expect(mockCreateServer).toHaveBeenCalled();
   });
 });
+
+describe('waitForPortFree quickCheckFirst', () => {
+  let listenCallCount: number;
+  let nextListenAvailable: boolean;
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    listenCallCount = 0;
+    nextListenAvailable = true;
+
+    mockExec.mockImplementation((_cmd: string, _opts: object, cb: (err: Error | null, stdout: string) => void) => {
+      cb(null, '');
+      return {} as never;
+    });
+
+    mockCreateServer.mockImplementation(() => {
+      const handlers = new Map<string, (...args: unknown[]) => void>();
+      const serverNum = ++listenCallCount;
+      const isAvailable = serverNum === 1 ? nextListenAvailable : true;
+      return {
+        once(event: string, callback: (...args: unknown[]) => void) {
+          handlers.set(event, callback);
+          return this;
+        },
+        listen() {
+          queueMicrotask(() => {
+            if (isAvailable) {
+              handlers.get('listening')?.();
+            } else {
+              handlers.get('error')?.(new Error('EADDRINUSE'));
+            }
+          });
+          return this;
+        },
+        close(callback?: () => void) {
+          callback?.();
+        },
+      };
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, writable: true });
+  });
+
+  it('returns immediately when port is free with quickCheckFirst=true (default)', async () => {
+    nextListenAvailable = true;
+    setPlatform('win32');
+    const { waitForPortFree } = await import('@electron/gateway/supervisor');
+
+    const start = Date.now();
+    await waitForPortFree(18789, 5000);
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(500);
+    expect(mockCreateServer).toHaveBeenCalledTimes(1);
+  });
+
+  it('enters polling when port is occupied and quickCheckFirst=true', async () => {
+    nextListenAvailable = false;
+    setPlatform('win32');
+
+    let createServerCallCount = 0;
+    mockCreateServer.mockImplementation(() => {
+      createServerCallCount++;
+      const handlers = new Map<string, (...args: unknown[]) => void>();
+      const isFirstCall = createServerCallCount <= 2;
+      return {
+        once(event: string, callback: (...args: unknown[]) => void) {
+          handlers.set(event, callback);
+          return this;
+        },
+        listen() {
+          queueMicrotask(() => {
+            if (isFirstCall) {
+              handlers.get('error')?.(new Error('EADDRINUSE'));
+            } else {
+              handlers.get('listening')?.();
+            }
+          });
+          return this;
+        },
+        close(callback?: () => void) {
+          callback?.();
+        },
+      };
+    });
+
+    const { waitForPortFree } = await import('@electron/gateway/supervisor');
+    await waitForPortFree(18789, 5000);
+    expect(createServerCallCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('skips quick check when quickCheckFirst=false', async () => {
+    nextListenAvailable = true;
+    setPlatform('win32');
+
+    let createServerCallCount = 0;
+    mockCreateServer.mockImplementation(() => {
+      createServerCallCount++;
+      const handlers = new Map<string, (...args: unknown[]) => void>();
+      return {
+        once(event: string, callback: (...args: unknown[]) => void) {
+          handlers.set(event, callback);
+          return this;
+        },
+        listen() {
+          queueMicrotask(() => {
+            handlers.get('listening')?.();
+          });
+          return this;
+        },
+        close(callback?: () => void) {
+          callback?.();
+        },
+      };
+    });
+
+    const { waitForPortFree } = await import('@electron/gateway/supervisor');
+    await waitForPortFree(18789, 5000, { quickCheckFirst: false });
+
+    expect(createServerCallCount).toBeGreaterThanOrEqual(1);
+  });
+});

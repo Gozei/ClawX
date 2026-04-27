@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { hostApiFetch } from '@/lib/host-api';
 import { AppError, normalizeAppError } from '@/lib/error-model';
-import { useGatewayStore } from './gateway';
+import { useGatewayStore, guardGatewayTransitioning } from './gateway';
 import type {
   MarketplaceInstalledSkill,
   MarketplaceSkillDetail,
@@ -247,6 +247,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   },
 
   saveSkillConfig: async (skillId: string, input) => {
+    if (guardGatewayTransitioning()) throw new Error('Gateway is restarting, please try again later');
     const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/skills/${encodeURIComponent(skillId)}/config`, {
       method: 'PUT',
       body: JSON.stringify(input),
@@ -265,6 +266,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   },
 
   deleteSkill: async (skillId: string) => {
+    if (guardGatewayTransitioning()) throw new Error('Gateway is restarting, please try again later');
     set((state) => ({ deleting: { ...state.deleting, [skillId]: true } }));
     try {
       const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/skills/${encodeURIComponent(skillId)}`, {
@@ -330,6 +332,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   },
 
   installSkill: async (slug: string, version?: string, sourceId?: string, force = false) => {
+    if (guardGatewayTransitioning()) throw new Error('Gateway is restarting, please try again later');
     const installKey = sourceId ? `${sourceId}:${slug}` : slug;
     set((state) => ({ installing: { ...state.installing, [installKey]: true } }));
     try {
@@ -356,6 +359,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   },
 
   uninstallSkill: async (slug: string, sourceId?: string) => {
+    if (guardGatewayTransitioning()) throw new Error('Gateway is restarting, please try again later');
     const installKey = sourceId ? `${sourceId}:${slug}` : slug;
     set((state) => ({ installing: { ...state.installing, [installKey]: true } }));
     try {
@@ -378,6 +382,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   },
 
   enableSkill: async (skillId: string) => {
+    if (guardGatewayTransitioning()) return;
     const currentSkills = Array.isArray(get().skills) ? get().skills : [];
     const previousSkill = currentSkills.find((skill) => skill.id === skillId);
     const previousDetail = get().skillDetailsById[skillId];
@@ -423,6 +428,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
         const targetEnabled = get().toggleTargets[skillId];
         if (targetEnabled === undefined) break;
 
+        if (guardGatewayTransitioning()) throw new Error('Gateway is restarting, please try again later');
         await useGatewayStore.getState().rpc('skills.update', { skillKey: skillId, enabled: targetEnabled });
         await get().fetchSkills(true);
         if (previousDetail) {
@@ -474,6 +480,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   },
 
   disableSkill: async (skillId: string) => {
+    if (guardGatewayTransitioning()) return;
     const currentSkills = Array.isArray(get().skills) ? get().skills : [];
     const previousSkill = currentSkills.find((skill) => skill.id === skillId);
     const previousDetail = get().skillDetailsById[skillId];
@@ -519,6 +526,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
         const targetEnabled = get().toggleTargets[skillId];
         if (targetEnabled === undefined) break;
 
+        if (guardGatewayTransitioning()) throw new Error('Gateway is restarting, please try again later');
         await useGatewayStore.getState().rpc('skills.update', { skillKey: skillId, enabled: targetEnabled });
         await get().fetchSkills(true);
         if (previousDetail) {

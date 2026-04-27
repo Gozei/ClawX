@@ -2,12 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hostApiFetchMock = vi.fn();
 const gatewayRpcMock = vi.fn();
+const guardGatewayTransitioningMock = vi.fn(() => false);
 
 vi.mock('@/lib/host-api', () => ({
   hostApiFetch: (...args: unknown[]) => hostApiFetchMock(...args),
 }));
 
 vi.mock('@/stores/gateway', () => ({
+  guardGatewayTransitioning: (...args: unknown[]) => guardGatewayTransitioningMock(...args),
   useGatewayStore: {
     getState: () => ({
       status: { state: 'running' },
@@ -22,6 +24,8 @@ describe('skills store refresh behavior', () => {
     vi.resetModules();
     hostApiFetchMock.mockReset();
     gatewayRpcMock.mockReset();
+    guardGatewayTransitioningMock.mockReset();
+    guardGatewayTransitioningMock.mockReturnValue(false);
 
     const { useSkillsStore } = await import('@/stores/skills');
     useSkillsStore.setState({
@@ -36,6 +40,8 @@ describe('skills store refresh behavior', () => {
       searchError: null,
       installing: {},
       deleting: {},
+      toggling: {},
+      toggleTargets: {},
       error: null,
       lastFetchedAt: null,
     });
@@ -253,5 +259,30 @@ describe('skills store refresh behavior', () => {
     expect(useSkillsStore.getState().skills).toEqual([]);
     expect(useSkillsStore.getState().skillDetailsById['deleted-skill']).toBeUndefined();
     expect(useSkillsStore.getState().detailLoadingId).toBeNull();
+  });
+
+  it('rolls back optimistic updates when gateway starts transitioning during the toggle debounce', async () => {
+    vi.useFakeTimers();
+    const { useSkillsStore } = await import('@/stores/skills');
+
+    useSkillsStore.setState({
+      skills: [
+        { id: 'gh-issues', name: 'GitHub Issues', description: 'Track issues', enabled: false, ready: false },
+      ],
+    });
+    guardGatewayTransitioningMock
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+
+    const request = useSkillsStore.getState().enableSkill('gh-issues');
+    const rejection = expect(request).rejects.toThrow('Gateway is restarting');
+
+    expect(useSkillsStore.getState().skills[0]?.enabled).toBe(true);
+    await vi.advanceTimersByTimeAsync(500);
+    await rejection;
+
+    expect(gatewayRpcMock).not.toHaveBeenCalled();
+    expect(useSkillsStore.getState().skills[0]?.enabled).toBe(false);
+    expect(useSkillsStore.getState().skills[0]?.ready).toBe(false);
   });
 });

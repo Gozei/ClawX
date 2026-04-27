@@ -45,7 +45,8 @@
     },
     "deleteDialog": {
         "title": "删除 Role",
-        "message": "确认从 {{appName}} 删除 “{{name}}”？这会永久删除该 Role 及其由 {{appName}} 管理的工作区、运行时和会话文件。"
+        "message": "确认从 {{appName}} 删除 “{{name}}”？这会永久删除该 Role、侧边栏中的相关聊天记录及其会话文件，并重启网关；正在进行的聊天、通道连接或定时任务可能会被短暂中断。",
+        "confirmLabel": "删除并重启"
     },
     "settingsDialog": {
         "title": "{{name}} 设置",

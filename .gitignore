@@ -65,7 +65,6 @@ resources/libreoffice/
 
 build/
 artifacts/
-/docs/
 
 .cursor/
 .codex-temp/

@@ -237,9 +237,70 @@ describe('chat send error localization', () => {
     await vi.advanceTimersByTimeAsync(95_000);
     await Promise.resolve();
 
-    expect(useChatStore.getState().error).toBe(
-      '模型没有返回响应。提供商可能暂时不可用，或 API Key 配额不足。请检查你的提供商设置。',
-    );
+    expect(useChatStore.getState().error).toBeNull();
+    expect(useChatStore.getState().sessionNotice).toMatchObject({
+      tone: 'info',
+      message: '回复耗时较长，仍在同步结果...',
+    });
+  });
+
+  it('keeps polling when the Gateway WebSocket chat.send ack times out', async () => {
+    const { default: i18n } = await import('@/i18n');
+    const { useChatStore } = await import('@/stores/chat');
+    await i18n.changeLanguage('en');
+
+    gatewayRpcMock.mockImplementation(async (method: string) => {
+      if (method === 'chat.history') {
+        return { messages: [] };
+      }
+      if (method === 'sessions.list') {
+        return { sessions: [] };
+      }
+      if (method === 'chat.abort') {
+        return { ok: true };
+      }
+      if (method === 'chat.send') {
+        throw new Error('Gateway WS timeout: chat.send');
+      }
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      sendStage: null,
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().sendMessage('hello');
+
+    const state = useChatStore.getState();
+    expect(state.error).toBeNull();
+    expect(state.sending).toBe(true);
+    expect(state.sendStage).toBe('awaiting_runtime');
+    expect(state.sessionNotice).toMatchObject({
+      tone: 'info',
+      message: 'The reply is taking longer than usual. Still syncing the result...',
+    });
+    expect(state.messages.at(-1)).toMatchObject({
+      role: 'user',
+      content: 'hello',
+    });
   });
 
   it('does not crash when fetchAgents is missing from the agents store', async () => {

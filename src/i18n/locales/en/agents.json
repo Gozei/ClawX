@@ -45,7 +45,8 @@
     },
     "deleteDialog": {
         "title": "Delete Role",
-        "message": "Delete \"{{name}}\" from {{appName}}? This permanently deletes the role and its {{appName}}-managed workspace, runtime, and session files from disk."
+        "message": "Delete \"{{name}}\" from {{appName}}? This permanently deletes the role, its related sidebar chat history and session files, and restarts the Gateway. Ongoing chats, channel connections, or scheduled tasks may be briefly interrupted.",
+        "confirmLabel": "Delete and Restart"
     },
     "settingsDialog": {
         "title": "{{name}} Settings",

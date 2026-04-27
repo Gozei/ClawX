@@ -8,7 +8,7 @@ import {
 import { deviceOAuthManager, type OAuthProviderType } from '../../utils/device-oauth';
 import { browserOAuthManager, type BrowserOAuthProviderType } from '../../utils/browser-oauth';
 import type { HostApiContext } from '../context';
-import { parseJsonBody, sendJson } from '../route-utils';
+import { parseJsonBody, sendJson, isGatewayTransitioning } from '../route-utils';
 import {
   syncDefaultProviderToRuntime,
   syncDeletedProviderApiKeyToRuntime,
@@ -68,6 +68,10 @@ export async function handleProviderRoutes(
   }
 
   if (url.pathname === '/api/provider-accounts' && req.method === 'POST') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ account: ProviderAccount; apiKey?: string }>(req);
@@ -138,6 +142,10 @@ export async function handleProviderRoutes(
   }
 
   if (url.pathname === '/api/provider-accounts/default' && req.method === 'PUT') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ accountId: string }>(req);
@@ -243,6 +251,10 @@ export async function handleProviderRoutes(
   }
 
   if (url.pathname.startsWith('/api/provider-accounts/') && req.method === 'PUT') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const accountId = decodeURIComponent(url.pathname.slice('/api/provider-accounts/'.length));
     const startedAt = Date.now();
     try {
@@ -333,6 +345,10 @@ export async function handleProviderRoutes(
   }
 
   if (url.pathname.startsWith('/api/provider-accounts/') && req.method === 'DELETE') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const accountId = decodeURIComponent(url.pathname.slice('/api/provider-accounts/'.length));
     const startedAt = Date.now();
     try {
@@ -412,6 +428,10 @@ export async function handleProviderRoutes(
 
   if (url.pathname === '/api/providers/default' && req.method === 'PUT') {
     logLegacyProviderRoute('PUT /api/providers/default');
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     try {
       const body = await parseJsonBody<{ providerId: string }>(req);
       const currentDefault = await providerService.getDefaultLegacyProvider();
@@ -501,6 +521,10 @@ export async function handleProviderRoutes(
 
   if (url.pathname === '/api/providers' && req.method === 'POST') {
     logLegacyProviderRoute('POST /api/providers');
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     try {
       const body = await parseJsonBody<{ config: ProviderConfig; apiKey?: string }>(req);
       const config = body.config;
@@ -539,6 +563,10 @@ export async function handleProviderRoutes(
 
   if (url.pathname.startsWith('/api/providers/') && req.method === 'PUT') {
     logLegacyProviderRoute('PUT /api/providers/:id');
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const providerId = decodeURIComponent(url.pathname.slice('/api/providers/'.length));
     try {
       const body = await parseJsonBody<{ updates: Partial<ProviderConfig>; apiKey?: string }>(req);
@@ -574,6 +602,10 @@ export async function handleProviderRoutes(
 
   if (url.pathname.startsWith('/api/providers/') && req.method === 'DELETE') {
     logLegacyProviderRoute('DELETE /api/providers/:id');
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const providerId = decodeURIComponent(url.pathname.slice('/api/providers/'.length));
     try {
       const existing = await providerService.getLegacyProvider(providerId);
