@@ -521,11 +521,16 @@ function inferPrimaryEnv(explicitPrimaryEnv: string | undefined, requiredEnv: st
   return /(?:API_KEY|TOKEN|SECRET|PASSWORD)$/i.test(candidate) ? candidate : undefined;
 }
 
+function stripUtf8Bom(raw: string): string {
+  return raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
+}
+
 function parseSkillSpec(raw: string): ParsedSkillSpec {
-  const frontmatterMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?([\s\S]*)$/);
+  const normalizedRaw = stripUtf8Bom(raw);
+  const frontmatterMatch = normalizedRaw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?([\s\S]*)$/);
   if (!frontmatterMatch) {
     return {
-      rawMarkdown: raw,
+      rawMarkdown: normalizedRaw,
       parseError: 'SKILL.md frontmatter not found',
     };
   }

@@ -3,6 +3,7 @@ export type AppErrorCode =
   | 'TIMEOUT'
   | 'RATE_LIMIT'
   | 'PERMISSION'
+  | 'NOT_FOUND'
   | 'CHANNEL_UNAVAILABLE'
   | 'NETWORK'
   | 'CONFIG'
@@ -34,6 +35,8 @@ export function mapBackendErrorCode(code?: string): AppErrorCode {
       return 'CONFIG';
     case 'UNSUPPORTED':
       return 'CHANNEL_UNAVAILABLE';
+    case 'NOT_FOUND':
+      return 'NOT_FOUND';
     default:
       return 'UNKNOWN';
   }
@@ -80,6 +83,9 @@ function classifyMessage(message: string): AppErrorCode {
     || lower.includes('403')
   ) {
     return 'PERMISSION';
+  }
+  if (lower.includes('not found') || lower.includes('404')) {
+    return 'NOT_FOUND';
   }
   if (
     lower.includes('network')

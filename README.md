@@ -112,7 +112,7 @@ Deep AI Worker now also bundles Tencent's official personal WeChat channel plugi
 
 ### ⏰ Cron-Based Automation
 Schedule AI tasks to run automatically. Define triggers, set intervals, and let your AI agents work around the clock without manual intervention.
-The Cron page now lets you configure external delivery directly in the task form with separate sender-account and recipient-target selectors. For supported channels, recipient targets are discovered automatically from channel directories or known session history, so you no longer need to edit `jobs.json` by hand.
+The Cron workspace now includes gateway status, paginated task management, run history, detail drawers, and advanced task configuration. You can configure `at`, `every`, and cron schedules with timezone/stagger options, bind agents and session targets, choose payload behavior, inspect run errors and delivery status, and keep using external delivery directly from the task form with separate sender-account and recipient-target settings.
 
 ### 🌙 Dream Mode
 Enable **Dream Mode** from **Settings → General** to surface OpenClaw memory dreaming in the client. When enabled, Deep AI Worker syncs `memory-core` dreaming into OpenClaw, shows the Dreams workspace, and exposes diary/status maintenance controls; when disabled, the Dreams UI and runtime dreaming configuration are turned off.

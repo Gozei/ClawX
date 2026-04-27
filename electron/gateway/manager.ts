@@ -924,6 +924,15 @@ export class GatewayManager extends EventEmitter {
       sanitizeSpawnArgs: (args) => this.sanitizeSpawnArgs(args),
       getCurrentState: () => this.status.state,
       getShouldReconnect: () => this.shouldReconnect,
+      onStdoutLine: (line) => {
+        const normalized = line.trim();
+        if (!normalized) return;
+        if (normalized.includes('[clawx-boot]')) {
+          logger.info(`[Gateway stdout] ${normalized}`);
+          return;
+        }
+        logger.debug(`[Gateway stdout] ${normalized}`);
+      },
       onStderrLine: (line) => {
         recordGatewayStartupStderrLine(this.recentStartupStderrLines, line);
         const classified = classifyGatewayStderrMessage(line);

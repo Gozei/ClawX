@@ -8,6 +8,7 @@ import {
   type AgentWorkflowNode,
   listAgentsSnapshot,
   prepareAgentModelUpdate,
+  removeAgentRuntimeDirectory,
   removeAgentWorkspaceDirectory,
   resolveAccountIdForAgent,
   updateAgentModel,
@@ -15,6 +16,7 @@ import {
   updateAgentName,
 } from '../../utils/agent-config';
 import { deleteChannelAccountConfig } from '../../utils/channel-config';
+import { getOpenClawProvidersConfig } from '../../utils/openclaw-auth';
 import {
   syncAgentModelRefToRuntime,
   syncAgentModelOverrideToRuntime,
@@ -22,7 +24,7 @@ import {
 } from '../../services/providers/provider-runtime-sync';
 import type { HostApiContext } from '../context';
 import { emitMutationAudit } from '../audit-utils';
-import { parseJsonBody, sendJson } from '../route-utils';
+import { parseJsonBody, sendJson, isGatewayTransitioning } from '../route-utils';
 import { logger } from '../../utils/logger';
 
 function scheduleGatewayReload(ctx: HostApiContext, reason: string): void {
@@ -37,6 +39,39 @@ type GatewayConfigSnapshot = {
   hash?: string;
   config?: Record<string, unknown>;
 };
+
+function parseModelProviderKey(modelRef: string | null): string | null {
+  const trimmed = (modelRef || '').trim();
+  const separatorIndex = trimmed.indexOf('/');
+  if (separatorIndex <= 0 || separatorIndex >= trimmed.length - 1) {
+    return null;
+  }
+  return trimmed.slice(0, separatorIndex);
+}
+
+async function buildAgentModelHotPatch(
+  agentsConfig: unknown,
+  modelRef: string | null,
+): Promise<Record<string, unknown>> {
+  const patch: Record<string, unknown> = {
+    agents: agentsConfig ?? {},
+  };
+  const providerKey = parseModelProviderKey(modelRef);
+  if (!providerKey) {
+    return patch;
+  }
+
+  const providerSnapshot = await getOpenClawProvidersConfig();
+  const providerEntry = providerSnapshot.providers[providerKey];
+  if (providerEntry && typeof providerEntry === 'object' && !Array.isArray(providerEntry)) {
+    patch.models = {
+      providers: {
+        [providerKey]: providerEntry,
+      },
+    };
+  }
+  return patch;
+}
 
 async function tryHotPatchAgentModel(
   ctx: HostApiContext,
@@ -54,11 +89,12 @@ async function tryHotPatchAgentModel(
   }
 
   const prepared = await prepareAgentModelUpdate(snapshot.config, agentId, modelRef, options);
+  const patch = await buildAgentModelHotPatch(prepared.config.agents, modelRef);
   await ctx.gatewayManager.rpc(
     'config.patch',
     {
       baseHash: snapshot.hash,
-      raw: JSON.stringify({ agents: prepared.config.agents ?? {} }),
+      raw: JSON.stringify(patch),
     },
     15000,
   );
@@ -66,36 +102,28 @@ async function tryHotPatchAgentModel(
   return prepared;
 }
 
-async function tryHotPatchRuntimeAgentModel(
-  ctx: HostApiContext,
-  agentId: string,
-  modelRef: string | null,
-  options: { setAsDefault?: boolean } = {},
-): Promise<Awaited<ReturnType<typeof prepareAgentModelUpdate>>> {
-  if (ctx.gatewayManager.getStatus().state !== 'running') {
-    throw new Error('Gateway is not running');
-  }
-
-  const snapshot = await ctx.gatewayManager.rpc<GatewayConfigSnapshot>('config.get', {}, 15000);
-  if (!snapshot?.hash || !snapshot.config || typeof snapshot.config !== 'object' || Array.isArray(snapshot.config)) {
-    throw new Error('Unable to read running Gateway config');
-  }
-
-  const prepared = await prepareAgentModelUpdate(snapshot.config, agentId, modelRef, options);
-  await ctx.gatewayManager.rpc(
-    'config.patch',
-    {
-      baseHash: snapshot.hash,
-      raw: JSON.stringify({ agents: prepared.config.agents ?? {} }),
-    },
-    15000,
-  );
-  return prepared;
-}
-
 import { exec } from 'child_process';
 import { promisify } from 'util';
 const execAsync = promisify(exec);
+
+async function waitForGatewayState(
+  readStatus: () => { state?: string },
+  predicate: (state: string) => boolean,
+  timeoutMs: number,
+  intervalMs = 100,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = readStatus().state ?? 'unknown';
+    if (predicate(state)) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  const finalState = readStatus().state ?? 'unknown';
+  return predicate(finalState);
+}
 
 /**
  * Force a full Gateway process restart after agent deletion.
@@ -113,6 +141,7 @@ export async function restartGatewayForAgentDeletion(ctx: HostApiContext): Promi
     const status = ctx.gatewayManager.getStatus();
     const pid = status.pid;
     const port = status.port;
+    const shouldRecoverGateway = status.state !== 'stopped';
     logger.info('[agents] Triggering Gateway restart (kill+respawn) after agent deletion', { pid, port });
 
     // Force-kill the Gateway process by PID.  The manager's stop() only
@@ -168,7 +197,28 @@ export async function restartGatewayForAgentDeletion(ctx: HostApiContext): Promi
       }
     }
 
-    await ctx.gatewayManager.restart();
+    if (!shouldRecoverGateway) {
+      logger.info('[agents] Gateway was already stopped; skipping post-deletion restart');
+      return;
+    }
+
+    await waitForGatewayState(
+      () => ctx.gatewayManager.getStatus(),
+      (state) => state !== 'running',
+      3000,
+    );
+
+    await ctx.gatewayManager.start();
+    const recovered = await waitForGatewayState(
+      () => ctx.gatewayManager.getStatus(),
+      (state) => state === 'running',
+      30000,
+    );
+    if (!recovered) {
+      throw new Error(
+        `Gateway did not recover after agent deletion (state=${ctx.gatewayManager.getStatus().state ?? 'unknown'})`,
+      );
+    }
     logger.info('[agents] Gateway restart completed after agent deletion');
   } catch (err) {
     logger.warn('[agents] Gateway restart after agent deletion failed:', err);
@@ -187,6 +237,10 @@ export async function handleAgentRoutes(
   }
 
   if (url.pathname === '/api/agents' && req.method === 'POST') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{
@@ -236,6 +290,10 @@ export async function handleAgentRoutes(
   }
 
   if (url.pathname.startsWith('/api/agents/') && req.method === 'PUT') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const suffix = url.pathname.slice('/api/agents/'.length);
     const parts = suffix.split('/').filter(Boolean);
 
@@ -271,15 +329,11 @@ export async function handleAgentRoutes(
 
     if (parts.length === 3 && parts[1] === 'model' && parts[2] === 'runtime') {
       try {
-        const body = await parseJsonBody<{ modelRef?: string | null; setAsDefault?: boolean }>(req);
+        const body = await parseJsonBody<{ modelRef?: string | null }>(req);
         const agentId = decodeURIComponent(parts[0]);
-        const updateOptions = {
-          setAsDefault: body.setAsDefault === true,
-        };
 
         await syncAllProviderAuthToRuntime();
         await syncAgentModelRefToRuntime(agentId, body.modelRef ?? null);
-        await tryHotPatchRuntimeAgentModel(ctx, agentId, body.modelRef ?? null, updateOptions);
 
         sendJson(res, 200, {
           success: true,
@@ -421,6 +475,10 @@ export async function handleAgentRoutes(
   }
 
   if (url.pathname.startsWith('/api/agents/') && req.method === 'DELETE') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const suffix = url.pathname.slice('/api/agents/'.length);
     const parts = suffix.split('/').filter(Boolean);
 
@@ -433,6 +491,12 @@ export async function handleAgentRoutes(
         // This ensures the Feishu plugin has disconnected the deleted bot
         // before the UI shows "delete success" and the user tries chatting.
         await restartGatewayForAgentDeletion(ctx);
+        // Retry runtime cleanup after restart so stale session indexes and
+        // transcripts are removed even if the old process still had files open
+        // during the initial config deletion step.
+        await removeAgentRuntimeDirectory(agentId).catch((err) => {
+          logger.warn('[agents] Failed to remove runtime after agent deletion:', err);
+        });
         // Delete workspace after reload so the new config is already live.
         await removeAgentWorkspaceDirectory(removedEntry).catch((err) => {
           logger.warn('[agents] Failed to remove workspace after agent deletion:', err);

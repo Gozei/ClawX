@@ -2,6 +2,8 @@
 
 本文档定义 Deep AI Worker 项目的分支管理、提交信息、Pull Request 和发布流程规范。
 
+> **注意**：本文档描述的是目标分支策略。项目当前仍在 `main` 上直接集成，`develop` 分支将在团队就绪后启用，届时所有日常开发将逐步迁移到基于 `develop` 的工作流。
+
 ## 长期分支
 
 - `main` 是生产发布分支，只保存已经充分测试并准备发布的稳定代码。
@@ -74,6 +76,7 @@ tommy/fix/bug
 - 日常开发 Pull Request 的目标分支应为 `develop`。
 - 发布 Pull Request 的目标分支应为 `main`，来源分支应为已经充分测试的 `develop`。
 - Pull Request 名称应与 commit message 规范保持一致。
+- PR 合并策略：默认使用 **Squash Merge**，保持主分支历史线性整洁。仅在确需保留细粒度提交历史时使用 Merge Commit，避免使用 Rebase Merge 以防重写公共历史。
 
 ## 提交信息与 PR 名称
 
@@ -162,8 +165,6 @@ git merge main
 ## 推荐工作流
 
 ```bash
-git checkout main
-git pull
 git checkout develop
 git pull
 git checkout -b <owner>/<type>/<short-description>
@@ -173,7 +174,7 @@ git checkout -b <owner>/<type>/<short-description>
 
 ```bash
 git status
-git add .
+git add <specific files>   # ⚠️ 避免使用 git add .，防止意外暂存 .env 等敏感文件
 git commit -m "<type>: <short summary>"
 git push -u origin <owner>/<type>/<short-description>
 ```

@@ -30,11 +30,15 @@
       "available": "New version",
       "latest": "You already have the latest version",
       "failed": "Failed to check for updates",
+      "cancel": "Cancel",
       "dialogTitle": "New Version Detected",
       "dialogMessage": "A new version was detected. Update now?",
       "downloadedMessage": "Version v{{version}} has finished downloading. Click to install and restart the app.",
       "downloadedReady": "The update has finished downloading. Click to install and restart the app.",
       "confirm": "Update",
+      "installTitle": "Update ready to install",
+      "installNow": "Restart and Install Now",
+      "installLater": "Restart on Next Launch",
       "installing": "Installing and restarting...",
       "started": "Update download started"
     },
@@ -365,9 +369,12 @@
       "check": "Check for Updates"
     },
     "installOverlay": {
+      "downloadBadge": "Update download in progress",
       "badge": "Update installation in progress",
       "title": "Installing update, please wait",
       "description": "The app is shutting down and handing off to the system installer. Do not close the app, click repeatedly, or keep interacting with the UI.",
+      "downloadingDescription": "Downloading update package. Please keep the app open.",
+      "downloadStarting": "Preparing download, please keep the app open.",
       "detailWindows": "Windows usually continues with a system installer flow. Follow the installer and wait for the app to restart.",
       "detailMac": "macOS may appear briefly unresponsive during replacement. This is expected. Please wait for the system to finish and relaunch the app.",
       "detailLinux": "On Linux, the app may briefly look unresponsive during installation. If the system shows a Wait option, choose Wait and do not force close the app, or the update may fail.",

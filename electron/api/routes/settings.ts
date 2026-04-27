@@ -9,7 +9,7 @@ import { syncDreamModeToOpenClawConfig } from '../../utils/dream-mode';
 import { applyRuntimeLoggingSettings, patchTouchesLoggingSettings } from '../../utils/logging-config';
 import type { HostApiContext } from '../context';
 import { emitMutationAudit } from '../audit-utils';
-import { parseJsonBody, sendJson } from '../route-utils';
+import { parseJsonBody, sendJson, isGatewayTransitioning } from '../route-utils';
 
 async function handleProxySettingsChange(ctx: HostApiContext): Promise<void> {
   const settings = await getAllSettings();
@@ -44,6 +44,20 @@ function patchTouchesDreamMode(patch: Partial<AppSettings>): boolean {
   return Object.prototype.hasOwnProperty.call(patch, 'dreamModeEnabled');
 }
 
+function patchTouchesGatewayConfig(patch: Partial<AppSettings>): boolean {
+  return patchTouchesProxy(patch) || patchTouchesDreamMode(patch);
+}
+
+function settingTouchesGatewayConfig(key: keyof AppSettings): boolean {
+  return key === 'dreamModeEnabled'
+    || key === 'proxyEnabled'
+    || key === 'proxyServer'
+    || key === 'proxyHttpServer'
+    || key === 'proxyHttpsServer'
+    || key === 'proxyAllServer'
+    || key === 'proxyBypassRules';
+}
+
 async function refreshNativeMenus(ctx: HostApiContext): Promise<void> {
   await createMenu();
   await refreshTray(ctx.mainWindow);
@@ -71,6 +85,10 @@ export async function handleSettingsRoutes(
     const startedAt = Date.now();
     try {
       const patch = await parseJsonBody<Partial<AppSettings>>(req);
+      if (patchTouchesGatewayConfig(patch) && isGatewayTransitioning(ctx)) {
+        sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+        return true;
+      }
       const entries = Object.entries(patch) as Array<[keyof AppSettings, AppSettings[keyof AppSettings]]>;
       for (const [key, value] of entries) {
         await setSetting(key, value);
@@ -130,6 +148,10 @@ export async function handleSettingsRoutes(
 
   if (url.pathname.startsWith('/api/settings/') && req.method === 'PUT') {
     const key = url.pathname.slice('/api/settings/'.length) as keyof AppSettings;
+    if (settingTouchesGatewayConfig(key) && isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ value: AppSettings[keyof AppSettings] }>(req);
@@ -197,6 +219,10 @@ export async function handleSettingsRoutes(
   }
 
   if (url.pathname === '/api/settings/reset' && req.method === 'POST') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       await resetSettings();

@@ -1,6 +1,6 @@
 import { app } from 'electron';
 import path from 'path';
-import { existsSync, readFileSync, mkdirSync, readdirSync, renameSync, rmSync, type Dirent } from 'fs';
+import { existsSync, readFileSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, type Dirent } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
@@ -48,6 +48,59 @@ export interface GatewayLaunchContext {
   proxySummary: string;
   channelStartupSummary: string;
   discoverySummary: string;
+}
+
+function isLocalOpenClawOverrideActive(): boolean {
+  return !app.isPackaged && Boolean(process.env.CLAWX_OPENCLAW_LOCAL_DIR?.trim());
+}
+
+function assertLocalOpenClawBuildReady(openclawDir: string): void {
+  if (!isLocalOpenClawOverrideActive()) {
+    return;
+  }
+
+  const requiredFiles = [
+    join(openclawDir, 'package.json'),
+    join(openclawDir, 'openclaw.mjs'),
+    join(openclawDir, 'dist', 'entry.js'),
+    join(openclawDir, 'dist', 'control-ui', 'index.html'),
+  ];
+  const missing = requiredFiles.filter((file) => !existsSync(fsPath(file)));
+  const buildHint =
+    `Local OpenClaw override is not ready at ${openclawDir}. ` +
+    'Run `pnpm build` and `pnpm ui:build` in the OpenClaw checkout, then restart ClawX.';
+
+  if (missing.length > 0) {
+    throw new Error(`${buildHint} Missing: ${missing.join(', ')}`);
+  }
+
+  const distEntry = join(openclawDir, 'dist', 'entry.js');
+  const sourceFilesToCheck = [
+    join(openclawDir, 'src', 'gateway', 'server-startup-post-attach.ts'),
+    join(openclawDir, 'src', 'gateway', 'server-startup-memory.ts'),
+    join(openclawDir, 'src', 'agents', 'session-write-lock.ts'),
+  ];
+
+  let distEntryMtime = 0;
+  try {
+    distEntryMtime = statSync(fsPath(distEntry)).mtimeMs;
+  } catch {
+    throw new Error(`${buildHint} Missing or unreadable: ${distEntry}`);
+  }
+
+  const staleSource = sourceFilesToCheck.find((file) => {
+    try {
+      return existsSync(fsPath(file)) && statSync(fsPath(file)).mtimeMs > distEntryMtime + 1000;
+    } catch {
+      return false;
+    }
+  });
+
+  if (staleSource) {
+    throw new Error(
+      `${buildHint} Source appears newer than dist output: ${staleSource}`,
+    );
+  }
 }
 
 // ── Auto-upgrade bundled plugins on startup ──────────────────────
@@ -443,6 +496,7 @@ export async function prepareGatewayLaunchContext(port: number): Promise<Gateway
   if (!isOpenClawPresent()) {
     throw new Error(`OpenClaw package not found at: ${openclawDir}`);
   }
+  assertLocalOpenClawBuildReady(openclawDir);
 
   const appSettings = await getAllSettings();
   await syncGatewayConfigBeforeLaunch(appSettings);

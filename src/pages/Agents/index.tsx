@@ -13,10 +13,10 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { useAgentsStore } from '@/stores/agents';
+import { useChatStore } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
 import { useProviderStore } from '@/stores/providers';
 import { useSkillsStore } from '@/stores/skills';
-import { useChatStore } from '@/stores/chat';
 import { hostApiFetch } from '@/lib/host-api';
 import { useBranding } from '@/lib/branding';
 import { buildProviderListItems } from '@/lib/provider-accounts';
@@ -469,23 +469,28 @@ export function Agents() {
           name: agentToDelete.name,
           appName: branding.productName,
         }) : ''}
-        confirmLabel={t('common:actions.delete')}
+        confirmLabel={t('deleteDialog.confirmLabel')}
         cancelLabel={t('common:actions.cancel')}
         variant="destructive"
-        onConfirm={async () => {
+        onConfirm={() => {
           if (!agentToDelete) return;
-          try {
-            const deleted = await deleteAgent(agentToDelete.id);
-            if (!deleted) return;
-            const deletedId = agentToDelete.id;
-            setAgentToDelete(null);
-            if (activeAgentId === deletedId) {
-              setActiveAgentId(null);
+          const deletedId = agentToDelete.id;
+          setAgentToDelete(null);
+          void (async () => {
+            try {
+              const deleted = await deleteAgent(deletedId, { skipImpactConfirm: true });
+              if (!deleted) return;
+              const chatStore = useChatStore.getState();
+              chatStore.purgeAgentSessions(deletedId);
+              await chatStore.loadHistory(true);
+              if (activeAgentId === deletedId) {
+                setActiveAgentId(null);
+              }
+              toast.success(t('toast.agentDeleted'));
+            } catch (error) {
+              toast.error(t('toast.agentDeleteFailed', { error: String(error) }));
             }
-            toast.success(t('toast.agentDeleted'));
-          } catch (error) {
-            toast.error(t('toast.agentDeleteFailed', { error: String(error) }));
-          }
+          })();
         }}
         onCancel={() => setAgentToDelete(null)}
       />

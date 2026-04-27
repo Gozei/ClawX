@@ -35,6 +35,10 @@
       "downloadedMessage": "版本 v{{version}} 已下载完成，点击后将安装并重启应用。",
       "downloadedReady": "更新已下载完成，点击后将安装并重启应用。",
       "confirm": "更新",
+      "cancel": "取消",
+      "installTitle": "更新已可安装",
+      "installNow": "立即重启安装",
+      "installLater": "下次启动时安装",
       "installing": "正在安装并重启...",
       "started": "已开始下载更新"
     },
@@ -365,9 +369,12 @@
       "check": "检查更新"
     },
     "installOverlay": {
+      "downloadBadge": "更新下载进行中",
       "badge": "更新安装进行中",
       "title": "正在安装更新，请耐心等待",
       "description": "应用正在退出并交给系统安装程序处理。现在不要关闭应用、不要重复点击，也不要做其他操作。",
+      "downloadingDescription": "更新包下载中，请保持应用打开。",
+      "downloadStarting": "正在准备下载，请保持应用打开。",
       "detailWindows": "Windows 通常会继续显示系统安装向导，请按向导完成安装并等待应用自动重启。",
       "detailMac": "macOS 可能会短暂没有明显响应，这是正常的。请等待系统完成替换并自动重启应用。",
       "detailLinux": "Linux 上安装阶段可能会短暂看起来像未响应。如果系统弹出“等待”或类似选项，请选择等待，不要强制关闭，否则更新可能失败。",

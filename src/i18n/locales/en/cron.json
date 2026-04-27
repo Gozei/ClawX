@@ -115,6 +115,217 @@
         "weeklyAt": "Weekly on {{day}} at {{time}}",
         "monthlyAtDay": "Monthly on day {{day}} at {{time}}",
         "dailyAt": "Daily at {{time}}",
+        "weekdaysAt": "Every weekday at {{time}}",
+        "everyMinute": "Every minute",
+        "hourlyAtMinute": "Hourly at minute {{minute}}",
+        "everyHoursAtMinute": "Every {{count}} hours at minute {{minute}}",
+        "customCron": "Custom cron",
+        "exact": "exact",
+        "stagger": "stagger {{value}}",
         "unknown": "Unknown"
+    },
+    "weekdays": {
+        "0": "Sunday",
+        "1": "Monday",
+        "2": "Tuesday",
+        "3": "Wednesday",
+        "4": "Thursday",
+        "5": "Friday",
+        "6": "Saturday"
+    },
+    "summary": {
+        "enabled": "Cron status",
+        "jobs": "Jobs",
+        "nextWake": "Next wake"
+    },
+    "states": {
+        "unavailable": "Unavailable"
+    },
+    "values": {
+        "notAvailable": "N/A",
+        "mainAgent": "main"
+    },
+    "status": {
+        "ok": "OK",
+        "error": "Error",
+        "skipped": "Skipped",
+        "unknown": "Unknown",
+        "delivered": "Delivered",
+        "not-delivered": "Not delivered",
+        "not-requested": "Not requested"
+    },
+    "fallback": {
+        "status": "Gateway status is unavailable. Showing local cron metadata when possible.",
+        "jobs": "Gateway task list is unavailable. Showing the local jobs.json fallback.",
+        "runs": "Gateway run history is unavailable. Showing local run log fallback."
+    },
+    "errors": {
+        "statusLoadFailed": "Failed to load Cron status",
+        "jobsLoadFailed": "Failed to load task list",
+        "runsLoadFailed": "Failed to load run history",
+        "targetsLoadFailed": "Failed to load delivery targets",
+        "channelsLoadFailed": "Failed to load configured channels",
+        "sessionKeyMissing": "This run does not include a session key.",
+        "sessionNotFound": "The chat session no longer exists or has no readable history.",
+        "sessionOpenFailed": "Failed to open chat session: {{error}}"
+    },
+    "filters": {
+        "label": "Filters",
+        "withCount": "Filters ({{count}})",
+        "subtitle": "Narrow the current list without changing the search text.",
+        "reset": "Reset"
+    },
+    "jobs": {
+        "title": "Jobs",
+        "searchJobs": "Search",
+        "searchPlaceholder": "Search jobs",
+        "enabled": "Enabled",
+        "all": "All",
+        "schedule": "Schedule",
+        "lastRun": "Last run",
+        "sort": "Sort",
+        "updated": "Updated",
+        "shownOf": "{{shown}} / {{total}} shown",
+        "loadMore": "Load more",
+        "consecutiveErrors_one": "{{count}} error",
+        "consecutiveErrors_other": "{{count}} errors",
+        "failedCount_one": "{{count}} failed",
+        "failedCount_other": "{{count}} failed",
+        "jobCount_one": "{{count}} job",
+        "jobCount_other": "{{count}} jobs"
+    },
+    "runs": {
+        "title": "Run history",
+        "scope": "Scope",
+        "allJobs": "All jobs",
+        "selectedJob": "Selected job",
+        "searchRuns": "Search",
+        "searchPlaceholder": "Search summary or error",
+        "status": "Status",
+        "delivery": "Delivery",
+        "allStatuses": "All",
+        "allDelivery": "All",
+        "noMatching": "No matching runs",
+        "loadMore": "Load more",
+        "unknownJob": "Unknown job"
+    },
+    "runEntry": {
+        "noSummary": "No summary",
+        "openRunChat": "Open chat",
+        "runAt": "Run at",
+        "totalTokens": "{{count}} tokens",
+        "inputOutputTokens": "{{input}} in / {{output}} out"
+    },
+    "scheduleKinds": {
+        "at": "At",
+        "every": "Every",
+        "cron": "Calendar"
+    },
+    "calendarModes": {
+        "daily": "Daily",
+        "weekly": "Weekly",
+        "monthly": "Monthly",
+        "weekdays": "Weekdays",
+        "custom": "Custom"
+    },
+    "cronHelp": {
+        "title": "Cron expression syntax",
+        "fields": "Fields: minute hour day-of-month month day-of-week. Use * for any value, */n for intervals, and comma-separated values for multiple matches.",
+        "examples": "Examples: 0 9 * * * runs daily at 09:00; */15 * * * * runs every 15 minutes; 0 9 * * 1 runs Monday at 09:00."
+    },
+    "units": {
+        "seconds": "Seconds",
+        "minutes": "Minutes",
+        "hours": "Hours",
+        "days": "Days"
+    },
+    "fields": {
+        "scheduleType": "Schedule type",
+        "runAt": "Run at",
+        "every": "Every",
+        "unit": "Unit",
+        "runTime": "Run time",
+        "weekday": "Weekday",
+        "monthDay": "Day",
+        "cronExpression": "Cron expression",
+        "timezone": "Timezone",
+        "agentId": "Agent ID",
+        "sessionKey": "Session Key",
+        "sessionTarget": "Session target",
+        "wakeMode": "Wake mode",
+        "deleteAfterRun": "Delete after run",
+        "exactTiming": "Exact timing",
+        "staggerAmount": "Stagger amount",
+        "staggerUnit": "Stagger unit",
+        "payloadKind": "Payload kind",
+        "model": "Model",
+        "thinking": "Thinking",
+        "timeoutSeconds": "Timeout seconds",
+        "lightContext": "Light context",
+        "webhookUrl": "Webhook URL",
+        "bestEffort": "Best effort",
+        "mode": "Mode",
+        "afterErrors": "After errors",
+        "cooldownSeconds": "Cooldown seconds",
+        "channel": "Channel",
+        "target": "Target",
+        "accountId": "Account ID",
+        "description": "Description",
+        "descriptionPlaceholder": "Optional operator note",
+        "systemEventText": "System event text"
+    },
+    "advanced": {
+        "execution": "Execution",
+        "schedule": "Schedule advanced",
+        "payload": "Payload advanced",
+        "failureAlert": "Failure alert"
+    },
+    "sessionTargets": {
+        "isolated": "Isolated / stable cron session",
+        "main": "Main"
+    },
+    "wakeModes": {
+        "nextHeartbeat": "Next heartbeat",
+        "now": "Now"
+    },
+    "payloadKinds": {
+        "agentTurn": "Agent turn",
+        "systemEvent": "System event"
+    },
+    "deliveryModes": {
+        "none": "Internal only",
+        "announce": "Channel announce",
+        "webhook": "Webhook POST"
+    },
+    "failureAlert": {
+        "inherit": "Inherit default",
+        "disabled": "Disabled",
+        "custom": "Custom"
+    },
+    "details": {
+        "created": "Created",
+        "updated": "Updated",
+        "duration": "Duration",
+        "consecutiveErrors": "Consecutive errors",
+        "prompt": "Prompt",
+        "metadata": "Metadata"
+    },
+    "validation": {
+        "nameRequired": "Task name is required",
+        "runTimeInvalid": "Run time is invalid",
+        "intervalPositive": "Interval must be greater than 0",
+        "cronRequired": "Cron expression is required",
+        "calendarTimeInvalid": "Please choose a valid run time",
+        "weekdayInvalid": "Please choose a valid weekday",
+        "monthDayInvalid": "Day must be between 1 and 31",
+        "staggerPositive": "Stagger window must be greater than 0",
+        "systemEventRequired": "System event text is required",
+        "promptRequired": "Prompt is required",
+        "timeoutPositive": "Timeout must be greater than 0",
+        "webhookUrl": "Webhook URL must start with http:// or https://",
+        "deliveryChannelRequired": "Delivery channel is required",
+        "deliveryTargetRequired": "Delivery target is required",
+        "failureAfterPositive": "Failure alert threshold must be greater than 0",
+        "failureCooldownPositive": "Failure alert cooldown must be 0 or greater"
     }
 }

@@ -24,6 +24,7 @@ import { patchOpenClawPrompts } from './patch-openclaw-prompts.mjs';
 const ROOT = path.resolve(__dirname, '..');
 const OUTPUT = path.join(ROOT, 'build', 'openclaw');
 const NODE_MODULES = path.join(ROOT, 'node_modules');
+const LOCAL_OPENCLAW_DIR = process.env.CLAWX_OPENCLAW_LOCAL_DIR?.trim();
 
 // On Windows, pnpm virtual store paths can exceed MAX_PATH (260 chars).
 function normWin(p) {
@@ -32,17 +33,54 @@ function normWin(p) {
   return '\\\\?\\' + p.replace(/\//g, '\\');
 }
 
+function normalizeLocalPath(p) {
+  if (process.platform === 'win32') {
+    const msysDrivePath = p.match(/^\/([a-zA-Z])\/(.+)$/);
+    if (msysDrivePath) {
+      return `${msysDrivePath[1].toUpperCase()}:\\${msysDrivePath[2].replace(/\//g, '\\')}`;
+    }
+  }
+  return p;
+}
+
 echo`📦 Bundling openclaw for electron-builder...`;
 
-// 1. Resolve the real path of node_modules/openclaw (follows pnpm symlink)
+// 1. Resolve the real path of node_modules/openclaw (follows pnpm symlink).
+//    For local OpenClaw source testing, set CLAWX_OPENCLAW_LOCAL_DIR to a built
+//    package checkout (for example C:\Users\...\Projects\openclaw after
+//    `pnpm build`). The local package files are copied into build/openclaw,
+//    while dependency collection still uses the installed pnpm package graph.
 const openclawLink = path.join(NODE_MODULES, 'openclaw');
 if (!fs.existsSync(openclawLink)) {
   echo`❌ node_modules/openclaw not found. Run pnpm install first.`;
   process.exit(1);
 }
 
-const openclawReal = fs.realpathSync(openclawLink);
-echo`   openclaw resolved: ${openclawReal}`;
+const installedOpenclawReal = fs.realpathSync(openclawLink);
+let openclawReal = installedOpenclawReal;
+
+if (LOCAL_OPENCLAW_DIR) {
+  const localOpenclawDir = path.resolve(normalizeLocalPath(LOCAL_OPENCLAW_DIR));
+  const requiredFiles = [
+    path.join(localOpenclawDir, 'package.json'),
+    path.join(localOpenclawDir, 'openclaw.mjs'),
+    path.join(localOpenclawDir, 'dist', 'entry.js'),
+  ];
+  const missing = requiredFiles.filter((file) => !fs.existsSync(file));
+  if (missing.length > 0) {
+    echo`❌ CLAWX_OPENCLAW_LOCAL_DIR is not a built OpenClaw package: ${localOpenclawDir}`;
+    for (const file of missing) {
+      echo`   missing: ${file}`;
+    }
+    echo`   Build it first, for example: cd ${localOpenclawDir} && pnpm build`;
+    process.exit(1);
+  }
+  openclawReal = localOpenclawDir;
+  echo`   openclaw source: ${openclawReal} (local CLAWX_OPENCLAW_LOCAL_DIR)`;
+  echo`   dependency graph: ${installedOpenclawReal} (installed package)`;
+} else {
+  echo`   openclaw resolved: ${openclawReal}`;
+}
 
 // 2. Clean and create output directory
 if (fs.existsSync(OUTPUT)) {
@@ -53,6 +91,11 @@ fs.mkdirSync(OUTPUT, { recursive: true });
 // 3. Copy openclaw package itself to OUTPUT root
 echo`   Copying openclaw package...`;
 fs.cpSync(openclawReal, OUTPUT, { recursive: true, dereference: true });
+const copiedNodeModules = path.join(OUTPUT, 'node_modules');
+if (fs.existsSync(copiedNodeModules)) {
+  fs.rmSync(copiedNodeModules, { recursive: true, force: true });
+  echo`   Removed copied node_modules; rebuilding bundled dependencies from pnpm graph`;
+}
 const patchedFiles = patchOpenClawPrompts(OUTPUT);
 if (patchedFiles > 0) {
   echo`   📝 Patched ${patchedFiles} OpenClaw prompt/runtime file(s) for concise Chinese system hints`;
@@ -127,8 +170,11 @@ function listPackages(nodeModulesDir) {
   return result;
 }
 
-// Start BFS from openclaw's virtual store node_modules
-const openclawVirtualNM = getVirtualStoreNodeModules(openclawReal);
+// Start BFS from the installed openclaw virtual store node_modules.
+// When CLAWX_OPENCLAW_LOCAL_DIR is set, the local source may be a workspace
+// checkout rather than a pnpm virtual-store package, so installed deps remain
+// the reproducible graph used for bundle assembly.
+const openclawVirtualNM = getVirtualStoreNodeModules(installedOpenclawReal);
 if (!openclawVirtualNM) {
   echo`❌ Could not determine pnpm virtual store for openclaw`;
   process.exit(1);

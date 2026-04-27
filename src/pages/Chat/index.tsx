@@ -287,6 +287,7 @@ export function Chat() {
   const loadHistory = useChatStore((s) => s.loadHistory);
   const abortRun = useChatStore((s) => s.abortRun);
   const clearSessionFeedback = useChatStore((s) => s.clearSessionFeedback);
+  const switchSession = useChatStore((s) => s.switchSession);
   const fetchAgents = useAgentsStore((s) => s.fetchAgents);
   const queuedMessages = useChatStore((s) => s.queuedMessages[s.currentSessionKey]);
   const queuedMessage = queuedMessages?.[0] ?? null;
@@ -405,6 +406,30 @@ export function Chat() {
 
     hadPreviewOpenRef.current = hasPreview;
   }, [restoreAutoCollapsedSidebar, selectedPreviewFile]);
+
+  useEffect(() => {
+    const sessionFromSearch = new URLSearchParams(location.search).get('session')?.trim() ?? '';
+    if (!sessionFromSearch) return;
+
+    if (sessionFromSearch !== currentSessionKey) {
+      switchSession(sessionFromSearch);
+    }
+
+    const nextParams = new URLSearchParams(location.search);
+    nextParams.delete('session');
+    const nextSearch = nextParams.toString();
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextSearch ? `?${nextSearch}` : '',
+        hash: location.hash,
+      },
+      {
+        replace: true,
+        state: location.state,
+      },
+    );
+  }, [currentSessionKey, location.hash, location.pathname, location.search, location.state, navigate, switchSession]);
 
   useEffect(() => {
     const routeState = location.state && typeof location.state === 'object'

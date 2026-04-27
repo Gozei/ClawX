@@ -55,15 +55,16 @@
     "gateway": {
         "notRunning": "Gateway Not Running",
         "notRunningDesc": "The OpenClaw Gateway needs to be running to use this feature. It will start automatically, or you can start it from Settings.",
-        "warning": "Gateway is not running."
+        "warning": "Gateway is not running.",
+        "restarting": "Gateway is restarting, please try again later."
     },
     "gatewayImpact": {
         "titleRestart": "This action will restart the Gateway",
         "titleRefresh": "This action will refresh the Gateway",
-        "messageRestartWithChanges": "If you continue, ClawX will apply this change and restart the OpenClaw Gateway. Ongoing chats, channel connections, or scheduled tasks may be briefly interrupted.",
-        "messageRestartOnly": "If you continue, ClawX will restart the OpenClaw Gateway. Ongoing chats, channel connections, or scheduled tasks may be briefly interrupted.",
-        "messageRefreshWithChanges": "If you continue, ClawX will apply this change and refresh the OpenClaw Gateway configuration. On some platforms or when in-place reload is unavailable, the Gateway may restart instead.",
-        "messageRefreshOnly": "If you continue, ClawX will refresh the OpenClaw Gateway configuration. On some platforms or when in-place reload is unavailable, the Gateway may restart instead.",
+        "messageRestartWithChanges": "If you continue, Deep AI Worker will apply this change and restart the OpenClaw Gateway. Ongoing chats, channel connections, or scheduled tasks may be briefly interrupted.",
+        "messageRestartOnly": "If you continue, Deep AI Worker will restart the OpenClaw Gateway. Ongoing chats, channel connections, or scheduled tasks may be briefly interrupted.",
+        "messageRefreshWithChanges": "If you continue, Deep AI Worker will apply this change and refresh the OpenClaw Gateway configuration. On some platforms or when in-place reload is unavailable, the Gateway may restart instead.",
+        "messageRefreshOnly": "If you continue, Deep AI Worker will refresh the OpenClaw Gateway configuration. On some platforms or when in-place reload is unavailable, the Gateway may restart instead.",
         "confirmRestartWithChanges": "Apply and Restart",
         "confirmRestartOnly": "Restart",
         "confirmRefreshWithChanges": "Apply Changes",
