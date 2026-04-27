@@ -112,7 +112,7 @@ Deep AI Worker now also bundles Tencent's official personal WeChat channel plugi
 
 ### ⏰ Cron-Based Automation
 Schedule AI tasks to run automatically. Define triggers, set intervals, and let your AI agents work around the clock without manual intervention.
-The Cron page now lets you configure external delivery directly in the task form with separate sender-account and recipient-target selectors. For supported channels, recipient targets are discovered automatically from channel directories or known session history, so you no longer need to edit `jobs.json` by hand.
+The Cron workspace now includes gateway status, paginated task management, run history, detail drawers, and advanced task configuration. You can configure `at`, `every`, and cron schedules with timezone/stagger options, bind agents and session targets, choose payload behavior, inspect run errors and delivery status, and keep using external delivery directly from the task form with separate sender-account and recipient-target settings.
 
 ### 🌙 Dream Mode
 Enable **Dream Mode** from **Settings → General** to surface OpenClaw memory dreaming in the client. When enabled, Deep AI Worker syncs `memory-core` dreaming into OpenClaw, shows the Dreams workspace, and exposes diary/status maintenance controls; when disabled, the Dreams UI and runtime dreaming configuration are turned off.
@@ -212,6 +212,7 @@ Notes:
 - Deep AI Worker also syncs the proxy to OpenClaw's Telegram channel config when Telegram is enabled.
 - Gateway restarts preserve an existing Telegram channel proxy if Deep AI Worker proxy is currently disabled.
 - To explicitly clear Telegram channel proxy from OpenClaw config, save proxy settings with proxy disabled.
+- The **OpenClaw Console** entry in the Settings Hub is treated as a developer tool and is only shown after **Developer Mode** is enabled.
 - In **Settings → Advanced → Developer**, you can run **OpenClaw Doctor** to execute `openclaw doctor --json` and inspect the diagnostic output without leaving the app.
 - On packaged Windows builds, the bundled `openclaw` CLI/TUI runs via the shipped `node.exe` entrypoint to keep terminal input behavior stable.
 
@@ -426,7 +427,7 @@ We welcome contributions from the community! Whether it's bug fixes, new feature
 ### How to Contribute
 
 1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+2. **Create** a feature branch with your own contributor prefix, such as `tommy/feature-name`, `tom/feature-name`, or `xxxxx/feature-name`
 3. **Commit** your changes with clear messages
 4. **Push** to your branch
 5. **Open** a Pull Request

@@ -81,6 +81,20 @@ describe('host-api', () => {
     await expect(hostApiFetch('/api/test')).rejects.toThrow('Invalid Authentication');
   });
 
+  it('throws message from unified non-ok HTTP response', async () => {
+    invokeIpcMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 404,
+        ok: false,
+        json: { success: false, error: 'Skill not found' },
+      },
+    });
+
+    const { hostApiFetch } = await import('@/lib/host-api');
+    await expect(hostApiFetch('/api/skills/missing')).rejects.toThrow('Skill not found');
+  });
+
   it('falls back to browser fetch only when IPC channel is unavailable', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

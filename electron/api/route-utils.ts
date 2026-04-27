@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
+import type { HostApiContext } from './context';
 import { PORTS } from '../utils/config';
 
 /**
@@ -91,4 +92,9 @@ export function sendText(res: ServerResponse, statusCode: number, text: string):
   res.statusCode = statusCode;
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.end(text);
+}
+
+export function isGatewayTransitioning(ctx: HostApiContext): boolean {
+  const state = ctx.gatewayManager.getStatus().state;
+  return state === 'starting' || state === 'reconnecting';
 }

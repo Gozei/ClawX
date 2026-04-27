@@ -41,6 +41,7 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
   const language = useSettingsStore((state) => state.language);
   const setLanguage = useSettingsStore((state) => state.setLanguage);
   const dreamModeEnabled = useSettingsStore((state) => state.dreamModeEnabled);
+  const devModeUnlocked = useSettingsStore((state) => state.devModeUnlocked);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
   const clearUpdateError = useUpdateStore((state) => state.clearError);
   const setUpdateAvailableDialogOpen = useUpdateStore((state) => state.setUpdateAvailableDialogOpen);
@@ -228,13 +229,15 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
       ) : undefined,
       disabled: checkingUpdates,
     },
-    {
-      key: 'console',
-      label: t('settingsHub.menu.console'),
-      testId: 'settings-hub-menu-console',
-      icon: TerminalSquare,
-      onClick: () => { void handleOpenConsole(); },
-    },
+    ...(devModeUnlocked
+      ? [{
+        key: 'console',
+        label: t('settingsHub.menu.console'),
+        testId: 'settings-hub-menu-console',
+        icon: TerminalSquare,
+        onClick: () => { void handleOpenConsole(); },
+      }]
+      : []),
   ];
 
   return (

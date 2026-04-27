@@ -9,7 +9,7 @@ import {
   pickChannelRuntimeStatus,
   type ChannelRuntimeAccountSnapshot,
 } from '@/lib/channel-status';
-import { useGatewayStore } from './gateway';
+import { useGatewayStore, guardGatewayTransitioning } from './gateway';
 import { CHANNEL_NAMES, type Channel, type ChannelType } from '../types/channel';
 import { toOpenClawChannelType, toUiChannelType } from '@/lib/channel-alias';
 
@@ -141,6 +141,9 @@ export const useChannelsStore = create<ChannelsState>((set, get) => ({
   },
 
   addChannel: async (params) => {
+    if (guardGatewayTransitioning()) {
+      throw new Error('Gateway is restarting, please try again later');
+    }
     try {
       const result = await useGatewayStore.getState().rpc<Channel>('channels.add', params);
 
@@ -178,6 +181,7 @@ export const useChannelsStore = create<ChannelsState>((set, get) => ({
   },
 
   deleteChannel: async (channelId) => {
+    if (guardGatewayTransitioning()) return;
     // Extract channel type from the channelId (format: "channelType-accountId")
     const { channelType } = splitChannelId(channelId);
     const gatewayChannelType = toOpenClawChannelType(channelType);
@@ -205,6 +209,7 @@ export const useChannelsStore = create<ChannelsState>((set, get) => ({
   },
 
   connectChannel: async (channelId) => {
+    if (guardGatewayTransitioning()) return;
     const { updateChannel } = get();
     updateChannel(channelId, { status: 'connecting', error: undefined });
 
@@ -220,6 +225,7 @@ export const useChannelsStore = create<ChannelsState>((set, get) => ({
   },
 
   disconnectChannel: async (channelId) => {
+    if (guardGatewayTransitioning()) return;
     const { updateChannel, clearAutoReconnect } = get();
     clearAutoReconnect(channelId);
 

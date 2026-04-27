@@ -9,6 +9,7 @@ test.describe('Developer mode gating', () => {
       await expect(page.getByTestId('main-layout')).toBeVisible();
 
       await openSettingsHub(page);
+      await expect(page.getByTestId('settings-hub-menu-console')).toHaveCount(0);
       await page.getByTestId('settings-hub-menu-settings').click({ force: true });
       await expect(page.getByTestId('settings-page')).toBeVisible();
       await expect(page.getByTestId('settings-developer-section')).toHaveCount(0);
@@ -18,6 +19,9 @@ test.describe('Developer mode gating', () => {
       await expect(page.getByTestId('settings-dev-mode-switch')).toHaveAttribute('data-state', 'checked');
       await expect(page.getByTestId('settings-developer-section')).toBeVisible();
       await expect(page.getByTestId('settings-developer-gateway-token')).toBeVisible();
+
+      await openSettingsHub(page);
+      await expect(page.getByTestId('settings-hub-menu-console')).toBeVisible();
     } finally {
       await closeElectronApp(app);
     }

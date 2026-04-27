@@ -78,6 +78,16 @@ function resolveProxyErrorMessage(error: HostApiProxyResponse['error']): string 
     : (error?.message || 'Host API proxy request failed');
 }
 
+function resolveProxyHttpErrorMessage(data: HostApiProxyData): string {
+  if (typeof data.text === 'string' && data.text.trim()) {
+    return data.text;
+  }
+  if (typeof data.json === 'object' && data.json != null && 'error' in data.json) {
+    return String((data.json as Record<string, unknown>).error);
+  }
+  return `HTTP ${data.status ?? 'unknown'}`;
+}
+
 function parseUnifiedProxyResponse<T>(
   response: HostApiProxyResponse,
   path: string,
@@ -89,6 +99,10 @@ function parseUnifiedProxyResponse<T>(
   }
 
   const data: HostApiProxyData = response.data ?? {};
+  if (data.ok === false) {
+    throw new Error(resolveProxyHttpErrorMessage(data));
+  }
+
   trackUiEvent('hostapi.fetch', {
     path,
     method,
@@ -113,11 +127,7 @@ function parseLegacyProxyResponse<T>(
   }
 
   if (!response.ok) {
-    const message = response.text
-      || (typeof response.json === 'object' && response.json != null && 'error' in (response.json as Record<string, unknown>)
-        ? String((response.json as Record<string, unknown>).error)
-        : `HTTP ${response.status ?? 'unknown'}`);
-    throw new Error(message);
+    throw new Error(resolveProxyHttpErrorMessage(response));
   }
 
   trackUiEvent('hostapi.fetch', {

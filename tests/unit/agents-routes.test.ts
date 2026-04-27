@@ -21,6 +21,7 @@ vi.mock('@electron/utils/agent-config', () => ({
   deleteAgentConfig: vi.fn(),
   listAgentsSnapshot: vi.fn(),
   prepareAgentModelUpdate: vi.fn(),
+  removeAgentRuntimeDirectory: vi.fn(),
   removeAgentWorkspaceDirectory: vi.fn(),
   resolveAccountIdForAgent: vi.fn(),
   updateAgentModel: vi.fn(),
@@ -45,12 +46,16 @@ vi.mock('@electron/services/providers/provider-runtime-sync', () => ({
 vi.mock('@electron/api/route-utils', () => ({
   parseJsonBody: vi.fn(),
   sendJson: vi.fn(),
+  isGatewayTransitioning: vi.fn(() => false),
 }));
 
 import {
   applyPreparedAgentModelUpdate,
   createAgent,
+  deleteAgentConfig,
   prepareAgentModelUpdate,
+  removeAgentRuntimeDirectory,
+  removeAgentWorkspaceDirectory,
   updateAgentModel,
   updateAgentStudio,
 } from '@electron/utils/agent-config';
@@ -84,13 +89,22 @@ describe('restartGatewayForAgentDeletion', () => {
     setPlatform('win32');
     const { restartGatewayForAgentDeletion } = await import('@electron/api/routes/agents');
 
-    const restart = vi.fn().mockResolvedValue(undefined);
-    const getStatus = vi.fn(() => ({ pid: 4321, port: 18789 }));
+    let state = 'running';
+    mockExec.mockImplementation((_cmd: string, cb: (err: Error | null, stdout: string) => void) => {
+      state = 'stopped';
+      cb(null, '');
+      return {} as never;
+    });
+
+    const start = vi.fn().mockImplementation(async () => {
+      state = 'running';
+    });
+    const getStatus = vi.fn(() => ({ state, pid: 4321, port: 18789 }));
 
     await restartGatewayForAgentDeletion({
       gatewayManager: {
         getStatus,
-        restart,
+        start,
       },
     } as never);
 
@@ -98,7 +112,7 @@ describe('restartGatewayForAgentDeletion', () => {
       'taskkill /F /PID 4321 /T',
       expect.any(Function),
     );
-    expect(restart).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -155,6 +169,65 @@ describe('handleAgentRoutes create flow', () => {
           debouncedReload: vi.fn(),
         },
       } as never,
+    );
+  });
+});
+
+describe('handleAgentRoutes delete flow', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+  });
+
+  it('retries runtime cleanup after restarting the gateway', async () => {
+    const { handleAgentRoutes } = await import('@electron/api/routes/agents');
+    let state = 'running';
+    mockExec.mockImplementation((_cmd: string, cb: (err: Error | null, stdout: string) => void) => {
+      state = 'stopped';
+      cb(null, '');
+      return {} as never;
+    });
+
+    vi.mocked(deleteAgentConfig).mockResolvedValue({
+      snapshot: {
+        agents: [],
+        defaultAgentId: 'main',
+        defaultModelRef: null,
+        configuredChannelTypes: [],
+        channelOwners: {},
+        channelAccountOwners: {},
+      },
+      removedEntry: {
+        id: 'role',
+        workspace: '/tmp/workspace-role',
+      },
+    } as never);
+    vi.mocked(removeAgentRuntimeDirectory).mockResolvedValue(undefined);
+    vi.mocked(removeAgentWorkspaceDirectory).mockResolvedValue(undefined);
+
+    await handleAgentRoutes(
+      { method: 'DELETE' } as never,
+      {} as never,
+      new URL('http://localhost/api/agents/role'),
+      {
+        gatewayManager: {
+          getStatus: () => ({ state, pid: 4321, port: 18789 }),
+          start: vi.fn().mockImplementation(async () => {
+            state = 'running';
+          }),
+        },
+      } as never,
+    );
+
+    expect(removeAgentRuntimeDirectory).toHaveBeenCalledWith('role');
+    expect(removeAgentWorkspaceDirectory).toHaveBeenCalledWith({
+      id: 'role',
+      workspace: '/tmp/workspace-role',
+    });
+    expect(sendJson).toHaveBeenCalledWith(
+      expect.anything(),
+      200,
+      expect.objectContaining({ success: true }),
     );
   });
 });
@@ -318,7 +391,7 @@ describe('handleAgentRoutes model refresh flow', () => {
     expect(debouncedReload).toHaveBeenCalledTimes(1);
   });
 
-  it('hot patches the runtime model without persisting agent config', async () => {
+  it('syncs the runtime model without patching Gateway config', async () => {
     const { handleAgentRoutes } = await import('@electron/api/routes/agents');
 
     vi.mocked(parseJsonBody).mockResolvedValue({ modelRef: 'moonshot/kimi-k2.5' });
@@ -355,17 +428,7 @@ describe('handleAgentRoutes model refresh flow', () => {
 
     const debouncedReload = vi.fn();
     const restart = vi.fn();
-    const rpc = vi
-      .fn()
-      .mockResolvedValueOnce({
-        hash: 'hash-1',
-        config: {
-          agents: {
-            list: [{ id: 'main' }],
-          },
-        },
-      })
-      .mockResolvedValueOnce({ ok: true });
+    const rpc = vi.fn();
 
     await handleAgentRoutes(
       { method: 'PUT' } as never,
@@ -383,34 +446,7 @@ describe('handleAgentRoutes model refresh flow', () => {
 
     expect(syncAllProviderAuthToRuntime).toHaveBeenCalledTimes(1);
     expect(syncAgentModelRefToRuntime).toHaveBeenCalledWith('main', 'moonshot/kimi-k2.5');
-    const modelSyncOrder = vi.mocked(syncAgentModelRefToRuntime).mock.invocationCallOrder[0] ?? 0;
-    const configGetOrder = rpc.mock.invocationCallOrder[0] ?? 0;
-    expect(modelSyncOrder).toBeGreaterThan(0);
-    expect(configGetOrder).toBeGreaterThan(0);
-    expect(modelSyncOrder).toBeLessThan(configGetOrder);
-    expect(rpc).toHaveBeenNthCalledWith(1, 'config.get', {}, 15000);
-    expect(rpc).toHaveBeenNthCalledWith(
-      2,
-      'config.patch',
-      {
-        baseHash: 'hash-1',
-        raw: JSON.stringify({
-          agents: {
-            list: [{ id: 'main', model: { primary: 'moonshot/kimi-k2.5' } }],
-          },
-          models: {
-            providers: {
-              moonshot: {
-                baseUrl: 'https://api.moonshot.cn/v1',
-                api: 'openai-completions',
-                models: [{ id: 'kimi-k2.5', name: 'kimi-k2.5', api: 'openai-completions' }],
-              },
-            },
-          },
-        }),
-      },
-      15000,
-    );
+    expect(rpc).not.toHaveBeenCalled();
     expect(applyPreparedAgentModelUpdate).not.toHaveBeenCalled();
     expect(updateAgentModel).not.toHaveBeenCalled();
     expect(debouncedReload).not.toHaveBeenCalled();

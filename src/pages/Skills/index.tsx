@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { pagePrimaryInputClasses } from '@/components/layout/page-tokens';
+import { normalizeAppError } from '@/lib/error-model';
 import { cn } from '@/lib/utils';
 import { useSkillsStore } from '@/stores/skills';
 import { useGatewayStore } from '@/stores/gateway';
@@ -52,6 +53,10 @@ function buildSkillsSearchParams(options: {
   if (options.missingFilter !== DEFAULT_MISSING_FILTER) params.set('missing', options.missingFilter);
   if (options.marketplaceOpen) params.set('marketplace', '1');
   return params;
+}
+
+function isSkillNotFoundError(error: unknown): boolean {
+  return normalizeAppError(error, { module: 'skills', operation: 'detail' }).code === 'NOT_FOUND';
 }
 
 export function Skills() {
@@ -615,8 +620,14 @@ export function SkillDetailPage() {
   useEffect(() => {
     if (!decodedSkillId) return;
     if (!isGatewayRunning) return;
-    void fetchSkillDetail(decodedSkillId, true).catch((error) => toast.error(String(error)));
-  }, [decodedSkillId, fetchSkillDetail, isGatewayRunning]);
+    void fetchSkillDetail(decodedSkillId, true).catch((error) => {
+      if (isSkillNotFoundError(error)) {
+        void fetchSkills(true);
+        return;
+      }
+      toast.error(String(error));
+    });
+  }, [decodedSkillId, fetchSkillDetail, fetchSkills, isGatewayRunning]);
 
   if (loading || detailLoading) {
     return <div data-testid="skills-detail-page" className="flex flex-col -m-6 dark:bg-background min-h-[calc(100vh-2.5rem)] items-center justify-center"><LoadingSpinner size="lg" /></div>;
