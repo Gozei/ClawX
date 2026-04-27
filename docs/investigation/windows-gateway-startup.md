@@ -224,16 +224,41 @@ total likely win         ~14s to ~16s
 
 This should bring the measured 26 to 31 second Gateway startup closer to the 10 to 15 second range before addressing config snapshot and plugin bootstrap costs.
 
-## Local OpenClaw Build Testing
+## Local OpenClaw Iteration and Debugging
 
-The durable fix belongs in the OpenClaw source tree. To test a local OpenClaw build in ClawX without publishing it to npm:
+The durable fix belongs in the OpenClaw source tree. ClawX can run against a local OpenClaw checkout without publishing OpenClaw to npm by setting `CLAWX_OPENCLAW_LOCAL_DIR`.
+
+Use this workflow when a Gateway startup or runtime bug requires changes in both repositories:
+
+```text
+C:\Users\szdee\Projects\ClawX      ClawX desktop app and Gateway manager
+C:\Users\szdee\Projects\openclaw   local OpenClaw source checkout
+```
+
+### 1. Build the local OpenClaw checkout
+
+Run this after editing OpenClaw source that is compiled into `dist/entry.js`:
 
 ```powershell
 cd C:\Users\szdee\Projects\openclaw
 pnpm install
 pnpm build
-pnpm ui:build
+```
 
+Run this when the Control UI assets are missing or changed:
+
+```powershell
+cd C:\Users\szdee\Projects\openclaw
+pnpm ui:build
+```
+
+`pnpm build` and `pnpm ui:build` are both needed for a clean ClawX-managed Gateway startup. If `dist/control-ui/index.html` is missing, OpenClaw may try to build UI assets during Gateway startup, which can look like a Gateway readiness hang on Windows.
+
+### 2. Point ClawX dev mode at the local OpenClaw build
+
+Start ClawX with the override set in the same shell:
+
+```powershell
 cd C:\Users\szdee\Projects\ClawX
 $env:CLAWX_OPENCLAW_LOCAL_DIR = 'C:\Users\szdee\Projects\openclaw'
 pnpm dev
@@ -241,16 +266,105 @@ pnpm dev
 
 On Windows, `CLAWX_OPENCLAW_LOCAL_DIR` also accepts Git Bash/MSYS drive paths such as `/c/Users/szdee/Projects/openclaw`; ClawX normalizes them before launching the Gateway.
 
+To remove the override in the current PowerShell session:
+
+```powershell
+Remove-Item Env:\CLAWX_OPENCLAW_LOCAL_DIR -ErrorAction SilentlyContinue
+```
+
+ClawX preflights local OpenClaw overrides before launch. If `dist/entry.js` or `dist/control-ui/index.html` is missing, or if the edited startup source is newer than `dist/entry.js`, ClawX fails fast with the build commands instead of letting the Gateway block while trying to repair assets during startup.
+
+### 3. Smoke-test OpenClaw directly before involving ClawX
+
+When ClawX reports `wait-ready outcome=pending`, first verify whether the local OpenClaw build can start by itself:
+
+```powershell
+cd C:\Users\szdee\Projects\openclaw
+node .\openclaw.mjs gateway --port 18790 --allow-unconfigured
+```
+
+In another PowerShell window, check that the port is listening:
+
+```powershell
+Test-NetConnection 127.0.0.1 -Port 18790
+```
+
+Use a non-default port such as `18790` so the smoke test does not collide with the ClawX-managed Gateway on `18789`.
+
+### 4. Read the ClawX Gateway logs
+
+The ClawX main log is the fastest place to understand managed Gateway startup and reconnect behavior:
+
+```powershell
+Get-Content "$env:APPDATA\Deep AI Worker\logs\clawx-$(Get-Date -Format yyyy-MM-dd).log" -Tail 200 -Wait
+```
+
+Useful patterns:
+
+```text
+[Windows Gateway Monitor] wait-ready ...
+[Gateway stdout] [clawx-boot] ...
+[Gateway stderr] Config was last written by a newer OpenClaw ...
+config.patch write ... changedPaths=...
+config change requires gateway restart (...)
+Gateway WebSocket closed (code=1012, reason=service restart)
+```
+
+If sending the first chat message immediately restarts the Gateway, look for a `config.patch` immediately before `code=1012`. The `/api/agents/:id/model/runtime` route is meant to be runtime-only; it should not patch `agents.list` or trigger a Gateway reload.
+
+### 5. Package with the local OpenClaw build
+
 For packaged/bundled validation, the same environment variable makes `scripts/bundle-openclaw.mjs` copy the local OpenClaw package files into `build/openclaw` while using ClawX's installed OpenClaw dependency graph for runtime dependencies:
 
 ```powershell
+cd C:\Users\szdee\Projects\ClawX
 $env:CLAWX_OPENCLAW_LOCAL_DIR = 'C:\Users\szdee\Projects\openclaw'
 pnpm run package
 ```
 
 This keeps the dependency flow explicit and avoids patching `node_modules/openclaw`, `build/openclaw/node_modules`, or packaged `app.asar` output by hand.
 
-ClawX preflights local OpenClaw overrides before launch. If `dist/entry.js` or `dist/control-ui/index.html` is missing, or if the edited startup source is newer than `dist/entry.js`, ClawX fails fast with the build commands instead of letting the Gateway block while trying to repair assets during startup.
+Important limitation: the local package override copies the local OpenClaw package files, but dependency collection still uses ClawX's installed OpenClaw dependency graph. This is fine for source-only changes. If the local OpenClaw change adds, removes, or upgrades runtime dependencies, update ClawX's installed OpenClaw dependency or the bundling strategy before trusting a packaged build.
+
+### 6. Recommended validation loop
+
+For OpenClaw startup changes:
+
+```powershell
+cd C:\Users\szdee\Projects\openclaw
+pnpm build
+pnpm run test:gateway -- src/gateway/server-startup-post-attach.test.ts
+
+cd C:\Users\szdee\Projects\ClawX
+$env:CLAWX_OPENCLAW_LOCAL_DIR = 'C:\Users\szdee\Projects\openclaw'
+pnpm run typecheck
+pnpm test -- tests/unit/gateway-process-launcher.test.ts tests/unit/paths.test.ts
+pnpm dev
+```
+
+For ClawX Gateway-manager changes:
+
+```powershell
+cd C:\Users\szdee\Projects\ClawX
+pnpm run typecheck
+pnpm test -- tests/unit/gateway-process-launcher.test.ts tests/unit/paths.test.ts
+```
+
+For chat-send or runtime model synchronization regressions:
+
+```powershell
+cd C:\Users\szdee\Projects\ClawX
+pnpm test -- tests/unit/agents-routes.test.ts tests/unit/chat-send-error-localization.test.ts
+```
+
+### 7. Common local-development pitfalls
+
+- Rebuild OpenClaw after editing `src/` files. ClawX launches `openclaw.mjs`, which loads built `dist` output.
+- Build Control UI assets before managed startup. Missing `dist/control-ui/index.html` can make first startup much slower.
+- Keep `CLAWX_OPENCLAW_LOCAL_DIR` scoped to the shell used for `pnpm dev` or `pnpm run package`.
+- A warning like `Config was last written by a newer OpenClaw` means the local checkout version is older than the version that wrote `~/.openclaw/openclaw.json`. It is noisy but not necessarily fatal.
+- Do not edit `node_modules/openclaw`, `build/openclaw`, or `release/win-unpacked/resources/openclaw` by hand except for throwaway diagnosis.
+- On Windows, prefer PowerShell paths for scripts, but `/c/Users/...` override paths are accepted and normalized.
 
 ## Follow-up Work
 
