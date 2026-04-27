@@ -28,7 +28,11 @@ import { syncDreamModeToOpenClawConfig } from '../utils/dream-mode';
 import { logger } from '../utils/logger';
 import { prependPathEntry } from '../utils/env-path';
 import { copyPluginFromNodeModules, fixupPluginManifest, cpSyncSafe } from '../utils/plugin-install';
-import { stripSystemdSupervisorEnv, withUtf8RuntimeEnv } from './config-sync-env';
+import {
+  resolveChannelStartupPolicyForConfiguredChannels,
+  stripSystemdSupervisorEnv,
+  withUtf8RuntimeEnv,
+} from './config-sync-env';
 import { shouldDisableManagedGatewayBonjour, summarizeManagedGatewayDiscovery } from './discovery-defaults';
 
 
@@ -421,17 +425,7 @@ async function resolveChannelStartupPolicy(): Promise<{
 }> {
   try {
     const configuredChannels = await listConfiguredChannels();
-    if (configuredChannels.length === 0) {
-      return {
-        skipChannels: true,
-        channelStartupSummary: 'skipped(no configured channels)',
-      };
-    }
-
-    return {
-      skipChannels: false,
-      channelStartupSummary: `enabled(${configuredChannels.join(',')})`,
-    };
+    return resolveChannelStartupPolicyForConfiguredChannels(configuredChannels);
   } catch (error) {
     logger.warn('Failed to determine configured channels for gateway launch:', error);
     return {

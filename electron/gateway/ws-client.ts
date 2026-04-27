@@ -199,6 +199,8 @@ export function buildGatewayConnectFrame(options: {
 // 此函数在握手阶段被 Gateway 关闭时自动重试，避免上层重启进程。
 const CONNECT_MAX_RETRIES = 3;
 const CONNECT_RETRY_DELAY_MS = 5_000;
+const RETRYABLE_CONNECT_ERROR_PATTERN =
+  /closed before handshake|Connect handshake timeout|Timed out waiting for connect\.challenge/i;
 
 function attemptSingleConnect(options: {
   port: number;
@@ -393,7 +395,7 @@ export async function connectGatewaySocket(options: {
       const msg = error instanceof Error ? error.message : String(error);
       // 仅在 Gateway 主动关闭 WS（handshake 阶段）或 RPC 超时时重试，
       // 其他错误（如 ECONNREFUSED）直接抛出。
-      const isRetryable = /closed before handshake/i.test(msg);
+      const isRetryable = RETRYABLE_CONNECT_ERROR_PATTERN.test(msg);
       if (!isRetryable || attempt >= CONNECT_MAX_RETRIES) {
         throw error;
       }

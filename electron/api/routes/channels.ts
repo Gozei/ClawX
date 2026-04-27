@@ -44,6 +44,7 @@ import { getOpenClawConfigDir } from '../../utils/paths';
 import {
   cancelWeChatLoginSession,
   findWeChatAccountIdsByUserId,
+  getWeChatAccountProfile,
   saveWeChatAccountState,
   startWeChatLoginSession,
   waitForWeChatLoginSession,
@@ -200,6 +201,8 @@ async function awaitWeChatQrLogin(
       token: result.botToken,
       baseUrl: result.baseUrl,
       userId: result.userId,
+      displayName: result.displayName,
+      avatar: result.avatar,
     });
     const staleAccountIds = replacedAccountIds.filter((accountId) => accountId !== normalizedAccountId);
     for (const staleAccountId of staleAccountIds) {
@@ -323,12 +326,7 @@ async function ensureScopedChannelBinding(channelType: string, accountId?: strin
   }
 
   if (storedChannelType === OPENCLAW_WECHAT_CHANNEL_TYPE) {
-    const existingOwner = agents.channelAccountOwners[`${storedChannelType}:${accountId}`]
-      || Object.entries(agents.channelAccountOwners)
-        .find(([key]) => key.startsWith(`${storedChannelType}:`))?.[1]
-      || agents.channelOwners[storedChannelType]
-      || agents.defaultAgentId
-      || 'main';
+    const existingOwner = agents.channelAccountOwners[`${storedChannelType}:${accountId}`] || 'main';
     if (agents.agents.some((entry) => entry.id === existingOwner)) {
       await assignChannelAccountToAgent(existingOwner, storedChannelType, accountId, {
         replaceExistingAgentChannelBinding: false,
@@ -459,13 +457,19 @@ async function buildChannelAccountsView(ctx: HostApiContext): Promise<ChannelAcc
       .filter((accountId): accountId is string => typeof accountId === 'string' && accountId.trim().length > 0);
     const accountIds = Array.from(new Set([...channelAccountsFromConfig, ...runtimeAccountIds, defaultAccountId]));
 
-    const accounts: ChannelAccountView[] = accountIds.map((accountId) => {
+    const accounts: ChannelAccountView[] = await Promise.all(accountIds.map(async (accountId) => {
       const runtime = runtimeAccounts.find((item) => item.accountId === accountId);
+      const wechatProfile = rawChannelType === OPENCLAW_WECHAT_CHANNEL_TYPE
+        ? await getWeChatAccountProfile(accountId)
+        : undefined;
+      const displayName = runtime?.name && runtime.name !== accountId
+        ? runtime.name
+        : (wechatProfile?.displayName || wechatProfile?.userId || accountId);
       const runtimeSnapshot: ChannelRuntimeAccountSnapshot = runtime ?? {};
       const status = computeChannelRuntimeStatus(runtimeSnapshot);
       return {
         accountId,
-        name: runtime?.name || accountId,
+        name: displayName,
         configured: channelAccountsFromConfig.includes(accountId) || runtime?.configured === true,
         connected: runtime?.connected === true,
         running: runtime?.running === true,
@@ -475,7 +479,8 @@ async function buildChannelAccountsView(ctx: HostApiContext): Promise<ChannelAcc
         isDefault: accountId === defaultAccountId,
         agentId: agentsSnapshot.channelAccountOwners[`${rawChannelType}:${accountId}`],
       };
-    }).sort((left, right) => {
+    }));
+    accounts.sort((left, right) => {
       if (left.accountId === defaultAccountId) return -1;
       if (right.accountId === defaultAccountId) return 1;
       return left.accountId.localeCompare(right.accountId);

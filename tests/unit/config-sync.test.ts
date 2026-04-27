@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { stripSystemdSupervisorEnv, withUtf8RuntimeEnv } from '@electron/gateway/config-sync-env';
+import {
+  resolveChannelStartupPolicyForConfiguredChannels,
+  stripSystemdSupervisorEnv,
+  withUtf8RuntimeEnv,
+} from '@electron/gateway/config-sync-env';
 
 describe('stripSystemdSupervisorEnv', () => {
   it('removes systemd supervisor marker env vars', () => {
@@ -59,6 +63,22 @@ describe('withUtf8RuntimeEnv', () => {
       LANG: 'C.UTF-8',
       LC_ALL: 'C.UTF-8',
       LC_CTYPE: 'C.UTF-8',
+    });
+  });
+});
+
+describe('resolveChannelStartupPolicyForConfiguredChannels', () => {
+  it('does not export a stale skip-channel environment when no channels are configured', () => {
+    expect(resolveChannelStartupPolicyForConfiguredChannels([])).toEqual({
+      skipChannels: false,
+      channelStartupSummary: 'idle(no configured channels)',
+    });
+  });
+
+  it('reports configured channels without enabling the skip-channel guard', () => {
+    expect(resolveChannelStartupPolicyForConfiguredChannels(['openclaw-weixin'])).toEqual({
+      skipChannels: false,
+      channelStartupSummary: 'enabled(openclaw-weixin)',
     });
   });
 });

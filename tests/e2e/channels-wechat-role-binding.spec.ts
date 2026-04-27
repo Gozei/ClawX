@@ -92,7 +92,7 @@ test.describe('WeChat channel role binding', () => {
                     accounts: [
                       {
                         accountId: 'wx-a-im-bot',
-                        name: 'wx-a-im-bot',
+                        name: 'Alice WeChat',
                         configured: true,
                         status: 'connected',
                         isDefault: true,
@@ -100,7 +100,7 @@ test.describe('WeChat channel role binding', () => {
                       },
                       {
                         accountId: 'wx-b-im-bot',
-                        name: 'wx-b-im-bot',
+                        name: 'Bob WeChat',
                         configured: true,
                         status: 'connected',
                         isDefault: false,
@@ -145,14 +145,15 @@ test.describe('WeChat channel role binding', () => {
       await expect(page.getByRole('heading', { name: 'WeChat' })).toBeVisible();
       await expect(page.getByText('wx-a-im-bot')).toHaveCount(0);
       await expect(page.getByText('wx-b-im-bot')).toHaveCount(0);
-      await expect(page.getByText(/WeChat Account|微信账号/)).toHaveCount(2);
+      await expect(page.getByText('Alice WeChat')).toBeVisible();
+      await expect(page.getByText('Bob WeChat')).toBeVisible();
 
       const roleSelectors = page.locator('select');
       await expect(roleSelectors).toHaveCount(2);
       await roleSelectors.nth(1).selectOption('sales');
 
       await page.getByRole('button', { name: /^(Apply Changes|应用更改|确认)$/ }).click();
-      await expect(page.getByText(/WeChat Account|微信账号/)).toHaveCount(2);
+      await expect(page.getByText('Bob WeChat')).toBeVisible();
     } finally {
       await closeElectronApp(app);
       await rm(userDataDir, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });

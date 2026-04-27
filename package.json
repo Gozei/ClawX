@@ -27,6 +27,9 @@
                 "x64",
                 "arm64"
             ]
+        },
+        "patchedDependencies": {
+            "@tencent-weixin/openclaw-weixin@2.1.10": "patches/@tencent-weixin__openclaw-weixin@2.1.10.patch"
         }
     },
     "description": "Deep AI Worker - Enterprise AI workspace based on OpenClaw",
@@ -121,7 +124,7 @@
         "@radix-ui/react-toast": "^1.2.15",
         "@radix-ui/react-tooltip": "^1.2.8",
         "@soimy/dingtalk": "^3.5.3",
-        "@tencent-weixin/openclaw-weixin": "^2.1.7",
+        "@tencent-weixin/openclaw-weixin": "^2.1.10",
         "@testing-library/jest-dom": "^6.9.1",
         "@testing-library/react": "^16.3.2",
         "@types/node": "^25.3.0",

@@ -72,6 +72,13 @@ type QrStatusResponse = {
   ilink_bot_id?: string;
   baseurl?: string;
   ilink_user_id?: string;
+  ilink_user_name?: string;
+  ilink_nickname?: string;
+  nickname?: string;
+  nick_name?: string;
+  avatar?: string;
+  avatar_url?: string;
+  headimgurl?: string;
 };
 
 export type WeChatLoginStartResult = {
@@ -87,6 +94,8 @@ export type WeChatLoginWaitResult = {
   accountId?: string;
   baseUrl?: string;
   userId?: string;
+  displayName?: string;
+  avatar?: string;
 };
 
 const activeLogins = new Map<string, ActiveLogin>();
@@ -304,16 +313,28 @@ async function writeAccountIndex(accountIds: string[]): Promise<void> {
   await writeFile(WECHAT_ACCOUNT_INDEX_FILE, JSON.stringify(accountIds, null, 2), 'utf-8');
 }
 
-async function readStoredAccountState(accountId: string): Promise<{ userId?: string } | undefined> {
+export type WeChatAccountProfile = {
+  userId?: string;
+  displayName?: string;
+  avatar?: string;
+};
+
+async function readStoredAccountState(accountId: string): Promise<WeChatAccountProfile | undefined> {
   try {
     const raw = await readFile(join(WECHAT_ACCOUNTS_DIR, `${accountId}.json`), 'utf-8');
-    const parsed = JSON.parse(raw) as { userId?: unknown };
+    const parsed = JSON.parse(raw) as { userId?: unknown; displayName?: unknown; avatar?: unknown };
     return {
       userId: typeof parsed.userId === 'string' ? parsed.userId.trim() : undefined,
+      displayName: typeof parsed.displayName === 'string' ? parsed.displayName.trim() : undefined,
+      avatar: typeof parsed.avatar === 'string' ? parsed.avatar.trim() : undefined,
     };
   } catch {
     return undefined;
   }
+}
+
+export async function getWeChatAccountProfile(accountId: string): Promise<WeChatAccountProfile | undefined> {
+  return await readStoredAccountState(accountId);
 }
 
 export async function findWeChatAccountIdsByUserId(userId?: string): Promise<string[]> {
@@ -335,6 +356,8 @@ export async function saveWeChatAccountState(rawAccountId: string, payload: {
   token: string;
   baseUrl?: string;
   userId?: string;
+  displayName?: string;
+  avatar?: string;
 }): Promise<string> {
   const accountId = normalizeOpenClawAccountId(rawAccountId);
   await mkdir(WECHAT_ACCOUNTS_DIR, { recursive: true });
@@ -351,6 +374,8 @@ export async function saveWeChatAccountState(rawAccountId: string, payload: {
     savedAt: new Date().toISOString(),
     ...(payload.baseUrl?.trim() ? { baseUrl: payload.baseUrl.trim() } : {}),
     ...(payload.userId?.trim() ? { userId: payload.userId.trim() } : {}),
+    ...(payload.displayName?.trim() ? { displayName: payload.displayName.trim() } : {}),
+    ...(payload.avatar?.trim() ? { avatar: payload.avatar.trim() } : {}),
   };
   await writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
   try {
@@ -374,6 +399,15 @@ export async function saveWeChatAccountState(rawAccountId: string, payload: {
   }
 
   return accountId;
+}
+
+function firstNonEmptyString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
 }
 
 export async function startWeChatLoginSession(options: {
@@ -485,6 +519,17 @@ export async function waitForWeChatLoginSession(options: {
           accountId: statusResponse.ilink_bot_id,
           baseUrl: statusResponse.baseurl,
           userId: statusResponse.ilink_user_id,
+          displayName: firstNonEmptyString(
+            statusResponse.ilink_user_name,
+            statusResponse.ilink_nickname,
+            statusResponse.nickname,
+            statusResponse.nick_name,
+          ),
+          avatar: firstNonEmptyString(
+            statusResponse.avatar,
+            statusResponse.avatar_url,
+            statusResponse.headimgurl,
+          ),
           message: 'WeChat connected successfully.',
         };
     }

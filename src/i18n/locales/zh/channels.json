@@ -46,6 +46,8 @@
         "wechatRoleConflict": "该微信账号存在多个 Role 绑定，请选择一个 Role 应用于它下面的所有 bot。",
         "wechatAccountName": "微信账号 {{index}}",
         "wechatAccountIdentity": "连接标识 {{id}}",
+        "wechatAccountId": "微信 ID：{{id}}",
+        "wechatFallbackName": "微信用户",
         "unassigned": "未绑定",
         "mainAccount": "主账号",
         "customIdLabel": "账号 ID",

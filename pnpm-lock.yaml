@@ -10,6 +10,11 @@ overrides:
   isbinaryfile: ^5.0.0
   https-proxy-agent: 7.0.6
 
+patchedDependencies:
+  '@tencent-weixin/openclaw-weixin@2.1.10':
+    hash: 51208f4e86566eff0122fbc438e70aa5b4c2cc355c359f863150c6ae9e28bcd3
+    path: patches/@tencent-weixin__openclaw-weixin@2.1.10.patch
+
 importers:
 
   .:
@@ -121,8 +126,8 @@ importers:
         specifier: ^3.5.3
         version: 3.5.3(@gozei/deepclaw@2026.4.16(@emnapi/core@1.10.0)(@emnapi/runtime@1.9.1)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(encoding@0.1.13)(hono@4.12.12)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))
       '@tencent-weixin/openclaw-weixin':
-        specifier: ^2.1.7
-        version: 2.1.7
+        specifier: ^2.1.10
+        version: 2.1.10(patch_hash=51208f4e86566eff0122fbc438e70aa5b4c2cc355c359f863150c6ae9e28bcd3)
       '@testing-library/jest-dom':
         specifier: ^6.9.1
         version: 6.9.1
@@ -2702,8 +2707,8 @@ packages:
     resolution: {integrity: sha512-4BAffykYOgO+5nzBWYwE3W90sBgLJoUPRWWcL8wlyiM8IB8ipJz3UMJ9KXQd1RKQXpKp8Tutn80HZtWsu2u76w==}
     engines: {node: '>=10'}
 
-  '@tencent-weixin/openclaw-weixin@2.1.7':
-    resolution: {integrity: sha512-2x5/mbO2IVAsN4aUA41g6i8O84WIJCeFj8kwmB2pGjuxIBVy5FnEI5n52Pc5xroOLbxzW5FXN4cDtc/PvvKghg==}
+  '@tencent-weixin/openclaw-weixin@2.1.10':
+    resolution: {integrity: sha512-cEG6Iw5g2qqlA+8/TcmV+E8aFUEX0ruxF0+a5LgVy5wv56/qP07KoapfRa7YTRPzhRW5UDaz6zsZQArt/4ZNnA==}
     engines: {node: '>=22'}
 
   '@testing-library/dom@10.4.1':
@@ -10252,7 +10257,7 @@ snapshots:
     dependencies:
       defer-to-connect: 2.0.1
 
-  '@tencent-weixin/openclaw-weixin@2.1.7':
+  '@tencent-weixin/openclaw-weixin@2.1.10(patch_hash=51208f4e86566eff0122fbc438e70aa5b4c2cc355c359f863150c6ae9e28bcd3)':
     dependencies:
       qrcode-terminal: 0.12.0
       zod: 4.3.6

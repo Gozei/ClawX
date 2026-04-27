@@ -46,6 +46,8 @@
         "wechatRoleConflict": "This WeChat account has multiple role bindings. Choose one role to apply to every bot under it.",
         "wechatAccountName": "WeChat Account {{index}}",
         "wechatAccountIdentity": "Connection {{id}}",
+        "wechatAccountId": "WeChat ID: {{id}}",
+        "wechatFallbackName": "WeChat User",
         "unassigned": "Unassigned",
         "mainAccount": "Primary Account",
         "customIdLabel": "Account ID",

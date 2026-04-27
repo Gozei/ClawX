@@ -80,11 +80,6 @@ function usesUnifiedRoleBinding(channelType: string): boolean {
   return channelType === 'wechat';
 }
 
-function getCompactAccountFingerprint(accountId: string): string {
-  const compact = accountId.replace(/[^a-zA-Z0-9]/g, '');
-  return (compact || accountId).slice(-6).toUpperCase();
-}
-
 type ChannelsProps = {
   embedded?: boolean;
 };
@@ -388,10 +383,10 @@ export function Channels({ embedded = false }: ChannelsProps) {
                     </div>
 
                     <div className="space-y-2">
-                      {group.accounts.map((account, accountIndex) => {
+                      {group.accounts.map((account) => {
                         const displayName =
                           isUnifiedRoleGroup
-                            ? t('account.wechatAccountName', { index: accountIndex + 1 })
+                            ? (account.name === account.accountId ? t('account.wechatFallbackName') : account.name)
                             :
                           account.accountId === 'default' && account.name === account.accountId
                             ? t('account.mainAccount')
@@ -403,11 +398,6 @@ export function Channels({ embedded = false }: ChannelsProps) {
                               <div className="flex items-center gap-2">
                                 <p className="text-[13px] font-medium text-foreground truncate">{displayName}</p>
                               </div>
-                              {isUnifiedRoleGroup && (
-                                <div className="text-[12px] text-muted-foreground mt-1">
-                                  {t('account.wechatAccountIdentity', { id: getCompactAccountFingerprint(account.accountId) })}
-                                </div>
-                              )}
                               {account.lastError && (
                                 <div className="text-[12px] text-destructive mt-1">{account.lastError}</div>
                               )}
@@ -418,20 +408,21 @@ export function Channels({ embedded = false }: ChannelsProps) {
                               <select
                                 className={cn(selectBaseClasses, 'h-8 w-auto rounded-lg border-black/10 bg-background px-2 pr-7 text-[12px] leading-4 dark:border-white/10 [background-position:right_8px_center] [background-size:14px_14px]')}
                                 style={compactSelectIconStyle}
-                                value={account.agentId || ''}
+                                value={account.agentId || (isUnifiedRoleGroup ? (visibleAgents.find((agent) => agent.id === 'main')?.id || visibleAgents[0]?.id || '') : '')}
                                 onChange={(event) => {
                                   void handleBindAgent(group.channelType, account.accountId, event.target.value);
                                 }}
                               >
-                                <option value="">{t('account.unassigned')}</option>
+                                {!isUnifiedRoleGroup && <option value="">{t('account.unassigned')}</option>}
                                 {visibleAgents.map((agent) => (
                                   <option key={agent.id} value={agent.id}>{agent.name}</option>
                                 ))}
                               </select>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-8 text-xs rounded-full"
+                              {!isUnifiedRoleGroup && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 text-xs rounded-full"
                                   onClick={() => {
                                     void (async () => {
                                       try {
@@ -453,8 +444,9 @@ export function Channels({ embedded = false }: ChannelsProps) {
                                     })();
                                   }}
                                 >
-                                {t('account.edit')}
-                              </Button>
+                                  {t('account.edit')}
+                                </Button>
+                              )}
                               <Button
                                 size="icon"
                                 variant="ghost"

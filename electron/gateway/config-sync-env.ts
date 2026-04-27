@@ -7,6 +7,11 @@ export const SUPERVISED_SYSTEMD_ENV_KEYS = [
 
 export type GatewayEnv = Record<string, string | undefined>;
 
+export type ChannelStartupPolicy = {
+  skipChannels: boolean;
+  channelStartupSummary: string;
+};
+
 const UTF8_RUNTIME_ENV: GatewayEnv = {
   PYTHONIOENCODING: 'utf-8',
   PYTHONUTF8: '1',
@@ -38,5 +43,21 @@ export function withUtf8RuntimeEnv(env: GatewayEnv): GatewayEnv {
   return {
     ...env,
     ...UTF8_RUNTIME_ENV,
+  };
+}
+
+export function resolveChannelStartupPolicyForConfiguredChannels(
+  configuredChannels: string[],
+): ChannelStartupPolicy {
+  if (configuredChannels.length === 0) {
+    return {
+      skipChannels: false,
+      channelStartupSummary: 'idle(no configured channels)',
+    };
+  }
+
+  return {
+    skipChannels: false,
+    channelStartupSummary: `enabled(${configuredChannels.join(',')})`,
   };
 }

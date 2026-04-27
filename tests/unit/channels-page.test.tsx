@@ -302,7 +302,7 @@ describe('Channels page status refresh', () => {
               accounts: [
                 {
                   accountId: 'wx-a-im-bot',
-                  name: 'wx-a-im-bot',
+                  name: 'Alice WeChat',
                   configured: true,
                   status: 'connected',
                   isDefault: true,
@@ -310,7 +310,7 @@ describe('Channels page status refresh', () => {
                 },
                 {
                   accountId: 'wx-b-im-bot',
-                  name: 'wx-b-im-bot',
+                  name: 'Bob WeChat',
                   configured: true,
                   status: 'connected',
                   isDefault: false,
@@ -347,7 +347,9 @@ describe('Channels page status refresh', () => {
 
     expect(screen.queryByText('wx-a-im-bot')).not.toBeInTheDocument();
     expect(screen.queryByText('wx-b-im-bot')).not.toBeInTheDocument();
-    expect(screen.getAllByText('account.wechatAccountName')).toHaveLength(2);
+    expect(screen.getByText('Alice WeChat')).toBeInTheDocument();
+    expect(screen.getByText('Bob WeChat')).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'account.unassigned' })).not.toBeInTheDocument();
     expect(screen.getAllByText('account.bindAgentLabel')).toHaveLength(2);
 
     fireEvent.change(screen.getAllByRole('combobox')[1], {

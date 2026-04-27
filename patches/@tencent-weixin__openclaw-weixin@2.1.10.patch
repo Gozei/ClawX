@@ -1,0 +1,75 @@
+diff --git a/src/channel.ts b/src/channel.ts
+index b9d1b13023fa9435ad79276ba9e630e98f19bdca..f6bb3ee03c8b833f75c5ba79529f951b24ed1fbe 100644
+--- a/src/channel.ts
++++ b/src/channel.ts
+@@ -44,6 +44,17 @@ function isRemoteUrl(mediaUrl: string): boolean {
+ }
+ 
+ const MEDIA_OUTBOUND_TEMP_DIR = path.join(resolvePreferredOpenClawTmpDir(), "weixin/media/outbound-temp");
++const MONITOR_START_STAGGER_MS = 750;
++let nextMonitorStartAt = 0;
++
++async function waitForMonitorStartSlot(): Promise<void> {
++  const now = Date.now();
++  const waitMs = Math.max(0, nextMonitorStartAt - now);
++  nextMonitorStartAt = now + waitMs + MONITOR_START_STAGGER_MS;
++  if (waitMs > 0) {
++    await new Promise((resolve) => setTimeout(resolve, waitMs));
++  }
++}
+ 
+ /** Resolve any local path scheme to an absolute filesystem path. */
+ function resolveLocalPath(mediaUrl: string): string {
+@@ -443,6 +454,7 @@ export const weixinPlugin: ChannelPlugin<ResolvedWeixinAccount> = {
+       const logPath = aLog.getLogFilePath();
+       ctx.log?.info?.(`[${account.accountId}] weixin logs: ${logPath}`);
+ 
++      await waitForMonitorStartSlot();
+       const { monitorWeixinProvider } = await import("./monitor/monitor.js");
+       return monitorWeixinProvider({
+         baseUrl: account.baseUrl,
+@@ -450,6 +462,7 @@ export const weixinPlugin: ChannelPlugin<ResolvedWeixinAccount> = {
+         token: account.token,
+         accountId: account.accountId,
+         config: ctx.cfg,
++        channelRuntime: ctx.channelRuntime,
+         runtime: ctx.runtime,
+         abortSignal: ctx.abortSignal,
+         setStatus: ctx.setStatus,
+diff --git a/src/monitor/monitor.ts b/src/monitor/monitor.ts
+index 697f95e38f84245b94539b9332bfeece5743b581..fb9225d6e8eb72e3449e7e051f9c38823c027386 100644
+--- a/src/monitor/monitor.ts
++++ b/src/monitor/monitor.ts
+@@ -5,7 +5,7 @@ import { getUpdates } from "../api/api.js";
+ import { WeixinConfigManager } from "../api/config-cache.js";
+ import { SESSION_EXPIRED_ERRCODE, pauseSession, getRemainingPauseMs } from "../api/session-guard.js";
+ import { processOneMessage } from "../messaging/process-message.js";
+-import { getWeixinRuntime, waitForWeixinRuntime } from "../runtime.js";
++import { resolveWeixinChannelRuntime } from "../runtime.js";
+ import { getSyncBufFilePath, loadGetUpdatesBuf, saveGetUpdatesBuf } from "../storage/sync-buf.js";
+ import { logger } from "../util/logger.js";
+ import type { Logger } from "../util/logger.js";
+@@ -24,6 +24,7 @@ export type MonitorWeixinOpts = {
+   /** When non-empty, only messages whose from_user_id is in this list are processed. */
+   allowFrom?: string[];
+   config: import("openclaw/plugin-sdk/core").OpenClawConfig;
++  channelRuntime?: PluginRuntime["channel"];
+   runtime?: { log?: (msg: string) => void; error?: (msg: string) => void };
+   abortSignal?: AbortSignal;
+   longPollTimeoutMs?: number;
+@@ -53,11 +54,12 @@ export async function monitorWeixinProvider(opts: MonitorWeixinOpts): Promise<vo
+   aLog.info(`waiting for Weixin runtime...`);
+   let channelRuntime: PluginRuntime["channel"];
+   try {
+-    const pluginRuntime = await waitForWeixinRuntime();
+-    channelRuntime = pluginRuntime.channel;
++    channelRuntime = await resolveWeixinChannelRuntime({
++      channelRuntime: opts.channelRuntime,
++    });
+     aLog.info(`Weixin runtime acquired, channelRuntime type: ${typeof channelRuntime}`);
+   } catch (err) {
+-    aLog.error(`waitForWeixinRuntime() failed: ${String(err)}`);
++    aLog.error(`resolveWeixinChannelRuntime() failed: ${String(err)}`);
+     throw err;
+   }
+ 

@@ -50,6 +50,7 @@ vi.mock('@electron/utils/plugin-install', () => ({
 vi.mock('@electron/utils/wechat-login', () => ({
   cancelWeChatLoginSession: vi.fn(),
   findWeChatAccountIdsByUserId: vi.fn().mockResolvedValue([]),
+  getWeChatAccountProfile: vi.fn().mockResolvedValue(undefined),
   saveWeChatAccountState: vi.fn(),
   startWeChatLoginSession: vi.fn(),
   waitForWeChatLoginSession: vi.fn(),
