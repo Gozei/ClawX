@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import { hostApiFetch } from '@/lib/host-api';
 import { invokeIpc } from '@/lib/api-client';
 import { subscribeHostEvent } from '@/lib/host-events';
+import i18n from '@/i18n';
 import type { GatewayStatus } from '../types/gateway';
 
 let gatewayInitPromise: Promise<void> | null = null;
@@ -677,6 +678,19 @@ function mapChannelStatus(status: string): 'connected' | 'connecting' | 'disconn
     default:
       return 'disconnected';
   }
+}
+
+export function isGatewayTransitioning(): boolean {
+  const state = useGatewayStore.getState().status.state;
+  return state === 'starting' || state === 'reconnecting';
+}
+
+export function guardGatewayTransitioning(): boolean {
+  if (!isGatewayTransitioning()) return false;
+  import('sonner').then(({ toast }) => {
+    toast.error(i18n.t('common:gateway.restarting', 'Gateway is restarting, please try again later.'));
+  }).catch(() => {});
+  return true;
 }
 
 export const useGatewayStore = create<GatewayState>((set, get) => ({

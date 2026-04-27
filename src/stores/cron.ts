@@ -15,6 +15,7 @@ import type {
   CronRunsResponse,
   CronStatus,
 } from '../types/cron';
+import { guardGatewayTransitioning } from './gateway';
 
 const DEFAULT_JOBS_LIMIT = 50;
 const DEFAULT_RUNS_LIMIT = 50;
@@ -281,6 +282,7 @@ export const useCronStore = create<CronState>((set, get) => ({
   },
 
   createJob: async (input) => {
+    if (guardGatewayTransitioning()) throw new Error('Gateway is restarting, please try again later');
     set({ busy: true, error: null });
     try {
       const job = await hostApiFetch<CronJob>('/api/cron/jobs', {
@@ -301,6 +303,7 @@ export const useCronStore = create<CronState>((set, get) => ({
   },
 
   updateJob: async (id, input) => {
+    if (guardGatewayTransitioning()) return;
     set({ busy: true, error: null });
     try {
       const updatedJob = await hostApiFetch<CronJob>(`/api/cron/jobs/${encodeURIComponent(id)}`, {
@@ -319,6 +322,7 @@ export const useCronStore = create<CronState>((set, get) => ({
   },
 
   deleteJob: async (id) => {
+    if (guardGatewayTransitioning()) return;
     set({ busy: true, error: null });
     try {
       await hostApiFetch(`/api/cron/jobs/${encodeURIComponent(id)}`, {
@@ -338,6 +342,7 @@ export const useCronStore = create<CronState>((set, get) => ({
   },
 
   toggleJob: async (id, enabled) => {
+    if (guardGatewayTransitioning()) return;
     set({ busy: true, error: null });
     try {
       await hostApiFetch('/api/cron/toggle', {
@@ -356,6 +361,7 @@ export const useCronStore = create<CronState>((set, get) => ({
   },
 
   triggerJob: async (id) => {
+    if (guardGatewayTransitioning()) return;
     set({ busy: true, error: null });
     try {
       await hostApiFetch('/api/cron/trigger', {

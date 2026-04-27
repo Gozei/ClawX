@@ -50,6 +50,17 @@ export function expandPath(path: string): string {
   return path;
 }
 
+function normalizeLocalPath(path: string): string {
+  const expanded = expandPath(path);
+  if (process.platform === 'win32') {
+    const msysDrivePath = expanded.match(/^\/([a-zA-Z])\/(.+)$/);
+    if (msysDrivePath) {
+      return `${msysDrivePath[1].toUpperCase()}:\\${msysDrivePath[2].replace(/\//g, '\\')}`;
+    }
+  }
+  return expanded;
+}
+
 /**
  * Get OpenClaw config directory
  */
@@ -119,6 +130,10 @@ export function getPreloadPath(): string {
 export function getOpenClawDir(): string {
   if (getElectronApp().isPackaged) {
     return join(process.resourcesPath, 'openclaw');
+  }
+  const localOpenClawDir = process.env.CLAWX_OPENCLAW_LOCAL_DIR?.trim();
+  if (localOpenClawDir) {
+    return normalizeLocalPath(localOpenClawDir);
   }
   // Development: use node_modules/openclaw
   return join(__dirname, '../../node_modules/openclaw');

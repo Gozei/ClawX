@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import { join } from 'node:path';
 import type { HostApiContext } from '../context';
 import { emitMutationAudit } from '../audit-utils';
-import { parseJsonBody, sendJson } from '../route-utils';
+import { parseJsonBody, sendJson, isGatewayTransitioning } from '../route-utils';
 import { getOpenClawConfigDir } from '../../utils/paths';
 import { ensureWeChatPluginInstalled } from '../../utils/plugin-install';
 import {
@@ -949,6 +949,10 @@ export async function handleCronRoutes(
   }
 
   if (url.pathname === '/api/cron/jobs' && req.method === 'POST') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const input = await parseJsonBody<{
@@ -1042,6 +1046,10 @@ export async function handleCronRoutes(
   }
 
   if (url.pathname.startsWith('/api/cron/jobs/') && req.method === 'PUT') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const id = decodeURIComponent(url.pathname.slice('/api/cron/jobs/'.length));
@@ -1096,6 +1104,10 @@ export async function handleCronRoutes(
   }
 
   if (url.pathname.startsWith('/api/cron/jobs/') && req.method === 'DELETE') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const id = decodeURIComponent(url.pathname.slice('/api/cron/jobs/'.length));
@@ -1124,6 +1136,10 @@ export async function handleCronRoutes(
   }
 
   if (url.pathname === '/api/cron/toggle' && req.method === 'POST') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ id: string; enabled: boolean }>(req);
@@ -1155,6 +1171,10 @@ export async function handleCronRoutes(
   }
 
   if (url.pathname === '/api/cron/trigger' && req.method === 'POST') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ id: string }>(req);

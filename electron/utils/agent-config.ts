@@ -771,7 +771,7 @@ async function listExistingAgentIdsOnDisk(): Promise<Set<string>> {
   return ids;
 }
 
-async function removeAgentRuntimeDirectory(agentId: string): Promise<void> {
+export async function removeAgentRuntimeDirectory(agentId: string): Promise<void> {
   const runtimeDir = join(getOpenClawConfigDir(), 'agents', agentId);
   try {
     await rm(runtimeDir, { recursive: true, force: true });

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 const parseJsonBodyMock = vi.fn();
 const sendJsonMock = vi.fn();
+const isGatewayTransitioningMock = vi.fn(() => false);
 const ensureWeChatPluginInstalledMock = vi.fn();
 const ensureWeChatPluginRegistrationMock = vi.fn();
 const originalHome = process.env.HOME;
@@ -13,6 +14,7 @@ const originalUserProfile = process.env.USERPROFILE;
 let tempHomeDir: string | null = null;
 
 vi.mock('@electron/api/route-utils', () => ({
+  isGatewayTransitioning: (...args: unknown[]) => isGatewayTransitioningMock(...args),
   parseJsonBody: (...args: unknown[]) => parseJsonBodyMock(...args),
   sendJson: (...args: unknown[]) => sendJsonMock(...args),
 }));
@@ -63,6 +65,7 @@ describe('handleCronRoutes', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.resetAllMocks();
+    isGatewayTransitioningMock.mockReturnValue(false);
     ensureWeChatPluginInstalledMock.mockReturnValue({ installed: true });
     ensureWeChatPluginRegistrationMock.mockResolvedValue(false);
     tempHomeDir = null;
