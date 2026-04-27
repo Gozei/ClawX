@@ -235,6 +235,32 @@ describe('skills store refresh behavior', () => {
     expect(useSkillsStore.getState().skills[0]?.ready).toBe(false);
   });
 
+  it('clears stale detail and list entries when a skill detail is not found', async () => {
+    const { useSkillsStore } = await import('@/stores/skills');
+
+    useSkillsStore.setState({
+      skills: [
+        { id: 'deleted-skill', name: 'Deleted Skill', description: 'Gone', enabled: true, ready: true },
+      ],
+      skillDetailsById: {
+        'deleted-skill': {
+          identity: { id: 'deleted-skill', name: 'Deleted Skill', description: 'Gone' },
+          status: { enabled: true, ready: true },
+          config: {},
+          requirements: {},
+          configuration: { credentials: [], optional: [], config: [], runtime: [] },
+        },
+      },
+    });
+    hostApiFetchMock.mockRejectedValueOnce(new Error('Skill not found'));
+
+    await expect(useSkillsStore.getState().fetchSkillDetail('deleted-skill', true)).rejects.toThrow('Skill not found');
+
+    expect(useSkillsStore.getState().skills).toEqual([]);
+    expect(useSkillsStore.getState().skillDetailsById['deleted-skill']).toBeUndefined();
+    expect(useSkillsStore.getState().detailLoadingId).toBeNull();
+  });
+
   it('rolls back optimistic updates when gateway starts transitioning during the toggle debounce', async () => {
     vi.useFakeTimers();
     const { useSkillsStore } = await import('@/stores/skills');
