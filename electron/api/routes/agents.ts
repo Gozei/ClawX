@@ -23,7 +23,7 @@ import {
 } from '../../services/providers/provider-runtime-sync';
 import type { HostApiContext } from '../context';
 import { emitMutationAudit } from '../audit-utils';
-import { parseJsonBody, sendJson } from '../route-utils';
+import { parseJsonBody, sendJson, isGatewayTransitioning } from '../route-utils';
 import { logger } from '../../utils/logger';
 
 function scheduleGatewayReload(ctx: HostApiContext, reason: string): void {
@@ -64,33 +64,6 @@ async function tryHotPatchAgentModel(
     15000,
   );
   await applyPreparedAgentModelUpdate(prepared);
-  return prepared;
-}
-
-async function tryHotPatchRuntimeAgentModel(
-  ctx: HostApiContext,
-  agentId: string,
-  modelRef: string | null,
-  options: { setAsDefault?: boolean } = {},
-): Promise<Awaited<ReturnType<typeof prepareAgentModelUpdate>>> {
-  if (ctx.gatewayManager.getStatus().state !== 'running') {
-    throw new Error('Gateway is not running');
-  }
-
-  const snapshot = await ctx.gatewayManager.rpc<GatewayConfigSnapshot>('config.get', {}, 15000);
-  if (!snapshot?.hash || !snapshot.config || typeof snapshot.config !== 'object' || Array.isArray(snapshot.config)) {
-    throw new Error('Unable to read running Gateway config');
-  }
-
-  const prepared = await prepareAgentModelUpdate(snapshot.config, agentId, modelRef, options);
-  await ctx.gatewayManager.rpc(
-    'config.patch',
-    {
-      baseHash: snapshot.hash,
-      raw: JSON.stringify({ agents: prepared.config.agents ?? {} }),
-    },
-    15000,
-  );
   return prepared;
 }
 
@@ -229,6 +202,10 @@ export async function handleAgentRoutes(
   }
 
   if (url.pathname === '/api/agents' && req.method === 'POST') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{
@@ -278,6 +255,10 @@ export async function handleAgentRoutes(
   }
 
   if (url.pathname.startsWith('/api/agents/') && req.method === 'PUT') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const suffix = url.pathname.slice('/api/agents/'.length);
     const parts = suffix.split('/').filter(Boolean);
 
@@ -313,15 +294,11 @@ export async function handleAgentRoutes(
 
     if (parts.length === 3 && parts[1] === 'model' && parts[2] === 'runtime') {
       try {
-        const body = await parseJsonBody<{ modelRef?: string | null; setAsDefault?: boolean }>(req);
+        const body = await parseJsonBody<{ modelRef?: string | null }>(req);
         const agentId = decodeURIComponent(parts[0]);
-        const updateOptions = {
-          setAsDefault: body.setAsDefault === true,
-        };
 
         await syncAllProviderAuthToRuntime();
         await syncAgentModelRefToRuntime(agentId, body.modelRef ?? null);
-        await tryHotPatchRuntimeAgentModel(ctx, agentId, body.modelRef ?? null, updateOptions);
 
         sendJson(res, 200, {
           success: true,
@@ -463,6 +440,10 @@ export async function handleAgentRoutes(
   }
 
   if (url.pathname.startsWith('/api/agents/') && req.method === 'DELETE') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const suffix = url.pathname.slice('/api/agents/'.length);
     const parts = suffix.split('/').filter(Boolean);
 

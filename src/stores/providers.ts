@@ -14,6 +14,7 @@ import { confirmGatewayImpact } from '@/lib/gateway-impact-confirm';
 import {
   fetchProviderSnapshot,
 } from '@/lib/provider-accounts';
+import { guardGatewayTransitioning } from './gateway';
 
 // Re-export types for consumers that imported from here
 export type {
@@ -114,6 +115,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   fetchProviders: async () => get().refreshProviderSnapshot(),
   
   addProvider: async (config, apiKey) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'refresh',
       willApplyChanges: true,
@@ -165,6 +167,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   createAccount: async (account, apiKey) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'refresh',
       willApplyChanges: true,
@@ -193,6 +196,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   addAccount: async (account, apiKey) => get().createAccount(account, apiKey),
   
   updateProvider: async (providerId, updates, apiKey) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'refresh',
       willApplyChanges: true,
@@ -246,6 +250,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   updateAccount: async (accountId, updates, apiKey) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'refresh',
       willApplyChanges: true,
@@ -272,6 +277,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
   
   deleteProvider: async (providerId) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'restart',
       willApplyChanges: true,
@@ -298,6 +304,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   removeAccount: async (accountId) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'restart',
       willApplyChanges: true,
@@ -325,6 +332,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   deleteAccount: async (accountId) => get().removeAccount(accountId),
   
   setApiKey: async (providerId, apiKey) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'refresh',
       willApplyChanges: true,
@@ -352,6 +360,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   updateProviderWithKey: async (providerId, updates, apiKey) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'refresh',
       willApplyChanges: true,
@@ -410,6 +419,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
   
   setDefaultProvider: async (providerId) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'refresh',
       willApplyChanges: true,
@@ -436,6 +446,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   setDefaultAccount: async (accountId) => {
+    if (guardGatewayTransitioning()) return false;
     const confirmed = await confirmGatewayImpact({
       mode: 'refresh',
       willApplyChanges: true,

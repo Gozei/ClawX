@@ -5,6 +5,7 @@
 import { create } from 'zustand';
 import { hostApiFetch } from '@/lib/host-api';
 import type { CronJob, CronJobCreateInput, CronJobUpdateInput } from '../types/cron';
+import { guardGatewayTransitioning } from './gateway';
 
 interface CronState {
   jobs: CronJob[];
@@ -42,6 +43,7 @@ export const useCronStore = create<CronState>((set) => ({
   },
   
   createJob: async (input) => {
+    if (guardGatewayTransitioning()) throw new Error('Gateway is restarting, please try again later');
     try {
       const job = await hostApiFetch<CronJob>('/api/cron/jobs', {
         method: 'POST',
@@ -56,6 +58,7 @@ export const useCronStore = create<CronState>((set) => ({
   },
   
   updateJob: async (id, input) => {
+    if (guardGatewayTransitioning()) return;
     try {
       const updatedJob = await hostApiFetch<CronJob>(`/api/cron/jobs/${encodeURIComponent(id)}`, {
         method: 'PUT',
@@ -73,6 +76,7 @@ export const useCronStore = create<CronState>((set) => ({
   },
   
   deleteJob: async (id) => {
+    if (guardGatewayTransitioning()) return;
     try {
       await hostApiFetch(`/api/cron/jobs/${encodeURIComponent(id)}`, {
         method: 'DELETE',
@@ -87,6 +91,7 @@ export const useCronStore = create<CronState>((set) => ({
   },
   
   toggleJob: async (id, enabled) => {
+    if (guardGatewayTransitioning()) return;
     try {
       await hostApiFetch('/api/cron/toggle', {
         method: 'POST',
@@ -104,6 +109,7 @@ export const useCronStore = create<CronState>((set) => ({
   },
   
   triggerJob: async (id) => {
+    if (guardGatewayTransitioning()) return;
     try {
       const result = await hostApiFetch('/api/cron/trigger', {
         method: 'POST',

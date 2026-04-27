@@ -20,6 +20,7 @@ import {
   type AuditMode,
 } from '../../shared/logging';
 import { confirmGatewayImpact } from '@/lib/gateway-impact-confirm';
+import { guardGatewayTransitioning } from './gateway';
 
 type Theme = 'light' | 'dark' | 'system';
 type UpdateChannel = 'stable' | 'beta' | 'dev';
@@ -292,6 +293,7 @@ export const useSettingsStore = create<SettingsState>()(
         }).catch(() => { });
       },
       setDreamModeEnabled: async (dreamModeEnabled) => {
+        if (guardGatewayTransitioning()) return false;
         const confirmed = await confirmGatewayImpact({
           mode: 'restart',
           willApplyChanges: true,

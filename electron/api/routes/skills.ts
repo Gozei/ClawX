@@ -7,7 +7,7 @@ import type {
 import { getAllSkillConfigs, updateSkillConfig } from '../../utils/skill-config';
 import { deleteSkillDirectory, getSkillDetail, listSkills, saveSkillConfig } from '../../utils/skill-details';
 import type { HostApiContext } from '../context';
-import { parseJsonBody, sendJson } from '../route-utils';
+import { parseJsonBody, sendJson, isGatewayTransitioning } from '../route-utils';
 
 export async function handleSkillRoutes(
   req: IncomingMessage,
@@ -30,6 +30,10 @@ export async function handleSkillRoutes(
   }
 
   if (url.pathname === '/api/skills/config' && req.method === 'PUT') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     try {
       const body = await parseJsonBody<{
         skillKey: string;
@@ -64,6 +68,10 @@ export async function handleSkillRoutes(
   }
 
   if (url.pathname.startsWith('/api/skills/') && url.pathname.endsWith('/config') && req.method === 'PUT') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     try {
       const skillId = decodeURIComponent(url.pathname.slice('/api/skills/'.length, -'/config'.length));
       const body = await parseJsonBody<{
@@ -79,6 +87,10 @@ export async function handleSkillRoutes(
   }
 
   if (url.pathname.startsWith('/api/skills/') && req.method === 'DELETE') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     try {
       const skillId = decodeURIComponent(url.pathname.slice('/api/skills/'.length));
       const detail = await getSkillDetail(ctx.gatewayManager, skillId);
@@ -139,6 +151,10 @@ export async function handleSkillRoutes(
   }
 
   if (url.pathname === '/api/clawhub/install' && req.method === 'POST') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     try {
       const body = await parseJsonBody<ClawHubInstallParams>(req);
       await ctx.clawHubService.install(body);
@@ -150,6 +166,10 @@ export async function handleSkillRoutes(
   }
 
   if (url.pathname === '/api/clawhub/uninstall' && req.method === 'POST') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     try {
       const body = await parseJsonBody<ClawHubUninstallParams>(req);
       await ctx.clawHubService.uninstall(body);
