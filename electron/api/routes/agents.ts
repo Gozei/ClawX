@@ -8,6 +8,7 @@ import {
   type AgentWorkflowNode,
   listAgentsSnapshot,
   prepareAgentModelUpdate,
+  removeAgentRuntimeDirectory,
   removeAgentWorkspaceDirectory,
   resolveAccountIdForAgent,
   updateAgentModel,
@@ -70,6 +71,25 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 const execAsync = promisify(exec);
 
+async function waitForGatewayState(
+  readStatus: () => { state?: string },
+  predicate: (state: string) => boolean,
+  timeoutMs: number,
+  intervalMs = 100,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = readStatus().state ?? 'unknown';
+    if (predicate(state)) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  const finalState = readStatus().state ?? 'unknown';
+  return predicate(finalState);
+}
+
 /**
  * Force a full Gateway process restart after agent deletion.
  *
@@ -86,6 +106,7 @@ export async function restartGatewayForAgentDeletion(ctx: HostApiContext): Promi
     const status = ctx.gatewayManager.getStatus();
     const pid = status.pid;
     const port = status.port;
+    const shouldRecoverGateway = status.state !== 'stopped';
     logger.info('[agents] Triggering Gateway restart (kill+respawn) after agent deletion', { pid, port });
 
     // Force-kill the Gateway process by PID.  The manager's stop() only
@@ -141,7 +162,28 @@ export async function restartGatewayForAgentDeletion(ctx: HostApiContext): Promi
       }
     }
 
-    await ctx.gatewayManager.restart();
+    if (!shouldRecoverGateway) {
+      logger.info('[agents] Gateway was already stopped; skipping post-deletion restart');
+      return;
+    }
+
+    await waitForGatewayState(
+      () => ctx.gatewayManager.getStatus(),
+      (state) => state !== 'running',
+      3000,
+    );
+
+    await ctx.gatewayManager.start();
+    const recovered = await waitForGatewayState(
+      () => ctx.gatewayManager.getStatus(),
+      (state) => state === 'running',
+      30000,
+    );
+    if (!recovered) {
+      throw new Error(
+        `Gateway did not recover after agent deletion (state=${ctx.gatewayManager.getStatus().state ?? 'unknown'})`,
+      );
+    }
     logger.info('[agents] Gateway restart completed after agent deletion');
   } catch (err) {
     logger.warn('[agents] Gateway restart after agent deletion failed:', err);
@@ -414,6 +456,12 @@ export async function handleAgentRoutes(
         // This ensures the Feishu plugin has disconnected the deleted bot
         // before the UI shows "delete success" and the user tries chatting.
         await restartGatewayForAgentDeletion(ctx);
+        // Retry runtime cleanup after restart so stale session indexes and
+        // transcripts are removed even if the old process still had files open
+        // during the initial config deletion step.
+        await removeAgentRuntimeDirectory(agentId).catch((err) => {
+          logger.warn('[agents] Failed to remove runtime after agent deletion:', err);
+        });
         // Delete workspace after reload so the new config is already live.
         await removeAgentWorkspaceDirectory(removedEntry).catch((err) => {
           logger.warn('[agents] Failed to remove workspace after agent deletion:', err);

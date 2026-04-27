@@ -2878,6 +2878,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     | 'archiveSession'
     | 'restoreSession'
     | 'deleteSession'
+    | 'purgeAgentSessions'
     | 'cleanupEmptySession'
     | 'loadHistory'
     | 'sendMessage'
@@ -2971,6 +2972,60 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       return {
         composerDrafts: clearSessionEntryFromMap(state.composerDrafts, targetSessionKey),
       };
+    });
+  },
+
+  purgeAgentSessions: (agentId: string) => {
+    const normalizedAgentId = normalizeAgentId(agentId);
+    const currentSessionKey = get().currentSessionKey;
+    const currentSessionBelongsToDeletedAgent = normalizeAgentId(getAgentIdFromSessionKey(currentSessionKey)) === normalizedAgentId;
+
+    clearHistoryIncompleteRetry(currentSessionKey);
+    clearNoResponseRecovery(currentSessionKey);
+
+    set((state) => {
+      const belongsToDeletedAgent = (sessionKey: string) => normalizeAgentId(getAgentIdFromSessionKey(sessionKey)) === normalizedAgentId;
+      const remainingSessions = state.sessions.filter((session) => !belongsToDeletedAgent(session.key));
+      const nextSessionKey = currentSessionBelongsToDeletedAgent
+        ? (remainingSessions[0]?.key
+          || resolveMainSessionKeyForAgent(useAgentsStore.getState().defaultAgentId)
+          || DEFAULT_SESSION_KEY)
+        : state.currentSessionKey;
+
+      const filterSessionMap = <T extends Record<string, unknown>>(entries: T): T => (
+        Object.fromEntries(
+          Object.entries(entries).filter(([sessionKey]) => !belongsToDeletedAgent(sessionKey)),
+        ) as T
+      );
+
+      const nextState: Partial<ChatState> = {
+        sessions: remainingSessions,
+        sessionModels: filterSessionMap(state.sessionModels),
+        composerDrafts: filterSessionMap(state.composerDrafts),
+        sessionLabels: filterSessionMap(state.sessionLabels),
+        sessionLastActivity: filterSessionMap(state.sessionLastActivity),
+        queuedMessages: filterSessionMap(state.queuedMessages),
+        sessionRunningState: state.sessionRunningState ? filterSessionMap(state.sessionRunningState) : state.sessionRunningState,
+      };
+
+      if (currentSessionBelongsToDeletedAgent) {
+        nextState.currentSessionKey = nextSessionKey;
+        nextState.currentAgentId = getAgentIdFromSessionKey(nextSessionKey);
+        nextState.messages = [];
+        nextState.streamingText = '';
+        nextState.streamingMessage = null;
+        nextState.streamingTools = [];
+        nextState.activeRunId = null;
+        nextState.error = null;
+        nextState.sessionNotice = null;
+        nextState.sendStage = null;
+        nextState.pendingFinal = false;
+        nextState.lastUserMessageAt = null;
+        nextState.pendingToolImages = [];
+        clearSessionView(currentSessionKey);
+      }
+
+      return nextState;
     });
   },
 

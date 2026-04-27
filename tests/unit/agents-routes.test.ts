@@ -21,6 +21,7 @@ vi.mock('@electron/utils/agent-config', () => ({
   deleteAgentConfig: vi.fn(),
   listAgentsSnapshot: vi.fn(),
   prepareAgentModelUpdate: vi.fn(),
+  removeAgentRuntimeDirectory: vi.fn(),
   removeAgentWorkspaceDirectory: vi.fn(),
   resolveAccountIdForAgent: vi.fn(),
   updateAgentModel: vi.fn(),
@@ -46,7 +47,10 @@ vi.mock('@electron/api/route-utils', () => ({
 import {
   applyPreparedAgentModelUpdate,
   createAgent,
+  deleteAgentConfig,
   prepareAgentModelUpdate,
+  removeAgentRuntimeDirectory,
+  removeAgentWorkspaceDirectory,
   updateAgentModel,
   updateAgentStudio,
 } from '@electron/utils/agent-config';
@@ -79,13 +83,22 @@ describe('restartGatewayForAgentDeletion', () => {
     setPlatform('win32');
     const { restartGatewayForAgentDeletion } = await import('@electron/api/routes/agents');
 
-    const restart = vi.fn().mockResolvedValue(undefined);
-    const getStatus = vi.fn(() => ({ pid: 4321, port: 18789 }));
+    let state = 'running';
+    mockExec.mockImplementation((_cmd: string, cb: (err: Error | null, stdout: string) => void) => {
+      state = 'stopped';
+      cb(null, '');
+      return {} as never;
+    });
+
+    const start = vi.fn().mockImplementation(async () => {
+      state = 'running';
+    });
+    const getStatus = vi.fn(() => ({ state, pid: 4321, port: 18789 }));
 
     await restartGatewayForAgentDeletion({
       gatewayManager: {
         getStatus,
-        restart,
+        start,
       },
     } as never);
 
@@ -93,7 +106,7 @@ describe('restartGatewayForAgentDeletion', () => {
       'taskkill /F /PID 4321 /T',
       expect.any(Function),
     );
-    expect(restart).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -150,6 +163,65 @@ describe('handleAgentRoutes create flow', () => {
           debouncedReload: vi.fn(),
         },
       } as never,
+    );
+  });
+});
+
+describe('handleAgentRoutes delete flow', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+  });
+
+  it('retries runtime cleanup after restarting the gateway', async () => {
+    const { handleAgentRoutes } = await import('@electron/api/routes/agents');
+    let state = 'running';
+    mockExec.mockImplementation((_cmd: string, cb: (err: Error | null, stdout: string) => void) => {
+      state = 'stopped';
+      cb(null, '');
+      return {} as never;
+    });
+
+    vi.mocked(deleteAgentConfig).mockResolvedValue({
+      snapshot: {
+        agents: [],
+        defaultAgentId: 'main',
+        defaultModelRef: null,
+        configuredChannelTypes: [],
+        channelOwners: {},
+        channelAccountOwners: {},
+      },
+      removedEntry: {
+        id: 'role',
+        workspace: '/tmp/workspace-role',
+      },
+    } as never);
+    vi.mocked(removeAgentRuntimeDirectory).mockResolvedValue(undefined);
+    vi.mocked(removeAgentWorkspaceDirectory).mockResolvedValue(undefined);
+
+    await handleAgentRoutes(
+      { method: 'DELETE' } as never,
+      {} as never,
+      new URL('http://localhost/api/agents/role'),
+      {
+        gatewayManager: {
+          getStatus: () => ({ state, pid: 4321, port: 18789 }),
+          start: vi.fn().mockImplementation(async () => {
+            state = 'running';
+          }),
+        },
+      } as never,
+    );
+
+    expect(removeAgentRuntimeDirectory).toHaveBeenCalledWith('role');
+    expect(removeAgentWorkspaceDirectory).toHaveBeenCalledWith({
+      id: 'role',
+      workspace: '/tmp/workspace-role',
+    });
+    expect(sendJson).toHaveBeenCalledWith(
+      expect.anything(),
+      200,
+      expect.objectContaining({ success: true }),
     );
   });
 });
