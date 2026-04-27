@@ -66,33 +66,6 @@ async function tryHotPatchAgentModel(
   return prepared;
 }
 
-async function tryHotPatchRuntimeAgentModel(
-  ctx: HostApiContext,
-  agentId: string,
-  modelRef: string | null,
-  options: { setAsDefault?: boolean } = {},
-): Promise<Awaited<ReturnType<typeof prepareAgentModelUpdate>>> {
-  if (ctx.gatewayManager.getStatus().state !== 'running') {
-    throw new Error('Gateway is not running');
-  }
-
-  const snapshot = await ctx.gatewayManager.rpc<GatewayConfigSnapshot>('config.get', {}, 15000);
-  if (!snapshot?.hash || !snapshot.config || typeof snapshot.config !== 'object' || Array.isArray(snapshot.config)) {
-    throw new Error('Unable to read running Gateway config');
-  }
-
-  const prepared = await prepareAgentModelUpdate(snapshot.config, agentId, modelRef, options);
-  await ctx.gatewayManager.rpc(
-    'config.patch',
-    {
-      baseHash: snapshot.hash,
-      raw: JSON.stringify({ agents: prepared.config.agents ?? {} }),
-    },
-    15000,
-  );
-  return prepared;
-}
-
 import { exec } from 'child_process';
 import { promisify } from 'util';
 const execAsync = promisify(exec);
@@ -271,15 +244,11 @@ export async function handleAgentRoutes(
 
     if (parts.length === 3 && parts[1] === 'model' && parts[2] === 'runtime') {
       try {
-        const body = await parseJsonBody<{ modelRef?: string | null; setAsDefault?: boolean }>(req);
+        const body = await parseJsonBody<{ modelRef?: string | null }>(req);
         const agentId = decodeURIComponent(parts[0]);
-        const updateOptions = {
-          setAsDefault: body.setAsDefault === true,
-        };
 
         await syncAllProviderAuthToRuntime();
         await syncAgentModelRefToRuntime(agentId, body.modelRef ?? null);
-        await tryHotPatchRuntimeAgentModel(ctx, agentId, body.modelRef ?? null, updateOptions);
 
         sendJson(res, 200, {
           success: true,

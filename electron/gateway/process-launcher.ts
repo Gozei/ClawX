@@ -183,6 +183,7 @@ export async function launchGatewayProcess(options: {
   sanitizeSpawnArgs: (args: string[]) => string[];
   getCurrentState: () => GatewayLifecycleState;
   getShouldReconnect: () => boolean;
+  onStdoutLine?: (line: string) => void;
   onStderrLine: (line: string) => void;
   onSpawn: (pid: number | undefined) => void;
   onExit: (child: Electron.UtilityProcess, code: number | null) => void;
@@ -207,22 +208,21 @@ export async function launchGatewayProcess(options: {
   const lastSpawnSummary = `mode=${mode}, entry="${entryScript}", args="${options.sanitizeSpawnArgs(gatewayArgs).join(' ')}", cwd="${openclawDir}"`;
 
   const runtimeEnv = { ...forkEnv };
-  // Only apply the fetch/child_process preload in dev mode.
-  // In packaged builds Electron's UtilityProcess rejects NODE_OPTIONS
-  // with --require, logging "Most NODE_OPTIONs are not supported in
-  // packaged apps" and the preload never loads.
-  if (!app.isPackaged) {
-    try {
-      const preloadPath = ensureGatewayFetchPreload();
-      if (existsSync(preloadPath)) {
+  let forkExecArgv: string[] = [];
+  try {
+    const preloadPath = ensureGatewayFetchPreload();
+    if (existsSync(preloadPath)) {
+      if (app.isPackaged) {
+        forkExecArgv = ['--require', preloadPath];
+      } else {
         runtimeEnv.NODE_OPTIONS = appendNodeRequireToNodeOptions(
           runtimeEnv.NODE_OPTIONS,
           preloadPath,
         );
       }
-    } catch (err) {
-      logger.warn('Failed to set up OpenRouter headers preload:', err);
     }
+  } catch (err) {
+    logger.warn('Failed to set up OpenRouter headers preload:', err);
   }
 
   return await new Promise<{ child: Electron.UtilityProcess; lastSpawnSummary: string }>((resolve, reject) => {
@@ -231,6 +231,7 @@ export async function launchGatewayProcess(options: {
       stdio: 'pipe',
       env: runtimeEnv as NodeJS.ProcessEnv,
       serviceName: 'OpenClaw Gateway',
+      execArgv: forkExecArgv,
     });
 
     let settled = false;
@@ -271,6 +272,13 @@ export async function launchGatewayProcess(options: {
       const raw = data.toString();
       for (const line of raw.split(/\r?\n/)) {
         options.onStderrLine(line);
+      }
+    });
+
+    child.stdout?.on('data', (data) => {
+      const raw = data.toString();
+      for (const line of raw.split(/\r?\n/)) {
+        options.onStdoutLine?.(line);
       }
     });
 
