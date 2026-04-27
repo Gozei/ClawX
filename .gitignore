@@ -74,3 +74,5 @@ package-lock.json
 scratch/
 tmp-playwright-*/
 tmp_origin_wubin_chat_index.tsx
+.win-agent/
+.opencode/
