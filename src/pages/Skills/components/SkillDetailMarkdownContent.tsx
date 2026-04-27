@@ -6,7 +6,7 @@ type SkillDetailMarkdownContentProps = {
 };
 
 function stripSkillFrontmatter(content?: string): string {
-  const normalized = (content || '').replace(/\r\n/g, '\n').trim();
+  const normalized = (content || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').trim();
   if (!normalized.startsWith('---\n')) {
     return normalized;
   }
