@@ -224,6 +224,34 @@ total likely win         ~14s to ~16s
 
 This should bring the measured 26 to 31 second Gateway startup closer to the 10 to 15 second range before addressing config snapshot and plugin bootstrap costs.
 
+## Local OpenClaw Build Testing
+
+The durable fix belongs in the OpenClaw source tree. To test a local OpenClaw build in ClawX without publishing it to npm:
+
+```powershell
+cd C:\Users\szdee\Projects\openclaw
+pnpm install
+pnpm build
+pnpm ui:build
+
+cd C:\Users\szdee\Projects\ClawX
+$env:CLAWX_OPENCLAW_LOCAL_DIR = 'C:\Users\szdee\Projects\openclaw'
+pnpm dev
+```
+
+On Windows, `CLAWX_OPENCLAW_LOCAL_DIR` also accepts Git Bash/MSYS drive paths such as `/c/Users/szdee/Projects/openclaw`; ClawX normalizes them before launching the Gateway.
+
+For packaged/bundled validation, the same environment variable makes `scripts/bundle-openclaw.mjs` copy the local OpenClaw package files into `build/openclaw` while using ClawX's installed OpenClaw dependency graph for runtime dependencies:
+
+```powershell
+$env:CLAWX_OPENCLAW_LOCAL_DIR = 'C:\Users\szdee\Projects\openclaw'
+pnpm run package
+```
+
+This keeps the dependency flow explicit and avoids patching `node_modules/openclaw`, `build/openclaw/node_modules`, or packaged `app.asar` output by hand.
+
+ClawX preflights local OpenClaw overrides before launch. If `dist/entry.js` or `dist/control-ui/index.html` is missing, or if the edited startup source is newer than `dist/entry.js`, ClawX fails fast with the build commands instead of letting the Gateway block while trying to repair assets during startup.
+
 ## Follow-up Work
 
 After the two main fixes, investigate:

@@ -2587,7 +2587,8 @@ function upsertToolStatuses(current: ToolStatus[], updates: ToolStatus[]): ToolS
  * should still terminate the send immediately.
  */
 function isRecoverableChatSendTimeout(error: string): boolean {
-  return error.includes('RPC timeout: chat.send');
+  return error.includes('RPC timeout: chat.send')
+    || error.includes('Gateway WS timeout: chat.send');
 }
 
 function collectToolUpdates(message: unknown, eventState: string): ToolStatus[] {

@@ -113,6 +113,7 @@ describe('launchGatewayProcess — preload injection', () => {
           }
           return child;
         }),
+        stdout: { on: vi.fn() },
         stderr: { on: vi.fn() },
         pid: 1234,
       };
@@ -173,5 +174,25 @@ describe('launchGatewayProcess — preload injection', () => {
     const forkCall = mockUtilityProcessFork.mock.calls[0];
     const forkOpts = forkCall[2] as Record<string, unknown>;
     expect(forkOpts.execArgv).toEqual([]);
+  });
+
+  it('forwards stdout lines when the Gateway emits diagnostic output', async () => {
+    const opts = createOptions();
+    const onStdoutLine = vi.fn();
+
+    await launchGatewayProcess({ ...opts, onStdoutLine });
+
+    const child = mockUtilityProcessFork.mock.results[0]?.value as {
+      stdout: { on: ReturnType<typeof vi.fn> };
+    };
+    const stdoutHandler = child.stdout.on.mock.calls.find(([event]) => event === 'data')?.[1] as
+      | ((data: Buffer) => void)
+      | undefined;
+
+    expect(stdoutHandler).toBeTypeOf('function');
+    stdoutHandler?.(Buffer.from('[clawx-boot] phase=ready\nplain line\n'));
+
+    expect(onStdoutLine).toHaveBeenCalledWith('[clawx-boot] phase=ready');
+    expect(onStdoutLine).toHaveBeenCalledWith('plain line');
   });
 });

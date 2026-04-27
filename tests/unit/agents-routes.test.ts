@@ -295,7 +295,7 @@ describe('handleAgentRoutes model refresh flow', () => {
     expect(debouncedReload).toHaveBeenCalledTimes(1);
   });
 
-  it('hot patches the runtime model without persisting agent config', async () => {
+  it('syncs the runtime model without patching Gateway config', async () => {
     const { handleAgentRoutes } = await import('@electron/api/routes/agents');
 
     vi.mocked(parseJsonBody).mockResolvedValue({ modelRef: 'moonshot/kimi-k2.5' });
@@ -323,17 +323,7 @@ describe('handleAgentRoutes model refresh flow', () => {
 
     const debouncedReload = vi.fn();
     const restart = vi.fn();
-    const rpc = vi
-      .fn()
-      .mockResolvedValueOnce({
-        hash: 'hash-1',
-        config: {
-          agents: {
-            list: [{ id: 'main' }],
-          },
-        },
-      })
-      .mockResolvedValueOnce({ ok: true });
+    const rpc = vi.fn();
 
     await handleAgentRoutes(
       { method: 'PUT' } as never,
@@ -351,25 +341,7 @@ describe('handleAgentRoutes model refresh flow', () => {
 
     expect(syncAllProviderAuthToRuntime).toHaveBeenCalledTimes(1);
     expect(syncAgentModelRefToRuntime).toHaveBeenCalledWith('main', 'moonshot/kimi-k2.5');
-    const modelSyncOrder = vi.mocked(syncAgentModelRefToRuntime).mock.invocationCallOrder[0] ?? 0;
-    const configGetOrder = rpc.mock.invocationCallOrder[0] ?? 0;
-    expect(modelSyncOrder).toBeGreaterThan(0);
-    expect(configGetOrder).toBeGreaterThan(0);
-    expect(modelSyncOrder).toBeLessThan(configGetOrder);
-    expect(rpc).toHaveBeenNthCalledWith(1, 'config.get', {}, 15000);
-    expect(rpc).toHaveBeenNthCalledWith(
-      2,
-      'config.patch',
-      {
-        baseHash: 'hash-1',
-        raw: JSON.stringify({
-          agents: {
-            list: [{ id: 'main', model: { primary: 'moonshot/kimi-k2.5' } }],
-          },
-        }),
-      },
-      15000,
-    );
+    expect(rpc).not.toHaveBeenCalled();
     expect(applyPreparedAgentModelUpdate).not.toHaveBeenCalled();
     expect(updateAgentModel).not.toHaveBeenCalled();
     expect(debouncedReload).not.toHaveBeenCalled();
