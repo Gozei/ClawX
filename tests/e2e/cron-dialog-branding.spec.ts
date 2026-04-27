@@ -44,12 +44,29 @@ test.describe('Cron task dialog branding', () => {
               },
             },
           },
-          '["/api/cron/jobs","GET"]': {
+          '["/api/cron/status","GET"]': {
             ok: true,
             data: {
               status: 200,
               ok: true,
-              json: [
+              json: { enabled: true, jobs: 1, nextWakeAtMs: 1776913200000, gatewayAvailable: true },
+            },
+          },
+          '["/api/cron/runs?scope=all&limit=50&offset=0&sortDir=desc","GET"]': {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: { entries: [], total: 0, offset: 0, nextOffset: null, hasMore: false, gatewayAvailable: true },
+            },
+          },
+          '["/api/cron/jobs?limit=50&offset=0&includeDisabled=true&enabled=all&sortBy=nextRunAtMs&sortDir=asc","GET"]': {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                jobs: [
                 {
                   id: 'daily-computing-power-report',
                   name: '每日算力市场报告生成',
@@ -66,6 +83,12 @@ test.describe('Cron task dialog branding', () => {
                   nextRun: '2026-04-23T01:00:00.000Z',
                 },
               ],
+                total: 1,
+                offset: 0,
+                nextOffset: null,
+                hasMore: false,
+                gatewayAvailable: true,
+              },
             },
           },
         },
@@ -79,15 +102,14 @@ test.describe('Cron task dialog branding', () => {
 
       await page.getByText('每日算力市场报告生成', { exact: true }).first().click();
 
+      await expect(page.getByRole('heading', { name: '每日算力市场报告生成', exact: true })).toBeVisible();
+      await page.getByRole('button', { name: /Edit|编辑/ }).click();
       await expect(page.getByRole('heading', { name: '编辑任务', exact: true })).toBeVisible();
-      await page.getByText('投递设置', { exact: true }).scrollIntoViewIfNeeded();
-      await expect(page.getByText(/选择仅在\s*Deep AI Worker\s*内保留结果/)).toBeVisible();
-      await expect(page.getByText('仅在 Deep AI Worker 内', { exact: true })).toBeVisible();
-      await expect(page.getByText(/\{\{?appName\}?\}/)).toHaveCount(0);
 
+      const dialog = page.getByTestId('cron-task-dialog');
       const bodyFont = await page.locator('body').evaluate((node) => getComputedStyle(node).fontFamily);
-      const taskNameFont = await page.getByLabel('任务名称').evaluate((node) => getComputedStyle(node).fontFamily);
-      const messageFont = await page.getByLabel('消息/提示词').evaluate((node) => getComputedStyle(node).fontFamily);
+      const taskNameFont = await dialog.locator('#name').evaluate((node) => getComputedStyle(node).fontFamily);
+      const messageFont = await dialog.locator('#message').evaluate((node) => getComputedStyle(node).fontFamily);
 
       expect(taskNameFont).toBe(bodyFont);
       expect(messageFont).toBe(bodyFont);

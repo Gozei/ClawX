@@ -115,6 +115,215 @@
         "weeklyAt": "每周 {{day}} {{time}}",
         "monthlyAtDay": "每月 {{day}} 日 {{time}}",
         "dailyAt": "每天 {{time}}",
+        "weekdaysAt": "每个工作日 {{time}}",
+        "everyMinute": "每分钟",
+        "hourlyAtMinute": "每小时第 {{minute}} 分钟",
+        "everyHoursAtMinute": "每 {{count}} 小时的第 {{minute}} 分钟",
+        "customCron": "自定义 Cron",
+        "exact": "精确执行",
+        "stagger": "错峰 {{value}}",
         "unknown": "未知"
+    },
+    "weekdays": {
+        "0": "周日",
+        "1": "周一",
+        "2": "周二",
+        "3": "周三",
+        "4": "周四",
+        "5": "周五",
+        "6": "周六"
+    },
+    "summary": {
+        "enabled": "Cron 状态",
+        "jobs": "任务",
+        "nextWake": "下次唤醒"
+    },
+    "states": {
+        "unavailable": "不可用"
+    },
+    "values": {
+        "notAvailable": "暂无",
+        "mainAgent": "主 Agent"
+    },
+    "status": {
+        "ok": "成功",
+        "error": "失败",
+        "skipped": "跳过",
+        "unknown": "未知",
+        "delivered": "已投递",
+        "not-delivered": "未投递",
+        "not-requested": "未请求",
+        "paused": "已暂停"
+    },
+    "fallback": {
+        "status": "无法读取网关状态，已尽量展示本地 Cron 元数据。",
+        "jobs": "网关任务列表不可用，当前展示本地 jobs.json 降级数据。",
+        "runs": "网关运行历史不可用，当前展示本地运行日志降级数据。"
+    },
+    "errors": {
+        "statusLoadFailed": "读取 Cron 状态失败",
+        "jobsLoadFailed": "读取任务列表失败",
+        "runsLoadFailed": "读取运行历史失败",
+        "targetsLoadFailed": "加载投递目标失败",
+        "channelsLoadFailed": "加载已配置通道失败",
+        "sessionKeyMissing": "这条运行记录没有会话 Key。",
+        "sessionNotFound": "该聊天会话不存在，或没有可读取的历史记录。",
+        "sessionOpenFailed": "打开聊天会话失败：{{error}}"
+    },
+    "filters": {
+        "label": "筛选",
+        "withCount": "筛选（{{count}}）",
+        "subtitle": "在不改变搜索内容的情况下缩小当前列表。",
+        "reset": "重置"
+    },
+    "jobs": {
+        "title": "任务",
+        "searchJobs": "搜索",
+        "searchPlaceholder": "搜索任务",
+        "enabled": "启用状态",
+        "all": "全部",
+        "schedule": "调度",
+        "lastRun": "上次运行",
+        "sort": "排序",
+        "updated": "更新时间",
+        "shownOf": "已展示 {{shown}} / {{total}}",
+        "loadMore": "加载更多",
+        "consecutiveErrors": "连续失败 {{count}} 次",
+        "failedCount": "{{count}} 个失败",
+        "jobCount": "{{count}} 个任务"
+    },
+    "runs": {
+        "title": "运行历史",
+        "scope": "范围",
+        "allJobs": "全部任务",
+        "selectedJob": "选中任务",
+        "searchRuns": "搜索",
+        "searchPlaceholder": "搜索摘要或错误",
+        "status": "状态",
+        "delivery": "投递",
+        "allStatuses": "全部",
+        "allDelivery": "全部",
+        "noMatching": "暂无匹配运行记录",
+        "loadMore": "加载更多",
+        "unknownJob": "未知任务"
+    },
+    "runEntry": {
+        "noSummary": "暂无摘要",
+        "openRunChat": "打开聊天",
+        "runAt": "运行时间",
+        "totalTokens": "{{count}} tokens",
+        "inputOutputTokens": "{{input}} 输入 / {{output}} 输出"
+    },
+    "scheduleKinds": {
+        "at": "指定时间",
+        "every": "固定间隔",
+        "cron": "日历计划"
+    },
+    "calendarModes": {
+        "daily": "每天",
+        "weekly": "每周",
+        "monthly": "每月",
+        "weekdays": "工作日",
+        "custom": "自定义"
+    },
+    "cronHelp": {
+        "title": "Cron 表达式语法",
+        "fields": "字段：分钟 小时 月内日期 月份 周内日期。* 表示任意值，*/n 表示固定间隔，逗号可填写多个匹配值。",
+        "examples": "示例：0 9 * * * 表示每天 09:00；*/15 * * * * 表示每 15 分钟；0 9 * * 1 表示每周一 09:00。"
+    },
+    "units": {
+        "seconds": "秒",
+        "minutes": "分钟",
+        "hours": "小时",
+        "days": "天"
+    },
+    "fields": {
+        "scheduleType": "调度类型",
+        "runAt": "运行时间",
+        "every": "间隔",
+        "unit": "单位",
+        "runTime": "执行时间",
+        "weekday": "星期",
+        "monthDay": "日期",
+        "cronExpression": "Cron 表达式",
+        "timezone": "时区",
+        "agentId": "Agent ID",
+        "sessionKey": "会话 Key",
+        "sessionTarget": "会话目标",
+        "wakeMode": "唤醒模式",
+        "deleteAfterRun": "运行后删除",
+        "exactTiming": "精确执行",
+        "staggerAmount": "错峰数值",
+        "staggerUnit": "错峰单位",
+        "payloadKind": "Payload 类型",
+        "model": "模型",
+        "thinking": "思考配置",
+        "timeoutSeconds": "超时秒数",
+        "lightContext": "轻上下文",
+        "webhookUrl": "Webhook URL",
+        "bestEffort": "尽力投递",
+        "mode": "模式",
+        "afterErrors": "失败阈值",
+        "cooldownSeconds": "冷却秒数",
+        "channel": "通道",
+        "target": "目标",
+        "accountId": "账号 ID",
+        "description": "描述",
+        "descriptionPlaceholder": "可选的运维备注",
+        "systemEventText": "系统事件文本"
+    },
+    "advanced": {
+        "execution": "执行",
+        "schedule": "高级调度",
+        "payload": "高级 Payload",
+        "failureAlert": "失败告警"
+    },
+    "sessionTargets": {
+        "isolated": "隔离 / 稳定 Cron 会话",
+        "main": "主会话"
+    },
+    "wakeModes": {
+        "nextHeartbeat": "下次心跳",
+        "now": "立即唤醒"
+    },
+    "payloadKinds": {
+        "agentTurn": "Agent 对话",
+        "systemEvent": "系统事件"
+    },
+    "deliveryModes": {
+        "none": "仅应用内",
+        "announce": "通道投递",
+        "webhook": "Webhook POST"
+    },
+    "failureAlert": {
+        "inherit": "继承默认",
+        "disabled": "禁用",
+        "custom": "自定义"
+    },
+    "details": {
+        "created": "创建时间",
+        "updated": "更新时间",
+        "duration": "耗时",
+        "consecutiveErrors": "连续失败",
+        "prompt": "提示词",
+        "metadata": "元数据"
+    },
+    "validation": {
+        "nameRequired": "请输入任务名称",
+        "runTimeInvalid": "运行时间无效",
+        "intervalPositive": "间隔必须大于 0",
+        "cronRequired": "请输入 Cron 表达式",
+        "calendarTimeInvalid": "请选择有效的执行时间",
+        "weekdayInvalid": "请选择有效的星期",
+        "monthDayInvalid": "日期必须在 1 到 31 之间",
+        "staggerPositive": "错峰窗口必须大于 0",
+        "systemEventRequired": "请输入系统事件文本",
+        "promptRequired": "请输入提示词",
+        "timeoutPositive": "超时秒数必须大于 0",
+        "webhookUrl": "Webhook URL 必须以 http:// 或 https:// 开头",
+        "deliveryChannelRequired": "请选择投递通道",
+        "deliveryTargetRequired": "请输入投递目标",
+        "failureAfterPositive": "失败告警阈值必须大于 0",
+        "failureCooldownPositive": "失败告警冷却时间必须大于等于 0"
     }
 }
