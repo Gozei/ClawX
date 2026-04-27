@@ -38,6 +38,11 @@ function isGatewayTransientError(error: AppError, gatewayState: 'stopped' | 'sta
     || message.includes('econnrefused');
 }
 
+function isSkillNotFoundError(error: unknown): boolean {
+  const appError = normalizeAppError(error, { module: 'skills', operation: 'detail' });
+  return appError.code === 'NOT_FOUND';
+}
+
 interface SkillsState {
   skills: SkillSnapshot[];
   skillDetailsById: Record<string, SkillDetail>;
@@ -230,6 +235,12 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     } catch (error) {
       set((state) => ({
         detailLoadingId: state.detailLoadingId === skillId ? null : state.detailLoadingId,
+        skillDetailsById: isSkillNotFoundError(error)
+          ? Object.fromEntries(Object.entries(state.skillDetailsById).filter(([id]) => id !== skillId))
+          : state.skillDetailsById,
+        skills: isSkillNotFoundError(error)
+          ? state.skills.filter((skill) => skill.id !== skillId)
+          : state.skills,
       }));
       throw error;
     }

@@ -542,4 +542,33 @@ describe('Skills page route state', () => {
 
     expect(screen.getByTestId('skill-detail-content')).toBeInTheDocument();
   });
+
+  it('shows the not found state without a toast when the detail skill has been deleted', async () => {
+    skillsState.skills = [
+      {
+        id: 'deleted-skill',
+        name: 'Deleted Skill',
+        description: 'Gone',
+        enabled: true,
+        ready: true,
+      } as SkillSnapshot,
+    ];
+    skillsState.skillDetailsById = {};
+    fetchSkillDetailMock.mockRejectedValueOnce(new Error('Skill not found'));
+
+    render(
+      <MemoryRouter initialEntries={['/skills/deleted-skill?q=deleted']}>
+        <Routes>
+          <Route path="/skills/:skillId" element={<SkillDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(fetchSkillDetailMock).toHaveBeenCalledWith('deleted-skill', true);
+    });
+    expect(screen.getByTestId('skills-detail-page-title')).toHaveTextContent('Deleted Skill');
+    expect(screen.queryByTestId('skill-detail-content')).not.toBeInTheDocument();
+    expect(toastMocks.error).not.toHaveBeenCalled();
+  });
 });
