@@ -22,7 +22,7 @@ import {
 } from '../../services/providers/provider-runtime-sync';
 import type { HostApiContext } from '../context';
 import { emitMutationAudit } from '../audit-utils';
-import { parseJsonBody, sendJson } from '../route-utils';
+import { parseJsonBody, sendJson, isGatewayTransitioning } from '../route-utils';
 import { logger } from '../../utils/logger';
 
 function scheduleGatewayReload(ctx: HostApiContext, reason: string): void {
@@ -160,6 +160,10 @@ export async function handleAgentRoutes(
   }
 
   if (url.pathname === '/api/agents' && req.method === 'POST') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{
@@ -209,6 +213,10 @@ export async function handleAgentRoutes(
   }
 
   if (url.pathname.startsWith('/api/agents/') && req.method === 'PUT') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const suffix = url.pathname.slice('/api/agents/'.length);
     const parts = suffix.split('/').filter(Boolean);
 
@@ -390,6 +398,10 @@ export async function handleAgentRoutes(
   }
 
   if (url.pathname.startsWith('/api/agents/') && req.method === 'DELETE') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const suffix = url.pathname.slice('/api/agents/'.length);
     const parts = suffix.split('/').filter(Boolean);
 

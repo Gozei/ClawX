@@ -70,7 +70,7 @@ async function listWhatsAppDirectoryGroupsFromConfig(_params: any): Promise<any[
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function listWhatsAppDirectoryPeersFromConfig(_params: any): Promise<any[]> { return []; }
 import type { HostApiContext } from '../context';
-import { parseJsonBody, sendJson } from '../route-utils';
+import { parseJsonBody, sendJson, isGatewayTransitioning } from '../route-utils';
 
 const WECHAT_QR_TIMEOUT_MS = 8 * 60 * 1000;
 const activeQrLogins = new Map<string, string>();
@@ -1104,6 +1104,10 @@ export async function handleChannelRoutes(
   }
 
   if (url.pathname === '/api/channels/default-account' && req.method === 'PUT') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ channelType: string; accountId: string }>(req);
@@ -1137,6 +1141,10 @@ export async function handleChannelRoutes(
   }
 
   if (url.pathname === '/api/channels/binding' && req.method === 'PUT') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ channelType: string; accountId: string; agentId: string }>(req);
@@ -1173,6 +1181,10 @@ export async function handleChannelRoutes(
   }
 
   if (url.pathname === '/api/channels/binding' && req.method === 'DELETE') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ channelType: string; accountId: string }>(req);
@@ -1295,6 +1307,10 @@ export async function handleChannelRoutes(
   }
 
   if (url.pathname === '/api/channels/config' && req.method === 'POST') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ channelType: string; config: Record<string, unknown>; accountId?: string }>(req);
@@ -1375,6 +1391,10 @@ export async function handleChannelRoutes(
   }
 
   if (url.pathname === '/api/channels/config/enabled' && req.method === 'PUT') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const body = await parseJsonBody<{ channelType: string; enabled: boolean }>(req);
@@ -1421,6 +1441,10 @@ export async function handleChannelRoutes(
   }
 
   if (url.pathname.startsWith('/api/channels/config/') && req.method === 'DELETE') {
+    if (isGatewayTransitioning(ctx)) {
+      sendJson(res, 409, { success: false, error: 'Gateway is restarting, please try again later' });
+      return true;
+    }
     const startedAt = Date.now();
     try {
       const channelType = decodeURIComponent(url.pathname.slice('/api/channels/config/'.length));
