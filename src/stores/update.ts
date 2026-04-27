@@ -40,6 +40,10 @@ interface UpdateState {
   /** Seconds remaining before auto-install, or null if inactive. */
   autoInstallCountdown: number | null;
   installPhaseStartedAt: number | null;
+  isUpdateAvailableDialogOpen: boolean;
+  isUpdateInstallDialogOpen: boolean;
+  /** Whether a download started from a manual flow should show install decision dialog. */
+  shouldShowInstallDialogOnDownload: boolean;
 
   // Actions
   init: () => Promise<void>;
@@ -49,6 +53,8 @@ interface UpdateState {
   cancelAutoInstall: () => Promise<void>;
   setChannel: (channel: 'stable' | 'beta' | 'dev') => Promise<void>;
   setAutoDownload: (enable: boolean) => Promise<void>;
+  setUpdateAvailableDialogOpen: (open: boolean) => void;
+  setUpdateInstallDialogOpen: (open: boolean) => void;
   clearError: () => void;
 }
 
@@ -61,6 +67,9 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
   isInitialized: false,
   autoInstallCountdown: null,
   installPhaseStartedAt: null,
+  isUpdateAvailableDialogOpen: false,
+  isUpdateInstallDialogOpen: false,
+  shouldShowInstallDialogOnDownload: false,
 
   init: async () => {
     if (get().isInitialized) return;
@@ -102,6 +111,12 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
         progress?: ProgressInfo;
         error?: string;
       };
+      const shouldShowInstallDialogOnDownload = status.status === 'downloaded'
+        ? false
+        : get().shouldShowInstallDialogOnDownload;
+      const showInstallDialog = status.status === 'downloaded'
+        ? get().shouldShowInstallDialogOnDownload
+        : false;
       set({
         status: status.status,
         updateInfo: status.info || null,
@@ -110,6 +125,8 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
         installPhaseStartedAt: status.status === 'installing'
           ? (get().installPhaseStartedAt ?? Date.now())
           : null,
+        shouldShowInstallDialogOnDownload,
+        isUpdateInstallDialogOpen: showInstallDialog,
       });
     });
 
@@ -137,7 +154,12 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
   },
 
   checkForUpdates: async () => {
-    set({ status: 'checking', error: null });
+      set({ status: 'checking', error: null });
+      set({
+        isUpdateAvailableDialogOpen: false,
+        isUpdateInstallDialogOpen: false,
+        shouldShowInstallDialogOnDownload: false,
+      });
     
     try {
       const result = await Promise.race([
@@ -177,24 +199,30 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
   },
 
   downloadUpdate: async (options) => {
-    set({ status: 'downloading', error: null });
+    const { autoInstallAfterDownload = false } = options ?? {};
+    set({
+      status: 'downloading',
+      error: null,
+      shouldShowInstallDialogOnDownload: !autoInstallAfterDownload,
+      isUpdateInstallDialogOpen: false,
+    });
     
     try {
       const result = await invokeIpc<{
         success: boolean;
         error?: string;
-      }>('update:download');
+      }>('update:download', {
+        autoInstallAfterDownload,
+      });
       
       if (!result.success) {
         set({ status: 'error', error: result.error || 'Failed to download update' });
+        set({ shouldShowInstallDialogOnDownload: false });
         return;
-      }
-
-      if (options?.autoInstallAfterDownload) {
-        await get().installUpdate();
       }
     } catch (error) {
       set({ status: 'error', error: String(error) });
+      set({ shouldShowInstallDialogOnDownload: false });
     }
   },
 
@@ -241,10 +269,22 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
   setAutoDownload: async (enable) => {
     try {
       await invokeIpc('update:setAutoDownload', enable);
+      if (!enable) {
+        set({ shouldShowInstallDialogOnDownload: false });
+      }
     } catch (error) {
       console.error('Failed to set auto-download:', error);
     }
   },
 
-  clearError: () => set({ error: null, status: 'idle', installPhaseStartedAt: null }),
+  setUpdateAvailableDialogOpen: (open) => set({ isUpdateAvailableDialogOpen: open }),
+  setUpdateInstallDialogOpen: (open) => set({ isUpdateInstallDialogOpen: open }),
+  clearError: () => set({
+    error: null,
+    status: 'idle',
+    installPhaseStartedAt: null,
+    shouldShowInstallDialogOnDownload: false,
+    isUpdateAvailableDialogOpen: false,
+    isUpdateInstallDialogOpen: false,
+  }),
 }));

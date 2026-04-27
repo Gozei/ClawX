@@ -17,7 +17,6 @@ import {
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useSettingsStore } from '@/stores/settings';
 import { useUpdateStore } from '@/stores/update';
 import { hostApiFetch } from '@/lib/host-api';
@@ -43,10 +42,9 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
   const setLanguage = useSettingsStore((state) => state.setLanguage);
   const dreamModeEnabled = useSettingsStore((state) => state.dreamModeEnabled);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
-  const downloadUpdate = useUpdateStore((state) => state.downloadUpdate);
   const clearUpdateError = useUpdateStore((state) => state.clearError);
+  const setUpdateAvailableDialogOpen = useUpdateStore((state) => state.setUpdateAvailableDialogOpen);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
-  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
 
   const resolvedTheme = useMemo(() => {
     if (theme === 'dark' || theme === 'light') return theme;
@@ -85,7 +83,7 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
       await checkForUpdates();
       const { status, error } = useUpdateStore.getState();
       if (status === 'available') {
-        setUpdateDialogOpen(true);
+        setUpdateAvailableDialogOpen(true);
         return;
       }
       if (status === 'not-available') {
@@ -99,18 +97,6 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
     } finally {
       setCheckingUpdates(false);
     }
-  };
-
-  const handleConfirmUpdate = async () => {
-    setUpdateDialogOpen(false);
-    await downloadUpdate({ autoInstallAfterDownload: true });
-    const { status, error } = useUpdateStore.getState();
-    if (status === 'error') {
-      toast.error(error || t('settingsHub.update.failed'));
-      return;
-    }
-    toast.success(t('settingsHub.update.started'));
-    onRequestClose?.();
   };
 
   const handleOpenConsole = async () => {
@@ -313,15 +299,7 @@ export function SettingsHub({ mode = 'sheet', onRequestClose }: SettingsHubProps
           })}
         </div>
       </aside>
-      <ConfirmDialog
-        open={updateDialogOpen}
-        title={t('settingsHub.update.dialogTitle')}
-        message={t('settingsHub.update.dialogMessage')}
-        confirmLabel={t('settingsHub.update.confirm')}
-        cancelLabel={t('common:actions.cancel')}
-        onConfirm={handleConfirmUpdate}
-        onCancel={() => setUpdateDialogOpen(false)}
-      />
+      {/* Update dialogs are now handled globally in App component */}
     </div>
   );
 }

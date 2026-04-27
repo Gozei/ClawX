@@ -11,6 +11,7 @@ interface ConfirmDialogProps {
   open: boolean;
   title: string;
   message: string;
+  overlayClassName?: string;
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: 'default' | 'destructive';
@@ -26,6 +27,7 @@ export function ConfirmDialog({
   message,
   confirmLabel = 'OK',
   cancelLabel = 'Cancel',
+  overlayClassName,
   variant = 'default',
   onConfirm,
   onCancel,
@@ -76,7 +78,7 @@ export function ConfirmDialog({
 
   return (
     <div
-      className={modalOverlayClasses}
+      className={cn(modalOverlayClasses, overlayClassName)}
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-dialog-title"

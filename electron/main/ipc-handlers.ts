@@ -451,8 +451,10 @@ function registerUnifiedRequestHandlers(gatewayManager: GatewayManager): void {
             break;
           }
           if (request.action === 'download') {
+            const payload = request.payload as { autoInstallAfterDownload?: boolean } | undefined;
+            const autoInstallAfterDownload = payload?.autoInstallAfterDownload === true;
             try {
-              await appUpdater.downloadUpdate();
+              await appUpdater.downloadUpdate(autoInstallAfterDownload);
               data = { success: true };
             } catch (error) {
               data = { success: false, error: String(error) };
