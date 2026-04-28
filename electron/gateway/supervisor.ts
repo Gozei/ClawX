@@ -8,6 +8,34 @@ import { isPythonReady, setupManagedPython } from '../utils/uv-setup';
 import { logger } from '../utils/logger';
 import { prependPathEntry } from '../utils/env-path';
 
+const DOCTOR_REPAIR_OUTPUT_LOG_LINE_LIMIT = 12;
+const DOCTOR_REPAIR_OUTPUT_LOG_CHAR_LIMIT = 2000;
+
+export function appendNormalizedOutputLines(target: string[], data: Buffer | string): void {
+  const raw = data.toString();
+  for (const line of raw.split(/\r?\n/)) {
+    const normalized = line.trim();
+    if (normalized) {
+      target.push(normalized);
+    }
+  }
+}
+
+export function summarizeBufferedOutput(lines: string[], label: string): string {
+  if (!lines.length) return '';
+
+  const truncatedLineCount = Math.max(0, lines.length - DOCTOR_REPAIR_OUTPUT_LOG_LINE_LIMIT);
+  const shownLines = lines.slice(0, DOCTOR_REPAIR_OUTPUT_LOG_LINE_LIMIT);
+  let summary = shownLines.join(' | ');
+  if (summary.length > DOCTOR_REPAIR_OUTPUT_LOG_CHAR_LIMIT) {
+    summary = `${summary.slice(0, DOCTOR_REPAIR_OUTPUT_LOG_CHAR_LIMIT)}...`;
+  }
+  if (truncatedLineCount > 0) {
+    summary = `${summary} (+${truncatedLineCount} more lines)`;
+  }
+  return `${label}: ${summary}`;
+}
+
 export function warmupManagedPythonReadiness(): void {
   void isPythonReady().then((pythonReady) => {
     if (!pythonReady) {
@@ -340,6 +368,8 @@ export async function runOpenClawDoctorRepair(): Promise<boolean> {
     });
 
     let settled = false;
+    const stdoutLines: string[] = [];
+    const stderrLines: string[] = [];
     const finish = (ok: boolean) => {
       if (settled) return;
       settled = true;
@@ -348,6 +378,11 @@ export async function runOpenClawDoctorRepair(): Promise<boolean> {
 
     const timeout = setTimeout(() => {
       logger.error('OpenClaw doctor repair timed out after 120000ms');
+      const stdoutSummary = summarizeBufferedOutput(stdoutLines, 'stdout');
+      const stderrSummary = summarizeBufferedOutput(stderrLines, 'stderr');
+      if (stdoutSummary || stderrSummary) {
+        logger.warn(`OpenClaw doctor repair output before timeout${stdoutSummary ? `; ${stdoutSummary}` : ''}${stderrSummary ? `; ${stderrSummary}` : ''}`);
+      }
       try {
         child.kill();
       } catch {
@@ -363,31 +398,23 @@ export async function runOpenClawDoctorRepair(): Promise<boolean> {
     });
 
     child.stdout?.on('data', (data) => {
-      const raw = data.toString();
-      for (const line of raw.split(/\r?\n/)) {
-        const normalized = line.trim();
-        if (!normalized) continue;
-        logger.debug(`[Gateway doctor stdout] ${normalized}`);
-      }
+      appendNormalizedOutputLines(stdoutLines, data);
     });
 
     child.stderr?.on('data', (data) => {
-      const raw = data.toString();
-      for (const line of raw.split(/\r?\n/)) {
-        const normalized = line.trim();
-        if (!normalized) continue;
-        logger.warn(`[Gateway doctor stderr] ${normalized}`);
-      }
+      appendNormalizedOutputLines(stderrLines, data);
     });
 
     child.on('exit', (code: number) => {
       clearTimeout(timeout);
+      const stdoutSummary = summarizeBufferedOutput(stdoutLines, 'stdout');
+      const stderrSummary = summarizeBufferedOutput(stderrLines, 'stderr');
       if (code === 0) {
-        logger.info('OpenClaw doctor repair completed successfully');
+        logger.info(`OpenClaw doctor repair completed successfully${stdoutSummary ? `; ${stdoutSummary}` : ''}`);
         finish(true);
         return;
       }
-      logger.warn(`OpenClaw doctor repair exited (code=${code})`);
+      logger.warn(`OpenClaw doctor repair exited (code=${code})${stdoutSummary ? `; ${stdoutSummary}` : ''}${stderrSummary ? `; ${stderrSummary}` : ''}`);
       finish(false);
     });
   });
