@@ -319,7 +319,6 @@ export function Chat() {
   const showSessionLoadingState = loading && safeMessages.length === 0 && !sending;
   const isZh = (i18n.resolvedLanguage || i18n.language || '').startsWith('zh');
   const {
-    activeTurnViewportAnchorRef,
     chatListRef,
     composerShellPadding,
     contentColumnHorizontalOffsetPx,
@@ -588,7 +587,7 @@ export function Chat() {
         );
       case 'active-turn':
         return activeTurn ? (
-          <div ref={activeTurnViewportAnchorRef} data-testid="chat-active-turn-anchor" className="min-w-0">
+          <div data-testid="chat-active-turn-anchor" className="min-w-0">
             <ActiveTurn
               key={activeTurn.userMessage.id || `active-turn-${currentSessionKey}`}
               turn={activeTurn}
@@ -622,7 +621,6 @@ export function Chat() {
     }
   }, [
     activeTurn,
-    activeTurnViewportAnchorRef,
     assistantMessageStyle,
     chatProcessDisplayMode,
     currentSessionKey,

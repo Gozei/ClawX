@@ -166,6 +166,123 @@ function getPinnedBottomScrollTop(scrollElement: HTMLElement): number {
   return Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight - CHAT_BOTTOM_OFFSET_PX);
 }
 
+function useChatContentColumnLayout({
+  chatListItemCount,
+  currentSessionKey,
+  loading,
+  scrollContainerNode,
+  sending,
+}: {
+  chatListItemCount: number;
+  currentSessionKey: string;
+  loading: boolean;
+  scrollContainerNode: HTMLDivElement | null;
+  sending: boolean;
+}) {
+  const [composerShellPadding, setComposerShellPadding] = useState<ComposerShellPadding>({ left: 16, right: 16 });
+  const [contentColumnHorizontalOffsetPx, setContentColumnHorizontalOffsetPx] = useState(0);
+
+  useLayoutEffect(() => {
+    const scrollElement = scrollContainerNode;
+    if (!scrollElement) {
+      setContentColumnHorizontalOffsetPx(0);
+      return;
+    }
+
+    const updateHorizontalOffset = () => {
+      const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
+      if (!contentColumn) {
+        setContentColumnHorizontalOffsetPx(0);
+        return;
+      }
+
+      const scrollRect = scrollElement.getBoundingClientRect();
+      const contentRect = contentColumn.getBoundingClientRect();
+      const actualLeft = contentRect.left - scrollRect.left;
+      const expectedLeft = (scrollRect.width - contentRect.width) / 2;
+      const drift = expectedLeft - actualLeft;
+      setContentColumnHorizontalOffsetPx((current) => {
+        const nextOffset = Math.round(current + drift);
+        return current === nextOffset ? current : nextOffset;
+      });
+    };
+
+    updateHorizontalOffset();
+
+    if (typeof ResizeObserver !== 'function') {
+      window.addEventListener('resize', updateHorizontalOffset);
+      return () => {
+        window.removeEventListener('resize', updateHorizontalOffset);
+      };
+    }
+
+    const observer = new ResizeObserver(() => {
+      updateHorizontalOffset();
+    });
+    observer.observe(scrollElement);
+    const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
+    if (contentColumn) {
+      observer.observe(contentColumn);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [chatListItemCount, currentSessionKey, loading, scrollContainerNode, sending]);
+
+  useLayoutEffect(() => {
+    const scrollElement = scrollContainerNode;
+    if (!scrollElement) {
+      setComposerShellPadding({ left: 16, right: 16 });
+      return;
+    }
+
+    const updatePadding = () => {
+      const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
+      if (!contentColumn) {
+        setComposerShellPadding({ left: 16, right: 16 });
+        return;
+      }
+
+      const scrollRect = scrollElement.getBoundingClientRect();
+      const contentRect = contentColumn.getBoundingClientRect();
+      const nextLeft = Math.max(16, Math.round(contentRect.left - scrollRect.left));
+      const nextRight = Math.max(16, Math.round(scrollRect.right - contentRect.right));
+      setComposerShellPadding((current) => (
+        current.left === nextLeft && current.right === nextRight
+          ? current
+          : { left: nextLeft, right: nextRight }
+      ));
+    };
+
+    updatePadding();
+
+    if (typeof ResizeObserver !== 'function') {
+      window.addEventListener('resize', updatePadding);
+      return () => {
+        window.removeEventListener('resize', updatePadding);
+      };
+    }
+
+    const observer = new ResizeObserver(() => {
+      updatePadding();
+    });
+    observer.observe(scrollElement);
+    const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
+    if (contentColumn) {
+      observer.observe(contentColumn);
+    }
+    return () => {
+      observer.disconnect();
+    };
+  }, [contentColumnHorizontalOffsetPx, currentSessionKey, chatListItemCount, loading, scrollContainerNode, sending]);
+
+  return {
+    composerShellPadding,
+    contentColumnHorizontalOffsetPx,
+  };
+}
+
 export function useChatScrollController({
   activeTurnScrollKey,
   chatListItemCount,
@@ -181,7 +298,6 @@ export function useChatScrollController({
   const debugEventsRef = useRef<ChatScrollDebugEvent[]>([]);
   const chatListRef = useRef<VirtuosoHandle | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const activeTurnViewportAnchorRef = useRef<HTMLDivElement | null>(null);
   const activeTurnAutoScrollModeRef = useRef<ActiveTurnAutoScrollMode>('idle');
   const activeTurnTrackedTurnKeyRef = useRef<string | null>(null);
   const suppressedAutoFollowTurnKeyRef = useRef<string | null>(null);
@@ -206,9 +322,17 @@ export function useChatScrollController({
   const [activeTurnUserInterruptVersion, setActiveTurnUserInterruptVersion] = useState(0);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [hasDetachedNewContent, setHasDetachedNewContent] = useState(false);
-  const [composerShellPadding, setComposerShellPadding] = useState<ComposerShellPadding>({ left: 16, right: 16 });
   const [scrollContainerNode, setScrollContainerNodeState] = useState<HTMLDivElement | null>(null);
-  const [contentColumnHorizontalOffsetPx, setContentColumnHorizontalOffsetPx] = useState(0);
+  const {
+    composerShellPadding,
+    contentColumnHorizontalOffsetPx,
+  } = useChatContentColumnLayout({
+    chatListItemCount,
+    currentSessionKey,
+    loading,
+    scrollContainerNode,
+    sending,
+  });
 
   useLayoutEffect(() => {
     scrollStateRef.current = scrollState;
@@ -722,101 +846,6 @@ export function useChatScrollController({
   ]);
 
   useLayoutEffect(() => {
-    const scrollElement = scrollContainerNode;
-    if (!scrollElement) {
-      setContentColumnHorizontalOffsetPx(0);
-      return;
-    }
-
-    const updateHorizontalOffset = () => {
-      const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
-      if (!contentColumn) {
-        setContentColumnHorizontalOffsetPx(0);
-        return;
-      }
-
-      const scrollRect = scrollElement.getBoundingClientRect();
-      const contentRect = contentColumn.getBoundingClientRect();
-      const actualLeft = contentRect.left - scrollRect.left;
-      const expectedLeft = (scrollRect.width - contentRect.width) / 2;
-      const drift = expectedLeft - actualLeft;
-      setContentColumnHorizontalOffsetPx((current) => {
-        const nextOffset = Math.round(current + drift);
-        return current === nextOffset ? current : nextOffset;
-      });
-    };
-
-    updateHorizontalOffset();
-
-    if (typeof ResizeObserver !== 'function') {
-      window.addEventListener('resize', updateHorizontalOffset);
-      return () => {
-        window.removeEventListener('resize', updateHorizontalOffset);
-      };
-    }
-
-    const observer = new ResizeObserver(() => {
-      updateHorizontalOffset();
-    });
-    observer.observe(scrollElement);
-    const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
-    if (contentColumn) {
-      observer.observe(contentColumn);
-    }
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [chatListItemCount, currentSessionKey, loading, scrollContainerNode, sending]);
-
-  useLayoutEffect(() => {
-    const scrollElement = scrollContainerNode;
-    if (!scrollElement) {
-      setComposerShellPadding({ left: 16, right: 16 });
-      return;
-    }
-
-    const updatePadding = () => {
-      const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
-      if (!contentColumn) {
-        setComposerShellPadding({ left: 16, right: 16 });
-        return;
-      }
-
-      const scrollRect = scrollElement.getBoundingClientRect();
-      const contentRect = contentColumn.getBoundingClientRect();
-      const nextLeft = Math.max(16, Math.round(contentRect.left - scrollRect.left));
-      const nextRight = Math.max(16, Math.round(scrollRect.right - contentRect.right));
-      setComposerShellPadding((current) => (
-        current.left === nextLeft && current.right === nextRight
-          ? current
-          : { left: nextLeft, right: nextRight }
-      ));
-    };
-
-    updatePadding();
-
-    if (typeof ResizeObserver !== 'function') {
-      window.addEventListener('resize', updatePadding);
-      return () => {
-        window.removeEventListener('resize', updatePadding);
-      };
-    }
-
-    const observer = new ResizeObserver(() => {
-      updatePadding();
-    });
-    observer.observe(scrollElement);
-    const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
-    if (contentColumn) {
-      observer.observe(contentColumn);
-    }
-    return () => {
-      observer.disconnect();
-    };
-  }, [contentColumnHorizontalOffsetPx, currentSessionKey, chatListItemCount, loading, scrollContainerNode, sending]);
-
-  useLayoutEffect(() => {
     if (showSessionLoadingState || isEmpty || !scrollContainerRef.current) return;
     if (pendingSessionEntryBottomRef.current) return;
     if (sending && activeTurnScrollKey) return;
@@ -1276,7 +1305,6 @@ export function useChatScrollController({
   ]);
 
   return {
-    activeTurnViewportAnchorRef,
     chatListRef,
     composerShellPadding,
     contentColumnHorizontalOffsetPx,
