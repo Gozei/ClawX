@@ -145,13 +145,19 @@
         "notAvailable": "N/A",
         "mainAgent": "main"
     },
+    "time": {
+        "soon": "soon",
+        "overdue": "overdue"
+    },
     "status": {
         "ok": "OK",
         "error": "Error",
         "skipped": "Skipped",
         "unknown": "Unknown",
+        "pending": "Pending",
         "delivered": "Delivered",
         "not-delivered": "Not delivered",
+        "pending-delivery": "Delivery pending",
         "not-requested": "Not requested"
     },
     "fallback": {

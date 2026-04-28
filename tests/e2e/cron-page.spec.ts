@@ -59,11 +59,11 @@ test.describe('Cron page', () => {
                     expr: '0 11 * * *',
                     tz: 'Asia/Shanghai',
                   },
-                  delivery: { mode: 'none' },
+                  delivery: { mode: 'announce', channel: 'openclaw-weixin', to: 'wechat:wxid_target' },
                   enabled: true,
                   createdAt: '2026-04-22T03:00:00.000Z',
                   updatedAt: '2026-04-22T03:00:00.000Z',
-                  nextRun: '2026-04-23T03:00:00.000Z',
+                  nextRun: '2099-04-23T03:00:00.000Z',
                 },
               ],
                 total: 1,
@@ -81,6 +81,10 @@ test.describe('Cron page', () => {
       await expect(page.getByTestId('cron-page')).toBeVisible();
       await expect(page.getByText('Daily Computing Power Report').first()).toBeVisible({ timeout: 30_000 });
       await expect(page.getByText('Generate the report deck.').first()).toBeVisible();
+      await expect(page.getByText(/Pending|待运行/).first()).toBeVisible();
+      await expect(page.getByText(/Delivery pending|待投递/).first()).toBeVisible();
+      await expect(page.getByText('just now')).toHaveCount(0);
+      await expect(page.getByText(/Unknown|未知/)).toHaveCount(0);
       await expect(page.getByText(/No scheduled tasks|暂无定时任务/)).toHaveCount(0);
     } finally {
       await closeElectronApp(app);

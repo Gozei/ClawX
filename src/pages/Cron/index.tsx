@@ -46,7 +46,7 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { hostApiFetch } from '@/lib/host-api';
 import { useBranding } from '@/lib/branding';
-import { cn, formatRelativeTime } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { useCronStore } from '@/stores/cron';
 import { isCronSessionKey } from '@/stores/chat/cron-session-utils';
 import { useGatewayStore } from '@/stores/gateway';
@@ -187,6 +187,37 @@ function formatDateTime(value: string | number | undefined, fallback = 'N/A'): s
   return Number.isNaN(date.getTime()) ? fallback : date.toLocaleString();
 }
 
+function formatRelativeFuture(date: Date, t: TFunction<'cron'>): string {
+  const diffMs = date.getTime() - Date.now();
+  if (Math.abs(diffMs) < 60_000) return t(diffMs >= 0 ? 'time.soon' : 'time.overdue');
+
+  const absMs = Math.abs(diffMs);
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+  if (absMs < 3_600_000) return rtf.format(Math.round(diffMs / 60_000), 'minute');
+  if (absMs < 86_400_000) return rtf.format(Math.round(diffMs / 3_600_000), 'hour');
+  return rtf.format(Math.round(diffMs / 86_400_000), 'day');
+}
+
+function formatNextRun(value: string | undefined, fallback: string, t: TFunction<'cron'>): { absolute: string; relative?: string; title?: string } {
+  if (!value) return { absolute: fallback };
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { absolute: fallback };
+
+  const absolute = date.toLocaleString(undefined, {
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const relative = formatRelativeFuture(date, t);
+  return {
+    absolute,
+    relative,
+    title: date.toLocaleString(),
+  };
+}
+
 function formatMs(value: number | undefined, fallback = 'N/A'): string {
   if (!value || !Number.isFinite(value)) return fallback;
   if (value < 1000) return `${Math.round(value)}ms`;
@@ -310,7 +341,7 @@ function buildCalendarCronExpression(form: CronFormState, t: TFunction<'cron'>):
   return `${minute} ${hour} ${day} * *`;
 }
 
-function formatSchedule(schedule: CronJob['schedule'], t: TFunction<'cron'>): string {
+function formatSchedule(schedule: CronJob['schedule'], t: TFunction<'cron'>, options: { showTimezone?: boolean } = {}): string {
   const value: CronSchedule = typeof schedule === 'string' ? { kind: 'cron', expr: schedule } : schedule;
   const fallback = t('values.notAvailable');
   if (!value || typeof value !== 'object') return fallback;
@@ -322,7 +353,7 @@ function formatSchedule(schedule: CronJob['schedule'], t: TFunction<'cron'>): st
     return t('schedule.everyDays', { count: Math.round(minutes / 1440) });
   }
   const parts = [formatCronExpression(value.expr, t)];
-  if (value.tz) parts.push(value.tz);
+  if (options.showTimezone !== false && value.tz) parts.push(value.tz);
   if (typeof value.staggerMs === 'number') parts.push(value.staggerMs === 0 ? t('schedule.exact') : t('schedule.stagger', { value: formatMs(value.staggerMs, fallback) }));
   return parts.join(' · ');
 }
@@ -383,8 +414,22 @@ function getLastStatus(job: CronJob): string {
   return String(job.state?.lastStatus ?? job.state?.lastRunStatus ?? (job.lastRun ? (job.lastRun.success ? 'ok' : 'error') : 'unknown'));
 }
 
+function hasRunRecord(job: CronJob): boolean {
+  return Boolean(job.state?.lastStatus || job.state?.lastRunStatus || job.state?.lastRunAtMs || job.lastRun);
+}
+
+function getLastStatusForDisplay(job: CronJob): string {
+  return hasRunRecord(job) ? getLastStatus(job) : 'pending';
+}
+
 function getDeliveryStatus(job: CronJob): string {
   return String(job.state?.lastDeliveryStatus ?? (job.state?.lastDelivered === true ? 'delivered' : job.state?.lastDelivered === false ? 'not-delivered' : 'not-requested'));
+}
+
+function getDeliveryStatusForDisplay(job: CronJob): string | null {
+  if (job.delivery?.mode !== 'announce' && job.delivery?.mode !== 'webhook') return null;
+  const status = getDeliveryStatus(job);
+  return !hasRunRecord(job) && status === 'not-requested' ? 'pending-delivery' : status;
 }
 
 function statusVariant(status: string): 'success' | 'destructive' | 'warning' | 'outline' {
@@ -574,6 +619,35 @@ function StatusPill({ status }: { status: string }) {
   return <Badge variant={statusVariant(status)}>{translateStatus(t, status)}</Badge>;
 }
 
+function NextRunCell({ job }: { job: CronJob }) {
+  const { t } = useTranslation('cron');
+  const nextRun = formatNextRun(job.nextRun, t('values.notAvailable'), t);
+  return (
+    <div className="min-w-0 text-[13px] text-muted-foreground" title={nextRun.title}>
+      <div className="truncate">{nextRun.absolute}</div>
+      {nextRun.relative ? <div className="truncate">{nextRun.relative}</div> : null}
+    </div>
+  );
+}
+
+function LastRunCell({ job }: { job: CronJob }) {
+  const { t } = useTranslation('cron');
+  const deliveryStatus = getDeliveryStatusForDisplay(job);
+  const lastRunTime = job.lastRun?.time ?? job.state?.lastRunAtMs;
+
+  return (
+    <div className="flex min-w-0 flex-wrap gap-2">
+      <StatusPill status={getLastStatusForDisplay(job)} />
+      {deliveryStatus ? <StatusPill status={deliveryStatus} /> : null}
+      {lastRunTime ? (
+        <span className="basis-full truncate text-[11px] text-muted-foreground">
+          {formatDateTime(lastRunTime, t('values.notAvailable'))}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function SelectField(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <div className="relative">
@@ -648,11 +722,8 @@ function CronPageNotices({
   const { t } = useTranslation('cron');
   const gatewayStatus = useGatewayStore((state) => state.status);
   const {
-    status,
     statusError,
-    jobsGatewayAvailable,
     jobsError,
-    runsGatewayAvailable,
     runsError,
   } = useCronStore();
   const isGatewayRunning = gatewayStatus.state === 'running';
@@ -662,8 +733,6 @@ function CronPageNotices({
     notices.push({ key: 'gateway', tone: 'warning', message: t('gatewayWarning') });
   } else if (error) {
     notices.push({ key: 'global-error', tone: 'error', message: error });
-  } else if (status?.gatewayAvailable === false) {
-    notices.push({ key: 'status-fallback', tone: 'warning', message: status.error || t('fallback.status') });
   } else if (statusError) {
     notices.push({ key: 'status-error', tone: 'error', message: `${t('errors.statusLoadFailed')}: ${statusError}` });
   }
@@ -673,18 +742,12 @@ function CronPageNotices({
   }
 
   if (activeTab === 'jobs') {
-    if (jobsGatewayAvailable === false && isGatewayRunning) {
-      notices.push({ key: 'jobs-fallback', tone: 'warning', message: t('fallback.jobs') });
-    }
     if (jobsError && isGatewayRunning) {
       notices.push({ key: 'jobs-error', tone: 'error', message: `${t('errors.jobsLoadFailed')}: ${jobsError}` });
     }
   }
 
   if (activeTab === 'runs') {
-    if (runsGatewayAvailable === false && isGatewayRunning) {
-      notices.push({ key: 'runs-fallback', tone: 'warning', message: t('fallback.runs') });
-    }
     if (runsError && isGatewayRunning) {
       notices.push({ key: 'runs-error', tone: 'error', message: `${t('errors.runsLoadFailed')}: ${runsError}` });
     }
@@ -764,8 +827,6 @@ function CronJobsTab({
             {t('empty.title', 'No scheduled tasks')}
           </div>
         ) : visibleJobs.map((job) => {
-          const lastStatus = getLastStatus(job);
-          const deliveryStatus = getDeliveryStatus(job);
           const channel = typeof job.delivery?.channel === 'string' ? job.delivery.channel : '';
           return (
             <div
@@ -792,12 +853,9 @@ function CronJobsTab({
                   {channel ? <span>{getChannelDisplayName(channel)}</span> : null}
                 </div>
               </div>
-              <div className="text-[13px] text-foreground/80">{formatSchedule(job.schedule, t)}</div>
-              <div className="text-[13px] text-muted-foreground">{job.nextRun ? formatRelativeTime(job.nextRun) : t('values.notAvailable')}</div>
-              <div className="flex flex-wrap gap-2">
-                <StatusPill status={lastStatus} />
-                <StatusPill status={deliveryStatus} />
-              </div>
+              <div className="text-[13px] text-foreground/80">{formatSchedule(job.schedule, t, { showTimezone: false })}</div>
+              <NextRunCell job={job} />
+              <LastRunCell job={job} />
               <div className="flex justify-end gap-1" onClick={(event) => event.stopPropagation()}>
                 <Button size="icon" variant="ghost" title={t('card.runNow')} onClick={() => void triggerJob(job.id).then(() => toast.success(t('toast.triggered'))).catch((error) => toast.error(t('toast.failedTrigger', { error: error instanceof Error ? error.message : String(error) })))}>
                   <Play className="h-4 w-4" />
@@ -1261,6 +1319,7 @@ function CronJobDetailsDrawer({ job, open, onClose, onEdit, onRuns }: { job?: Cr
   const { t } = useTranslation('cron');
   if (!job) return null;
   const notAvailable = t('values.notAvailable');
+  const deliveryDisplayStatus = getDeliveryStatusForDisplay(job);
   const rows = [
     ['ID', job.id],
     [t('fields.agentId'), job.agentId || t('values.mainAgent')],
@@ -1280,8 +1339,8 @@ function CronJobDetailsDrawer({ job, open, onClose, onEdit, onRuns }: { job?: Cr
         </SheetHeader>
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
           <div className="flex flex-wrap gap-2">
-            <StatusPill status={getLastStatus(job)} />
-            <StatusPill status={getDeliveryStatus(job)} />
+            <StatusPill status={getLastStatusForDisplay(job)} />
+            {deliveryDisplayStatus ? <StatusPill status={deliveryDisplayStatus} /> : null}
             <Badge variant={job.enabled ? 'success' : 'outline'}>{job.enabled ? t('common:status.enabled', 'Enabled') : t('common:status.paused', 'Paused')}</Badge>
           </div>
           <section className="space-y-2">
