@@ -33,7 +33,6 @@ import { AppLogo } from '@/components/branding/AppLogo';
 import { useBranding } from '@/lib/branding';
 import { SettingsHub } from '@/components/settings/SettingsHub';
 import { isSessionRunning } from '@/stores/chat/session-running';
-import { DEFAULT_SESSION_KEY } from '@/stores/chat/types';
 
 const SIDEBAR_EXPANDED_MIN_WIDTH = 240;
 const SIDEBAR_EXPANDED_MAX_WIDTH = 420;
@@ -235,7 +234,6 @@ export function Sidebar() {
     let cancelled = false;
     const initialChatState = useChatStore.getState();
     const shouldInitializeStartupDraft = !startupDraftInitializedRef.current
-      && initialChatState.currentSessionKey === DEFAULT_SESSION_KEY
       && initialChatState.sessions.length === 0
       && initialChatState.messages.length === 0
       && !initialChatState.pendingFinal

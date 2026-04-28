@@ -468,36 +468,6 @@ function readMatchingPersistedSessionView(messages: RawMessage[]): SessionViewSn
   return best ? cloneSessionViewSnapshot(best.snapshot) : null;
 }
 
-function readLatestPersistedSessionViewEntry(): { sessionKey: string; snapshot: SessionViewSnapshot } | null {
-  if (!canUseSessionViewStorage()) return null;
-  let best: (PersistedSessionViewSnapshot & { sessionKey: string }) | null = null;
-
-  try {
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index);
-      if (!key?.startsWith(SESSION_VIEW_STORAGE_PREFIX)) continue;
-      const raw = window.localStorage.getItem(key);
-      if (!raw) continue;
-      const parsed = JSON.parse(raw) as Partial<PersistedSessionViewSnapshot>;
-      if (typeof parsed.savedAt !== 'number' || Date.now() - parsed.savedAt > SESSION_VIEW_STORAGE_TTL_MS) continue;
-      if (!parsed.snapshot || typeof parsed.snapshot !== 'object') continue;
-      const snapshot = cloneSessionViewSnapshot(parsed.snapshot as SessionViewSnapshot);
-      if (!hasRecoverableSessionView(snapshot)) continue;
-      if (!best || parsed.savedAt > best.savedAt) {
-        best = {
-          savedAt: parsed.savedAt,
-          sessionKey: key.slice(SESSION_VIEW_STORAGE_PREFIX.length),
-          snapshot,
-        };
-      }
-    }
-  } catch {
-    return null;
-  }
-
-  return best ? { sessionKey: best.sessionKey, snapshot: cloneSessionViewSnapshot(best.snapshot) } : null;
-}
-
 function clearPersistedSessionView(sessionKey: string): void {
   if (!sessionKey || !canUseSessionViewStorage()) return;
   try {
@@ -2089,8 +2059,56 @@ async function loadLocalSessionHistory(
   }
 }
 
+function hasCurrentTurnHistoryActivity(
+  messages: RawMessage[],
+  referenceTimestamp: number | null,
+): boolean {
+  const referenceMs = referenceTimestamp ? toMs(referenceTimestamp) : 0;
+  return messages.some((message) => {
+    if (isInternalMessage(message)) return false;
+    if (message.role !== 'assistant' && !isToolResultRole(message.role)) return false;
+    if (!referenceMs || typeof message.timestamp !== 'number') return true;
+    return isTimestampAtOrAfter(referenceMs, message.timestamp);
+  });
+}
+
+function shouldUseLocalHistoryDuringActiveSend(
+  messages: RawMessage[],
+  state: Pick<ChatState, 'lastUserMessageAt'>,
+): boolean {
+  if (messages.length === 0) return false;
+  return hasCurrentTurnHistoryActivity(messages, state.lastUserMessageAt);
+}
+
 function normalizeAgentId(value: string | undefined | null): string {
   return (value ?? '').trim().toLowerCase() || 'main';
+}
+
+function isColdStartDefaultSessionState(
+  state: Pick<
+    ChatState,
+    | 'currentSessionKey'
+    | 'sessions'
+    | 'messages'
+    | 'composerDrafts'
+    | 'sessionLabels'
+    | 'sessionLastActivity'
+    | 'sending'
+    | 'pendingFinal'
+    | 'activeRunId'
+    | 'lastUserMessageAt'
+  >,
+): boolean {
+  return state.currentSessionKey === DEFAULT_SESSION_KEY
+    && state.sessions.length === 0
+    && state.messages.length === 0
+    && Object.keys(state.composerDrafts).length === 0
+    && Object.keys(state.sessionLabels).length === 0
+    && Object.keys(state.sessionLastActivity).length === 0
+    && !state.sending
+    && !state.pendingFinal
+    && !state.activeRunId
+    && !state.lastUserMessageAt;
 }
 
 function resolveDefaultCanonicalPrefix(): string {
@@ -3358,25 +3376,25 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             }
           }
           const currentState = get();
-          const currentIsUnusedDraft = isUnusedDraftSession(currentState, nextSessionKey);
-          const hasLocalSessionEntry = localSessions.some((session) => session.key === nextSessionKey);
-          const latestRecoverableView = currentIsUnusedDraft ? readLatestPersistedSessionViewEntry() : null;
-          if (
-            latestRecoverableView
-            && dedupedSessions.some((session) => session.key === latestRecoverableView.sessionKey)
-          ) {
-            nextSessionKey = latestRecoverableView.sessionKey;
+          const shouldCreateStartupDraft = isColdStartDefaultSessionState(currentState);
+          if (shouldCreateStartupDraft) {
+            const prefix = resolveDefaultCanonicalPrefix()
+              || getCanonicalPrefixFromSessions(dedupedSessions)
+              || DEFAULT_CANONICAL_PREFIX;
+            nextSessionKey = `${prefix}:session-${Date.now()}`;
           }
+          const currentIsUnusedDraft = shouldCreateStartupDraft || isUnusedDraftSession(currentState, nextSessionKey);
+          const hasLocalSessionEntry = localSessions.some((session) => session.key === nextSessionKey);
           if (!dedupedSessions.find((s) => s.key === nextSessionKey) && dedupedSessions.length > 0) {
             // Preserve locally-created blank drafts and pending local sessions.
-            // The initial ghost key (`agent:main:main`) is neither, so it still
-            // yields to persisted history when no startup draft exists.
+            // Cold start creates a fresh draft instead of auto-selecting
+            // persisted history from the sidebar.
             if (!currentIsUnusedDraft && !hasLocalSessionEntry) {
               nextSessionKey = dedupedSessions[0].key;
             }
           }
 
-          const shouldMaterializeCurrentSession = !isUnusedDraftSession(get(), nextSessionKey);
+          const shouldMaterializeCurrentSession = !currentIsUnusedDraft && !isUnusedDraftSession(get(), nextSessionKey);
           const sessionsWithCurrent = !dedupedSessions.find((s) => s.key === nextSessionKey) && nextSessionKey && shouldMaterializeCurrentSession
             ? [
               ...dedupedSessions,
@@ -3389,11 +3407,20 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
               .filter((session) => typeof session.updatedAt === 'number' && Number.isFinite(session.updatedAt))
               .map((session) => [session.key, session.updatedAt!]),
           );
-          const discoveredModels = Object.fromEntries(
+          const discoveredModels: Record<string, string> = Object.fromEntries(
             sessionsWithCurrent
               .filter((session) => typeof session.model === 'string' && session.model.trim().length > 0)
               .map((session) => [session.key, session.model!.trim()]),
           );
+          if (shouldCreateStartupDraft && !discoveredModels[nextSessionKey]) {
+            const startupDraftModel = sessionsWithCurrent
+              .find((session) => session.key === DEFAULT_SESSION_KEY || session.key.endsWith(':main'))
+              ?.model
+              ?.trim();
+            if (startupDraftModel) {
+              discoveredModels[nextSessionKey] = startupDraftModel;
+            }
+          }
 
           set((state) => ({
             sessions: sessionsWithCurrent,
@@ -3418,7 +3445,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             ),
           }));
 
-          if (currentSessionKey !== nextSessionKey) {
+          if (currentSessionKey !== nextSessionKey && shouldMaterializeCurrentSession) {
             void get().loadHistory();
           }
 
@@ -4461,14 +4488,23 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       });
       };
 
+      let localHistoryFallback: Awaited<ReturnType<typeof loadLocalSessionHistory>> | null = null;
+
       try {
+        const stateBeforeHistoryLoad = get();
         const shouldTryLocalSessionHistory = !isCronSessionKey(currentSessionKey)
-          && !get().sending;
+          && (!stateBeforeHistoryLoad.sending || quiet);
         if (shouldTryLocalSessionHistory) {
           const localHistory = await loadLocalSessionHistory(currentSessionKey, 200);
           if (localHistory.resolved) {
-            applyLoadedMessages(localHistory.messages, localHistory.thinkingLevel);
-            return;
+            if (
+              !stateBeforeHistoryLoad.sending
+              || shouldUseLocalHistoryDuringActiveSend(localHistory.messages, stateBeforeHistoryLoad)
+            ) {
+              applyLoadedMessages(localHistory.messages, localHistory.thinkingLevel);
+              return;
+            }
+            localHistoryFallback = localHistory;
           }
         }
 
@@ -4489,6 +4525,8 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           const fallbackMessages = await loadCronFallbackMessages(currentSessionKey, 200);
           if (fallbackMessages.length > 0) {
             applyLoadedMessages(fallbackMessages, null);
+          } else if (localHistoryFallback) {
+            applyLoadedMessages(localHistoryFallback.messages, localHistoryFallback.thinkingLevel);
           } else {
             applyLoadFailure('Failed to load chat history');
           }
@@ -4498,6 +4536,8 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         const fallbackMessages = await loadCronFallbackMessages(currentSessionKey, 200);
         if (fallbackMessages.length > 0) {
           applyLoadedMessages(fallbackMessages, null);
+        } else if (localHistoryFallback) {
+          applyLoadedMessages(localHistoryFallback.messages, localHistoryFallback.thinkingLevel);
         } else {
           applyLoadFailure(String(err));
         }
@@ -4929,8 +4969,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     // way to track progress when the gateway doesn't stream intermediate turns.
     const hasUsefulData = resolvedState === 'delta' || resolvedState === 'final'
       || resolvedState === 'error' || resolvedState === 'aborted';
-    const shouldSuspendHistoryPoll = resolvedState === 'final'
-      || resolvedState === 'error'
+    const shouldSuspendHistoryPoll = resolvedState === 'error'
       || resolvedState === 'aborted';
     if (hasUsefulData) {
       if (shouldSuspendHistoryPoll) {

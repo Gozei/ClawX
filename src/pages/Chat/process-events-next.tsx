@@ -30,12 +30,6 @@ export type ProcessEventItem = {
   retries?: number;
 };
 
-function formatDuration(durationMs?: number): string | null {
-  if (!durationMs || !Number.isFinite(durationMs)) return null;
-  if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
-  return `${(durationMs / 1000).toFixed(1)}s`;
-}
-
 function formatRetryAttemptCount(
   retries: number | undefined,
   language: string | undefined,
@@ -768,9 +762,7 @@ function ProcessEventDetail({
 }
 
 const PROCESS_EVENT_TEXT_CLASS = 'text-foreground/50 transition-colors group-hover:text-foreground';
-const PROCESS_EVENT_SUBTEXT_CLASS = 'text-foreground/42 transition-colors group-hover:text-foreground/75';
 const ACTIVE_PROCESS_EVENT_TEXT_CLASS = 'text-foreground/60 transition-colors group-hover:text-foreground/82';
-const ACTIVE_PROCESS_EVENT_SUBTEXT_CLASS = 'text-foreground/40 transition-colors group-hover:text-foreground/58';
 const ACTIVE_PROCESS_EVENT_PREVIEW_CLASS = 'text-foreground/52 transition-colors group-hover:text-foreground/72';
 
 function ProcessDirectContent({
@@ -803,7 +795,6 @@ const ProcessEventRow = memo(function ProcessEventRow({
 }) {
   const canExpand = !!item.detail;
   const [expanded, setExpanded] = useState(false);
-  const durationLabel = formatDuration(item.durationMs);
   const summaryLabel = formatEventStatusLabel(item, language);
   const previewLabel = formatEventPreviewLabel(item, language);
   const isActive = isActiveProcessItem(item);
@@ -841,11 +832,6 @@ const ProcessEventRow = memo(function ProcessEventRow({
             >
               {summaryLabel}
             </span>
-            {durationLabel && (
-              <span className={cn('shrink-0 text-[12px]', ACTIVE_PROCESS_EVENT_SUBTEXT_CLASS)}>
-                ({durationLabel})
-              </span>
-            )}
             {!isExpanded && previewLabel && (
               <span
                 data-testid="chat-process-event-preview"
@@ -861,11 +847,6 @@ const ProcessEventRow = memo(function ProcessEventRow({
               <span data-testid="chat-process-event-summary" className={cn('shrink-0 text-[13px] font-medium', PROCESS_EVENT_TEXT_CLASS)}>
                 {summaryLabel}
               </span>
-              {durationLabel && (
-                <span className={cn('shrink-0 text-[11px]', PROCESS_EVENT_SUBTEXT_CLASS)}>
-                  {durationLabel}
-                </span>
-              )}
               {!isExpanded && previewLabel && (
                 <span
                   data-testid="chat-process-event-preview"
