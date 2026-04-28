@@ -2,14 +2,12 @@
  * Update Settings Component
  * Displays update status and allows manual update checking/installation
  */
-import { useEffect, useCallback, useState } from 'react';
-import { Download, RefreshCw, Loader2, Rocket, XCircle, ScrollText } from 'lucide-react';
+import { useEffect, useCallback } from 'react';
+import { Download, RefreshCw, Loader2, Rocket, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { useUpdateStore } from '@/stores/update';
 import { useTranslation } from 'react-i18next';
-import { ChangelogDialog } from '@/components/settings/ChangelogDialog';
-import { MarkdownRenderer } from '@/pages/Chat/MarkdownRenderer';
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -36,8 +34,6 @@ export function UpdateSettings() {
     cancelAutoInstall,
     clearError,
   } = useUpdateStore();
-
-  const [changelogOpen, setChangelogOpen] = useState(false);
 
   // Initialize on mount
   useEffect(() => {
@@ -162,7 +158,6 @@ export function UpdateSettings() {
   }
 
   return (
-    <>
     <div className="space-y-4">
       {/* Current Version */}
       <div className="flex items-center justify-between">
@@ -172,18 +167,6 @@ export function UpdateSettings() {
         </div>
         {renderStatusIcon()}
       </div>
-
-      {/* Changelog Entry */}
-      <Button
-        data-testid="settings-changelog-button"
-        variant="ghost"
-        size="sm"
-        className="text-muted-foreground hover:text-foreground -ml-2"
-        onClick={() => setChangelogOpen(true)}
-      >
-        <ScrollText className="h-4 w-4 mr-1.5" />
-        {t('updates.changelog')}
-      </Button>
 
       {/* Status */}
       <div className="flex items-center justify-between py-3 border-t border-b">
@@ -219,9 +202,9 @@ export function UpdateSettings() {
             )}
           </div>
           {updateInfo.releaseNotes && (
-            <div className="text-sm text-muted-foreground prose prose-sm max-w-none dark:prose-invert">
+            <div className="text-sm text-muted-foreground prose prose-sm max-w-none">
               <p className="font-medium text-foreground mb-1">{t('updates.whatsNew')}</p>
-              <MarkdownRenderer content={typeof updateInfo.releaseNotes === 'string' ? updateInfo.releaseNotes : ''} />
+              <p className="whitespace-pre-wrap">{updateInfo.releaseNotes}</p>
             </div>
           )}
         </div>
@@ -239,11 +222,7 @@ export function UpdateSettings() {
       <p className="text-xs text-muted-foreground">
         {t('updates.help')}
       </p>
-
-      </div>
-
-      <ChangelogDialog open={changelogOpen} onClose={() => setChangelogOpen(false)} />
-    </>
+    </div>
   );
 }
 

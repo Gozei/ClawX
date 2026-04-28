@@ -17,6 +17,7 @@ import { useUpdateStore } from '@/stores/update';
 import changelogRaw from '../../../CHANGELOG.md?raw';
 import { UpdateSettings } from '@/components/settings/UpdateSettings';
 import { LogsPanel } from '@/components/settings/LogsPanel';
+import { ChangelogDialog } from '@/components/settings/ChangelogDialog';
 import {
   getGatewayWsDiagnosticEnabled,
   invokeIpc,
@@ -137,6 +138,7 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
     timedOut?: boolean;
     error?: string;
   } | null>(null);
+  const [changelogOpen, setChangelogOpen] = useState(false);
 
   const handleOpenLogDir = async () => {
     try {
@@ -1285,12 +1287,21 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
                   >
                     {t('about.faq')}
                   </Button>
+                  <Button
+                    variant="link"
+                    className="h-auto p-0 text-[14px] text-blue-500 hover:text-blue-600 font-medium"
+                    onClick={() => setChangelogOpen(true)}
+                  >
+                    {t('updates.changelog')}
+                  </Button>
                 </div>
               </div>
             </div>
           </div>
         </div>
       </div>
+
+      <ChangelogDialog open={changelogOpen} onClose={() => setChangelogOpen(false)} />
     </div>
   );
 }
