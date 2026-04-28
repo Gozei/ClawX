@@ -269,7 +269,7 @@ export function Setup() {
         )}
       >
         {/* Progress Indicator */}
-        <div className="flex justify-center pt-8">
+        <div className="flex justify-center pt-8 [@media(max-height:760px)]:pt-4">
           <div className="flex items-center gap-2">
             {steps.map((s, i) => (
               <div key={s.id} className="flex items-center">
@@ -310,11 +310,11 @@ export function Setup() {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
             className={cn(
-              'mx-auto max-w-2xl p-8',
+              'mx-auto max-w-2xl px-8 pb-4 pt-8 [@media(max-height:760px)]:pb-2 [@media(max-height:760px)]:pt-5',
               safeStepIndex === STEP.SKILLS && 'flex flex-1 min-h-0 flex-col'
             )}
           >
-            <div className="text-center mb-8">
+            <div className="text-center mb-6 [@media(max-height:760px)]:mb-4">
               <h1 className="text-3xl font-bold mb-2">
                 {t(`steps.${step.id}.title`, {
                   appName: branding.productName,
@@ -332,7 +332,7 @@ export function Setup() {
             {/* Step-specific content */}
             <div
               className={cn(
-                'rounded-xl bg-card text-card-foreground border shadow-sm p-8 mb-8',
+                'rounded-xl bg-card text-card-foreground border shadow-sm px-8 py-6 mb-5 [@media(max-height:760px)]:py-5',
                 safeStepIndex === STEP.SKILLS && 'flex-1 min-h-0 overflow-hidden'
               )}
             >
@@ -366,7 +366,7 @@ export function Setup() {
 
             {/* Navigation - hidden during installation step */}
             {safeStepIndex !== STEP.INSTALLING && (
-              <div className="flex justify-between">
+              <div className="flex justify-between pb-2">
                 <div>
                   {!isFirstStep && (
                     <Button variant="ghost" onClick={handleBack}>
@@ -409,8 +409,8 @@ function WelcomeContent() {
   const branding = useBranding();
 
   return (
-    <div data-testid="setup-welcome-step" className="text-center space-y-4">
-      <div className="mb-4 flex justify-center">
+    <div data-testid="setup-welcome-step" className="text-center space-y-3.5">
+      <div className="mb-3 flex justify-center">
         <img src={clawxIcon} alt={branding.productName} className="h-16 w-16" />
       </div>
       <div className="space-y-1">
@@ -425,7 +425,7 @@ function WelcomeContent() {
       </p>
 
       {/* Language Selector */}
-      <div className="flex justify-center gap-2 py-2">
+      <div className="flex justify-center gap-2 py-1">
         {SUPPORTED_LANGUAGES.map((lang) => (
           <Button
             key={lang.code}
@@ -439,7 +439,7 @@ function WelcomeContent() {
         ))}
       </div>
 
-      <ul className="text-left space-y-2 text-muted-foreground pt-2">
+      <ul className="text-left space-y-2 text-muted-foreground pt-1">
         <li className="flex items-center gap-2">
           <CheckCircle2 className="h-5 w-5 text-green-400" />
           {t('welcome.features.noCommand')}
