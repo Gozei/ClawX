@@ -511,13 +511,14 @@ export function Sidebar() {
     const isSessionRunningNow = s.key === currentSessionKey
       ? currentSessionIsRunning
       : Boolean(sessionRunningState[s.key]);
+    const shouldReserveSessionActionSpace = isSessionRunningNow || s.pinned || isMenuOpen;
 
     return (
       <div key={s.key} className="group relative flex items-center" data-testid={`sidebar-session-${s.key}`}>
         {isEditing ? (
           <div
             className={cn(
-              'w-full rounded-lg px-3 py-1.5 pr-12 text-left text-[13px]',
+              'w-full rounded-lg px-3 py-1.5 text-left text-[13px]',
               isOnChat && currentSessionKey === s.key
                 ? 'bg-white text-foreground font-medium shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
                 : 'text-foreground/75',
@@ -557,12 +558,14 @@ export function Sidebar() {
           </div>
         ) : (
           <button
+            data-testid={`sidebar-session-button-${s.key}`}
             onClick={() => {
               switchSession(s.key);
               navigate('/');
             }}
             className={cn(
-              'w-full rounded-lg px-3 py-1.5 pr-12 text-left text-[13px] transition-all duration-200',
+              'w-full rounded-lg px-3 py-1.5 text-left text-[13px] transition-colors duration-200',
+              shouldReserveSessionActionSpace ? 'pr-10' : 'pr-3 group-hover:pr-10',
               'hover:bg-[#eef3fb] dark:hover:bg-white/5',
               isOnChat && currentSessionKey === s.key
                 ? 'bg-white text-foreground font-medium shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
@@ -645,8 +648,8 @@ export function Sidebar() {
               className={cn(
                 'flex h-7 w-7 items-center justify-center rounded-md transition-all',
                 isMenuOpen
-                  ? 'opacity-100 bg-white text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.06)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
-                  : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:bg-white hover:text-foreground dark:hover:bg-white/10',
+                  ? 'pointer-events-auto opacity-100 bg-white text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.06)] ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
+                  : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 text-muted-foreground hover:bg-white hover:text-foreground dark:hover:bg-white/10',
               )}
             >
               <MoreHorizontal className="h-4 w-4" />

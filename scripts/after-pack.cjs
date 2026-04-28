@@ -22,6 +22,7 @@
 const { cpSync, copyFileSync, existsSync, lstatSync, readdirSync, readlinkSync, rmSync, statSync, mkdirSync, realpathSync } = require('fs');
 const { execFileSync } = require('child_process');
 const { join, dirname, basename, relative, resolve } = require('path');
+const Module = require('module');
 
 // On Windows, paths in pnpm's virtual store can exceed the default MAX_PATH
 // limit (260 chars). Node.js 18.17+ respects the system LongPathsEnabled
@@ -31,6 +32,112 @@ function normWin(p) {
   if (process.platform !== 'win32') return p;
   if (p.startsWith('\\\\?\\')) return p;
   return '\\\\?\\' + p.replace(/\//g, '\\');
+}
+
+const OFFICE_PREVIEW_RUNTIME_ROOTS = [
+  'mammoth',
+  'jszip',
+  'docx-preview',
+  '@jvmr/pptx-to-html',
+  'xlsx',
+];
+
+function assertOfficePreviewRuntimeDepsInAsar(resourcesDir) {
+  const appAsarPath = join(resourcesDir, 'app.asar');
+  if (!existsSync(appAsarPath)) {
+    console.warn('[after-pack] ⚠️  app.asar not found; skipping office preview dependency check.');
+    return;
+  }
+
+  let asar;
+  try {
+    asar = require('@electron/asar');
+  } catch (error) {
+    throw new Error(`Unable to load @electron/asar for office preview dependency check: ${error.message}`);
+  }
+
+  const builtins = new Set(
+    Module.builtinModules.flatMap((name) => [name, name.replace(/^node:/, '')]),
+  );
+  const visited = new Set();
+  const missing = [];
+
+  function packageParts(name) {
+    const parts = name.split('/');
+    return name.startsWith('@') ? [parts[0], parts[1]] : [parts[0]];
+  }
+
+  function readPackageJson(packageDir) {
+    const archivePath = join(packageDir, 'package.json');
+    try {
+      return JSON.parse(asar.extractFile(appAsarPath, archivePath).toString('utf8'));
+    } catch {
+      return null;
+    }
+  }
+
+  function packageExists(packageDir) {
+    return readPackageJson(packageDir) !== null;
+  }
+
+  function findPackageDir(fromDir, name) {
+    const parts = packageParts(name);
+    let current = fromDir || '.';
+
+    while (true) {
+      const candidate = current === '.'
+        ? join('node_modules', ...parts)
+        : join(current, 'node_modules', ...parts);
+      if (packageExists(candidate)) {
+        return candidate;
+      }
+
+      const parent = dirname(current);
+      if (parent === current) {
+        break;
+      }
+      current = parent;
+    }
+
+    return builtins.has(name) ? 'builtin' : null;
+  }
+
+  function checkPackage(name, fromDir, via) {
+    const packageDir = findPackageDir(fromDir, name);
+    if (packageDir === 'builtin') {
+      return;
+    }
+    if (!packageDir) {
+      missing.push(`${name} required by ${via}`);
+      return;
+    }
+    if (visited.has(packageDir)) {
+      return;
+    }
+
+    const packageJson = readPackageJson(packageDir);
+    if (!packageJson) {
+      missing.push(`${name} package.json missing at ${packageDir}`);
+      return;
+    }
+
+    visited.add(packageDir);
+    for (const dependency of Object.keys(packageJson.dependencies || {}).sort()) {
+      checkPackage(dependency, packageDir, `${packageJson.name}@${packageJson.version}`);
+    }
+  }
+
+  for (const rootName of OFFICE_PREVIEW_RUNTIME_ROOTS) {
+    checkPackage(rootName, '', 'office preview root');
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Office preview runtime dependency check failed for app.asar:\n${missing.map((item) => `  - ${item}`).join('\n')}`,
+    );
+  }
+
+  console.log(`[after-pack] ✅ Verified office preview runtime dependency closure in app.asar (${visited.size} packages).`);
 }
 
 // ── Arch helpers ─────────────────────────────────────────────────────────────
@@ -860,6 +967,10 @@ exports.default = async function afterPack(context) {
       console.log(`[after-pack] 🩹 Patched ${asarLruCount} lru-cache instance(s) in app.asar.unpacked`);
     }
   }
+
+  // 5.1 Validate that Office preview packages are self-contained in app.asar.
+  assertOfficePreviewRuntimeDepsInAsar(resourcesDir);
+
   // 6. [Windows only] Patch NSIS extractAppPackage.nsh to skip CopyFiles
   //
   // electron-builder's extractUsing7za macro decompresses app-64.7z into a temp

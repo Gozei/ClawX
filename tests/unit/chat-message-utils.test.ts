@@ -1,10 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { extractText, isInternalMaintenanceTurnUserMessage } from '@/pages/Chat/message-utils';
+import { extractText, formatTimestamp, isInternalMaintenanceTurnUserMessage } from '@/pages/Chat/message-utils';
 import type { RawMessage } from '@/stores/chat';
 
 const FULLY_INJECTED_VISIBLE_TEXT = 'Only this sentence should be shown in chat.';
 
 describe('chat message utils', () => {
+  it('formats chat timestamps by local calendar day with exact times', () => {
+    const now = new Date(2026, 3, 28, 12, 0);
+
+    expect(formatTimestamp(new Date(2026, 3, 28, 10, 30).getTime(), now)).toBe('今天 10:30');
+    expect(formatTimestamp(Math.floor(new Date(2026, 3, 27, 10, 30).getTime() / 1000), now)).toBe('昨天 10:30');
+    expect(formatTimestamp(new Date(2026, 3, 26, 10, 30).getTime(), now)).toBe('2026/4/26 10:30');
+  });
+
+  it('uses calendar days instead of elapsed hours for yesterday timestamps', () => {
+    const now = new Date(2026, 3, 28, 0, 30);
+
+    expect(formatTimestamp(new Date(2026, 3, 27, 23, 30).getTime(), now)).toBe('昨天 23:30');
+  });
+
   it('surfaces runtime assistant errors that were persisted without content', () => {
     const message: RawMessage = {
       id: 'assistant-runtime-error-1',

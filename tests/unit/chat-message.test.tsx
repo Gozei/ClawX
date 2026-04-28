@@ -157,22 +157,42 @@ describe('ChatMessage', () => {
     expect(screen.getByTestId('chat-message-model-label')).toHaveTextContent('JD Provider / gpt-5.4');
   });
 
-  it('keeps the hover metadata row non-interactive until the message is hovered', () => {
+  it('keeps user message metadata controlled by hover', () => {
     const message: RawMessage = {
       id: 'user-hover-1',
       role: 'user',
-      content: 'Hover row should not intercept scrolling while hidden.',
+      content: 'Metadata row should stay hover controlled.',
       timestamp: 1712123456,
     };
 
     renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
 
-    const copyButton = screen.getByTestId('chat-message-copy-user');
-    const hoverRow = copyButton.parentElement;
+    const metaRow = screen.getByTestId('chat-message-meta-user');
 
-    expect(hoverRow).toHaveClass('invisible');
-    expect(hoverRow).toHaveClass('pointer-events-none');
-    expect(hoverRow).toHaveClass('group-hover:pointer-events-auto');
+    expect(metaRow).toHaveClass('invisible');
+    expect(metaRow).toHaveClass('pointer-events-none');
+    expect(metaRow).toHaveClass('group-hover:visible');
+    expect(metaRow).toHaveClass('group-hover:pointer-events-auto');
+  });
+
+  it('shows assistant message metadata without waiting for hover', () => {
+    const message: RawMessage = {
+      id: 'assistant-meta-visible-1',
+      role: 'assistant',
+      content: 'Assistant metadata row should stay visible.',
+      timestamp: 1712123456,
+    };
+
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
+
+    const copyButton = screen.getByTestId('chat-message-copy-assistant');
+    const metaRow = screen.getByTestId('chat-message-meta-assistant');
+
+    expect(copyButton).toBeVisible();
+    expect(metaRow).toBeVisible();
+    expect(metaRow).not.toHaveClass('invisible');
+    expect(metaRow).not.toHaveClass('pointer-events-none');
+    expect(metaRow).not.toHaveClass('group-hover:pointer-events-auto');
   });
 
   it('shows the product name above ordinary assistant replies when the avatar is visible', () => {

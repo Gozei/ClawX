@@ -66,8 +66,22 @@ test.describe('Session pin', () => {
       const page = await getStableWindow(app);
       await expect(page.getByTestId('main-layout')).toBeVisible();
 
+      const alphaRow = page.getByTestId(`sidebar-session-${SESSION_A_KEY}`);
+      const alphaButton = page.getByTestId(`sidebar-session-button-${SESSION_A_KEY}`);
       const bravoRow = page.getByTestId(`sidebar-session-${SESSION_B_KEY}`);
+      const bravoButton = page.getByTestId(`sidebar-session-button-${SESSION_B_KEY}`);
+      await expect(alphaRow).toBeVisible({ timeout: 60_000 });
       await expect(bravoRow).toBeVisible({ timeout: 60_000 });
+      const idleTransitionProperty = await alphaButton.evaluate((node) => getComputedStyle(node).transitionProperty);
+      expect(idleTransitionProperty).not.toBe('all');
+      expect(idleTransitionProperty).not.toContain('padding');
+      await page.mouse.move(8, 8);
+      await expect(alphaButton).toHaveCSS('padding-right', '12px');
+      await alphaRow.hover();
+      await expect(alphaButton).toHaveCSS('padding-right', '40px');
+      await page.mouse.move(8, 8);
+      await expect(alphaButton).toHaveCSS('padding-right', '12px');
+
       await bravoRow.hover();
       await page.getByTestId(`sidebar-session-menu-trigger-${SESSION_B_KEY}`).click();
       await expect(page.getByTestId(`sidebar-session-menu-panel-${SESSION_B_KEY}`)).toBeVisible();
@@ -99,6 +113,7 @@ test.describe('Session pin', () => {
       await expect(pinnedSection.getByText('Charlie session', { exact: true })).toBeVisible();
       await expect(page.getByTestId(`sidebar-session-pin-indicator-${SESSION_B_KEY}`)).toBeVisible();
       await expect(page.getByTestId(`sidebar-session-pin-indicator-${SESSION_C_KEY}`)).toBeVisible();
+      await expect(bravoButton).toHaveCSS('padding-right', '40px');
 
       await bravoRow.hover();
       await expect(page.getByTestId(`sidebar-session-menu-trigger-${SESSION_B_KEY}`)).toBeVisible();

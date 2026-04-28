@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   ensureProviderStoreMigrated: vi.fn(),
   listProviderAccounts: vi.fn(),
+  getProviderAccount: vi.fn(),
   deleteProviderAccount: vi.fn(),
   listSuppressedProviderKeys: vi.fn(),
   suppressProviderKeys: vi.fn(),
   unsuppressProviderKeys: vi.fn(),
   saveProviderAccount: vi.fn(),
+  getDefaultProviderAccountId: vi.fn(),
   getActiveOpenClawProviders: vi.fn(),
   getOpenClawProvidersConfig: vi.fn(),
   getOpenClawProviderKeyForType: vi.fn(),
@@ -25,8 +27,8 @@ vi.mock('@electron/services/providers/provider-store', () => ({
   listProviderAccounts: mocks.listProviderAccounts,
   deleteProviderAccount: mocks.deleteProviderAccount,
   listSuppressedProviderKeys: mocks.listSuppressedProviderKeys,
-  getProviderAccount: vi.fn(),
-  getDefaultProviderAccountId: vi.fn(),
+  getProviderAccount: mocks.getProviderAccount,
+  getDefaultProviderAccountId: mocks.getDefaultProviderAccountId,
   providerAccountToConfig: vi.fn(),
   providerConfigToAccount: vi.fn(),
   saveProviderAccount: mocks.saveProviderAccount,
@@ -108,6 +110,7 @@ describe('ProviderService.listAccounts (openclaw.json as sole source of truth)',
     mocks.getOpenClawProvidersConfig.mockResolvedValue({ providers: {}, defaultModel: undefined });
     mocks.listProviderAccounts.mockResolvedValue([]);
     mocks.listSuppressedProviderKeys.mockResolvedValue([]);
+    mocks.getDefaultProviderAccountId.mockResolvedValue(undefined);
     service = new ProviderService();
   });
 
@@ -320,6 +323,97 @@ describe('ProviderService.listAccounts (openclaw.json as sole source of truth)',
     const ids = result.map((a: ProviderAccount) => a.id);
     expect(ids).toContain('openrouter-uuid');
     expect(ids).toContain('minimax-portal-cn-uuid');
+  });
+
+  it('returns all active saved accounts even when endpoint and model match', async () => {
+    mocks.getOpenClawProviderKeyForType.mockImplementation((type: string, id: string) => {
+      if (type === 'custom' && id === 'custom-oldaa') return 'custom-oldaa';
+      if (type === 'custom' && id === 'custom-newbb') return 'custom-newbb';
+      return type === 'minimax-portal-cn' ? 'minimax-portal' : type;
+    });
+    mocks.listProviderAccounts.mockResolvedValue([
+      makeAccount({
+        id: 'custom-oldaa',
+        vendorId: 'custom' as ProviderAccount['vendorId'],
+        label: 'Acme',
+        baseUrl: 'https://api.acme.test/v1',
+        apiProtocol: 'openai-completions',
+        model: 'gpt-5.4',
+        updatedAt: '2026-03-20T00:00:00.000Z',
+      }),
+      makeAccount({
+        id: 'custom-newbb',
+        vendorId: 'custom' as ProviderAccount['vendorId'],
+        label: 'Acme',
+        baseUrl: 'https://api.acme.test/v1',
+        apiProtocol: 'openai-completions',
+        model: 'gpt-5.4',
+        updatedAt: '2026-03-21T00:00:00.000Z',
+      }),
+    ]);
+    mocks.getActiveOpenClawProviders.mockResolvedValue(new Set(['custom-oldaa', 'custom-newbb']));
+    mocks.getOpenClawProvidersConfig.mockResolvedValue({
+      providers: {
+        'custom-oldaa': { baseUrl: 'https://api.acme.test/v1', models: [{ id: 'gpt-5.4' }] },
+        'custom-newbb': { baseUrl: 'https://api.acme.test/v1', models: [{ id: 'gpt-5.4' }] },
+      },
+      defaultModel: undefined,
+    });
+
+    const result = await service.listAccounts();
+
+    expect(result).toHaveLength(2);
+    expect(result.map((account) => account.id)).toEqual(['custom-oldaa', 'custom-newbb']);
+    expect(mocks.suppressProviderKeys).not.toHaveBeenCalled();
+    expect(mocks.deleteProviderAccount).not.toHaveBeenCalled();
+  });
+
+  it('rejects creating an account with the same provider URL and model ID', async () => {
+    mocks.listProviderAccounts.mockResolvedValue([
+      makeAccount({
+        id: 'custom-existing',
+        vendorId: 'custom' as ProviderAccount['vendorId'],
+        baseUrl: 'https://api.acme.test/v1',
+        model: 'gpt-5.4',
+      }),
+    ]);
+
+    await expect(service.createAccount(makeAccount({
+      id: 'custom-new',
+      vendorId: 'custom' as ProviderAccount['vendorId'],
+      baseUrl: 'https://api.acme.test/v1/',
+      model: 'GPT-5.4',
+    }))).rejects.toThrow(/Duplicate model configuration/);
+
+    expect(mocks.saveProviderAccount).not.toHaveBeenCalled();
+    expect(mocks.unsuppressProviderKeys).not.toHaveBeenCalled();
+  });
+
+  it('rejects updating an account to a duplicate provider URL and model ID', async () => {
+    const existing = makeAccount({
+      id: 'custom-edit',
+      vendorId: 'custom' as ProviderAccount['vendorId'],
+      baseUrl: 'https://api.other.test/v1',
+      model: 'model-a',
+    });
+    mocks.getProviderAccount.mockResolvedValue(existing);
+    mocks.listProviderAccounts.mockResolvedValue([
+      makeAccount({
+        id: 'custom-existing',
+        vendorId: 'custom' as ProviderAccount['vendorId'],
+        baseUrl: 'https://api.acme.test/v1',
+        model: 'gpt-5.4',
+      }),
+      existing,
+    ]);
+
+    await expect(service.updateAccount('custom-edit', {
+      baseUrl: 'https://api.acme.test/v1/',
+      model: 'GPT-5.4',
+    })).rejects.toThrow(/Duplicate model configuration/);
+
+    expect(mocks.saveProviderAccount).not.toHaveBeenCalled();
+    expect(mocks.unsuppressProviderKeys).not.toHaveBeenCalled();
   });
 
   it('seeds builtin providers discovered from auth profiles without explicit models.providers entries', async () => {

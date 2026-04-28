@@ -457,23 +457,36 @@ export function assistantMessageShowsInChat(
   return false;
 }
 
+function formatClockTime(date: Date): string {
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
 /**
- * Format a Unix timestamp (seconds) to relative time string.
+ * Format a Unix timestamp (seconds or milliseconds) by local calendar day.
  */
-export function formatTimestamp(timestamp: unknown): string {
+export function formatTimestamp(timestamp: unknown, now: Date = new Date()): string {
   if (!timestamp) return '';
   const ts = typeof timestamp === 'number' ? timestamp : Number(timestamp);
-  if (!ts || isNaN(ts)) return '';
+  if (!ts || Number.isNaN(ts)) return '';
 
   // OpenClaw timestamps can be in seconds or milliseconds
   const ms = ts > 1e12 ? ts : ts * 1000;
   const date = new Date(ms);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
+  if (Number.isNaN(date.getTime())) return '';
 
-  if (diffMs < 60000) return '刚刚';
-  if (diffMs < 3600000) return `${Math.floor(diffMs / 60000)} 分钟前`;
-  if (diffMs < 86400000) return `${Math.floor(diffMs / 3600000)} 小时前`;
+  const time = formatClockTime(date);
+  const todayStart = startOfLocalDay(now);
+  const messageDayStart = startOfLocalDay(date);
+  const diffDays = Math.round((todayStart.getTime() - messageDayStart.getTime()) / 86400000);
 
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (diffDays === 0) return `今天 ${time}`;
+  if (diffDays === 1) return `昨天 ${time}`;
+
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${time}`;
 }

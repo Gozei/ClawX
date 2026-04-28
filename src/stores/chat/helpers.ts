@@ -1276,6 +1276,20 @@ function normalizeBlockText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function normalizeStreamText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function isContinuingStreamText(previousText: string, nextText: string): boolean {
+  const previous = normalizeStreamText(previousText);
+  const next = normalizeStreamText(nextText);
+  if (!previous || !next) return false;
+  return next.startsWith(previous)
+    || previous.startsWith(next)
+    || next.includes(previous)
+    || previous.includes(next);
+}
+
 function isToolContentBlock(block: ContentBlock): boolean {
   return block.type === 'tool_use'
     || block.type === 'toolCall'
@@ -1297,7 +1311,7 @@ function isProcessBlockPreserved(previous: ContentBlock, nextBlocks: ContentBloc
       return nextBlocks.some((candidate) => {
         if (candidate.type !== 'text') return false;
         const nextText = normalizeBlockText(candidate.text);
-        return !!nextText && (nextText.startsWith(previousText) || previousText.startsWith(nextText));
+        return isContinuingStreamText(previousText, nextText);
       });
     }
     case 'thinking': {
@@ -1306,7 +1320,7 @@ function isProcessBlockPreserved(previous: ContentBlock, nextBlocks: ContentBloc
       return nextBlocks.some((candidate) => {
         if (candidate.type !== 'thinking') return false;
         const nextThinking = normalizeBlockText(candidate.thinking);
-        return !!nextThinking && (nextThinking.startsWith(previousThinking) || previousThinking.startsWith(nextThinking));
+        return isContinuingStreamText(previousThinking, nextThinking);
       });
     }
     case 'tool_use':
@@ -1358,8 +1372,7 @@ function shouldContinueAssistantDelta(previous: RawMessage | null | undefined, n
   if (typeof previous.content === 'string' || typeof next.content === 'string') {
     const previousText = getMessageText(previous.content).trim();
     const nextText = getMessageText(next.content).trim();
-    if (!previousText || !nextText) return false;
-    return nextText.startsWith(previousText) || previousText.startsWith(nextText);
+    return isContinuingStreamText(previousText, nextText);
   }
 
   if (!Array.isArray(previous.content) || !Array.isArray(next.content)) {

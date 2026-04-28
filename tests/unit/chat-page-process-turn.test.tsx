@@ -135,18 +135,31 @@ vi.mock('@/stores/settings', () => ({
 vi.mock('react-virtuoso', async () => {
   const React = await import('react');
 
-  const DefaultScroller = React.forwardRef<HTMLDivElement, React.ComponentProps<'div'>>(
+  type MockVirtuosoHandle = {
+    autoscrollToBottom: () => void;
+    getState: (callback: (state: unknown) => void) => void;
+    scrollBy: (options: { top?: number }) => void;
+    scrollIntoView: () => void;
+    scrollTo: (options: { top?: number }) => void;
+    scrollToIndex: () => void;
+  };
+  type MockVirtuosoPartProps = React.ComponentProps<'div'> & { context?: unknown };
+  type MockVirtuosoScroller = React.ForwardRefExoticComponent<
+    MockVirtuosoPartProps & React.RefAttributes<HTMLDivElement>
+  >;
+
+  const DefaultScroller = React.forwardRef<HTMLDivElement, MockVirtuosoPartProps>(
     function DefaultScroller({ children, ...props }, ref) {
       return <div ref={ref} {...props}>{children}</div>;
     },
   );
-  const DefaultList = React.forwardRef<HTMLDivElement, React.ComponentProps<'div'>>(
+  const DefaultList = React.forwardRef<HTMLDivElement, MockVirtuosoPartProps>(
     function DefaultList({ children, ...props }, ref) {
       return <div ref={ref} {...props}>{children}</div>;
     },
   );
 
-  const Virtuoso = React.forwardRef<any, Record<string, unknown>>(function MockVirtuoso(props, ref) {
+  const Virtuoso = React.forwardRef<MockVirtuosoHandle, Record<string, unknown>>(function MockVirtuoso(props, ref) {
     const {
       data = [],
       itemContent,
@@ -158,8 +171,8 @@ vi.mock('react-virtuoso', async () => {
       components?: {
         Header?: React.ComponentType<{ context: unknown }>;
         Footer?: React.ComponentType<{ context: unknown }>;
-        List?: React.ComponentType<any>;
-        Scroller?: React.ComponentType<any>;
+        List?: React.ComponentType<MockVirtuosoPartProps>;
+        Scroller?: MockVirtuosoScroller;
       };
       computeItemKey?: (index: number, item: unknown) => React.Key;
       context?: unknown;
@@ -421,10 +434,10 @@ describe('Chat process turn rendering', () => {
     render(<Chat />);
 
     expect(virtuosoState.lastProps).toMatchObject({
-      alignToBottom: true,
       increaseViewportBy: { top: 720, bottom: 360 },
       initialTopMostItemIndex: { index: 'LAST', align: 'end' },
     });
+    expect(virtuosoState.lastProps).not.toHaveProperty('alignToBottom');
   });
 
   it('cancels session-entry bottom docking once a running turn takes ownership', () => {
@@ -433,6 +446,14 @@ describe('Chat process turn rendering', () => {
       rafQueue.push(callback);
       return rafQueue.length;
     });
+    const flushRaf = () => {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
+        const callback = rafQueue.shift();
+        now += 16;
+        callback?.(now);
+      }
+    };
     vi.stubGlobal('requestAnimationFrame', requestAnimationFrameMock);
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
 
@@ -459,6 +480,7 @@ describe('Chat process turn rendering', () => {
     ];
 
     const { rerender } = render(<Chat />);
+    act(flushRaf);
     const scrollContainer = screen.getByTestId('chat-scroll-container');
     Object.defineProperty(scrollContainer, 'clientHeight', {
       configurable: true,
@@ -481,7 +503,7 @@ describe('Chat process turn rendering', () => {
     chatState.messages = [];
 
     rerender(<Chat />);
-    act(() => {});
+    act(flushRaf);
 
     chatState.loading = false;
     chatState.sending = true;
@@ -498,15 +520,7 @@ describe('Chat process turn rendering', () => {
     ];
 
     rerender(<Chat />);
-
-    act(() => {
-      let now = 0;
-      while (rafQueue.length > 0) {
-        const callback = rafQueue.shift();
-        now += 16;
-        callback?.(now);
-      }
-    });
+    act(flushRaf);
 
     expect(scrollContainer.scrollTop).toBe(0);
   });
@@ -562,8 +576,8 @@ describe('Chat process turn rendering', () => {
     });
 
     act(() => {
-      let now = 0;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -744,8 +758,8 @@ describe('Chat process turn rendering', () => {
     });
 
     act(() => {
-      let now = 0;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -755,7 +769,7 @@ describe('Chat process turn rendering', () => {
     expect(virtuosoState.lastProps).toMatchObject({
       initialTopMostItemIndex: { index: 'LAST', align: 'end' },
     });
-    expect(scrollContainer.scrollTop).toBe(280);
+    expect(scrollContainer.scrollTop).toBe(264);
   });
 
   it('keeps the original bubble-style process content when the final answer has not started yet', () => {
@@ -1366,6 +1380,8 @@ describe('Chat process turn rendering', () => {
     const scrollContainer = screen.getByTestId('chat-scroll-container');
     const activeTurnAnchor = screen.getByTestId('chat-active-turn-anchor');
     scrollContainer.scrollTop = 120;
+    fireEvent.wheel(scrollContainer, { deltaY: -240 });
+    requestAnimationFrameMock.mockClear();
     Object.defineProperty(scrollContainer, 'clientHeight', {
       configurable: true,
       value: 640,
@@ -1399,8 +1415,8 @@ describe('Chat process turn rendering', () => {
     } as DOMRect);
 
     act(() => {
-      let now = 0;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -1467,8 +1483,8 @@ describe('Chat process turn rendering', () => {
     } as DOMRect);
 
     act(() => {
-      let now = 0;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -1548,8 +1564,8 @@ describe('Chat process turn rendering', () => {
     } as DOMRect);
 
     act(() => {
-      let now = 0;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -1605,8 +1621,8 @@ describe('Chat process turn rendering', () => {
     });
 
     act(() => {
-      let now = 0;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -1614,7 +1630,6 @@ describe('Chat process turn rendering', () => {
     });
 
     expect(scrollContainer.scrollTop).toBe(120);
-    expect(requestAnimationFrameMock).not.toHaveBeenCalled();
   });
 
   it('keeps the latest streamed content visible at the bottom while auto-follow is active', () => {
@@ -1707,8 +1722,8 @@ describe('Chat process turn rendering', () => {
     vi.spyOn(activeTurnAnchor, 'getBoundingClientRect').mockImplementation(() => activeTurnRect);
 
     act(() => {
-      let now = 0;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -1729,8 +1744,8 @@ describe('Chat process turn rendering', () => {
     });
 
     act(() => {
-      let now = 200;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -1830,8 +1845,8 @@ describe('Chat process turn rendering', () => {
     vi.spyOn(activeTurnAnchor, 'getBoundingClientRect').mockImplementation(() => activeTurnRect);
 
     act(() => {
-      let now = 0;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -1854,8 +1869,8 @@ describe('Chat process turn rendering', () => {
     });
 
     act(() => {
-      let now = 200;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -1955,8 +1970,8 @@ describe('Chat process turn rendering', () => {
     vi.spyOn(activeTurnAnchor, 'getBoundingClientRect').mockImplementation(() => activeTurnRect);
 
     act(() => {
-      let now = 0;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -1977,8 +1992,8 @@ describe('Chat process turn rendering', () => {
     });
 
     act(() => {
-      let now = 200;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -2078,8 +2093,8 @@ describe('Chat process turn rendering', () => {
     vi.spyOn(activeTurnAnchor, 'getBoundingClientRect').mockImplementation(() => activeTurnRect);
 
     act(() => {
-      let now = 0;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -2103,8 +2118,8 @@ describe('Chat process turn rendering', () => {
     });
 
     act(() => {
-      let now = 200;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -2204,8 +2219,8 @@ describe('Chat process turn rendering', () => {
     vi.spyOn(activeTurnAnchor, 'getBoundingClientRect').mockImplementation(() => activeTurnRect);
 
     act(() => {
-      let now = 0;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -2228,8 +2243,8 @@ describe('Chat process turn rendering', () => {
     });
 
     act(() => {
-      let now = 200;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -2252,8 +2267,8 @@ describe('Chat process turn rendering', () => {
     });
 
     act(() => {
-      let now = 400;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -2396,8 +2411,8 @@ describe('Chat process turn rendering', () => {
     vi.spyOn(activeTurnAnchor, 'getBoundingClientRect').mockImplementation(() => activeTurnRect);
 
     act(() => {
-      let now = 0;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -2420,8 +2435,8 @@ describe('Chat process turn rendering', () => {
     });
 
     act(() => {
-      let now = 200;
-      while (rafQueue.length > 0) {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
         const callback = rafQueue.shift();
         now += 16;
         callback?.(now);
@@ -2601,7 +2616,19 @@ describe('Chat process turn rendering', () => {
     render(<Chat />);
 
     expect(screen.getByTestId('chat-process-activity-stream')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-process-activity-copy')).toHaveClass('px-1.5', 'text-[13px]', 'overflow-hidden');
     expect(screen.getByTestId('chat-process-activity-label')).toHaveTextContent('Thinking');
+    expect(screen.getByTestId('chat-process-activity-label')).toHaveClass('font-medium');
+    expect(screen.getByTestId('chat-process-activity-label-scan')).toHaveTextContent('Thinking');
+    expect(screen.getByTestId('chat-process-activity-label-scan')).toHaveClass('text-transparent');
+    expect(screen.getByTestId('chat-process-activity-label-scan')).toHaveStyle({ animation: 'chat-process-activity-label-scan 2.35s cubic-bezier(0.4, 0, 0.2, 1) infinite' });
+    expect(screen.getByTestId('chat-process-activity-label-scan')).toHaveStyle({ WebkitTextFillColor: 'transparent' });
+    const processActivityScanStyle = screen.getByTestId('chat-process-activity-label-scan').getAttribute('style') ?? '';
+    expect(processActivityScanStyle).toMatch(/rgba\(255,\s*255,\s*255/);
+    expect(processActivityScanStyle).not.toMatch(/rgba\(79,\s*141,\s*247/);
+    expect(Array.from(document.querySelectorAll('style')).some((node) => node.textContent?.includes('@keyframes chat-process-activity-label-scan'))).toBe(true);
+    expect(Array.from(document.querySelectorAll('style')).some((node) => node.textContent?.includes('0% { background-position: 172% 50%'))).toBe(true);
+    expect(Array.from(document.querySelectorAll('style')).some((node) => node.textContent?.includes('100% { background-position: -72% 50%'))).toBe(true);
     expect(screen.getByTestId('chat-process-header-brand-name')).toHaveTextContent('ClawX');
     expect(screen.getByTestId('chat-process-header-brand-name')).toHaveClass('text-[16px]');
     expect(screen.queryByTestId('chat-process-header-brand-scan')).not.toBeInTheDocument();
@@ -2624,7 +2651,8 @@ describe('Chat process turn rendering', () => {
 
     expect(screen.getByTestId('chat-typing-indicator')).not.toHaveClass('-mx-4');
     expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('group');
-    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('max-w-full');
+    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('w-full');
+    expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('min-w-0');
     expect(screen.getByTestId('chat-typing-indicator')).not.toHaveClass('px-4');
     expect(screen.getByTestId('chat-typing-indicator')).toHaveClass('space-y-3.5');
     expect(screen.getByTestId('chat-typing-indicator-header')).toHaveClass('flex');
@@ -2651,16 +2679,23 @@ describe('Chat process turn rendering', () => {
     expect(screen.getByTestId('chat-typing-indicator-scan')).toBeInTheDocument();
     expect(screen.getByTestId('chat-typing-indicator-scan')).toHaveTextContent('ClawX');
     expect(screen.getByTestId('chat-typing-indicator-scan')).toHaveClass('text-transparent');
-    expect(screen.getByTestId('chat-typing-indicator-scan')).toHaveStyle({ animation: 'chat-product-scan 3.2s cubic-bezier(0.4, 0, 0.2, 1) infinite' });
+    expect(screen.getByTestId('chat-typing-indicator-scan')).toHaveStyle({ animation: 'chat-product-scan 2.35s cubic-bezier(0.4, 0, 0.2, 1) infinite' });
     expect(screen.getByTestId('chat-typing-indicator-scan')).toHaveStyle({ WebkitTextFillColor: 'transparent' });
-    expect(screen.getByTestId('chat-typing-indicator-scan').getAttribute('style')).toContain('radial-gradient(circle at 28% 50%');
-    expect(screen.getByTestId('chat-typing-indicator-scan').getAttribute('style')).toContain('radial-gradient(circle at 56% 38%');
+    const productScanStyle = screen.getByTestId('chat-typing-indicator-scan').getAttribute('style') ?? '';
+    expect(productScanStyle).toContain('linear-gradient(90deg');
+    expect(productScanStyle).toMatch(/rgba\(255,\s*255,\s*255/);
+    expect(productScanStyle).not.toMatch(/rgba\(79,\s*141,\s*247/);
+    expect(productScanStyle).not.toContain('radial-gradient');
     expect(screen.getByTestId('chat-typing-indicator-pre-output-card')).toBeInTheDocument();
     expect(screen.getByTestId('chat-typing-indicator-pre-output-title')).toHaveTextContent('Understanding the request');
     expect(screen.getByTestId('chat-typing-indicator-pre-output-detail')).toHaveTextContent('Reasoning pipeline active');
+    expect(screen.getByTestId('chat-typing-indicator-pre-output-status')).toHaveClass('gap-1.5');
     expect(screen.getByTestId('chat-typing-indicator-pre-output-status-text')).toHaveTextContent('Processing');
-    expect(Array.from(document.querySelectorAll('style')).some((node) => node.textContent?.includes('0% { background-position: -52% 50%'))).toBe(true);
-    expect(Array.from(document.querySelectorAll('style')).some((node) => node.textContent?.includes('100% { background-position: 152% 50%'))).toBe(true);
+    expect(screen.getByTestId('chat-typing-indicator-pre-output-status-text')).toHaveClass('text-[11.5px]');
+    expect(screen.queryByTestId('chat-typing-indicator-pre-output-status-scan')).not.toBeInTheDocument();
+    expect(Array.from(document.querySelectorAll('style')).some((node) => node.textContent?.includes('@keyframes chat-product-scan'))).toBe(true);
+    expect(Array.from(document.querySelectorAll('style')).some((node) => node.textContent?.includes('0% { background-position: 172% 50%'))).toBe(true);
+    expect(Array.from(document.querySelectorAll('style')).some((node) => node.textContent?.includes('100% { background-position: -72% 50%'))).toBe(true);
   });
 
   it('hides the waiting affordance once final output starts streaming', () => {

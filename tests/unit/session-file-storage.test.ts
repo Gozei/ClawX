@@ -11,6 +11,7 @@ import {
 } from '../../electron/utils/session-file-storage';
 
 const tempDirs: string[] = [];
+const toPosixPath = (value: string) => value.replace(/\\/g, '/');
 
 describe('session-file-storage', () => {
   afterEach(async () => {
@@ -27,17 +28,19 @@ describe('session-file-storage', () => {
   it('builds a session-scoped uploads directory for valid session keys', () => {
     const resolved = resolveUserUploadStorageDirForBase('/tmp/uploads', 'agent:finance:session-123');
 
-    expect(resolved).toMatch(/^\/tmp\/uploads\/finance\/session-123-[0-9a-f]{8}\/uploads$/);
+    expect(toPosixPath(resolved)).toMatch(/^\/tmp\/uploads\/finance\/session-123-[0-9a-f]{8}\/uploads$/);
   });
 
   it('uses a shared fallback directory when session key is invalid', () => {
-    expect(resolveUserUploadStorageDirForBase('/tmp/uploads', 'invalid-session-key')).toBe('/tmp/uploads/shared/uploads');
+    expect(toPosixPath(resolveUserUploadStorageDirForBase('/tmp/uploads', 'invalid-session-key'))).toBe(
+      '/tmp/uploads/shared/uploads',
+    );
   });
 
   it('builds a session-scoped outputs directory for valid session keys', () => {
     const resolved = resolveAssistantOutputStorageDirForBase('/tmp/outputs', 'agent:finance:session-123');
 
-    expect(resolved).toMatch(/^\/tmp\/outputs\/finance\/session-123-[0-9a-f]{8}\/outputs$/);
+    expect(toPosixPath(resolved)).toMatch(/^\/tmp\/outputs\/finance\/session-123-[0-9a-f]{8}\/outputs$/);
   });
 
   it('preserves the original file name when there is no collision', async () => {

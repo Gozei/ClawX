@@ -1160,6 +1160,90 @@ describe('chat store session resume', () => {
     expect(next.sessionRunningState).toEqual({});
   });
 
+  it('does not keep temporary assistant snapshots once cumulative stream text contains them', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+    const intro = 'I will research the chip market now.';
+    const update = 'I found the first market figures.';
+    const finalizing = 'I am adding sources to the final answer.';
+    const cumulativeText = [intro, '', update, '', finalizing].join('\n');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: { 'agent:main:main': true },
+      sending: true,
+      activeRunId: 'run-cumulative-stream',
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: 'running',
+    });
+
+    useChatStore.getState().handleChatEvent({
+      state: 'delta',
+      runId: 'run-cumulative-stream',
+      sessionKey: 'agent:main:main',
+      seq: 1,
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: intro }],
+        timestamp: assistantTimestampSeconds,
+      },
+    });
+    await vi.advanceTimersByTimeAsync(60);
+
+    useChatStore.getState().handleChatEvent({
+      state: 'delta',
+      runId: 'run-cumulative-stream',
+      sessionKey: 'agent:main:main',
+      seq: 2,
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: update }],
+        timestamp: assistantTimestampSeconds + 1,
+      },
+    });
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(useChatStore.getState().messages.map((message) => message.id)).toEqual([
+      'user-1',
+      'stream-delta-snapshot-1',
+    ]);
+
+    useChatStore.getState().handleChatEvent({
+      state: 'delta',
+      runId: 'run-cumulative-stream',
+      sessionKey: 'agent:main:main',
+      seq: 3,
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: cumulativeText }],
+        timestamp: assistantTimestampSeconds + 2,
+      },
+    });
+    await vi.advanceTimersByTimeAsync(60);
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual(['user-1']);
+    expect(next.streamingMessage).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'text', text: cumulativeText }],
+    });
+  });
+
   it('clears stale settled streaming state when an explicit history refresh already contains the final reply', async () => {
     gatewayRpcMock.mockReset();
     gatewayRpcMock.mockImplementation((method: string) => {
@@ -1229,6 +1313,163 @@ describe('chat store session resume', () => {
     expect(next.streamingMessage).toBeNull();
     expect(next.streamingTools).toEqual([]);
     expect(next.pendingToolImages).toEqual([]);
+  });
+
+  it('merges late assistant process deltas into the settled turn before the final reply', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Fix the spreadsheet.', timestamp: userTimestampSeconds },
+        {
+          id: 'assistant-final',
+          role: 'assistant',
+          content: 'The spreadsheet is fixed now.',
+          timestamp: userTimestampSeconds + 20,
+          stopReason: 'stop',
+        },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: null,
+    });
+
+    useChatStore.getState().handleChatEvent({
+      state: 'delta',
+      runId: 'run-settled',
+      sessionKey: 'agent:main:main',
+      seq: 2,
+      message: {
+        id: 'assistant-process-late',
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'I found the formula issue.' },
+          { type: 'toolCall', id: 'tool-1', name: 'exec', input: { command: 'inspect workbook' } },
+        ],
+        timestamp: userTimestampSeconds + 10,
+        stopReason: 'toolUse',
+      },
+    });
+
+    useChatStore.getState().handleChatEvent({
+      state: 'delta',
+      runId: 'run-settled',
+      sessionKey: 'agent:main:main',
+      seq: 1,
+      message: {
+        id: 'assistant-process-earlier',
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'I am checking the workbook structure.' },
+          { type: 'toolCall', id: 'tool-0', name: 'read', input: { path: 'workbook.xlsx' } },
+        ],
+        timestamp: userTimestampSeconds + 5,
+        stopReason: 'toolUse',
+      },
+    });
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual([
+      'user-1',
+      'assistant-process-earlier',
+      'assistant-process-late',
+      'assistant-final',
+    ]);
+    expect(next.sending).toBe(false);
+    expect(next.activeRunId).toBeNull();
+    expect(next.sendStage).toBeNull();
+    expect(next.streamingMessage).toBeNull();
+    expect(next.streamingTools).toEqual([]);
+  });
+
+  it('keeps the current active run while merging late process deltas from a previous settled turn', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+    const newUserTimestamp = userTimestampSeconds + 60;
+    const currentStreamingMessage = {
+      id: 'assistant-current-stream',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Working on the new request.' }],
+      timestamp: newUserTimestamp + 1,
+    };
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        { id: 'user-previous', role: 'user', content: 'Fix the spreadsheet.', timestamp: userTimestampSeconds },
+        {
+          id: 'assistant-previous-final',
+          role: 'assistant',
+          content: 'The spreadsheet is fixed now.',
+          timestamp: userTimestampSeconds + 20,
+          stopReason: 'stop',
+        },
+        { id: 'user-current', role: 'user', content: 'Now summarize it.', timestamp: newUserTimestamp },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: { 'agent:main:main': true },
+      sending: true,
+      activeRunId: 'run-current',
+      streamingText: '',
+      streamingMessage: currentStreamingMessage,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: newUserTimestamp * 1000,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: 'running',
+    });
+
+    useChatStore.getState().handleChatEvent({
+      state: 'delta',
+      runId: 'run-previous',
+      sessionKey: 'agent:main:main',
+      seq: 1,
+      message: {
+        id: 'assistant-previous-process',
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'I checked the workbook formulas.' },
+          { type: 'toolCall', id: 'tool-prev', name: 'exec', input: { command: 'check formulas' } },
+        ],
+        timestamp: userTimestampSeconds + 10,
+        stopReason: 'toolUse',
+      },
+    });
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual([
+      'user-previous',
+      'assistant-previous-process',
+      'assistant-previous-final',
+      'user-current',
+    ]);
+    expect(next.sending).toBe(true);
+    expect(next.activeRunId).toBe('run-current');
+    expect(next.sendStage).toBe('running');
+    expect(next.streamingMessage).toEqual(currentStreamingMessage);
+    expect(next.sessionRunningState).toEqual({ 'agent:main:main': true });
   });
 
   it('keeps the history poll alive after a delta event so a missing completed notification can still finalize the turn', async () => {

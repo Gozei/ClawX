@@ -223,21 +223,21 @@ export function mergeProviderStoreData(legacyData: JsonRecord, currentData: Json
   const currentApiKeys = isRecord(currentData.apiKeys)
     ? (currentData.apiKeys as Record<string, unknown>)
     : {};
-
-  const mergedAccounts = {
-    ...legacyAccounts,
-    ...currentAccounts,
-  };
-  const mergedProviders = {
-    ...legacyProviders,
-    ...currentProviders,
-  };
   const mergedSecrets = mapLegacySecretsToCurrentAccounts(
     legacyAccounts,
     currentAccounts,
     legacySecrets,
     currentSecrets,
   );
+  const mergedAccounts: Record<string, unknown> = {
+    ...legacyAccounts,
+    ...currentAccounts,
+  };
+
+  const mergedProviders = {
+    ...legacyProviders,
+    ...currentProviders,
+  };
   const mergedApiKeys = {
     ...legacyApiKeys,
     ...deriveApiKeysFromSecrets(mergedSecrets),

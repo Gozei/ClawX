@@ -2,6 +2,7 @@ import { Fragment, memo, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 type StreamingMarkdownPreviewProps = {
+  anchorPrefix?: string;
   content: string;
   className?: string;
   trailingCursor?: boolean;
@@ -34,6 +35,15 @@ type InlineToken =
   | { kind: 'code'; value: string }
   | { kind: 'strike'; value: string }
   | { kind: 'link'; label: string };
+
+function buildBlockAnchorProps(anchorPrefix: string | undefined, blockKey: string, blockType: string) {
+  if (!anchorPrefix) return {};
+  return {
+    'data-chat-scroll-block-anchor': 'true',
+    'data-chat-scroll-block-anchor-key': `${anchorPrefix}:${blockKey}`,
+    'data-chat-scroll-block-anchor-type': blockType,
+  };
+}
 
 function tokenizeInlineMarkdown(text: string): InlineToken[] {
   const normalized = text.trimEnd();
@@ -268,6 +278,7 @@ function renderInlineContent(text: string, trailingCursor = false): ReactNode[] 
 }
 
 export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
+  anchorPrefix,
   content,
   className,
   trailingCursor = false,
@@ -289,7 +300,14 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
         }
 
         if (block.kind === 'divider') {
-          return <div key={block.key} className="h-px w-full bg-black/10 dark:bg-white/12" aria-hidden="true" />;
+          return (
+            <div
+              key={block.key}
+              className="h-px w-full bg-black/10 dark:bg-white/12"
+              aria-hidden="true"
+              {...buildBlockAnchorProps(anchorPrefix, block.key, 'divider')}
+            />
+          );
         }
 
         if (block.kind === 'code') {
@@ -297,6 +315,7 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
             <pre
               key={block.key}
               className="max-w-full overflow-x-auto rounded-2xl border border-black/5 bg-black/[0.025] px-3.5 py-3 text-[12px] leading-6 text-foreground/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] dark:border-white/7 dark:bg-white/[0.025]"
+              {...buildBlockAnchorProps(anchorPrefix, block.key, 'code')}
             >
               {block.text}
               {showCursor ? <span data-testid="chat-streaming-cursor" className="ml-0.5 inline-block h-4 w-2 animate-pulse rounded-sm bg-foreground/45 align-[-2px]" /> : null}
@@ -306,7 +325,11 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
 
         if (block.kind === 'heading') {
           return (
-            <div key={block.key} className={cn(block.level <= 2 && 'pt-1', block.level === 3 && 'pt-0.5')}>
+            <div
+              key={block.key}
+              className={cn(block.level <= 2 && 'pt-1', block.level === 3 && 'pt-0.5')}
+              {...buildBlockAnchorProps(anchorPrefix, block.key, `heading-${block.level}`)}
+            >
               <div
                 className={cn(
                   'font-semibold tracking-[-0.015em] text-foreground',
@@ -329,6 +352,7 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
             <div
               key={block.key}
               className="min-w-0 border-l-2 border-black/8 pl-3.5 text-[14px] leading-7 text-foreground/70 dark:border-white/10"
+              {...buildBlockAnchorProps(anchorPrefix, block.key, 'quote')}
             >
               {renderInlineContent(block.text, showCursor)}
             </div>
@@ -341,7 +365,11 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
               {block.items.map((item, itemIndex) => {
                 const itemHasCursor = showCursor && itemIndex === block.items.length - 1;
                 return (
-                  <div key={`${block.key}-${itemIndex}`} className="flex min-w-0 items-start gap-3 text-[14px] leading-7 text-foreground">
+                  <div
+                    key={`${block.key}-${itemIndex}`}
+                    className="flex min-w-0 items-start gap-3 text-[14px] leading-7 text-foreground"
+                    {...buildBlockAnchorProps(anchorPrefix, `${block.key}-${itemIndex}`, 'unordered-item')}
+                  >
                     <span className="mt-[0.6rem] h-1.5 w-1.5 shrink-0 rounded-full bg-foreground/24" aria-hidden="true" />
                     <span className="min-w-0 flex-1 text-foreground/90">
                       {renderInlineContent(item, itemHasCursor)}
@@ -359,7 +387,11 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
               {block.items.map((item, itemIndex) => {
                 const itemHasCursor = showCursor && itemIndex === block.items.length - 1;
                 return (
-                  <div key={`${block.key}-${itemIndex}`} className="flex min-w-0 items-start gap-3 text-[14px] leading-7 text-foreground">
+                  <div
+                    key={`${block.key}-${itemIndex}`}
+                    className="flex min-w-0 items-start gap-3 text-[14px] leading-7 text-foreground"
+                    {...buildBlockAnchorProps(anchorPrefix, `${block.key}-${itemIndex}`, 'ordered-item')}
+                  >
                     <span className="mt-[0.08rem] min-w-[1.5rem] shrink-0 text-[13px] text-foreground/42 tabular-nums">
                       {item.order}.
                     </span>
@@ -374,7 +406,11 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
         }
 
         return (
-          <div key={block.key} className="min-w-0 text-[14px] leading-7 text-foreground/86">
+          <div
+            key={block.key}
+            className="min-w-0 text-[14px] leading-7 text-foreground/86"
+            {...buildBlockAnchorProps(anchorPrefix, block.key, 'paragraph')}
+          >
             {renderInlineContent(block.text, showCursor)}
           </div>
         );

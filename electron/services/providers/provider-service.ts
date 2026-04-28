@@ -95,6 +95,55 @@ function maskApiKey(apiKey: string | null): string | null {
   return '*'.repeat(apiKey.length);
 }
 
+function normalizeComparableString(value: string | undefined): string {
+  return (value || '').trim().replace(/\/+$/, '').toLowerCase();
+}
+
+function getConfiguredAccountModelIds(account: ProviderAccount): string[] {
+  return Array.from(new Set([
+    account.model || '',
+    ...((account.metadata?.customModels ?? []).map((modelId) => modelId.trim())),
+  ].map((modelId) => modelId.trim()).filter(Boolean)));
+}
+
+function getProviderModelDuplicateScope(account: ProviderAccount): string {
+  const defaultBaseUrl = getProviderDefinition(account.vendorId)?.providerConfig?.baseUrl;
+  return normalizeComparableString(account.baseUrl || defaultBaseUrl) || `vendor:${account.vendorId}`;
+}
+
+function getProviderModelDuplicateSignatures(account: ProviderAccount): string[] {
+  const scope = getProviderModelDuplicateScope(account);
+  return getConfiguredAccountModelIds(account)
+    .map((modelId) => `${scope}|${modelId.trim().toLowerCase()}`);
+}
+
+function hasProviderModelIdentityChanged(
+  previous: ProviderAccount,
+  next: ProviderAccount,
+): boolean {
+  return JSON.stringify(getProviderModelDuplicateSignatures(previous).sort())
+    !== JSON.stringify(getProviderModelDuplicateSignatures(next).sort());
+}
+
+async function assertNoDuplicateProviderModels(nextAccount: ProviderAccount): Promise<void> {
+  const nextSignatures = new Set(getProviderModelDuplicateSignatures(nextAccount));
+  if (nextSignatures.size === 0) {
+    return;
+  }
+
+  const accounts = await listProviderAccounts();
+  for (const account of accounts) {
+    if (account.id === nextAccount.id) continue;
+    const duplicateModelId = getConfiguredAccountModelIds(account).find((modelId) =>
+      nextSignatures.has(`${getProviderModelDuplicateScope(account)}|${modelId.trim().toLowerCase()}`));
+    if (duplicateModelId) {
+      throw new Error(
+        `Duplicate model configuration: provider URL "${account.baseUrl || account.vendorId}" already has model "${duplicateModelId}".`,
+      );
+    }
+  }
+}
+
 const legacyProviderApiWarned = new Set<string>();
 const ACCOUNT_LIST_CACHE_TTL_MS = 1200;
 
@@ -331,6 +380,7 @@ export class ProviderService {
 
   async createAccount(account: ProviderAccount, apiKey?: string): Promise<ProviderAccount> {
     await ensureProviderStoreMigrated();
+    await assertNoDuplicateProviderModels(account);
     // Only save to providerAccounts store — do NOT call saveProvider() which
     // writes to the legacy `providers` store and causes phantom/duplicate issues.
     await unsuppressProviderKeys(getSuppressedProviderKeysForAccount(account));
@@ -359,6 +409,10 @@ export class ProviderService {
       id: accountId,
       updatedAt: patch.updatedAt ?? new Date().toISOString(),
     };
+
+    if (hasProviderModelIdentityChanged(existing, nextAccount)) {
+      await assertNoDuplicateProviderModels(nextAccount);
+    }
 
     // Only save to providerAccounts store — skip legacy saveProvider().
     await unsuppressProviderKeys(getSuppressedProviderKeysForAccount(nextAccount));

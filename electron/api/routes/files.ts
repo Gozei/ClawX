@@ -2473,15 +2473,6 @@ async function buildFilePreview(
     );
   }
 
-  if (await shouldPromptForLibreOfficePreview(extension)) {
-    return createUnavailablePreview(
-      fileName,
-      mimeType,
-      fileSize,
-      'requiresLibreOffice',
-    );
-  }
-
   if (mimeType.startsWith('image/')) {
     return {
       kind: 'image',
@@ -2511,6 +2502,15 @@ async function buildFilePreview(
   }
 
   if (PRESENTATION_EXTENSIONS.has(extension)) {
+    if (await shouldPromptForLibreOfficePreview(extension)) {
+      return createUnavailablePreview(
+        fileName,
+        mimeType,
+        fileSize,
+        'requiresLibreOffice',
+      );
+    }
+
     return await buildPresentationPreview(filePath, fileName, mimeType, fileSize);
   }
 

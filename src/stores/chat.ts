@@ -117,6 +117,7 @@ const _historyLoadInFlight = new Map<string, { promise: Promise<void>; quiet: bo
 const _lastHistoryLoadAtBySession = new Map<string, number>();
 const SESSION_LOAD_MIN_INTERVAL_MS = 1_200;
 const HISTORY_LOAD_MIN_INTERVAL_MS = 800;
+const HISTORY_LOADING_INDICATOR_DELAY_MS = 180;
 const HISTORY_POLL_SILENCE_WINDOW_MS = 3_500;
 const HISTORY_POLL_START_DELAY_MS = 5_000;
 const HISTORY_POLL_INTERVAL_MS = 6_000;
@@ -318,6 +319,11 @@ function normalizeComposerDraft(draft: ChatComposerDraft | null | undefined): Ch
   };
 
   return hasComposerDraftContent(normalized) ? normalized : null;
+}
+
+function shouldMaterializeComposerDraftSession(draft: ChatComposerDraft): boolean {
+  return draft.attachments.length > 0
+    || (typeof draft.targetAgentId === 'string' && draft.targetAgentId.trim().length > 0);
 }
 
 function cloneSessionViewSnapshot(snapshot: SessionViewSnapshot): SessionViewSnapshot {
@@ -604,6 +610,13 @@ function flushPendingDelta(set: ChatStoreSet): void {
           ? nextMessage
           : null;
 
+      if (incomingAssistant && nextMessage.content !== undefined) {
+        nextPersistedMessages = removeContainedAssistantDeltaSnapshots(
+          nextPersistedMessages,
+          incomingAssistant,
+        );
+      }
+
       if (
         currentStreamingAssistant
         && incomingAssistant
@@ -815,6 +828,38 @@ function isEquivalentRecentAssistantMessage(
   });
 }
 
+function normalizeAssistantStreamText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function isAssistantDeltaSnapshotMessage(message: RawMessage): boolean {
+  if (message.role !== 'assistant') return false;
+  const id = typeof message.id === 'string' ? message.id : '';
+  return id.startsWith('stream-delta-snapshot-') || id.endsWith('-delta-snapshot');
+}
+
+function assistantTextContainsSnapshot(message: RawMessage, snapshot: RawMessage): boolean {
+  const messageText = normalizeAssistantStreamText(getComparableMessageText(message));
+  const snapshotText = normalizeAssistantStreamText(getComparableMessageText(snapshot));
+  if (!messageText || !snapshotText) return false;
+  return messageText === snapshotText || messageText.includes(snapshotText);
+}
+
+function removeContainedAssistantDeltaSnapshots(
+  messages: RawMessage[],
+  incomingAssistant: RawMessage,
+): RawMessage[] {
+  let changed = false;
+  const nextMessages = messages.filter((message) => {
+    if (!isAssistantDeltaSnapshotMessage(message)) return true;
+    if (!assistantTextContainsSnapshot(incomingAssistant, message)) return true;
+    changed = true;
+    return false;
+  });
+
+  return changed ? nextMessages : messages;
+}
+
 function messageExistsByIdentityOrText(messages: RawMessage[], candidate: RawMessage): boolean {
   if (candidate.id && messages.some((message) => message.id === candidate.id)) return true;
   const candidateText = getComparableMessageText(candidate);
@@ -824,6 +869,157 @@ function messageExistsByIdentityOrText(messages: RawMessage[], candidate: RawMes
     if (candidateText && getComparableMessageText(message) === candidateText) return true;
     return !!candidateContentKey && buildMessageContentKey(message.content) === candidateContentKey;
   });
+}
+
+function normalizeStopReason(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase().replace(/[-_\s]/g, '') : '';
+}
+
+function isToolUseStopReason(value: unknown): boolean {
+  return normalizeStopReason(value) === 'tooluse';
+}
+
+function hasToolInteractionContent(message: RawMessage): boolean {
+  const content = message.content;
+  if (Array.isArray(content)) {
+    for (const block of content as ContentBlock[]) {
+      if (
+        block.type === 'tool_use'
+        || block.type === 'toolCall'
+        || block.type === 'tool_result'
+        || block.type === 'toolResult'
+      ) {
+        return true;
+      }
+    }
+  }
+
+  const msg = message as unknown as Record<string, unknown>;
+  const toolCalls = msg.tool_calls ?? msg.toolCalls;
+  return Array.isArray(toolCalls) && toolCalls.length > 0;
+}
+
+function hasRenderableAssistantPayload(message: RawMessage): boolean {
+  return hasNonToolAssistantContent(message)
+    || isToolOnlyMessage(message)
+    || hasToolInteractionContent(message);
+}
+
+function isSettledFinalAssistantMessage(message: RawMessage | undefined): boolean {
+  if (!message || message.role !== 'assistant') return false;
+  if (isAssistantDeltaSnapshotMessage(message)) return false;
+  if (isInternalAssistantControlMessage(message)) return false;
+  if (isToolOnlyMessage(message)) return false;
+  if (!hasNonToolAssistantContent(message)) return false;
+  if (isToolUseStopReason(message.stopReason)) return false;
+
+  // Text-bearing tool-use turns are process messages, not final replies.  A
+  // final assistant message can still contain process blocks when the provider
+  // sends a stop reason, so only classify missing-stop tool turns as process.
+  if (!message.stopReason && hasToolInteractionContent(message)) {
+    return false;
+  }
+
+  return true;
+}
+
+function getMessageTimestampMs(message: RawMessage | undefined): number | null {
+  return typeof message?.timestamp === 'number' && Number.isFinite(message.timestamp)
+    ? toMs(message.timestamp)
+    : null;
+}
+
+function normalizeSettledTurnIncomingMessage(message: RawMessage): RawMessage | null {
+  const toolResultProcessMessage = createToolResultProcessMessage(message);
+  const normalizedMessage = toolResultProcessMessage ?? (
+    isToolResultRole(message.role)
+      ? null
+      : {
+          ...message,
+          role: (message.role || 'assistant') as RawMessage['role'],
+        }
+  );
+
+  if (!normalizedMessage || normalizedMessage.role !== 'assistant') return null;
+  if (isInternalAssistantControlMessage(normalizedMessage)) return null;
+  if (!hasRenderableAssistantPayload(normalizedMessage)) return null;
+  return normalizedMessage;
+}
+
+function findNextUserMessageIndex(messages: RawMessage[], startIndex: number): number {
+  for (let index = startIndex + 1; index < messages.length; index += 1) {
+    if (messages[index]?.role === 'user') {
+      return index;
+    }
+  }
+  return messages.length;
+}
+
+function findTurnUserIndexForMessage(messages: RawMessage[], message: RawMessage): number {
+  const messageTimestampMs = getMessageTimestampMs(message);
+  if (messageTimestampMs != null) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const current = messages[index];
+      if (current?.role !== 'user') continue;
+      const currentTimestampMs = getMessageTimestampMs(current);
+      if (currentTimestampMs == null || currentTimestampMs <= messageTimestampMs) {
+        return index;
+      }
+    }
+  }
+
+  return findLastUserMessageIndex(messages);
+}
+
+function mergeMessageIntoSettledTurn(
+  messages: RawMessage[],
+  incomingMessage: RawMessage,
+): { handled: boolean; messages: RawMessage[] } {
+  const normalizedMessage = normalizeSettledTurnIncomingMessage(incomingMessage);
+  if (!normalizedMessage) {
+    return { handled: false, messages };
+  }
+
+  const userIndex = findTurnUserIndexForMessage(messages, normalizedMessage);
+  if (userIndex < 0) {
+    return { handled: false, messages };
+  }
+
+  const nextUserIndex = findNextUserMessageIndex(messages, userIndex);
+  const turnMessages = messages.slice(userIndex + 1, nextUserIndex);
+  const settledFinalOffset = turnMessages.findIndex(isSettledFinalAssistantMessage);
+  if (settledFinalOffset < 0) {
+    return { handled: false, messages };
+  }
+
+  if (messageExistsByIdentityOrText(turnMessages, normalizedMessage)) {
+    return { handled: true, messages };
+  }
+
+  const settledFinalIndex = userIndex + 1 + settledFinalOffset;
+  const incomingIsFinal = isSettledFinalAssistantMessage(normalizedMessage);
+  const upperBound = incomingIsFinal ? nextUserIndex : settledFinalIndex;
+  const incomingTimestampMs = getMessageTimestampMs(normalizedMessage);
+  let insertIndex = upperBound;
+
+  if (incomingTimestampMs != null) {
+    for (let index = userIndex + 1; index < upperBound; index += 1) {
+      const currentTimestampMs = getMessageTimestampMs(messages[index]);
+      if (currentTimestampMs != null && currentTimestampMs > incomingTimestampMs) {
+        insertIndex = index;
+        break;
+      }
+    }
+  }
+
+  return {
+    handled: true,
+    messages: [
+      ...messages.slice(0, insertIndex),
+      normalizedMessage,
+      ...messages.slice(insertIndex),
+    ],
+  };
 }
 
 function mergeRecoverableSessionView(
@@ -2953,11 +3149,21 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         };
       }
 
+      const shouldMaterializeSession = shouldMaterializeComposerDraftSession(normalizedDraft);
       return {
         composerDrafts: {
           ...state.composerDrafts,
           [sessionKey]: normalizedDraft,
         },
+        ...(shouldMaterializeSession
+          ? {
+              sessions: ensureSessionEntry(state.sessions, sessionKey),
+              sessionLastActivity: {
+                ...state.sessionLastActivity,
+                [sessionKey]: Date.now(),
+              },
+            }
+          : {}),
       };
     });
   },
@@ -3682,11 +3888,12 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       return;
     }
 
-    if (!quiet) set({ loading: true, error: null });
+    if (!quiet) set({ error: null });
 
     // Safety guard: if history loading takes too long, force loading to false
     // to prevent the UI from being stuck in a spinner forever.
     let loadingTimedOut = false;
+    let loadingIndicatorTimer: ReturnType<typeof setTimeout> | null = null;
     const loadingSafetyTimer = quiet ? null : setTimeout(() => {
       loadingTimedOut = true;
       set({ loading: false });
@@ -4298,9 +4505,19 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     })();
 
     _historyLoadInFlight.set(currentSessionKey, { promise: loadPromise, quiet });
+    if (!quiet) {
+      loadingIndicatorTimer = setTimeout(() => {
+        const active = _historyLoadInFlight.get(currentSessionKey);
+        if (active?.promise !== loadPromise || get().currentSessionKey !== currentSessionKey) {
+          return;
+        }
+        set({ loading: true });
+      }, HISTORY_LOADING_INDICATOR_DELAY_MS);
+    }
     try {
       await loadPromise;
     } finally {
+      if (loadingIndicatorTimer) clearTimeout(loadingIndicatorTimer);
       // Clear the safety timer on normal completion
       if (loadingSafetyTimer) clearTimeout(loadingSafetyTimer);
       if (!loadingTimedOut) {
@@ -4643,9 +4860,6 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
     // Only process events for the current session (when sessionKey is present)
     if (resolvedEventSessionKey != null && !sessionKeysMatch(resolvedEventSessionKey, currentSessionKey)) return;
 
-    // Only process events for the active run (or if no active run set)
-    if (activeRunId && runId && runId !== activeRunId) return;
-
     if (isDuplicateChatEvent(eventState, event)) return;
 
     _lastChatEventAt = Date.now();
@@ -4661,6 +4875,53 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         resolvedState = 'delta';
       }
     }
+
+    const eventMessage = event.message && typeof event.message === 'object'
+      ? event.message as RawMessage
+      : null;
+    const eventBelongsToDifferentActiveRun = !!activeRunId && !!runId && runId !== activeRunId;
+    if ((resolvedState === 'delta' || resolvedState === 'final') && eventMessage) {
+      let mergedIntoSettledTurn = false;
+      set((state) => {
+        const merged = mergeMessageIntoSettledTurn(state.messages, eventMessage);
+        mergedIntoSettledTurn = merged.handled;
+        if (!merged.handled) {
+          return {};
+        }
+
+        return {
+          messages: merged.messages,
+          ...(eventBelongsToDifferentActiveRun
+            ? {}
+            : {
+                sending: false,
+                activeRunId: null,
+                sendStage: null,
+                pendingFinal: false,
+                lastUserMessageAt: null,
+                streamingText: '',
+                streamingMessage: null,
+                streamingTools: [],
+                sessionNotice: null,
+                sessionRunningState: updateSessionRunningState(state.sessionRunningState, currentSessionKey, false),
+              }),
+        };
+      });
+
+      if (mergedIntoSettledTurn) {
+        if (!eventBelongsToDifferentActiveRun) {
+          clearHistoryPoll();
+          clearHistoryIncompleteRetry(currentSessionKey);
+          clearNoResponseRecovery(currentSessionKey);
+          clearPendingFinalRecoveryTimer();
+        }
+        return;
+      }
+    }
+
+    // Only process live events for the active run. Historical process events
+    // that can be merged into an already-settled turn are handled above.
+    if (activeRunId && runId && runId !== activeRunId) return;
 
     // Only pause the history poll when we receive actual streaming data.
     // The gateway sends "agent" events with { phase, startedAt } that carry

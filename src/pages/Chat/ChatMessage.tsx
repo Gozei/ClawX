@@ -3,7 +3,7 @@
  * Renders user / assistant / system / toolresult messages
  * with markdown, thinking sections, images, and tool cards.
  */
-import { useState, useCallback, useEffect, useMemo, useRef, memo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, memo, isValidElement, type ReactNode } from 'react';
 import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { FileTypeIcon } from './file-icon';
 import { createPortal } from 'react-dom';
@@ -32,6 +32,7 @@ interface ChatMessageProps {
   hideAvatar?: boolean;
   reserveAvatarSpace?: boolean;
   constrainWidth?: boolean;
+  scrollAnchorPrefix?: string;
   onOpenAttachmentPreview?: (file: AttachedFileMeta) => void;
   streamingTools?: Array<{
     id?: string;
@@ -71,6 +72,9 @@ function getRuntimeProviderKey(account: ProviderAccount): string {
 }
 
 const messageSignatureCache = new WeakMap<RawMessage, string>();
+const generatedMessageAnchorCache = new WeakMap<RawMessage, string>();
+let generatedMessageAnchorId = 0;
+
 function buildMessageSignature(message: RawMessage): string {
   const cached = messageSignatureCache.get(message);
   if (cached) return cached;
@@ -96,6 +100,62 @@ function buildMessageSignature(message: RawMessage): string {
 
   messageSignatureCache.set(message, signature);
   return signature;
+}
+
+function stableHashString(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function getReactNodeText(node: ReactNode): string {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number' || typeof node === 'bigint') return String(node);
+  if (Array.isArray(node)) return node.map((child) => getReactNodeText(child)).join('');
+  if (isValidElement<{ children?: ReactNode }>(node)) return getReactNodeText(node.props.children);
+  return '';
+}
+
+type ChatScrollBlockAnchorProps = {
+  'data-chat-scroll-block-anchor': 'true';
+  'data-chat-scroll-block-anchor-key': string;
+  'data-chat-scroll-block-anchor-type': string;
+};
+
+function buildChatMessageAnchorPrefix(message: RawMessage): string {
+  const stableIdentity = [
+    message.id ?? '',
+    message.timestamp ?? '',
+    message.provider ?? '',
+    message.modelRef ?? message.model ?? '',
+  ].filter(Boolean).join(':');
+  if (stableIdentity) {
+    return `message:${message.role}:${stableIdentity}`;
+  }
+
+  const cached = generatedMessageAnchorCache.get(message);
+  if (cached) return cached;
+  generatedMessageAnchorId += 1;
+  const generated = `message:${message.role}:generated-${generatedMessageAnchorId}`;
+  generatedMessageAnchorCache.set(message, generated);
+  return generated;
+}
+
+function createBlockAnchorFactory(anchorPrefix: string) {
+  const counters = new Map<string, number>();
+  return (blockType: string, children: ReactNode): ChatScrollBlockAnchorProps => {
+    const index = counters.get(blockType) ?? 0;
+    counters.set(blockType, index + 1);
+    const textHash = stableHashString(getReactNodeText(children).slice(0, 512));
+    return {
+      'data-chat-scroll-block-anchor': 'true',
+      'data-chat-scroll-block-anchor-key': `${anchorPrefix}:${blockType}:${index}:${textHash}`,
+      'data-chat-scroll-block-anchor-type': blockType,
+    };
+  };
 }
 
 function areStreamingToolsEqual(
@@ -128,6 +188,7 @@ function areChatMessagePropsEqual(prev: ChatMessageProps, next: ChatMessageProps
     && prev.hideAvatar === next.hideAvatar
     && prev.reserveAvatarSpace === next.reserveAvatarSpace
     && prev.constrainWidth === next.constrainWidth
+    && prev.scrollAnchorPrefix === next.scrollAnchorPrefix
     && prev.onOpenAttachmentPreview === next.onOpenAttachmentPreview
     && buildMessageSignature(prev.message) === buildMessageSignature(next.message)
     && areStreamingToolsEqual(prev.streamingTools, next.streamingTools);
@@ -184,6 +245,7 @@ export const ChatMessage = memo(function ChatMessage({
   hideAvatar = false,
   reserveAvatarSpace = false,
   constrainWidth = true,
+  scrollAnchorPrefix,
   onOpenAttachmentPreview,
   streamingTools = [],
 }: ChatMessageProps) {
@@ -216,6 +278,10 @@ export const ChatMessage = memo(function ChatMessage({
   const attachmentListClassName = cn('flex min-w-0 flex-wrap gap-2', constrainedMessageWidthClassName);
   const mediaListClassName = cn('flex min-w-0 flex-wrap gap-2', constrainedMessageWidthClassName);
   const branding = useBranding();
+  const messageAnchorPrefix = useMemo(
+    () => scrollAnchorPrefix ?? buildChatMessageAnchorPrefix(message),
+    [message, scrollAnchorPrefix],
+  );
   const providerItems = useMemo(
     () => buildProviderListItems(providerAccounts, providerStatuses, providerVendors, providerDefaultAccountId),
     [providerAccounts, providerDefaultAccountId, providerStatuses, providerVendors],
@@ -345,6 +411,7 @@ export const ChatMessage = memo(function ChatMessage({
               isStreaming={isStreaming}
               fontSize={bodyFontSize}
               assistantMessageStyle={assistantMessageStyle}
+              anchorPrefix={messageAnchorPrefix}
             />
           )}
 
@@ -383,7 +450,7 @@ export const ChatMessage = memo(function ChatMessage({
           )}
 
           {hasText && (
-            <MessageHoverBar
+            <MessageMetaBar
               text={text}
               timestamp={message.timestamp}
               metaFontSize={metaFontSize}
@@ -525,6 +592,7 @@ export const ChatMessage = memo(function ChatMessage({
             isStreaming={isStreaming}
             fontSize={bodyFontSize}
             assistantMessageStyle={assistantMessageStyle}
+            anchorPrefix={messageAnchorPrefix}
           />
         )}
 
@@ -564,9 +632,9 @@ export const ChatMessage = memo(function ChatMessage({
           </div>
         )}
 
-        {/* Hover row — show timestamp + copy action on the bottom-right for text messages */}
+        {/* Metadata row — show timestamp + copy action for text messages */}
         {hasText && (
-          <MessageHoverBar
+          <MessageMetaBar
             text={text}
             timestamp={message.timestamp}
             metaFontSize={metaFontSize}
@@ -646,9 +714,9 @@ const ToolStatusBar = memo(function ToolStatusBar({
   );
 });
 
-// ── Message hover bar (timestamp + copy, shown on group hover) ──
+// ── Message metadata bar (timestamp + copy) ──
 
-const MessageHoverBar = memo(function MessageHoverBar({
+const MessageMetaBar = memo(function MessageMetaBar({
   text,
   timestamp,
   metaFontSize,
@@ -672,8 +740,10 @@ const MessageHoverBar = memo(function MessageHoverBar({
 
   return (
     <div
+      data-testid={`chat-message-meta-${messageType}`}
       className={cn(
-        'invisible pointer-events-none flex items-center gap-2 select-none text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:visible group-hover:pointer-events-auto group-hover:opacity-100',
+        'flex items-center gap-2 select-none text-muted-foreground',
+        !isAssistant && 'invisible pointer-events-none opacity-0 transition-opacity duration-150 group-hover:visible group-hover:pointer-events-auto group-hover:opacity-100',
         isAssistant ? 'self-start' : 'self-end',
       )}
     >
@@ -735,6 +805,7 @@ const MessageBubble = memo(function MessageBubble({
   isStreaming,
   fontSize,
   assistantMessageStyle,
+  anchorPrefix,
 }: {
   text: string;
   isUser: boolean;
@@ -742,8 +813,10 @@ const MessageBubble = memo(function MessageBubble({
   isStreaming: boolean;
   fontSize: string;
   assistantMessageStyle: AssistantMessageStyle;
+  anchorPrefix: string;
 }) {
   const usesAssistantStreamStyle = !isUser && assistantMessageStyle === 'stream';
+  const createBlockAnchorProps = createBlockAnchorFactory(anchorPrefix);
 
   return (
     <div
@@ -762,10 +835,17 @@ const MessageBubble = memo(function MessageBubble({
       )}
     >
       {isUser ? (
-        <p className="min-w-0 whitespace-pre-wrap break-words leading-[1.82] [overflow-wrap:anywhere]" style={{ fontSize }}>{text}</p>
+        <p
+          className="min-w-0 whitespace-pre-wrap break-words leading-[1.82] [overflow-wrap:anywhere]"
+          style={{ fontSize }}
+          {...createBlockAnchorProps('user-paragraph', text)}
+        >
+          {text}
+        </p>
       ) : isStreaming ? (
         <div className={cn('min-w-0 max-w-full', usesAssistantStreamStyle && 'max-w-none')} style={{ fontSize }}>
           <StreamingMarkdownPreview
+            anchorPrefix={`${anchorPrefix}:stream`}
             content={text}
             trailingCursor
             className={cn(
@@ -791,11 +871,77 @@ const MessageBubble = memo(function MessageBubble({
                   );
                 }
                 return (
-                  <pre className="max-w-full overflow-x-auto rounded-lg bg-background/50 p-4">
+                  <pre
+                    className="max-w-full overflow-x-auto rounded-lg bg-background/50 p-4"
+                    {...createBlockAnchorProps('code', children)}
+                  >
                     <code className={cn('text-sm font-mono', className)} {...props}>
                       {children}
                     </code>
                   </pre>
+                );
+              },
+              blockquote({ children, node: _node, ...props }) {
+                return (
+                  <blockquote {...props} {...createBlockAnchorProps('blockquote', children)}>
+                    {children}
+                  </blockquote>
+                );
+              },
+              h1({ children, node: _node, ...props }) {
+                return (
+                  <h1 {...props} {...createBlockAnchorProps('heading-1', children)}>
+                    {children}
+                  </h1>
+                );
+              },
+              h2({ children, node: _node, ...props }) {
+                return (
+                  <h2 {...props} {...createBlockAnchorProps('heading-2', children)}>
+                    {children}
+                  </h2>
+                );
+              },
+              h3({ children, node: _node, ...props }) {
+                return (
+                  <h3 {...props} {...createBlockAnchorProps('heading-3', children)}>
+                    {children}
+                  </h3>
+                );
+              },
+              h4({ children, node: _node, ...props }) {
+                return (
+                  <h4 {...props} {...createBlockAnchorProps('heading-4', children)}>
+                    {children}
+                  </h4>
+                );
+              },
+              h5({ children, node: _node, ...props }) {
+                return (
+                  <h5 {...props} {...createBlockAnchorProps('heading-5', children)}>
+                    {children}
+                  </h5>
+                );
+              },
+              h6({ children, node: _node, ...props }) {
+                return (
+                  <h6 {...props} {...createBlockAnchorProps('heading-6', children)}>
+                    {children}
+                  </h6>
+                );
+              },
+              li({ children, node: _node, ...props }) {
+                return (
+                  <li {...props} {...createBlockAnchorProps('list-item', children)}>
+                    {children}
+                  </li>
+                );
+              },
+              p({ children, node: _node, ...props }) {
+                return (
+                  <p {...props} {...createBlockAnchorProps('paragraph', children)}>
+                    {children}
+                  </p>
                 );
               },
               a({ href, children }) {

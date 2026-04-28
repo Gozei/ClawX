@@ -636,13 +636,11 @@ async function collectLocalSessionsCatalog(options?: {
     const index = await loadSessionStoreIndex(sessionsJsonPath, { repairRecovered: true });
     for (const [sessionKey, entry] of Object.entries(index.entries)) {
       const transcriptPath = resolveSessionTranscriptPathFromEntry(sessionsDir, entry);
-      let transcriptExists = false;
       let transcriptCreatedAt: number | undefined;
 
       if (transcriptPath) {
         try {
           const transcriptStat = await fsP.stat(transcriptPath);
-          transcriptExists = true;
           transcriptCreatedAt = transcriptStat.birthtimeMs || transcriptStat.ctimeMs || undefined;
           dependencies.push({
             path: transcriptPath,
@@ -669,23 +667,10 @@ async function collectLocalSessionsCatalog(options?: {
         }
       }
 
+      // Keep catalog fast: return only previews already stored in sessions.json.
+      // Missing labels are hydrated by /api/sessions/previews after the sidebar paints.
       const storedPreview = getStoredSessionPreview(entry);
       const derivedCreatedAt = normalizeSessionUpdatedAt(entry.createdAt) ?? transcriptCreatedAt;
-
-      let resolvedPreview = storedPreview;
-      if (
-        includePreviews
-        && transcriptExists
-        && !sessionKey.endsWith(':main')
-        && !(typeof entry.label === 'string' && entry.label.trim())
-        && !resolvedPreview
-      ) {
-        try {
-          resolvedPreview = await readFirstUserMessagePreview(transcriptPath!);
-        } catch {
-          resolvedPreview = null;
-        }
-      }
 
       const row = buildLocalSessionRow(sessionKey, {
         ...entry,
@@ -696,9 +681,9 @@ async function collectLocalSessionsCatalog(options?: {
       }
       sessions.set(sessionKey, row);
 
-      if (includePreviews && resolvedPreview !== null) {
+      if (includePreviews && storedPreview !== null) {
         previews[sessionKey] = {
-          firstUserMessage: resolvedPreview,
+          firstUserMessage: storedPreview,
         };
       }
     }

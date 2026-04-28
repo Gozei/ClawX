@@ -238,7 +238,7 @@ describe('provider metadata', () => {
     ]);
   });
 
-  it('builds configured model entries with the same dedupe rules as the Models page', () => {
+  it('returns every saved configured model entry without cross-account dedupe', () => {
     const accounts: ProviderAccount[] = [
       {
         id: 'openai',
@@ -324,6 +324,11 @@ describe('provider metadata', () => {
       expect.objectContaining({
         key: 'openai:gpt-5.4-mini',
         modelId: 'gpt-5.4-mini',
+        isGlobalDefault: false,
+      }),
+      expect.objectContaining({
+        key: 'openai-duplicate:gpt-5.4',
+        modelId: 'gpt-5.4',
         isGlobalDefault: false,
       }),
     ]);

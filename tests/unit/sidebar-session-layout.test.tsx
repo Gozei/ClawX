@@ -124,6 +124,18 @@ vi.mock('react-i18next', async (importOriginal) => {
 
 describe('Sidebar session layout', () => {
   beforeEach(() => {
+    chatState.sessions = [
+      {
+        key: 'agent:main:sidebar-layout-a',
+        label: 'Aligned title A',
+        pinned: false,
+      },
+      {
+        key: 'agent:research:sidebar-layout-b',
+        label: 'Aligned title B',
+        pinned: false,
+      },
+    ];
     chatState.currentSessionKey = 'agent:main:sidebar-layout-a';
     chatState.sending = false;
     chatState.pendingFinal = false;
@@ -135,7 +147,7 @@ describe('Sidebar session layout', () => {
     updateState.currentVersion = '2026.4.9';
   });
 
-  it('renders fixed-width role badges and flexed title columns for session rows', () => {
+  it('renders fixed-width role badges and relaxed idle title columns for session rows', () => {
     render(
       <MemoryRouter initialEntries={['/']}>
         <Sidebar />
@@ -146,6 +158,8 @@ describe('Sidebar session layout', () => {
     const longRole = screen.getByTestId('sidebar-session-role-agent:research:sidebar-layout-b');
     const shortTitle = screen.getByTestId('sidebar-session-title-agent:main:sidebar-layout-a');
     const longTitle = screen.getByTestId('sidebar-session-title-agent:research:sidebar-layout-b');
+    const shortButton = screen.getByTestId('sidebar-session-button-agent:main:sidebar-layout-a');
+    const longButton = screen.getByTestId('sidebar-session-button-agent:research:sidebar-layout-b');
 
     expect(shortRole).toHaveClass('w-[63px]', 'inline-flex', 'shrink-0');
     expect(longRole).toHaveClass('w-[63px]', 'inline-flex', 'shrink-0');
@@ -154,6 +168,46 @@ describe('Sidebar session layout', () => {
 
     expect(shortTitle).toHaveClass('min-w-0', 'flex-1', 'truncate');
     expect(longTitle).toHaveClass('min-w-0', 'flex-1', 'truncate');
+    expect(shortButton).toHaveClass('pr-3', 'group-hover:pr-10');
+    expect(longButton).toHaveClass('pr-3', 'group-hover:pr-10');
+    expect(shortButton).toHaveClass('transition-colors');
+    expect(longButton).toHaveClass('transition-colors');
+    expect(shortButton).not.toHaveClass('transition-all');
+    expect(longButton).not.toHaveClass('transition-all');
+    expect(shortButton).not.toHaveClass('pr-12');
+    expect(longButton).not.toHaveClass('pr-12');
+  });
+
+  it('reserves action space only when a persistent status indicator is visible', () => {
+    chatState.sessions = [
+      {
+        key: 'agent:main:sidebar-layout-a',
+        label: 'Aligned title A',
+        pinned: false,
+      },
+      {
+        key: 'agent:research:sidebar-layout-b',
+        label: 'Aligned title B',
+        pinned: true,
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+
+    const idleButton = screen.getByTestId('sidebar-session-button-agent:main:sidebar-layout-a');
+    const pinnedButton = screen.getByTestId('sidebar-session-button-agent:research:sidebar-layout-b');
+    const idleMenuTrigger = screen.getByTestId('sidebar-session-menu-trigger-agent:main:sidebar-layout-a');
+    const pinnedMenuTrigger = screen.getByTestId('sidebar-session-menu-trigger-agent:research:sidebar-layout-b');
+
+    expect(idleButton).toHaveClass('pr-3', 'group-hover:pr-10');
+    expect(pinnedButton).toHaveClass('pr-10');
+    expect(pinnedButton).not.toHaveClass('group-hover:pr-10');
+    expect(idleMenuTrigger).toHaveClass('pointer-events-none', 'group-hover:pointer-events-auto');
+    expect(pinnedMenuTrigger).toHaveClass('pointer-events-none', 'group-hover:pointer-events-auto');
   });
 
   it('shows spinning run indicators for every running session while keeping actions hover-revealed', () => {
@@ -172,11 +226,15 @@ describe('Sidebar session layout', () => {
     const secondaryRunningIndicator = screen.getByTestId('sidebar-session-running-indicator-agent:research:sidebar-layout-b');
     const activeMenuTrigger = screen.getByTestId('sidebar-session-menu-trigger-agent:main:sidebar-layout-a');
     const backgroundMenuTrigger = screen.getByTestId('sidebar-session-menu-trigger-agent:research:sidebar-layout-b');
+    const activeButton = screen.getByTestId('sidebar-session-button-agent:main:sidebar-layout-a');
+    const backgroundButton = screen.getByTestId('sidebar-session-button-agent:research:sidebar-layout-b');
 
     expect(primaryRunningIndicator).toHaveClass('opacity-100', 'group-hover:opacity-0');
     expect(secondaryRunningIndicator).toHaveClass('opacity-100', 'group-hover:opacity-0');
-    expect(activeMenuTrigger).toHaveClass('opacity-0', 'group-hover:opacity-100');
-    expect(backgroundMenuTrigger).toHaveClass('opacity-0', 'group-hover:opacity-100');
+    expect(activeMenuTrigger).toHaveClass('pointer-events-none', 'opacity-0', 'group-hover:pointer-events-auto', 'group-hover:opacity-100');
+    expect(backgroundMenuTrigger).toHaveClass('pointer-events-none', 'opacity-0', 'group-hover:pointer-events-auto', 'group-hover:opacity-100');
+    expect(activeButton).toHaveClass('pr-10');
+    expect(backgroundButton).toHaveClass('pr-10');
   });
 
   it('shows the version and a green status dot below settings when the system is healthy', () => {

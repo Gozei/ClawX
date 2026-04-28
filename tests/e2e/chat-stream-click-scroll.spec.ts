@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { ElectronApplication, Page } from '@playwright/test';
 import {
   closeElectronApp,
   expect,
@@ -35,43 +35,11 @@ async function measureScrollMetrics(page: Page): Promise<{ scrollTop: number; di
   });
 }
 
-test.describe('Chat stream click scroll', () => {
-  test('stops following the stream after the user clicks inside the transcript', async ({ launchElectronApp }) => {
-    test.setTimeout(180_000);
-
-    const app = await launchElectronApp({ skipSetup: true });
-
+async function installStreamMockHandlers(
+  app: ElectronApplication,
+): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      await installIpcMocks(app, {
-        gatewayStatus: { state: 'running', port: 18789, pid: 12345, connectedAt: Date.now() },
-        hostApi: {
-          [stableStringify(['/api/gateway/status', 'GET'])]: {
-            ok: true,
-            data: {
-              status: 200,
-              ok: true,
-              json: {
-                state: 'running',
-                port: 18789,
-                pid: 12345,
-                connectedAt: Date.now(),
-              },
-            },
-          },
-          [stableStringify(['/api/agents', 'GET'])]: {
-            ok: true,
-            data: {
-              status: 200,
-              ok: true,
-              json: {
-                success: true,
-                agents: [],
-              },
-            },
-          },
-        },
-      });
-
       await app.evaluate(({ ipcMain, BrowserWindow }, { prompt, runId, sessionId, sessionKey }) => {
         const baseTimestamp = Math.floor(Date.now() / 1000) - 600;
         const seedMessages: Array<Record<string, unknown>> = [];
@@ -224,6 +192,54 @@ test.describe('Chat stream click scroll', () => {
         sessionId: SESSION_ID,
         sessionKey: SESSION_KEY,
       });
+      return;
+    } catch (error) {
+      if (attempt === 2 || !String(error).includes('Execution context was destroyed')) {
+        throw error;
+      }
+      await getStableWindow(app);
+    }
+  }
+}
+
+test.describe('Chat stream click scroll', () => {
+  test('stops following the stream after the user clicks inside the transcript', async ({ launchElectronApp }) => {
+    test.setTimeout(180_000);
+
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      await installIpcMocks(app, {
+        gatewayStatus: { state: 'running', port: 18789, pid: 12345, connectedAt: Date.now() },
+        hostApi: {
+          [stableStringify(['/api/gateway/status', 'GET'])]: {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                state: 'running',
+                port: 18789,
+                pid: 12345,
+                connectedAt: Date.now(),
+              },
+            },
+          },
+          [stableStringify(['/api/agents', 'GET'])]: {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                success: true,
+                agents: [],
+              },
+            },
+          },
+        },
+      });
+
+      await installStreamMockHandlers(app);
 
       const page = await getStableWindow(app);
       await expect(page.getByTestId('main-layout')).toBeVisible({ timeout: 60_000 });
@@ -242,6 +258,9 @@ test.describe('Chat stream click scroll', () => {
       ), { timeout: 20_000 }).toBe(true);
 
       await expect(page.getByText('Stage 1 summary:')).toBeVisible({ timeout: 20_000 });
+      await expect.poll(async () => (
+        await page.evaluate(() => document.querySelectorAll('[data-chat-scroll-block-anchor-key]').length)
+      ), { timeout: 20_000 }).toBeGreaterThan(0);
       await page.waitForTimeout(300);
 
       const beforeClick = await measureScrollMetrics(page);
@@ -250,16 +269,62 @@ test.describe('Chat stream click scroll', () => {
 
       await page.getByText('Stage 1 summary:').click();
 
+      const detachedSnapshot = await page.evaluate(() => {
+        const debugApi = (window as typeof window & {
+          __CLAWX_CHAT_SCROLL_DEBUG__?: {
+            getSnapshot: () => {
+              anchor: { anchorType: string } | null;
+              detachedScrollTop: number | null;
+              mode: string;
+            };
+          };
+        }).__CLAWX_CHAT_SCROLL_DEBUG__;
+        return debugApi?.getSnapshot() ?? null;
+      });
+      expect(detachedSnapshot?.mode).toBe('detached');
+      expect(detachedSnapshot?.anchor?.anchorType).toBeTruthy();
+      expect(detachedSnapshot?.detachedScrollTop).not.toBeNull();
+
       await expect(page.getByTestId('chat-content-column')).toContainText('Stage 2 details:', { timeout: 20_000 });
       await expect.poll(async () => {
         const metrics = await measureScrollMetrics(page);
         return metrics.distanceFromBottom ?? 0;
       }, { timeout: 20_000 }).toBeGreaterThan((beforeClick.distanceFromBottom ?? 0) + 120);
 
+      await expect.poll(async () => {
+        const metrics = await measureScrollMetrics(page);
+        return Math.abs(metrics.scrollTop - (detachedSnapshot?.detachedScrollTop ?? beforeClick.scrollTop));
+      }, { timeout: 20_000 }).toBeLessThanOrEqual(3);
+
       const finalMetrics = await measureScrollMetrics(page);
-      expect(Math.abs(finalMetrics.scrollTop - beforeClick.scrollTop)).toBeLessThanOrEqual(3);
       expect(finalMetrics.distanceFromBottom).not.toBeNull();
       expect(finalMetrics.distanceFromBottom ?? 0).toBeGreaterThan((beforeClick.distanceFromBottom ?? 0) + 120);
+
+      const debugEvents = await page.evaluate(() => {
+        const debugApi = (window as typeof window & {
+          __CLAWX_CHAT_SCROLL_DEBUG__?: {
+            getEvents: () => Array<{ type: string }>;
+          };
+        }).__CLAWX_CHAT_SCROLL_DEBUG__;
+        return debugApi?.getEvents().map((event) => event.type) ?? [];
+      });
+      expect(debugEvents).toContain('transition');
+      expect(debugEvents).toContain('anchor-captured');
+      expect(debugEvents).not.toContain('detached-restored');
+
+      await page.getByTestId('chat-scroll-container').hover();
+      await page.mouse.wheel(0, -320);
+      await expect.poll(async () => {
+        const metrics = await measureScrollMetrics(page);
+        return metrics.scrollTop;
+      }, { timeout: 10_000 }).toBeLessThan(finalMetrics.scrollTop - 24);
+
+      const afterWheelUp = await measureScrollMetrics(page);
+      await page.mouse.wheel(0, 320);
+      await expect.poll(async () => {
+        const metrics = await measureScrollMetrics(page);
+        return metrics.scrollTop;
+      }, { timeout: 10_000 }).toBeGreaterThan(afterWheelUp.scrollTop + 24);
 
       await expect(page.getByTestId('chat-scroll-to-latest')).toHaveCount(0);
     } finally {

@@ -131,9 +131,13 @@ describe('ProcessEventMessage', () => {
 
     const row = screen.getByTestId('chat-process-event-row');
     expect(row).not.toHaveClass('border-b');
-    expect(within(row).getByTestId('chat-process-event-summary')).toHaveTextContent('Browser opened');
-    expect(within(row).getByTestId('chat-process-event-preview')).toBeInTheDocument();
-    expect(within(row).getByTestId('chat-process-event-preview')).toHaveClass('flex-1');
+    const summary = within(row).getByTestId('chat-process-event-summary');
+    const preview = within(row).getByTestId('chat-process-event-preview');
+    expect(summary).toHaveTextContent('Browser opened');
+    expect(summary).toHaveClass('text-[13px]');
+    expect(preview).toBeInTheDocument();
+    expect(preview).toHaveClass('flex-1');
+    expect(preview).toHaveClass('text-[13px]');
     expect(within(row).getByTestId('chat-process-event-toggle-icon')).toHaveClass('opacity-0');
 
     fireEvent.click(within(row).getByTestId('chat-process-event-toggle'));

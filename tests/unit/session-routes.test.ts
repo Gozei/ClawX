@@ -430,6 +430,54 @@ describe('handleSessionRoutes', () => {
     });
   });
 
+  it('keeps the session catalog fast by not deriving missing previews from transcripts', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      JSON.stringify({
+        sessions: [
+          {
+            key: 'agent:main:session-preview',
+            file: 'session-preview.jsonl',
+            updatedAt: 1,
+          },
+        ],
+      }, null, 2),
+      'utf8',
+    );
+    await writeFile(
+      join(sessionsDir, 'session-preview.jsonl'),
+      JSON.stringify({
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'This should load later' }],
+        },
+      }),
+      'utf8',
+    );
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    const handled = await handleSessionRoutes(
+      { method: 'GET' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/catalog'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
+      success: true,
+      sessions: [
+        expect.objectContaining({
+          key: 'agent:main:session-preview',
+          updatedAt: 1,
+        }),
+      ],
+      previews: {},
+    });
+  });
+
   it('strips AGENTS, attachment, and execution preludes from preview labels', async () => {
     const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
     await mkdir(sessionsDir, { recursive: true });
