@@ -17,7 +17,10 @@
             "libsignal": "file:vendor/libsignal-node-direct.tar.gz",
             "@whiskeysockets/libsignal-node": "file:vendor/libsignal-node-direct.tar.gz",
             "isbinaryfile": "^5.0.0",
-            "https-proxy-agent": "7.0.6"
+            "https-proxy-agent": "7.0.6",
+            "fast-xml-parser": ">=4.5.5",
+            "protobufjs": ">=7.5.5",
+            "tar": ">=7.5.11"
         },
         "supportedArchitectures": {
             "os": [
