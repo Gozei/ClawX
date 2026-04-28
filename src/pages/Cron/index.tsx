@@ -497,9 +497,11 @@ function buildSchedule(form: CronFormState, t: TFunction<'cron'>): CronSchedule 
 }
 
 function buildPayload(form: CronFormState, t: TFunction<'cron'>): CronPayload {
-  if (!form.payloadText.trim()) throw new Error(form.payloadKind === 'systemEvent' ? t('validation.systemEventRequired') : t('validation.promptRequired'));
-  if (form.payloadKind === 'systemEvent') return { kind: 'systemEvent', text: form.payloadText.trim() };
-  const payload: CronPayload = { kind: 'agentTurn', message: form.payloadText.trim() };
+  const text = form.payloadText.trim();
+  const isSystemEvent = form.sessionTarget === 'main' || form.payloadKind === 'systemEvent';
+  if (!text) throw new Error(isSystemEvent ? t('validation.systemEventRequired') : t('validation.promptRequired'));
+  if (isSystemEvent) return { kind: 'systemEvent', text };
+  const payload: CronPayload = { kind: 'agentTurn', message: text };
   if (form.payloadModel.trim()) payload.model = form.payloadModel.trim();
   if (form.payloadThinking.trim()) payload.thinking = form.payloadThinking.trim();
   if (form.timeoutSeconds.trim()) {
@@ -1010,7 +1012,6 @@ function CronJobEditorDrawer({
         ...form,
         scheduleKind: dialogScheduleKind,
         scheduleAt: dialogScheduleKind === 'at' && !form.scheduleAt ? getDefaultScheduleAt() : form.scheduleAt,
-        payloadKind: 'agentTurn',
         failureAlertMode: 'inherit',
         deliveryChannel: form.deliveryMode === 'announce' ? form.deliveryChannel : '',
         deliveryTo: form.deliveryMode === 'announce' ? form.deliveryTo : '',
