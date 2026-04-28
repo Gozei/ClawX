@@ -848,8 +848,9 @@ function buildCronUpdatePatch(input: Record<string, unknown>): Record<string, un
     patch.schedule = { kind: 'cron', expr: patch.schedule };
   }
 
-  if (typeof patch.message === 'string') {
-    patch.payload = { kind: 'agentTurn', message: patch.message };
+  if ('payload' in patch || typeof patch.message === 'string') {
+    const payload = normalizeCronIpcPayload(patch.payload, patch.message, patch.sessionTarget);
+    if (payload) patch.payload = payload;
     delete patch.message;
   }
 
@@ -858,6 +859,36 @@ function buildCronUpdatePatch(input: Record<string, unknown>): Record<string, un
   }
 
   return patch;
+}
+
+function normalizeCronIpcPayload(
+  rawPayload: unknown,
+  fallbackMessage: unknown,
+  sessionTarget: unknown,
+): GatewayCronJob['payload'] | undefined {
+  const record = rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload)
+    ? rawPayload as Record<string, unknown>
+    : undefined;
+  const forceSystemEvent = sessionTarget === 'main';
+
+  if (record) {
+    const kind = typeof record.kind === 'string' ? record.kind.trim() : '';
+    const text = typeof record.text === 'string' ? record.text : undefined;
+    const message = typeof record.message === 'string' ? record.message : undefined;
+    if (forceSystemEvent || kind === 'systemEvent') {
+      return { kind: 'systemEvent', text: (text ?? message ?? '').trim() };
+    }
+    return { kind: 'agentTurn', message: (message ?? text ?? '').trim() };
+  }
+
+  if (typeof fallbackMessage === 'string') {
+    const text = fallbackMessage.trim();
+    return forceSystemEvent
+      ? { kind: 'systemEvent', text }
+      : { kind: 'agentTurn', message: text };
+  }
+
+  return undefined;
 }
 
 /**

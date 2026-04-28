@@ -405,6 +405,79 @@ describe('handleCronRoutes', () => {
     );
   });
 
+  it('updates main-session cron jobs with system-event payloads from legacy message input', async () => {
+    parseJsonBodyMock.mockResolvedValue({
+      sessionTarget: 'main',
+      message: '提醒你下班打卡',
+    });
+
+    const rpc = vi.fn().mockResolvedValue({
+      id: 'job-main',
+      name: 'Main reminder',
+      enabled: true,
+      createdAtMs: 1,
+      updatedAtMs: 3,
+      schedule: { kind: 'cron', expr: '10 19 * * *', tz: 'Asia/Shanghai' },
+      payload: { kind: 'systemEvent', text: '提醒你下班打卡' },
+      sessionTarget: 'main',
+      delivery: { mode: 'announce', channel: 'openclaw-weixin', to: 'wechat:wxid_target' },
+      state: {},
+    });
+
+    const { handleCronRoutes } = await import('@electron/api/routes/cron');
+    await handleCronRoutes(
+      { method: 'PUT' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/cron/jobs/job-main'),
+      {
+        gatewayManager: { rpc },
+      } as never,
+    );
+
+    expect(rpc).toHaveBeenCalledWith('cron.update', {
+      id: 'job-main',
+      patch: {
+        sessionTarget: 'main',
+        payload: { kind: 'systemEvent', text: '提醒你下班打卡' },
+      },
+    });
+  });
+
+  it('preserves explicit system-event payloads when message is also present', async () => {
+    parseJsonBodyMock.mockResolvedValue({
+      message: 'legacy fallback should not win',
+      payload: { kind: 'systemEvent', text: 'Use the explicit system event' },
+    });
+
+    const rpc = vi.fn().mockResolvedValue({
+      id: 'job-system-event',
+      name: 'System event',
+      enabled: true,
+      createdAtMs: 1,
+      updatedAtMs: 3,
+      schedule: { kind: 'cron', expr: '0 9 * * *' },
+      payload: { kind: 'systemEvent', text: 'Use the explicit system event' },
+      state: {},
+    });
+
+    const { handleCronRoutes } = await import('@electron/api/routes/cron');
+    await handleCronRoutes(
+      { method: 'PUT' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/cron/jobs/job-system-event'),
+      {
+        gatewayManager: { rpc },
+      } as never,
+    );
+
+    expect(rpc).toHaveBeenCalledWith('cron.update', {
+      id: 'job-system-event',
+      patch: {
+        payload: { kind: 'systemEvent', text: 'Use the explicit system event' },
+      },
+    });
+  });
+
   it('passes through delivery.accountId for multi-account cron jobs', async () => {
     parseJsonBodyMock.mockResolvedValue({
       delivery: {
