@@ -546,7 +546,7 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
           subtitleTestId="settings-page-subtitle"
         />
 
-        <div className="flex-1 overflow-y-auto pr-2 pb-10 min-h-0 -mr-2 space-y-12">
+        <div className="flex-1 overflow-y-auto pl-2 pr-2 pb-10 min-h-0 -ml-2 -mr-2 space-y-12">
           <div>
             <h2 className="text-3xl font-serif text-foreground mb-6 font-normal tracking-tight" style={{ fontFamily: 'Georgia, Cambria, "Times New Roman", Times, serif' }}>
               {t('appearance.title')}
