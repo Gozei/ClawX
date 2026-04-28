@@ -68,10 +68,10 @@ describe('withUtf8RuntimeEnv', () => {
 });
 
 describe('resolveChannelStartupPolicyForConfiguredChannels', () => {
-  it('does not export a stale skip-channel environment when no channels are configured', () => {
+  it('skips channel and sidecar startup when no channels are configured', () => {
     expect(resolveChannelStartupPolicyForConfiguredChannels([])).toEqual({
-      skipChannels: false,
-      channelStartupSummary: 'idle(no configured channels)',
+      skipChannels: true,
+      channelStartupSummary: 'skipped(no configured channels)',
     });
   });
 

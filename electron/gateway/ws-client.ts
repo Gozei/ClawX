@@ -68,14 +68,9 @@ export async function probeGatewayReady(
 
 // 分阶段探测间隔：启动早期慢探测减少对 Gateway 的干扰，
 // 接近就绪时加速以降低响应延迟。
-export function getDynamicProbeInterval(elapsedMs: number, platform?: string): number {
-  if (platform === 'win32') {
-    if (elapsedMs < 5_000) return 500;
-    if (elapsedMs < 15_000) return 1000;
-    return 500;
-  }
-  if (elapsedMs < 30_000) return 2000;
-  if (elapsedMs < 120_000) return 1000;
+export function getDynamicProbeInterval(elapsedMs: number, _platform?: string): number {
+  if (elapsedMs < 5_000) return 500;
+  if (elapsedMs < 15_000) return 1000;
   return 500;
 }
 
