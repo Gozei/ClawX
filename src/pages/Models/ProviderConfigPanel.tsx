@@ -202,6 +202,34 @@ function getRowDuplicateScope(row: ModelRow): string {
   return normalizeProviderUrl(row.account.baseUrl || getVendorDefaultBaseUrl(row.vendorId)) || `vendor:${row.vendorId}`;
 }
 
+function getRowDuplicateKey(row: ModelRow): string {
+  return [
+    row.vendorId,
+    getRowDuplicateScope(row),
+    row.protocol,
+    normalizeModelId(row.modelId),
+  ].join('|');
+}
+
+function shouldPreferModelRow(candidate: ModelRow, current: ModelRow): boolean {
+  if (candidate.isGlobalDefault !== current.isGlobalDefault) return candidate.isGlobalDefault;
+  if (candidate.isDefault !== current.isDefault) return candidate.isDefault;
+  if (candidate.hasCredentials !== current.hasCredentials) return candidate.hasCredentials;
+  return candidate.account.updatedAt.localeCompare(current.account.updatedAt) > 0;
+}
+
+function collapseDuplicateModelRows(rows: ModelRow[]): ModelRow[] {
+  const byIdentity = new Map<string, ModelRow>();
+  for (const row of rows) {
+    const key = getRowDuplicateKey(row);
+    const current = byIdentity.get(key);
+    if (!current || shouldPreferModelRow(row, current)) {
+      byIdentity.set(key, row);
+    }
+  }
+  return [...byIdentity.values()];
+}
+
 function getDraftDuplicateScope(draft: DraftState): string {
   return normalizeProviderUrl(draft.baseUrl || getVendorDefaultBaseUrl(draft.vendorId)) || `vendor:${draft.vendorId}`;
 }
@@ -409,7 +437,7 @@ function getStatusTone(test?: TestStatus): string {
 }
 
 function buildModelRows(accounts: ProviderAccount[], statuses: ReturnType<typeof useProviderStore.getState>['statuses'], vendors: ReturnType<typeof useProviderStore.getState>['vendors'], defaultAccountId: string | null): ModelRow[] {
-  return buildConfiguredModelEntries(accounts, statuses, vendors, defaultAccountId).map((entry) => ({
+  const rows = buildConfiguredModelEntries(accounts, statuses, vendors, defaultAccountId).map((entry) => ({
     key: entry.key,
     account: entry.account,
     accountLabel: entry.displayName,
@@ -423,6 +451,7 @@ function buildModelRows(accounts: ProviderAccount[], statuses: ReturnType<typeof
     hasCredentials: entry.hasConfiguredCredentials,
     resultType: inferResultType(entry.modelId),
   }));
+  return collapseDuplicateModelRows(rows);
 }
 
 function applyModelChangeToAccount(account: ProviderAccount, draft: DraftState): Partial<ProviderAccount> {
