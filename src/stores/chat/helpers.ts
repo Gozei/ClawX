@@ -1073,6 +1073,7 @@ function normalizeToolFailureMessage(value: unknown): string | undefined {
 
 function normalizeToolStatus(rawStatus: unknown, fallback: 'running' | 'completed' | 'error'): ToolStatus['status'] {
   const status = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : '';
+  if (status === 'running' || status === 'started' || status === 'in_progress') return 'running';
   if (status.includes('retry')) return 'retrying';
   if (status === 'error' || status === 'failed') return 'error';
   if (status === 'completed' || status === 'success' || status === 'done') return 'completed';
