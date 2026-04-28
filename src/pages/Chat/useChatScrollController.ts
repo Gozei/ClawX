@@ -450,6 +450,8 @@ export function useChatScrollController({
     syncBottomState(0);
     return nextScrollTop;
   }, [markProgrammaticScroll, syncBottomState]);
+  // isAtBottomRef and pendingSessionEntryBottomRef are read intentionally:
+  // ref reads do not trigger renders, and this callback refreshes with the remaining deps.
   const shouldPinFollowingBottom = useCallback((allowActiveTurn = false) => (
     isFollowingLatest()
     && isAtBottomRef.current
@@ -713,6 +715,8 @@ export function useChatScrollController({
     markProgrammaticScroll,
     pinScrollToBottom,
     sending,
+    // version only increments on mode transitions. A mid-stabilization mode change
+    // from syncBottomState could still clean up/re-run this settle timer.
     scrollState.version,
     syncBottomState,
   ]);

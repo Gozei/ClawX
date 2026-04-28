@@ -7,6 +7,54 @@ import type { AttachedFileMeta, ChatComposerDraft, ChatSession, ContentBlock, Ra
 
 export const CHAT_HISTORY_RPC_TIMEOUT_MS = 60_000;
 export const CHAT_HISTORY_LABEL_PREFETCH_LIMIT = 50;
+export const STREAM_DELTA_FLUSH_FALLBACK_MS = 16;
+
+export type DeltaFlushScheduleState = {
+  handle: number | ReturnType<typeof setTimeout> | null;
+  usesAnimationFrame: boolean;
+};
+
+function createDeltaFlushScheduler(state: DeltaFlushScheduleState): {
+  cancelPendingDeltaFlush: () => void;
+  scheduleDeltaFlush: (flushFn: () => void) => void;
+} {
+  const cancelPendingDeltaFlush = () => {
+    if (state.handle == null) return;
+    if (
+      state.usesAnimationFrame
+      && typeof window !== 'undefined'
+      && typeof window.cancelAnimationFrame === 'function'
+      && typeof state.handle === 'number'
+    ) {
+      window.cancelAnimationFrame(state.handle);
+    } else {
+      clearTimeout(state.handle);
+    }
+    state.handle = null;
+    state.usesAnimationFrame = false;
+  };
+
+  const scheduleDeltaFlush = (flushFn: () => void) => {
+    if (state.handle != null) return;
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      state.usesAnimationFrame = true;
+      state.handle = window.requestAnimationFrame(() => {
+        state.handle = null;
+        state.usesAnimationFrame = false;
+        flushFn();
+      });
+      return;
+    }
+
+    state.usesAnimationFrame = false;
+    state.handle = setTimeout(() => {
+      state.handle = null;
+      flushFn();
+    }, STREAM_DELTA_FLUSH_FALLBACK_MS);
+  };
+
+  return { cancelPendingDeltaFlush, scheduleDeltaFlush };
+}
 
 type DraftSessionStateLike = {
   currentSessionKey: string;
@@ -1509,6 +1557,7 @@ export {
   isFailedToolResultMessage,
   createToolResultProcessMessage,
   collectToolUpdates,
+  createDeltaFlushScheduler,
   createAssistantDeltaSnapshot,
   upsertToolStatuses,
   EMPTY_ASSISTANT_RESPONSE_ERROR,

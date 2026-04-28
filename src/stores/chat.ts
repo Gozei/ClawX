@@ -19,6 +19,7 @@ import {
   CHAT_HISTORY_LABEL_PREFETCH_LIMIT,
   CHAT_HISTORY_RPC_TIMEOUT_MS,
   createAssistantDeltaSnapshot,
+  createDeltaFlushScheduler,
   getAssistantRuntimeErrorNotice,
   hasAssistantFinalTextContent,
   hasComposerDraftContent,
@@ -26,6 +27,7 @@ import {
   isUnusedDraftSession,
   isFailedToolResultMessage,
   shouldContinueAssistantDelta,
+  type DeltaFlushScheduleState,
 } from './chat/helpers';
 import {
   DEFAULT_CANONICAL_PREFIX,
@@ -165,11 +167,13 @@ type PersistedSessionViewSnapshot = {
 let pendingDeltaMessages: RawMessage[] = [];
 let pendingDeltaUpdates: ToolStatus[] = [];
 let pendingDeltaClearError = false;
-let pendingDeltaFlushHandle: number | ReturnType<typeof setTimeout> | null = null;
-let pendingDeltaFlushUsesAnimationFrame = false;
+const _deltaFlushScheduleState: DeltaFlushScheduleState = {
+  handle: null,
+  usesAnimationFrame: false,
+};
+const { cancelPendingDeltaFlush, scheduleDeltaFlush } = createDeltaFlushScheduler(_deltaFlushScheduleState);
 let pendingFinalRecoveryHandle: ReturnType<typeof setTimeout> | null = null;
 let pendingDeltaSnapshotSeq = 0;
-const STREAM_DELTA_FLUSH_FALLBACK_MS = 16;
 const PENDING_FINAL_RECOVERY_DELAY_MS = 8_000;
 
 function clearErrorRecoveryTimer(): void {
@@ -516,23 +520,6 @@ function restoreSessionView(sessionKey: string): SessionViewSnapshot {
   return cloneSessionViewSnapshot(snapshot ?? EMPTY_SESSION_VIEW_SNAPSHOT);
 }
 
-function cancelPendingDeltaFlush(): void {
-  if (pendingDeltaFlushHandle) {
-    if (
-      pendingDeltaFlushUsesAnimationFrame
-      && typeof window !== 'undefined'
-      && typeof window.cancelAnimationFrame === 'function'
-      && typeof pendingDeltaFlushHandle === 'number'
-    ) {
-      window.cancelAnimationFrame(pendingDeltaFlushHandle);
-    } else {
-      clearTimeout(pendingDeltaFlushHandle);
-    }
-    pendingDeltaFlushHandle = null;
-    pendingDeltaFlushUsesAnimationFrame = false;
-  }
-}
-
 function resetPendingDeltaState(): void {
   pendingDeltaMessages = [];
   pendingDeltaUpdates = [];
@@ -637,25 +624,6 @@ function flushPendingDelta(set: ChatStoreSet): void {
         : state.streamingTools,
     };
   });
-}
-
-function scheduleDeltaFlush(set: ChatStoreSet): void {
-  if (pendingDeltaFlushHandle) return;
-  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-    pendingDeltaFlushUsesAnimationFrame = true;
-    pendingDeltaFlushHandle = window.requestAnimationFrame(() => {
-      pendingDeltaFlushHandle = null;
-      pendingDeltaFlushUsesAnimationFrame = false;
-      flushPendingDelta(set);
-    });
-    return;
-  }
-
-  pendingDeltaFlushUsesAnimationFrame = false;
-  pendingDeltaFlushHandle = setTimeout(() => {
-    pendingDeltaFlushHandle = null;
-    flushPendingDelta(set);
-  }, STREAM_DELTA_FLUSH_FALLBACK_MS);
 }
 
 function startHistoryPoll(get: () => ChatState, sessionKey: string): void {
@@ -5044,7 +5012,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         }
         mergePendingDeltaUpdates(updates);
         set({ sendStage: 'running', sessionNotice: null });
-        scheduleDeltaFlush(set);
+        scheduleDeltaFlush(() => flushPendingDelta(set));
         break;
       }
       case 'final': {
