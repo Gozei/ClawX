@@ -235,6 +235,7 @@ const AUTH_PROFILE_PROVIDER_KEY_MAP: Record<string, string> = {
   'openai-codex': 'openai',
   'google-gemini-cli': 'google',
 };
+const CORE_BUNDLED_PLUGIN_IDS = new Set(['acpx']);
 
 let _bundledPluginCache: { all: Set<string>; enabledByDefault: string[] } | null = null;
 function discoverBundledPlugins(): { all: Set<string>; enabledByDefault: string[] } {
@@ -1745,6 +1746,13 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
         const explicitlyEnabledBundledPluginIds = Object.entries(pEntries)
           .filter(([pluginId, entry]) => bundled.all.has(pluginId) && entry?.enabled === true)
           .map(([pluginId]) => pluginId);
+
+        for (const pluginId of bundled.enabledByDefault) {
+          if (!CORE_BUNDLED_PLUGIN_IDS.has(pluginId)) continue;
+          if (!nextAllow.includes(pluginId)) {
+            nextAllow.push(pluginId);
+          }
+        }
 
         for (const pluginId of explicitlyEnabledBundledPluginIds) {
           if (!nextAllow.includes(pluginId)) {

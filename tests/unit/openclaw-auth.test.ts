@@ -524,12 +524,19 @@ describe('sanitizeOpenClawConfig', () => {
     expect(dingtalk.clientSecret).toBe('dt-secret');
   });
 
-  it('does not auto-allow bundled default plugins when external plugins are enabled', async () => {
+  it('keeps core bundled runtime plugin without auto-allowing other bundled defaults', async () => {
     const bundledOpenClawDir = join(testUserData, 'bundled-openclaw');
+    const acpxManifestDir = join(bundledOpenClawDir, 'dist', 'extensions', 'acpx');
     const devicePairManifestDir = join(bundledOpenClawDir, 'dist', 'extensions', 'device-pair');
     const browserManifestDir = join(bundledOpenClawDir, 'dist', 'extensions', 'browser');
+    await mkdir(acpxManifestDir, { recursive: true });
     await mkdir(devicePairManifestDir, { recursive: true });
     await mkdir(browserManifestDir, { recursive: true });
+    await writeFile(
+      join(acpxManifestDir, 'openclaw.plugin.json'),
+      JSON.stringify({ id: 'acpx', enabledByDefault: true }, null, 2),
+      'utf8',
+    );
     await writeFile(
       join(devicePairManifestDir, 'openclaw.plugin.json'),
       JSON.stringify({ id: 'device-pair', enabledByDefault: true }, null, 2),
@@ -563,7 +570,7 @@ describe('sanitizeOpenClawConfig', () => {
 
     const result = await readOpenClawJson();
     const plugins = result.plugins as Record<string, unknown>;
-    expect(plugins.allow).toEqual(['customPlugin', 'openclaw-lark']);
+    expect(plugins.allow).toEqual(['customPlugin', 'openclaw-lark', 'acpx']);
     expect((plugins.entries as Record<string, unknown>).customPlugin).toEqual({ enabled: true });
   });
 
