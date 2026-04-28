@@ -468,6 +468,45 @@ function readMatchingPersistedSessionView(messages: RawMessage[]): SessionViewSn
   return best ? cloneSessionViewSnapshot(best.snapshot) : null;
 }
 
+function readLatestPersistedSessionViewEntry(
+  allowedSessionKeys?: Set<string>,
+): { savedAt: number; sessionKey: string; snapshot: SessionViewSnapshot } | null {
+  if (!canUseSessionViewStorage()) return null;
+  let best: { savedAt: number; sessionKey: string; snapshot: SessionViewSnapshot } | null = null;
+
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (!key?.startsWith(SESSION_VIEW_STORAGE_PREFIX)) continue;
+
+      const sessionKey = key.slice(SESSION_VIEW_STORAGE_PREFIX.length);
+      if (!sessionKey || (allowedSessionKeys && !allowedSessionKeys.has(sessionKey))) continue;
+
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
+
+      const parsed = JSON.parse(raw) as Partial<PersistedSessionViewSnapshot>;
+      if (typeof parsed.savedAt !== 'number') continue;
+      if (Date.now() - parsed.savedAt > SESSION_VIEW_STORAGE_TTL_MS) {
+        window.localStorage.removeItem(key);
+        continue;
+      }
+      if (!parsed.snapshot || typeof parsed.snapshot !== 'object') continue;
+
+      const snapshot = cloneSessionViewSnapshot(parsed.snapshot as SessionViewSnapshot);
+      if (!hasRecoverableSessionView(snapshot)) continue;
+
+      if (!best || parsed.savedAt > best.savedAt) {
+        best = { savedAt: parsed.savedAt, sessionKey, snapshot };
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return best ? { ...best, snapshot: cloneSessionViewSnapshot(best.snapshot) } : null;
+}
+
 function clearPersistedSessionView(sessionKey: string): void {
   if (!sessionKey || !canUseSessionViewStorage()) return;
   try {
@@ -2523,9 +2562,92 @@ function isToolResultRole(role: unknown): boolean {
   return normalized === 'toolresult' || normalized === 'tool_result';
 }
 
+const INTERNAL_SESSION_STATUS_TOOL_NAME = 'session_status';
+
+function normalizeInternalToolName(value: unknown): string {
+  return typeof value === 'string'
+    ? value.trim().toLowerCase().replace(/[\s-]+/g, '_')
+    : '';
+}
+
+function isInternalSessionStatusToolName(value: unknown): boolean {
+  return normalizeInternalToolName(value) === INTERNAL_SESSION_STATUS_TOOL_NAME;
+}
+
+function getStructuredToolName(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const fn = record.function;
+  if (fn && typeof fn === 'object') {
+    const functionName = (fn as Record<string, unknown>).name;
+    if (typeof functionName === 'string') return functionName;
+  }
+  return record.name;
+}
+
+function hasInternalSessionStatusToolInteraction(msg: { content?: unknown; toolName?: unknown; name?: unknown }): boolean {
+  if (isInternalSessionStatusToolName(msg.toolName) || isInternalSessionStatusToolName(msg.name)) {
+    return true;
+  }
+
+  const msgRecord = msg as Record<string, unknown>;
+  const toolCalls = msgRecord.tool_calls ?? msgRecord.toolCalls;
+  if (Array.isArray(toolCalls) && toolCalls.some((call) => isInternalSessionStatusToolName(getStructuredToolName(call)))) {
+    return true;
+  }
+
+  if (!Array.isArray(msg.content)) return false;
+  return (msg.content as ContentBlock[]).some((block) => {
+    if (block.type !== 'tool_use' && block.type !== 'tool_result' && block.type !== 'toolCall' && block.type !== 'toolResult') {
+      return false;
+    }
+    return isInternalSessionStatusToolName(block.name);
+  });
+}
+
+function getTextPartsFromMessage(msg: { content?: unknown; text?: unknown }): string[] {
+  const parts: string[] = [];
+  if (typeof msg.content === 'string') {
+    parts.push(msg.content);
+  } else if (Array.isArray(msg.content)) {
+    for (const block of msg.content as ContentBlock[]) {
+      if (block.type === 'text' && typeof block.text === 'string') {
+        parts.push(block.text);
+      }
+    }
+  }
+  if (typeof msg.text === 'string') {
+    parts.push(msg.text);
+  }
+  return parts;
+}
+
+function isInternalSessionStatusMarkerText(text: string): boolean {
+  const normalized = text.trim().replace(/^[^\w]+/, '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return normalized === INTERNAL_SESSION_STATUS_TOOL_NAME;
+}
+
+function isInternalSessionStatusMessage(msg: {
+  role?: unknown;
+  content?: unknown;
+  toolName?: unknown;
+  name?: unknown;
+  text?: unknown;
+}): boolean {
+  if (!hasInternalSessionStatusToolInteraction(msg)) return false;
+  if (isToolResultRole(msg.role)) return true;
+  if (msg.role !== 'assistant') return false;
+
+  const textParts = getTextPartsFromMessage(msg);
+  return textParts.length === 0 || textParts.every((part) => (
+    !part.trim() || isInternalSessionStatusMarkerText(part)
+  ));
+}
+
 /** True for internal plumbing messages that should never be shown in the UI. */
-function isInternalMessage(msg: { role?: unknown; content?: unknown }): boolean {
+function isInternalMessage(msg: { role?: unknown; content?: unknown; toolName?: unknown; name?: unknown; text?: unknown }): boolean {
   if (msg.role === 'system') return true;
+  if (isInternalSessionStatusMessage(msg)) return true;
   if (msg.role === 'user') {
     const text = getMessageText(msg.content);
     if (isPreCompactionMemoryFlushPrompt(text)) return true;
@@ -3377,13 +3499,21 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
           }
           const currentState = get();
           const shouldCreateStartupDraft = isColdStartDefaultSessionState(currentState);
-          if (shouldCreateStartupDraft) {
+          const currentLooksLikeUnusedDraft = isUnusedDraftSession(currentState, nextSessionKey);
+          const startupRecoveredSessionView = (shouldCreateStartupDraft || currentLooksLikeUnusedDraft)
+            ? readLatestPersistedSessionViewEntry()
+            : null;
+          const shouldUseStartupRecoveredSession = startupRecoveredSessionView != null;
+          if (shouldUseStartupRecoveredSession) {
+            nextSessionKey = startupRecoveredSessionView.sessionKey;
+          } else if (shouldCreateStartupDraft) {
             const prefix = resolveDefaultCanonicalPrefix()
               || getCanonicalPrefixFromSessions(dedupedSessions)
               || DEFAULT_CANONICAL_PREFIX;
             nextSessionKey = `${prefix}:session-${Date.now()}`;
           }
-          const currentIsUnusedDraft = shouldCreateStartupDraft || isUnusedDraftSession(currentState, nextSessionKey);
+          const currentIsUnusedDraft = !shouldUseStartupRecoveredSession
+            && (shouldCreateStartupDraft || isUnusedDraftSession(currentState, nextSessionKey));
           const hasLocalSessionEntry = localSessions.some((session) => session.key === nextSessionKey);
           if (!dedupedSessions.find((s) => s.key === nextSessionKey) && dedupedSessions.length > 0) {
             // Preserve locally-created blank drafts and pending local sessions.
@@ -3412,7 +3542,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
               .filter((session) => typeof session.model === 'string' && session.model.trim().length > 0)
               .map((session) => [session.key, session.model!.trim()]),
           );
-          if (shouldCreateStartupDraft && !discoveredModels[nextSessionKey]) {
+          if (shouldCreateStartupDraft && !shouldUseStartupRecoveredSession && !discoveredModels[nextSessionKey]) {
             const startupDraftModel = sessionsWithCurrent
               .find((session) => session.key === DEFAULT_SESSION_KEY || session.key.endsWith(':main'))
               ?.model
@@ -3887,10 +4017,12 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
   loadHistory: async (quiet = false) => {
     const currentState = get();
     const { currentSessionKey } = currentState;
+    const recoverableCurrentSessionView = restoreSessionView(currentSessionKey);
     const shouldSkipUnusedDraftHydration = (
       currentSessionKey.includes(':session-')
       && isUnusedDraftSession(currentState, currentSessionKey)
       && !currentState.sessions.some((session) => session.key === currentSessionKey)
+      && !hasRecoverableSessionView(recoverableCurrentSessionView)
     );
     if (shouldSkipUnusedDraftHydration) {
       if (currentState.loading) {
@@ -5076,13 +5208,20 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
               const snapshotMsgs: RawMessage[] = [];
               if (currentStream) {
                 const streamRole = currentStream.role;
-                if (streamRole === 'assistant' || streamRole === undefined) {
+                const streamSnapshotMessage: RawMessage = {
+                  ...(currentStream as RawMessage),
+                  role: 'assistant',
+                };
+                if (
+                  (streamRole === 'assistant' || streamRole === undefined)
+                  && !isInternalMessage(streamSnapshotMessage)
+                ) {
                   // Use message's own id if available, otherwise derive a stable one from runId
                   const snapId = currentStream.id
                     || `${runId || 'run'}-turn-${s.messages.length}`;
                   if (!s.messages.some(m => m.id === snapId)) {
                     snapshotMsgs.push({
-                      ...(currentStream as RawMessage),
+                      ...streamSnapshotMessage,
                       role: 'assistant',
                       id: snapId,
                     });
@@ -5091,6 +5230,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
               }
               if (
                 toolResultProcessMessage
+                && !isInternalMessage(toolResultProcessMessage)
                 && !s.messages.some((message) => message.id === toolResultProcessMessage.id)
                 && !snapshotMsgs.some((message) => message.id === toolResultProcessMessage.id)
               ) {

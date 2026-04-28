@@ -126,6 +126,10 @@ type ChatListItem =
   | {
       type: 'typing';
       key: string;
+    }
+  | {
+      type: 'tail-spacer';
+      key: string;
     };
 
 type ChatVirtuosoContext = {
@@ -621,6 +625,12 @@ export function Chat() {
         type: 'active-turn',
         key: activeTurnScrollKey ?? `active-turn:${currentSessionKey}`,
       });
+      if (sending && activeTurnScrollKey) {
+        items.push({
+          type: 'tail-spacer',
+          key: `active-turn-tail-spacer:${activeTurnScrollKey}`,
+        });
+      }
       return items;
     }
 
@@ -704,6 +714,7 @@ export function Chat() {
   const isZh = (i18n.resolvedLanguage || i18n.language || '').startsWith('zh');
   const {
     activeTurnViewportAnchorRef,
+    activeTurnTailSpacerHeight,
     chatListRef,
     composerShellPadding,
     contentColumnHorizontalOffsetPx,
@@ -1009,6 +1020,14 @@ export function Chat() {
         return <ActivityIndicator phase="tool_processing" />;
       case 'typing':
         return <TypingIndicator />;
+      case 'tail-spacer':
+        return (
+          <div
+            aria-hidden="true"
+            data-testid="chat-active-turn-tail-spacer"
+            style={{ height: `${activeTurnTailSpacerHeight}px` }}
+          />
+        );
       default:
         return null;
     }
@@ -1016,7 +1035,9 @@ export function Chat() {
     activeTurnFinalStreamingMessage,
     activeTurnProcessStreamingMessage,
     activeTurnStartedAtMs,
+    activeTurnTailSpacerHeight,
     activeTurnUserMessage,
+    activeTurnViewportAnchorRef,
     assistantMessageStyle,
     chatProcessDisplayMode,
     currentSessionKey,

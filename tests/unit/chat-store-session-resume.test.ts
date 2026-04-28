@@ -568,6 +568,169 @@ describe('chat store session resume', () => {
     expect(next.sendStage).toBe('running');
   });
 
+  it('selects a recoverable running session from local storage on cold startup', async () => {
+    vi.setSystemTime(new Date('2026-04-25T02:49:00.000Z'));
+    const persistedSessionKey = 'agent:main:session-live-startup';
+    const userMessage = {
+      id: 'user-visible-stream-startup',
+      role: 'user',
+      content: 'Find flights after reload',
+      timestamp: Date.now() / 1000,
+    };
+    const streamingText = 'Opening the travel site and checking tomorrow flights now.';
+
+    window.localStorage.setItem(`clawx:chat-session-view:v1:${persistedSessionKey}`, JSON.stringify({
+      savedAt: Date.now(),
+      snapshot: {
+        messages: [userMessage],
+        loading: false,
+        error: null,
+        sessionNotice: null,
+        sending: true,
+        activeRunId: 'run-visible-stream-startup',
+        streamingText,
+        streamingMessage: null,
+        streamingTools: [],
+        sendStage: 'running',
+        pendingFinal: false,
+        lastUserMessageAt: Date.now(),
+        pendingToolImages: [],
+        thinkingLevel: null,
+      },
+    }));
+
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'sessions.list') {
+        return Promise.resolve({
+          sessions: [{
+            key: persistedSessionKey,
+            label: 'Find flights after reload',
+            updatedAt: Date.now(),
+          }],
+        });
+      }
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [userMessage],
+        });
+      }
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [],
+      messages: [],
+      composerDrafts: {},
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      sendStage: null,
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().loadSessions();
+    expect(useChatStore.getState().currentSessionKey).toBe(persistedSessionKey);
+
+    await useChatStore.getState().loadHistory(true);
+
+    const next = useChatStore.getState();
+    expect(next.currentSessionKey).toBe(persistedSessionKey);
+    expect(next.messages.map((message) => message.content)).toEqual(['Find flights after reload', streamingText]);
+    expect(next.sending).toBe(true);
+    expect(next.pendingFinal).toBe(true);
+  });
+
+  it('hydrates an unused draft session when it has a recoverable local running view', async () => {
+    vi.setSystemTime(new Date('2026-04-25T02:49:00.000Z'));
+    const persistedSessionKey = 'agent:main:session-recoverable-draft';
+    const userMessage = {
+      id: 'user-recoverable-draft',
+      role: 'user',
+      content: 'Recover this draft session',
+      timestamp: Date.now() / 1000,
+    };
+    const streamingText = 'Still working inside the recovered draft session.';
+
+    window.localStorage.setItem(`clawx:chat-session-view:v1:${persistedSessionKey}`, JSON.stringify({
+      savedAt: Date.now(),
+      snapshot: {
+        messages: [userMessage],
+        loading: false,
+        error: null,
+        sessionNotice: null,
+        sending: true,
+        activeRunId: 'run-recoverable-draft',
+        streamingText,
+        streamingMessage: null,
+        streamingTools: [],
+        sendStage: 'running',
+        pendingFinal: false,
+        lastUserMessageAt: Date.now(),
+        pendingToolImages: [],
+        thinkingLevel: null,
+      },
+    }));
+
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [userMessage],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+    useChatStore.setState({
+      currentSessionKey: persistedSessionKey,
+      currentAgentId: 'main',
+      sessions: [],
+      messages: [],
+      composerDrafts: {},
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      sendStage: null,
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().loadHistory(true);
+
+    const next = useChatStore.getState();
+    expect(next.currentSessionKey).toBe(persistedSessionKey);
+    expect(next.messages.map((message) => message.content)).toEqual(['Recover this draft session', streamingText]);
+    expect(next.sending).toBe(true);
+    expect(next.pendingFinal).toBe(true);
+  });
+
   it('clears the running state when history already includes the final assistant reply even without pendingFinal', async () => {
     gatewayRpcMock.mockReset();
     gatewayRpcMock.mockImplementation((method: string) => {
@@ -1391,6 +1554,169 @@ describe('chat store session resume', () => {
     expect(next.streamingMessage).toBeNull();
     expect(next.streamingTools).toEqual([]);
     expect(next.pendingToolImages).toEqual([]);
+  });
+
+  it('filters internal session status tool turns from loaded history', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.history') {
+        return Promise.resolve({
+          messages: [
+            { id: 'user-1', role: 'user', content: 'Which model are you?', timestamp: userTimestampSeconds },
+            {
+              id: 'assistant-status',
+              role: 'assistant',
+              content: [
+                { type: 'thinking', thinking: 'Check runtime model metadata.' },
+                { type: 'text', text: 'session_status' },
+                { type: 'toolCall', id: 'status-tool-1', name: 'session_status', input: {} },
+              ],
+              timestamp: assistantTimestampSeconds,
+              stopReason: 'toolUse',
+            },
+            {
+              id: 'tool-result-status',
+              role: 'toolresult',
+              toolCallId: 'status-tool-1',
+              toolName: 'session_status',
+              content: 'Model: custom-custombc/qwen3.5-plus',
+              timestamp: assistantTimestampSeconds + 1,
+            },
+            {
+              id: 'assistant-final',
+              role: 'assistant',
+              content: 'I am using custom-custombc/qwen3.5-plus.',
+              timestamp: assistantTimestampSeconds + 2,
+              stopReason: 'stop',
+            },
+          ],
+        });
+      }
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: true,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: null,
+    });
+
+    await useChatStore.getState().loadHistory(true);
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual([
+      'user-1',
+      'assistant-final',
+    ]);
+    expect(JSON.stringify(next.messages)).not.toContain('session_status');
+  });
+
+  it('does not snapshot internal session status tool turns as assistant replies', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+    const finalReply = 'I am using custom-custombc/qwen3.5-plus.';
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Which model are you?', timestamp: userTimestampSeconds },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: { 'agent:main:main': true },
+      sending: true,
+      activeRunId: 'run-session-status',
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: 'running',
+    });
+
+    useChatStore.getState().handleChatEvent({
+      state: 'delta',
+      runId: 'run-session-status',
+      sessionKey: 'agent:main:main',
+      seq: 1,
+      message: {
+        id: 'assistant-status',
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'Check runtime model metadata.' },
+          { type: 'text', text: 'session_status' },
+          { type: 'toolCall', id: 'status-tool-1', name: 'session_status', input: {} },
+        ],
+        timestamp: assistantTimestampSeconds,
+        stopReason: 'toolUse',
+      },
+    });
+    await vi.advanceTimersByTimeAsync(60);
+
+    useChatStore.getState().handleChatEvent({
+      state: 'final',
+      runId: 'run-session-status',
+      sessionKey: 'agent:main:main',
+      seq: 2,
+      message: {
+        id: 'tool-result-status',
+        role: 'toolresult',
+        toolCallId: 'status-tool-1',
+        toolName: 'session_status',
+        content: 'Model: custom-custombc/qwen3.5-plus',
+        timestamp: assistantTimestampSeconds + 1,
+      },
+    });
+
+    useChatStore.getState().handleChatEvent({
+      state: 'final',
+      runId: 'run-session-status',
+      sessionKey: 'agent:main:main',
+      seq: 3,
+      message: {
+        id: 'assistant-final',
+        role: 'assistant',
+        content: finalReply,
+        timestamp: assistantTimestampSeconds + 2,
+        stopReason: 'stop',
+      },
+    });
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual([
+      'user-1',
+      'assistant-final',
+    ]);
+    expect(next.messages.filter((message) => message.content === finalReply)).toHaveLength(1);
+    expect(JSON.stringify(next.messages)).not.toContain('session_status');
+    expect(next.sending).toBe(false);
+    expect(next.streamingMessage).toBeNull();
   });
 
   it('merges late assistant process deltas into the settled turn before the final reply', async () => {

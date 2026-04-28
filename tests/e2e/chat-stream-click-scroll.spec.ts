@@ -265,7 +265,7 @@ test.describe('Chat stream click scroll', () => {
 
       const beforeClick = await measureScrollMetrics(page);
       expect(beforeClick.distanceFromBottom).not.toBeNull();
-      expect(beforeClick.distanceFromBottom ?? 999).toBeLessThanOrEqual(24);
+      expect(beforeClick.distanceFromBottom ?? 999).toBeLessThanOrEqual(48);
 
       await page.getByText('Stage 1 summary:').click();
 

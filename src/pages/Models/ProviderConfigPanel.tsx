@@ -495,6 +495,7 @@ export function ProviderConfigPanel() {
     createAccount,
     updateAccount,
     removeAccount,
+    setDefaultAccount,
   } = useProviderStore();
   const fetchAgents = useAgentsStore((state) => state.fetchAgents);
 

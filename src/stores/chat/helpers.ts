@@ -967,6 +967,88 @@ function isToolResultRole(role: unknown): boolean {
   return normalized === 'toolresult' || normalized === 'tool_result';
 }
 
+const INTERNAL_SESSION_STATUS_TOOL_NAME = 'session_status';
+
+function normalizeInternalToolName(value: unknown): string {
+  return typeof value === 'string'
+    ? value.trim().toLowerCase().replace(/[\s-]+/g, '_')
+    : '';
+}
+
+function isInternalSessionStatusToolName(value: unknown): boolean {
+  return normalizeInternalToolName(value) === INTERNAL_SESSION_STATUS_TOOL_NAME;
+}
+
+function getStructuredToolName(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const fn = record.function;
+  if (fn && typeof fn === 'object') {
+    const functionName = (fn as Record<string, unknown>).name;
+    if (typeof functionName === 'string') return functionName;
+  }
+  return record.name;
+}
+
+function hasInternalSessionStatusToolInteraction(msg: { content?: unknown; toolName?: unknown; name?: unknown }): boolean {
+  if (isInternalSessionStatusToolName(msg.toolName) || isInternalSessionStatusToolName(msg.name)) {
+    return true;
+  }
+
+  const msgRecord = msg as Record<string, unknown>;
+  const toolCalls = msgRecord.tool_calls ?? msgRecord.toolCalls;
+  if (Array.isArray(toolCalls) && toolCalls.some((call) => isInternalSessionStatusToolName(getStructuredToolName(call)))) {
+    return true;
+  }
+
+  if (!Array.isArray(msg.content)) return false;
+  return (msg.content as ContentBlock[]).some((block) => {
+    if (block.type !== 'tool_use' && block.type !== 'tool_result' && block.type !== 'toolCall' && block.type !== 'toolResult') {
+      return false;
+    }
+    return isInternalSessionStatusToolName(block.name);
+  });
+}
+
+function getTextPartsFromMessage(msg: { content?: unknown; text?: unknown }): string[] {
+  const parts: string[] = [];
+  if (typeof msg.content === 'string') {
+    parts.push(msg.content);
+  } else if (Array.isArray(msg.content)) {
+    for (const block of msg.content as ContentBlock[]) {
+      if (block.type === 'text' && typeof block.text === 'string') {
+        parts.push(block.text);
+      }
+    }
+  }
+  if (typeof msg.text === 'string') {
+    parts.push(msg.text);
+  }
+  return parts;
+}
+
+function isInternalSessionStatusMarkerText(text: string): boolean {
+  const normalized = text.trim().replace(/^[^\w]+/, '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return normalized === INTERNAL_SESSION_STATUS_TOOL_NAME;
+}
+
+function isInternalSessionStatusMessage(msg: {
+  role?: unknown;
+  content?: unknown;
+  toolName?: unknown;
+  name?: unknown;
+  text?: unknown;
+}): boolean {
+  if (!hasInternalSessionStatusToolInteraction(msg)) return false;
+  if (isToolResultRole(msg.role)) return true;
+  if (msg.role !== 'assistant') return false;
+
+  const textParts = getTextPartsFromMessage(msg);
+  return textParts.length === 0 || textParts.every((part) => (
+    !part.trim() || isInternalSessionStatusMarkerText(part)
+  ));
+}
+
 function isPreCompactionMemoryFlushPrompt(text: string): boolean {
   const normalized = text.trim();
   return /^Pre-compaction memory flush\./i.test(normalized)
@@ -975,8 +1057,9 @@ function isPreCompactionMemoryFlushPrompt(text: string): boolean {
 }
 
 /** True for internal plumbing messages that should never be shown in the UI. */
-function isInternalMessage(msg: { role?: unknown; content?: unknown }): boolean {
+function isInternalMessage(msg: { role?: unknown; content?: unknown; toolName?: unknown; name?: unknown; text?: unknown }): boolean {
   if (msg.role === 'system') return true;
+  if (isInternalSessionStatusMessage(msg)) return true;
   if (msg.role === 'user') {
     const text = getMessageText(msg.content);
     if (isPreCompactionMemoryFlushPrompt(text)) return true;
@@ -1396,6 +1479,7 @@ function shouldContinueAssistantDelta(previous: RawMessage | null | undefined, n
 
 function createAssistantDeltaSnapshot(message: RawMessage, snapshotId: string): RawMessage | null {
   if (!isAssistantLikeRole(message.role)) return null;
+  if (isInternalMessage({ ...message, role: 'assistant' })) return null;
 
   if (typeof message.content === 'string') {
     if (!message.content.trim() && (message._attachedFiles?.length ?? 0) === 0) return null;

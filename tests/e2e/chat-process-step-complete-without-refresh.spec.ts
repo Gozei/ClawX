@@ -922,4 +922,223 @@ test.describe('Chat process step completion', () => {
     }
   });
 
+  test('hides internal session status tool turns after the final reply', async ({ launchElectronApp }) => {
+    test.setTimeout(180_000);
+
+    const app = await launchElectronApp({ skipSetup: true });
+    const prompt = 'Which model are you using?';
+    const finalReply = 'I am using custom-custombc/qwen3.5-plus.';
+
+    try {
+      await installIpcMocks(app, {
+        gatewayStatus: { state: 'running', port: 18789, pid: 12345, connectedAt: Date.now() },
+        hostApi: {
+          [stableStringify(['/api/gateway/status', 'GET'])]: {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                state: 'running',
+                port: 18789,
+                pid: 12345,
+                connectedAt: Date.now(),
+              },
+            },
+          },
+          [stableStringify(['/api/agents', 'GET'])]: {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                success: true,
+                agents: [],
+              },
+            },
+          },
+          [stableStringify(['/api/settings', 'GET'])]: {
+            ok: true,
+            data: {
+              status: 200,
+              ok: true,
+              json: {
+                language: 'en',
+                chatProcessDisplayMode: 'all',
+                assistantMessageStyle: 'bubble',
+                hideInternalRoutineProcesses: true,
+                setupComplete: true,
+              },
+            },
+          },
+        },
+      });
+
+      await retryElectronAppOperation(app, async () => await app.evaluate(({ ipcMain, BrowserWindow }, { finalReply, prompt, runId, sessionId, sessionKey }) => {
+        let sessions: Array<{ key: string; id: string; label: string; updatedAt: number }> = [];
+        let historyMessages: Array<Record<string, unknown>> = [];
+
+        function emitNotification(payload: unknown): void {
+          const window = BrowserWindow.getAllWindows().at(-1);
+          if (!window) throw new Error('No BrowserWindow available');
+          window.webContents.send('gateway:notification', payload);
+        }
+
+        ipcMain.removeHandler('gateway:rpc');
+        ipcMain.handle('gateway:rpc', async (_event, method: string, params?: { sessionKey?: string }) => {
+          if (method === 'sessions.list') {
+            return {
+              success: true,
+              result: { sessions },
+            };
+          }
+
+          if (method === 'chat.history') {
+            return {
+              success: true,
+              result: { messages: historyMessages },
+            };
+          }
+
+          if (method === 'chat.abort') {
+            return {
+              success: true,
+              result: { ok: true },
+            };
+          }
+
+          if (method === 'chat.send') {
+            const now = Math.floor(Date.now() / 1000);
+            const activeSessionKey = params?.sessionKey || sessionKey;
+            const userMessage = {
+              id: 'user-session-status-1',
+              role: 'user',
+              content: prompt,
+              timestamp: now,
+            };
+            const statusMessage = {
+              id: 'assistant-session-status-1',
+              role: 'assistant',
+              content: [
+                { type: 'thinking', thinking: 'Check runtime model metadata.' },
+                { type: 'text', text: 'session_status' },
+                {
+                  type: 'toolCall',
+                  id: 'session-status-tool-1',
+                  name: 'session_status',
+                  input: {},
+                },
+              ],
+              timestamp: now + 1,
+              stopReason: 'toolUse',
+            };
+            const statusToolResult = {
+              id: 'tool-result-session-status-1',
+              role: 'toolresult',
+              toolCallId: 'session-status-tool-1',
+              toolName: 'session_status',
+              content: 'Model: custom-custombc/qwen3.5-plus',
+              timestamp: now + 2,
+            };
+            const finalMessage = {
+              id: 'assistant-session-status-final-1',
+              role: 'assistant',
+              content: finalReply,
+              timestamp: now + 3,
+              stopReason: 'stop',
+            };
+
+            sessions = [{
+              key: activeSessionKey,
+              id: sessionId,
+              label: prompt,
+              updatedAt: Date.now(),
+            }];
+            historyMessages = [userMessage];
+
+            setTimeout(() => {
+              emitNotification({
+                method: 'agent',
+                params: {
+                  phase: 'started',
+                  runId,
+                  sessionKey: activeSessionKey,
+                },
+              });
+            }, 0);
+
+            setTimeout(() => {
+              historyMessages = [userMessage, statusMessage];
+              emitNotification({
+                method: 'agent',
+                params: {
+                  runId,
+                  sessionKey: activeSessionKey,
+                  state: 'delta',
+                  message: statusMessage,
+                },
+              });
+            }, 300);
+
+            setTimeout(() => {
+              historyMessages = [userMessage, statusMessage, statusToolResult];
+              emitNotification({
+                method: 'agent',
+                params: {
+                  runId,
+                  sessionKey: activeSessionKey,
+                  state: 'final',
+                  message: statusToolResult,
+                },
+              });
+            }, 700);
+
+            setTimeout(() => {
+              historyMessages = [userMessage, statusMessage, statusToolResult, finalMessage];
+              emitNotification({
+                method: 'agent',
+                params: {
+                  runId,
+                  sessionKey: activeSessionKey,
+                  state: 'final',
+                  message: finalMessage,
+                },
+              });
+            }, 1_100);
+
+            return {
+              success: true,
+              result: { runId },
+            };
+          }
+
+          return {};
+        });
+      }, {
+        finalReply,
+        prompt,
+        runId: `${RUN_ID}-session-status`,
+        sessionId: `${SESSION_ID}-session-status`,
+        sessionKey: SESSION_KEY,
+      }));
+
+      const page = await getStableWindow(app);
+      await expect(page.getByTestId('main-layout')).toBeVisible({ timeout: 60_000 });
+
+      const composer = page.getByTestId('chat-composer');
+      await composer.getByRole('textbox').fill(prompt);
+      await composer.getByTestId('chat-send-button').click();
+
+      await expect(page.getByText(finalReply)).toBeVisible({ timeout: 30_000 });
+      await expect.poll(async () => (
+        await page.getByTestId('chat-assistant-message-bubble').filter({ hasText: finalReply }).count()
+      ), { timeout: 30_000 }).toBe(1);
+      await expect.poll(async () => await page.evaluate(() => document.body.textContent?.includes('session_status') ?? false), {
+        timeout: 30_000,
+      }).toBe(false);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
 });

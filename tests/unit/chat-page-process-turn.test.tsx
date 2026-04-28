@@ -565,6 +565,7 @@ describe('Chat process turn rendering', () => {
     render(<Chat />);
 
     const scrollContainer = screen.getByTestId('chat-scroll-container');
+    const activeTurnAnchor = screen.getByTestId('chat-active-turn-anchor');
     scrollContainer.scrollTop = 0;
     Object.defineProperty(scrollContainer, 'clientHeight', {
       configurable: true,
@@ -574,6 +575,28 @@ describe('Chat process turn rendering', () => {
       configurable: true,
       value: 1200,
     });
+    vi.spyOn(scrollContainer, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 960,
+      height: 640,
+      top: 0,
+      right: 960,
+      bottom: 640,
+      left: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    vi.spyOn(activeTurnAnchor, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 616,
+      width: 960,
+      height: 120,
+      top: 616,
+      right: 960,
+      bottom: 736,
+      left: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
 
     act(() => {
       let now = performance.now();
@@ -769,7 +792,7 @@ describe('Chat process turn rendering', () => {
     expect(virtuosoState.lastProps).toMatchObject({
       initialTopMostItemIndex: { index: 'LAST', align: 'end' },
     });
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
   });
 
   it('keeps the original bubble-style process content when the final answer has not started yet', () => {
@@ -1423,7 +1446,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
     expect(requestAnimationFrameMock.mock.calls.length).toBeGreaterThan(3);
   });
 
@@ -1730,7 +1753,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
 
     Object.defineProperty(scrollContainer, 'scrollHeight', {
       configurable: true,
@@ -1752,7 +1775,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(512);
+    expect(scrollContainer.scrollTop).toBe(528);
   });
 
   it('does not release auto-follow from a plain scroll event without user scroll intent', () => {
@@ -1853,7 +1876,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
 
     fireEvent.scroll(scrollContainer);
 
@@ -1877,7 +1900,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(512);
+    expect(scrollContainer.scrollTop).toBe(528);
   });
 
   it('stops auto-following once the user manually scrolls during streaming', () => {
@@ -1978,7 +2001,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
 
     fireEvent.wheel(scrollContainer, { deltaY: -120 });
 
@@ -2000,7 +2023,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
   });
 
   it('stops auto-following once the user clicks inside the transcript during streaming', () => {
@@ -2101,7 +2124,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
 
     fireEvent.pointerDown(activeTurnAnchor, {
       button: 0,
@@ -2126,7 +2149,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
   });
 
   it('lets the user keep scrolling up and back down after interrupting auto-follow', () => {
@@ -2227,7 +2250,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
 
     fireEvent.wheel(scrollContainer, { deltaY: -120 });
     scrollContainer.scrollTop = 96;
@@ -2419,7 +2442,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
 
     const eventToggle = screen.getAllByTestId('chat-process-event-toggle')[0];
     fireEvent.pointerDown(eventToggle);
@@ -2443,7 +2466,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
   });
 
   it('hides the persisted copy of an optimistic user message when the active turn already renders it', () => {
