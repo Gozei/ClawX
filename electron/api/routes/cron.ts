@@ -920,7 +920,6 @@ export async function handleCronRoutes(
     const sortDir = url.searchParams.get('sortDir') === 'asc' ? 'asc' : 'desc';
     const statuses = url.searchParams.get('statuses')?.split(',').map((item) => item.trim()).filter(Boolean);
     const deliveryStatuses = url.searchParams.get('deliveryStatuses')?.split(',').map((item) => item.trim()).filter(Boolean);
-    let gatewayAvailable = false;
     try {
       const params: Record<string, unknown> = {
         scope,
@@ -933,7 +932,6 @@ export async function handleCronRoutes(
       if (deliveryStatuses?.length) params.deliveryStatuses = deliveryStatuses;
       if (query) params.query = query;
       const result = await ctx.gatewayManager.rpc('cron.runs', params);
-      gatewayAvailable = true;
       const record = asRecord(result);
       const entries = Array.isArray(record?.entries) ? record.entries : [];
       sendJson(res, 200, {
@@ -942,7 +940,7 @@ export async function handleCronRoutes(
         offset: typeof record?.offset === 'number' ? record.offset : offset,
         nextOffset: typeof record?.nextOffset === 'number' || record?.nextOffset === null ? record.nextOffset : null,
         hasMore: typeof record?.hasMore === 'boolean' ? record.hasMore : false,
-        gatewayAvailable,
+        gatewayAvailable: true,
       });
     } catch {
       try {

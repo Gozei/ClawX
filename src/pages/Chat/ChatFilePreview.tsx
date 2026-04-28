@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect -- File preview components reset local render/cache state when the selected preview source changes. */
 import {
   useCallback,
   useEffect,
@@ -724,7 +725,9 @@ function slugifyHeadingText(value: string, usedIds: Set<string>, fallbackIndex: 
   const normalized = value
     .trim()
     .toLowerCase()
-    .replace(/[\u0000-\u001f]+/g, '')
+    .split('')
+    .filter((char) => char.charCodeAt(0) >= 32)
+    .join('')
     .replace(/[^\p{L}\p{N}]+/gu, '-')
     .replace(/^-+|-+$/g, '')
     || `section-${fallbackIndex}`;

@@ -574,6 +574,17 @@ export function useChatScrollController({
     syncBottomState(0);
     return nextScrollTop;
   }, [markProgrammaticScroll, syncBottomState]);
+  const resumeFollowingFromUserBottom = useCallback(() => {
+    suppressedAutoFollowTurnKeyRef.current = null;
+    resumeFollowingLatest('user-intent');
+    pinScrollToBottom(ACTIVE_TURN_AUTO_SCROLL_DURATION_MS + 240);
+
+    if (sending && activeTurnScrollKey) {
+      activeTurnTrackedTurnKeyRef.current = activeTurnScrollKey;
+      activeTurnAutoScrollModeRef.current = 'follow-bottom';
+      setActiveTurnUserInterruptVersion((value) => value + 1);
+    }
+  }, [activeTurnScrollKey, pinScrollToBottom, resumeFollowingLatest, sending]);
   // isAtBottomRef and pendingSessionEntryBottomRef are read intentionally:
   // ref reads do not trigger renders, and this callback refreshes with the remaining deps.
   const shouldPinFollowingBottom = useCallback((allowActiveTurn = false) => (
@@ -683,13 +694,19 @@ export function useChatScrollController({
           syncBottomState(0);
           return;
         }
-        syncBottomState();
+        const nextAtBottom = syncBottomState();
         if (
           !isFollowingLatest()
           && now >= bottomStateProgrammaticGuardUntilRef.current
           && refreshDetachedViewport
-          && now <= detachedViewportRefreshUntilRef.current
         ) {
+          if (nextAtBottom) {
+            resumeFollowingFromUserBottom();
+            return;
+          }
+          if (now > detachedViewportRefreshUntilRef.current) {
+            return;
+          }
           captureSemanticAnchor();
           detachedViewportScrollTopRef.current = scrollElement.scrollTop;
         }
@@ -728,6 +745,7 @@ export function useChatScrollController({
     currentSessionKey,
     isFollowingLatest,
     pinScrollToBottom,
+    resumeFollowingFromUserBottom,
     scrollContainerNode,
     sending,
     shouldPinFollowingBottom,

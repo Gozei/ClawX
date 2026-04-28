@@ -35,6 +35,17 @@ async function measureScrollMetrics(page: Page): Promise<{ scrollTop: number; di
   });
 }
 
+async function getChatScrollMode(page: Page): Promise<string | null> {
+  return await page.evaluate(() => {
+    const debugApi = (window as typeof window & {
+      __CLAWX_CHAT_SCROLL_DEBUG__?: {
+        getSnapshot: () => { mode: string };
+      };
+    }).__CLAWX_CHAT_SCROLL_DEBUG__;
+    return debugApi?.getSnapshot().mode ?? null;
+  });
+}
+
 async function installStreamMockHandlers(
   app: ElectronApplication,
 ): Promise<void> {
@@ -325,6 +336,13 @@ test.describe('Chat stream click scroll', () => {
         const metrics = await measureScrollMetrics(page);
         return metrics.scrollTop;
       }, { timeout: 10_000 }).toBeGreaterThan(afterWheelUp.scrollTop + 24);
+
+      await page.mouse.wheel(0, 5000);
+      await expect.poll(async () => {
+        const metrics = await measureScrollMetrics(page);
+        return metrics.distanceFromBottom ?? 999;
+      }, { timeout: 10_000 }).toBeLessThanOrEqual(48);
+      await expect.poll(async () => getChatScrollMode(page), { timeout: 10_000 }).toBe('following');
 
       await expect(page.getByTestId('chat-scroll-to-latest')).toHaveCount(0);
     } finally {

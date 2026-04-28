@@ -275,6 +275,21 @@ vi.mock('@/pages/Chat/ChatToolbarV2', () => ({
   ChatToolbarV2: () => <div data-testid="chat-toolbar" />,
 }));
 
+type ChatScrollDebugSnapshotForTest = {
+  activeTurnAutoScrollMode: string;
+  isAtBottom: boolean;
+  mode: string;
+};
+
+function getChatScrollDebugSnapshot() {
+  const debugWindow = window as typeof window & {
+    __CLAWX_CHAT_SCROLL_DEBUG__?: {
+      getSnapshot: () => ChatScrollDebugSnapshotForTest;
+    };
+  };
+  return debugWindow.__CLAWX_CHAT_SCROLL_DEBUG__?.getSnapshot() ?? null;
+}
+
 describe('Chat process turn rendering', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -2458,7 +2473,7 @@ describe('Chat process turn rendering', () => {
     expect(scrollContainer.scrollTop).toBe(280);
   });
 
-  it('lets the user keep scrolling up and back down after interrupting auto-follow', () => {
+  it('resumes auto-following after the user scrolls back to the bottom', () => {
     const rafQueue: FrameRequestCallback[] = [];
     const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
       rafQueue.push(callback);
@@ -2581,6 +2596,7 @@ describe('Chat process turn rendering', () => {
     });
 
     expect(scrollContainer.scrollTop).toBe(96);
+    expect(getChatScrollDebugSnapshot()?.mode).toBe('detached');
 
     fireEvent.wheel(scrollContainer, { deltaY: 120 });
     scrollContainer.scrollTop = 244;
@@ -2604,7 +2620,12 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(244);
+    expect(scrollContainer.scrollTop).toBe(280);
+    expect(getChatScrollDebugSnapshot()).toMatchObject({
+      activeTurnAutoScrollMode: 'follow-bottom',
+      isAtBottom: true,
+      mode: 'following',
+    });
     expect(requestAnimationFrameMock).toHaveBeenCalled();
   });
 

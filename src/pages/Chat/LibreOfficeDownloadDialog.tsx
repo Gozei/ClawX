@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect -- The dialog polls external runtime status and mirrors it into local UI state. */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
