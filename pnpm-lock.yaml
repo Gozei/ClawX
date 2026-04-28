@@ -23,6 +23,9 @@ importers:
       '@whiskeysockets/baileys':
         specifier: 7.0.0-rc.9
         version: 7.0.0-rc.9(jimp@1.6.1)(sharp@0.34.5)
+      '@whiskeysockets/libsignal-node':
+        specifier: file:vendor/libsignal-node-direct.tar.gz
+        version: file:vendor/libsignal-node-direct.tar.gz
       '@xmldom/xmldom':
         specifier: ^0.9.10
         version: 0.9.10
