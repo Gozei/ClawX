@@ -1,48 +1,46 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { closeElectronApp, completeSetup, expect, getStableWindow, openModelsFromSettings, test } from './fixtures/electron';
+import {
+  closeElectronApp,
+  completeSetup,
+  expect,
+  getStableWindow,
+  installIpcMocks,
+  openModelsFromSettings,
+  test,
+} from './fixtures/electron';
 
 const SEEDED_ACCOUNT_ID = 'chat-composer-openai-e2e';
+const SEEDED_ACCOUNT = {
+  id: SEEDED_ACCOUNT_ID,
+  vendorId: 'openai',
+  label: 'OpenAI E2E',
+  authMode: 'api_key',
+  baseUrl: 'https://api.openai.com/v1',
+  apiProtocol: 'openai-completions',
+  model: 'gpt-5.4',
+  metadata: {
+    customModels: ['gpt-5.4-mini'],
+    modelProtocols: {
+      'gpt-5.4': 'openai-completions',
+      'gpt-5.4-mini': 'openai-completions',
+    },
+  },
+  enabled: true,
+  isDefault: false,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+};
 
-async function seedConfiguredModels(page: Parameters<typeof completeSetup>[0]): Promise<void> {
-  await page.evaluate(async ({ accountId }) => {
-    const now = new Date().toISOString();
-    await window.electron.ipcRenderer.invoke('hostapi:fetch', {
-      path: '/api/provider-accounts',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        account: {
-          id: accountId,
-          vendorId: 'openai',
-          label: 'OpenAI E2E',
-          authMode: 'api_key',
-          baseUrl: 'https://api.openai.com/v1',
-          apiProtocol: 'openai-completions',
-          model: 'gpt-5.4',
-          metadata: {
-            customModels: ['gpt-5.4-mini'],
-            modelProtocols: {
-              'gpt-5.4': 'openai-completions',
-              'gpt-5.4-mini': 'openai-completions',
-            },
-          },
-          enabled: true,
-          isDefault: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-        apiKey: 'sk-e2e-placeholder',
-      }),
-    });
-
-    await window.electron.ipcRenderer.invoke('hostapi:fetch', {
-      path: '/api/provider-accounts/default',
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accountId }),
-    });
-  }, { accountId: SEEDED_ACCOUNT_ID });
+function hostJson(json: unknown) {
+  return {
+    ok: true,
+    data: {
+      status: 200,
+      ok: true,
+      json,
+    },
+  };
 }
 
 test.describe('Chat composer actions', () => {
@@ -122,18 +120,77 @@ test.describe('Chat composer actions', () => {
     }
   });
 
-  test('keeps model switching available while the gateway is disconnected', async ({ page }) => {
+  test('keeps model switching available while the gateway is disconnected', async ({ electronApp, page }) => {
     await completeSetup(page);
-    await seedConfiguredModels(page);
+    await installIpcMocks(electronApp, {
+      gatewayStatus: { state: 'running', port: 18789, pid: 12345 },
+      hostApi: {
+        '["/api/agents","GET"]': hostJson({
+          agents: [
+            {
+              id: 'main',
+              name: 'Main',
+              isDefault: true,
+              modelDisplay: 'OpenAI / gpt-5.4',
+              modelRef: 'openai/gpt-5.4',
+              inheritedModel: false,
+              workspace: '',
+              agentDir: '',
+              mainSessionKey: 'agent:main:main',
+              channelTypes: [],
+              skillIds: [],
+              workflowSteps: [],
+              triggerModes: [],
+            },
+          ],
+          defaultAgentId: 'main',
+          defaultModelRef: 'openai/gpt-5.4',
+          configuredChannelTypes: [],
+          channelOwners: {},
+          channelAccountOwners: {},
+        }),
+        '["/api/gateway/status","GET"]': hostJson({ state: 'running', port: 18789, pid: 12345 }),
+        '["/api/provider-accounts","GET"]': hostJson([SEEDED_ACCOUNT]),
+        '["/api/provider-account-statuses","GET"]': hostJson([
+          {
+            id: SEEDED_ACCOUNT_ID,
+            type: 'openai',
+            name: 'OpenAI E2E',
+            model: 'gpt-5.4',
+            enabled: true,
+            hasKey: true,
+            createdAt: SEEDED_ACCOUNT.createdAt,
+            updatedAt: SEEDED_ACCOUNT.updatedAt,
+          },
+        ]),
+        '["/api/provider-vendors","GET"]': hostJson([]),
+        '["/api/provider-accounts/default","GET"]': hostJson({ accountId: SEEDED_ACCOUNT_ID }),
+        '["/api/sessions/catalog","GET"]': hostJson({ success: true, sessions: [], previews: {} }),
+        '["/api/sessions/history","POST"]': hostJson({
+          success: true,
+          resolved: true,
+          messages: [],
+          thinkingLevel: null,
+        }),
+        '["/api/sessions/model","POST"]': hostJson({ success: true }),
+      },
+    });
     await page.reload();
     await expect(page.getByTestId('main-layout')).toBeVisible();
 
-    await page.evaluate(async () => {
-      try {
-        await window.electron.ipcRenderer.invoke('gateway:stop');
-      } catch {
-        // The final UI assertions verify the disconnected state.
-      }
+    const composerBeforeDisconnect = page.getByTestId('chat-composer');
+    await expect(composerBeforeDisconnect.getByTestId('chat-model-switch')).toContainText(
+      'OpenAI / gpt-5.4',
+      { timeout: 20_000 },
+    );
+
+    await electronApp.evaluate(({ BrowserWindow, ipcMain }) => {
+      ipcMain.removeHandler('gateway:status');
+      ipcMain.handle('gateway:status', async () => ({ state: 'stopped', port: 18789 }));
+      BrowserWindow.getAllWindows().at(-1)?.webContents.send('gateway:status-changed', {
+        state: 'stopped',
+        port: 18789,
+      });
     });
 
     await page.getByTestId('sidebar-new-chat').click({ force: true });

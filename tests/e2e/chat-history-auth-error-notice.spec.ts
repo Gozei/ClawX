@@ -3,6 +3,7 @@ import {
   expect,
   getStableWindow,
   installIpcMocks,
+  retryElectronAppOperation,
   test,
 } from './fixtures/electron';
 
@@ -30,8 +31,6 @@ test.describe('Chat history auth error notice', () => {
     const app = await launchElectronApp({ skipSetup: true });
 
     try {
-      await getStableWindow(app);
-
       await installIpcMocks(app, {
         gatewayStatus: { state: 'running', port: 18789, pid: 12345, connectedAt: Date.now() },
         hostApi: {
@@ -76,7 +75,7 @@ test.describe('Chat history auth error notice', () => {
         },
       });
 
-      await app.evaluate(({ ipcMain, BrowserWindow }, {
+      await retryElectronAppOperation(app, async () => await app.evaluate(({ ipcMain, BrowserWindow }, {
         prompt,
         sessionKey,
         sessionId,
@@ -214,7 +213,7 @@ test.describe('Chat history auth error notice', () => {
         streamingText: STREAMING_TEXT,
         partialText: PARTIAL_TEXT,
         authErrorText: AUTH_ERROR_TEXT,
-      });
+      }));
 
       const page = await getStableWindow(app);
       await expect(page.getByTestId('main-layout')).toBeVisible({ timeout: 60_000 });

@@ -83,6 +83,9 @@ describe('user-data migration', () => {
     const merged = mergeProviderStoreData(legacyStore, currentStore);
 
     expect(merged.defaultProviderAccountId).toBe('zai');
+    expect((merged.providerAccounts as Record<string, { model?: string }>)['custom-fbf']?.model).toBe('qwen3.5-plus');
+    expect((merged.providerAccounts as Record<string, unknown>)['custom-customfb']).toBeDefined();
+    expect((merged.providerAccounts as Record<string, { model?: string }>)['custom-customfb']?.model).toBeUndefined();
     expect(merged.apiKeys).toMatchObject({
       zai: 'zai-secret',
       'custom-customfb': 'dashscope-secret',

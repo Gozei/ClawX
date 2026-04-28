@@ -201,6 +201,29 @@ describe('chat tool status merging', () => {
     )).toBe(true);
   });
 
+  it('treats cumulative assistant text containing the previous text as one streaming step', () => {
+    expect(shouldContinueAssistantDelta(
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'text',
+            text: 'I found the first market figures.',
+          },
+        ],
+      },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'text',
+            text: 'I will research the chip market now.\n\nI found the first market figures.\n\nI am adding sources to the final answer.',
+          },
+        ],
+      },
+    )).toBe(true);
+  });
+
   it('treats a new note replacing an earlier note as a new live stage', () => {
     expect(shouldContinueAssistantDelta(
       {

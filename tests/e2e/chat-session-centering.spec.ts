@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test';
 import {
   closeElectronApp,
   expect,
@@ -9,6 +10,27 @@ import {
 const SESSION_KEY = 'agent:main:session-centered';
 const SESSION_LABEL = 'Centered Session';
 const MAIN_SESSION_KEY = 'agent:main:main';
+
+async function sampleChatScrollTop(page: Page, settleMs = 550, sampleMs = 700): Promise<number[]> {
+  return await page.evaluate(async ({ sampleMs, settleMs }) => {
+    const scrollContainer = document.querySelector('[data-testid="chat-scroll-container"]') as HTMLElement | null;
+    if (!scrollContainer) return [];
+
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, settleMs);
+    });
+
+    const samples: number[] = [];
+    const startedAt = performance.now();
+    while (performance.now() - startedAt < sampleMs) {
+      samples.push(scrollContainer.scrollTop);
+      await new Promise((resolve) => {
+        requestAnimationFrame(resolve);
+      });
+    }
+    return samples;
+  }, { sampleMs, settleMs });
+}
 
 test.describe('Chat Session Centering', () => {
   test('keeps the composer and history content centered after switching from a blank chat to a saved session', async ({ launchElectronApp, homeDir }) => {
@@ -207,6 +229,11 @@ test.describe('Chat Session Centering', () => {
       await expect(assistantContent).toBeVisible({ timeout: 30_000 });
       await expect(assistantAttachments).toBeVisible({ timeout: 30_000 });
       await expect(composer).toBeVisible({ timeout: 30_000 });
+
+      const scrollTopSamples = await sampleChatScrollTop(page);
+      expect(scrollTopSamples.length).toBeGreaterThan(5);
+      const scrollTopRange = Math.max(...scrollTopSamples) - Math.min(...scrollTopSamples);
+      expect(scrollTopRange).toBeLessThanOrEqual(4);
 
       const beforeScroll = {
         mainPane: await mainPane.boundingBox(),

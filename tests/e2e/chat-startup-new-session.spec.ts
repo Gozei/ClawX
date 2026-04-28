@@ -10,6 +10,7 @@ const RECENT_SESSION_KEY = 'agent:main:session-latest';
 const RECENT_SESSION_LABEL = 'Recovered startup session';
 const MAIN_SESSION_KEY = 'agent:main:desk';
 const MAIN_SESSION_LABEL = 'Desk';
+const SLOW_SESSION_KEY = 'agent:main:session-slow-history';
 
 test.describe('Chat startup new session', () => {
   test('keeps the blank new chat selected on launch even when history exists', async ({ launchElectronApp }) => {
@@ -128,6 +129,95 @@ test.describe('Chat startup new session', () => {
         ((composerBox?.x ?? 0) + ((composerBox?.width ?? 0) / 2))
         - ((mainPaneBox?.x ?? 0) + ((mainPaneBox?.width ?? 0) / 2)),
       )).toBeLessThanOrEqual(2);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
+  test('defers the empty-session loading spinner while history hydration starts', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      await installIpcMocks(app, {
+        gatewayStatus: { state: 'running', port: 18789, pid: 12345, connectedAt: Date.now() },
+      });
+      await app.evaluate(({ ipcMain }, params) => {
+        const okJson = (json: Record<string, unknown>) => ({
+          ok: true,
+          data: {
+            status: 200,
+            ok: true,
+            json,
+          },
+        });
+
+        ipcMain.removeHandler('hostapi:fetch');
+        ipcMain.handle('hostapi:fetch', async (_event, request: { path?: string; method?: string }) => {
+          const method = request?.method ?? 'GET';
+          const path = request?.path ?? '';
+
+          if (method === 'GET' && path === '/api/gateway/status') {
+            return okJson({ state: 'running', port: 18789, pid: 12345, connectedAt: Date.now() });
+          }
+          if (method === 'GET' && path === '/api/agents') {
+            return okJson({
+              success: true,
+              agents: [
+                {
+                  id: 'main',
+                  name: 'Main Role',
+                  default: true,
+                  mainSessionKey: params.mainSessionKey,
+                },
+              ],
+            });
+          }
+          if (method === 'GET' && path === '/api/sessions/catalog') {
+            return okJson({
+              success: true,
+              sessions: [
+                {
+                  key: params.sessionKey,
+                  label: 'Slow history',
+                  updatedAt: Date.now(),
+                },
+              ],
+              previews: {},
+            });
+          }
+          if (method === 'POST' && path === '/api/sessions/previews') {
+            return okJson({ success: true, previews: {} });
+          }
+          if (method === 'POST' && path === '/api/sessions/history') {
+            return await new Promise(() => {
+              // Keep the request pending so the renderer-side loading timer is deterministic.
+            });
+          }
+
+          return {
+            ok: false,
+            error: {
+              message: `Unexpected hostapi:fetch request: ${method} ${path}`,
+            },
+          };
+        });
+      }, {
+        mainSessionKey: MAIN_SESSION_KEY,
+        sessionKey: SLOW_SESSION_KEY,
+      });
+
+      const page = await getStableWindow(app);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await expect(page.getByTestId('main-layout')).toBeVisible();
+      await expect(page.getByTestId('chat-welcome-title')).toBeVisible({ timeout: 30_000 });
+      await page.clock.install();
+
+      await page.getByTestId(`sidebar-session-button-${SLOW_SESSION_KEY}`).click();
+      await page.clock.runFor(0);
+      expect(await page.getByTestId('chat-session-loading').count()).toBe(0);
+
+      await page.clock.runFor(180);
+      await expect(page.getByTestId('chat-session-loading')).toBeVisible();
     } finally {
       await closeElectronApp(app);
     }

@@ -126,6 +126,20 @@ function buildPreviewCacheKey(file: AttachedFileMeta): string {
   return `${file.filePath ?? ''}|${file.fileName}|${file.mimeType}`;
 }
 
+function isPresentationLikePreviewFile(file: AttachedFileMeta, preview: FilePreviewPayload | null): boolean {
+  const mimeType = `${file.mimeType} ${preview?.mimeType ?? ''}`.toLowerCase();
+  if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) {
+    return true;
+  }
+
+  const names = [
+    file.fileName,
+    file.filePath ?? '',
+    preview?.fileName ?? '',
+  ].join(' ').toLowerCase();
+  return /\.pptx(?:$|[\s?#])/i.test(names);
+}
+
 function isTransientPreviewLoadError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
@@ -2793,6 +2807,7 @@ function PreviewBodyState({
   if (
     preview.kind === 'unavailable'
     && preview.reasonCode === 'requiresLibreOffice'
+    && isPresentationLikePreviewFile(file, preview)
     && mode === 'modal'
     && !dismissedLibreOfficePrompt
   ) {

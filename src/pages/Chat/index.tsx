@@ -4,9 +4,9 @@
  * via gateway:rpc IPC. Session selector, thinking toggle, and refresh
  * are in the toolbar; messages render with markdown + streaming.
  */
-import { forwardRef, type ForwardedRef, type KeyboardEvent as ReactKeyboardEvent, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, type CSSProperties, type ForwardedRef, type KeyboardEvent as ReactKeyboardEvent, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ChevronDown, ChevronRight, Loader2, Sparkles } from 'lucide-react';
-import { Virtuoso, type ContextProp, type ItemProps, type ListProps, type ScrollerProps, type VirtuosoHandle } from 'react-virtuoso';
+import { Virtuoso, type ContextProp, type ItemProps, type ListProps, type ScrollerProps } from 'react-virtuoso';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useChatStore, type AttachedFileMeta, type ChatMessageDispatchOptions, type RawMessage, type ToolStatus } from '@/stores/chat';
 import { useGatewayStore } from '@/stores/gateway';
@@ -39,16 +39,12 @@ import { groupMessagesForDisplay, splitFinalMessageForTurnDisplay, type HistoryD
 import { getProcessActivityLabel, getProcessEventItems, ProcessEventMessage, ProcessFinalDivider } from './process-events-next';
 import { LibreOfficeDownloadDialog, type LibreOfficeRuntimeStatusPayload } from './LibreOfficeDownloadDialog';
 import { toast } from 'sonner';
+import { useChatScrollController } from './useChatScrollController';
 
 const EMPTY_MESSAGES: RawMessage[] = [];
-const ACTIVE_TURN_BOTTOM_OFFSET_PX = 16;
-const ACTIVE_TURN_AUTO_SCROLL_DURATION_MS = 500;
-const ACTIVE_TURN_PROGRAMMATIC_SCROLL_GUARD_MS = 80;
-const ACTIVE_TURN_NEAR_BOTTOM_THRESHOLD_PX = 48;
 const CHAT_SCROLL_TOP_BREATHING_ROOM_PX = 20;
 const CHAT_COMPOSER_PREFILL_STATE_KEY = 'composerPrefillText';
 const ACTIVE_TURN_USER_MATCH_WINDOW_MS = 60_000;
-const SESSION_ENTRY_BOTTOM_STABILIZE_MS = 400;
 const PROCESS_ACTIVITY_SOFT_STALL_MS = 12_000;
 const PROCESS_ACTIVITY_LONG_STALL_MS = 30_000;
 const CHAT_CONTENT_COLUMN_WIDTH_CSS = 'min(calc(100% - 1rem), 54rem)';
@@ -60,7 +56,6 @@ const CHAT_PREVIEW_MIN_MAIN_WIDTH_PX = 280;
 const CHAT_PREVIEW_RESIZE_KEY_STEP_PERCENT = 2;
 const CHAT_PREVIEW_RESIZE_KEY_LARGE_STEP_PERCENT = 8;
 const LIBREOFFICE_BACKED_PREVIEW_EXTENSIONS = new Set(['.pptx', '.docx', '.xlsx', '.xls', '.csv']);
-type ActiveTurnAutoScrollMode = 'idle' | 'follow-bottom';
 
 type LibreOfficeDownloadPrompt = {
   file: AttachedFileMeta;
@@ -232,11 +227,14 @@ const ChatVirtuosoList = forwardRef<HTMLDivElement, ListProps & ContextProp<Chat
 );
 
 const ChatVirtuosoItem = forwardRef<HTMLDivElement, ItemProps<ChatListItem> & ContextProp<ChatVirtuosoContext>>(
-  function ChatVirtuosoItem({ children, style, ...restProps }, ref) {
+  function ChatVirtuosoItem({ children, item, style, ...restProps }, ref) {
     return (
       <div
         ref={ref}
         {...restProps}
+        data-chat-scroll-anchor="true"
+        data-chat-scroll-anchor-key={item.key}
+        data-chat-scroll-anchor-type={item.type}
         style={{
           ...style,
           boxSizing: 'border-box',
@@ -299,27 +297,7 @@ export function Chat() {
     nonce: 0,
   });
   const autoFlushAttemptedQueuedIdRef = useRef<string | null>(null);
-  const chatListRef = useRef<VirtuosoHandle | null>(null);
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const activeTurnViewportAnchorRef = useRef<HTMLDivElement | null>(null);
   const splitPaneRef = useRef<HTMLDivElement | null>(null);
-  const activeTurnAutoScrollModeRef = useRef<ActiveTurnAutoScrollMode>('idle');
-  const activeTurnTrackedTurnKeyRef = useRef<string | null>(null);
-  const suppressedAutoFollowTurnKeyRef = useRef<string | null>(null);
-  const pendingLocalSendFollowBottomRef = useRef(false);
-  const pendingSessionEntryBottomRef = useRef(false);
-  const pendingSessionEntryUserInterruptedRef = useRef(false);
-  const previousSessionKeyRef = useRef(currentSessionKey);
-  const hasMountedSessionRef = useRef(false);
-  const activeTurnAutoScrollTargetRef = useRef(0);
-  const activeTurnAutoScrollFrameRef = useRef<number | null>(null);
-  const activeTurnAutoScrollAnimationRef = useRef<{ startTop: number; targetTop: number; startedAt: number } | null>(null);
-  const bottomStateProgrammaticGuardUntilRef = useRef(0);
-  const followLatestRef = useRef(true);
-  const detachedViewportScrollTopRef = useRef<number | null>(null);
-  const detachedViewportSignatureRef = useRef<string | null>(null);
-  const latestTranscriptActivitySignatureRef = useRef<string | null>(null);
-  const isAtBottomRef = useRef(true);
   const previewResizeStartXRef = useRef<number | null>(null);
   const previewResizeStartWidthRef = useRef(CHAT_PREVIEW_DEFAULT_WIDTH_PERCENT);
   const previewAutoCollapsedSidebarRef = useRef(false);
@@ -327,12 +305,6 @@ export function Chat() {
   const libreOfficePromptRequestRef = useRef(0);
   const sidebarCollapsedRef = useRef(sidebarCollapsed);
   const hadPreviewOpenRef = useRef(false);
-  const [activeTurnUserInterruptVersion, setActiveTurnUserInterruptVersion] = useState(0);
-  const [isAtBottom, setIsAtBottom] = useState(true);
-  const [hasDetachedNewContent, setHasDetachedNewContent] = useState(false);
-  const [composerShellPadding, setComposerShellPadding] = useState({ left: 16, right: 16 });
-  const [scrollContainerNode, setScrollContainerNodeState] = useState<HTMLDivElement | null>(null);
-  const [contentColumnHorizontalOffsetPx, setContentColumnHorizontalOffsetPx] = useState(0);
   const [selectedPreviewFile, setSelectedPreviewFile] = useState<AttachedFileMeta | null>(null);
   const [libreOfficeDownloadPrompt, setLibreOfficeDownloadPrompt] = useState<LibreOfficeDownloadPrompt | null>(null);
   const [previewPaneWidthPercent, setPreviewPaneWidthPercent] = useState(CHAT_PREVIEW_DEFAULT_WIDTH_PERCENT);
@@ -493,7 +465,8 @@ export function Chat() {
     : (!activeTurnBuffer && typeof rawStreamingMessage === 'string' ? rawStreamingMessage : '');
   const fallbackLastUserIndex = findLastUserMessageIndex(safeMessages);
   const fallbackLastUserTimestampMs = toTimestampMs(lastUserMessageAt ?? undefined) ?? 0;
-  const shouldRetainCompletedFallbackTurn = !activeTurnBuffer
+  const shouldRetainCompletedFallbackTurn = useMemo(() => (
+    !activeTurnBuffer
     && !sending
     && fallbackLastUserIndex >= 0
     && fallbackLastUserTimestampMs > 0
@@ -501,12 +474,17 @@ export function Chat() {
     && safeMessages.slice(fallbackLastUserIndex + 1).some((message) => (
       message.role === 'assistant'
       && ((toTimestampMs(message.timestamp) ?? fallbackLastUserTimestampMs) >= fallbackLastUserTimestampMs)
-    ));
+    ))
+  ), [activeTurnBuffer, fallbackLastUserIndex, fallbackLastUserTimestampMs, safeMessages, sending]);
   const fallbackActiveTurnStartIndex = !activeTurnBuffer && (sending || shouldRetainCompletedFallbackTurn)
     ? fallbackLastUserIndex
     : -1;
-  const fallbackHistoryMessages = fallbackActiveTurnStartIndex >= 0 ? safeMessages.slice(0, fallbackActiveTurnStartIndex) : safeMessages;
-  const fallbackActiveTurnMessages = fallbackActiveTurnStartIndex >= 0 ? safeMessages.slice(fallbackActiveTurnStartIndex) : EMPTY_MESSAGES;
+  const fallbackHistoryMessages = useMemo(() => (
+    fallbackActiveTurnStartIndex >= 0 ? safeMessages.slice(0, fallbackActiveTurnStartIndex) : safeMessages
+  ), [fallbackActiveTurnStartIndex, safeMessages]);
+  const fallbackActiveTurnMessages = useMemo(() => (
+    fallbackActiveTurnStartIndex >= 0 ? safeMessages.slice(fallbackActiveTurnStartIndex) : EMPTY_MESSAGES
+  ), [fallbackActiveTurnStartIndex, safeMessages]);
   const fallbackActiveTurnUserMessage = fallbackActiveTurnMessages[0]?.role === 'user' ? fallbackActiveTurnMessages[0] : null;
   const fallbackStreamingTimestamp = fallbackStreamMsg?.timestamp
     ?? fallbackActiveTurnUserMessage?.timestamp
@@ -517,14 +495,18 @@ export function Chat() {
     fallbackStreamText,
     fallbackStreamingTimestamp,
   );
-  const fallbackAssistantMessages = fallbackActiveTurnUserMessage
-    ? fallbackActiveTurnMessages.slice(1).filter((message) => message.role === 'assistant')
-    : EMPTY_MESSAGES;
-  const fallbackLatestPersistedAssistant = !activeTurnBuffer ? [...safeMessages].reverse().find((message) => {
-    if (message.role !== 'assistant') return false;
-    if (!fallbackActiveTurnUserMessage?.timestamp || !message.timestamp) return true;
-    return toTimestampMs(message.timestamp)! >= toTimestampMs(fallbackActiveTurnUserMessage.timestamp)!;
-  }) ?? null : null;
+  const fallbackAssistantMessages = useMemo(() => (
+    fallbackActiveTurnUserMessage
+      ? fallbackActiveTurnMessages.slice(1).filter((message) => message.role === 'assistant')
+      : EMPTY_MESSAGES
+  ), [fallbackActiveTurnMessages, fallbackActiveTurnUserMessage]);
+  const fallbackLatestPersistedAssistant = useMemo(() => (
+    !activeTurnBuffer ? [...safeMessages].reverse().find((message) => {
+      if (message.role !== 'assistant') return false;
+      if (!fallbackActiveTurnUserMessage?.timestamp || !message.timestamp) return true;
+      return toTimestampMs(message.timestamp)! >= toTimestampMs(fallbackActiveTurnUserMessage.timestamp)!;
+    }) ?? null : null
+  ), [activeTurnBuffer, fallbackActiveTurnUserMessage?.timestamp, safeMessages]);
   const fallbackIsStreamingDuplicate = !activeTurnBuffer
     && !!fallbackLatestPersistedAssistant
     && !!fallbackStreamingDisplayMessage
@@ -533,12 +515,16 @@ export function Chat() {
   const fallbackPersistedFinalMessage = fallbackIsStreamingDuplicate && fallbackAssistantMessages.length > 0
     ? fallbackAssistantMessages[fallbackAssistantMessages.length - 1]
     : null;
-  const fallbackProcessMessages = fallbackPersistedFinalMessage
-    ? fallbackAssistantMessages.slice(0, -1)
-    : fallbackAssistantMessages;
-  const fallbackSplitStreaming = fallbackStreamingDisplayMessage
-    ? splitFinalMessageForTurnDisplay(fallbackStreamingDisplayMessage)
-    : null;
+  const fallbackProcessMessages = useMemo(() => (
+    fallbackPersistedFinalMessage
+      ? fallbackAssistantMessages.slice(0, -1)
+      : fallbackAssistantMessages
+  ), [fallbackAssistantMessages, fallbackPersistedFinalMessage]);
+  const fallbackSplitStreaming = useMemo(() => (
+    fallbackStreamingDisplayMessage
+      ? splitFinalMessageForTurnDisplay(fallbackStreamingDisplayMessage)
+      : null
+  ), [fallbackStreamingDisplayMessage]);
 
   const historyMessages = activeTurnBuffer?.historyMessages ?? fallbackHistoryMessages;
   const deferredHistoryMessages = useDeferredValue(historyMessages);
@@ -572,13 +558,15 @@ export function Chat() {
     && !!recentCompletedTurnFinalCandidate
     && hasVisibleFinalContent(recentCompletedTurnFinalCandidate)
     && isWithinCompletedTurnProcessGrace(activeTurnStartedAtMs);
-  const effectiveActiveTurnProcessMessages = shouldShowRecentCompletedTurnLayout
-    && !persistedActiveFinalMessage
-    && activeTurnProcessMessages.length > 0
-    ? activeTurnProcessMessages.slice(0, -1)
-    : activeTurnProcessMessages;
   const resolvedPersistedFinalMessage = persistedActiveFinalMessage
     ?? (shouldShowRecentCompletedTurnLayout ? recentCompletedTurnFinalCandidate : null);
+  const effectiveActiveTurnProcessMessages = useMemo(() => (
+    shouldShowRecentCompletedTurnLayout
+    && !persistedActiveFinalMessage
+    && activeTurnProcessMessages.length > 0
+      ? activeTurnProcessMessages.slice(0, -1)
+      : activeTurnProcessMessages
+  ), [activeTurnProcessMessages, persistedActiveFinalMessage, shouldShowRecentCompletedTurnLayout]);
   const hasPersistedProcessMessages = effectiveActiveTurnProcessMessages.some((message) => (
     hasVisibleProcessContent(message, showThinking, chatProcessDisplayMode, assistantMessageStyle, hideInternalRoutineProcesses)
   ));
@@ -714,6 +702,27 @@ export function Chat() {
   const isEmpty = safeMessages.length === 0 && !sending;
   const showSessionLoadingState = loading && safeMessages.length === 0 && !sending;
   const isZh = (i18n.resolvedLanguage || i18n.language || '').startsWith('zh');
+  const {
+    activeTurnViewportAnchorRef,
+    chatListRef,
+    composerShellPadding,
+    contentColumnHorizontalOffsetPx,
+    handleActiveTurnUserInterrupt,
+    handleJumpToLatest,
+    hasDetachedNewContent,
+    isAtBottom,
+    prepareForLocalSend,
+    setScrollContainerNode,
+  } = useChatScrollController({
+    activeTurnScrollKey,
+    chatListItemCount: chatListItems.length,
+    currentSessionKey,
+    isEmpty,
+    latestTranscriptActivitySignature,
+    loading,
+    sending,
+    showSessionLoadingState,
+  });
   const jumpToLatestButtonTemporarilyDisabled = true;
   const showScrollToLatestButton = !showSessionLoadingState && !isEmpty && !isAtBottom;
   const scrollToLatestButtonBottomPx = showQueuedMessageCard
@@ -721,395 +730,6 @@ export function Chat() {
     : showQueuedMessageNotice
       ? 124
       : 92;
-  const setScrollContainerNode = useCallback((node: HTMLDivElement | null) => {
-    scrollContainerRef.current = node;
-    setScrollContainerNodeState((current) => (current === node ? current : node));
-  }, []);
-  const captureDetachedViewport = useCallback(() => {
-    const scrollElement = scrollContainerRef.current;
-    if (!scrollElement) return;
-    detachedViewportScrollTopRef.current = scrollElement.scrollTop;
-  }, []);
-  const resumeFollowingLatest = useCallback(() => {
-    followLatestRef.current = true;
-    detachedViewportScrollTopRef.current = null;
-    setHasDetachedNewContent(false);
-  }, []);
-  const pauseFollowingLatest = useCallback(() => {
-    followLatestRef.current = false;
-    captureDetachedViewport();
-  }, [captureDetachedViewport]);
-  const markProgrammaticScroll = useCallback((guardMs = ACTIVE_TURN_PROGRAMMATIC_SCROLL_GUARD_MS) => {
-    const nextGuardUntil = performance.now() + guardMs;
-    bottomStateProgrammaticGuardUntilRef.current = Math.max(
-      bottomStateProgrammaticGuardUntilRef.current,
-      nextGuardUntil,
-    );
-  }, []);
-  const getDistanceFromBottom = useCallback(() => {
-    const scrollElement = scrollContainerRef.current;
-    if (!scrollElement) return null;
-    return scrollElement.scrollHeight - scrollElement.clientHeight - scrollElement.scrollTop;
-  }, []);
-  const syncBottomState = useCallback((distanceOverride?: number | null) => {
-    const distanceFromBottom = distanceOverride ?? getDistanceFromBottom();
-    const nextAtBottom = distanceFromBottom == null
-      || distanceFromBottom <= ACTIVE_TURN_NEAR_BOTTOM_THRESHOLD_PX;
-    isAtBottomRef.current = nextAtBottom;
-    setIsAtBottom((current) => (current === nextAtBottom ? current : nextAtBottom));
-    if (nextAtBottom) {
-      setHasDetachedNewContent(false);
-    }
-    return nextAtBottom;
-  }, [getDistanceFromBottom]);
-  const isScrollNearBottom = useCallback(() => {
-    const distanceFromBottom = getDistanceFromBottom();
-    return distanceFromBottom != null && distanceFromBottom <= ACTIVE_TURN_NEAR_BOTTOM_THRESHOLD_PX;
-  }, [getDistanceFromBottom]);
-  const positionScrollNearBottom = useCallback((bottomOffsetPx: number) => {
-    const scrollElement = scrollContainerRef.current;
-    if (!scrollElement) return;
-    markProgrammaticScroll();
-    scrollElement.scrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight - bottomOffsetPx);
-  }, [markProgrammaticScroll]);
-  useEffect(() => {
-    const scrollElement = scrollContainerRef.current;
-    if (!scrollElement || !pendingSessionEntryBottomRef.current) return;
-
-    const interruptPendingEntry = () => {
-      pendingSessionEntryUserInterruptedRef.current = true;
-      pendingSessionEntryBottomRef.current = false;
-    };
-    const handleKeyboardInterrupt = (event: KeyboardEvent) => {
-      if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', 'Space'].includes(event.code)) return;
-      interruptPendingEntry();
-    };
-
-    scrollElement.addEventListener('wheel', interruptPendingEntry, { passive: true });
-    scrollElement.addEventListener('touchmove', interruptPendingEntry, { passive: true });
-    scrollElement.addEventListener('keydown', handleKeyboardInterrupt);
-
-    return () => {
-      scrollElement.removeEventListener('wheel', interruptPendingEntry);
-      scrollElement.removeEventListener('touchmove', interruptPendingEntry);
-      scrollElement.removeEventListener('keydown', handleKeyboardInterrupt);
-    };
-  }, [currentSessionKey, chatListItems.length, loading]);
-
-  useEffect(() => {
-    latestTranscriptActivitySignatureRef.current = null;
-    detachedViewportSignatureRef.current = null;
-    followLatestRef.current = true;
-    detachedViewportScrollTopRef.current = null;
-    isAtBottomRef.current = true;
-    setIsAtBottom(true);
-    setHasDetachedNewContent(false);
-  }, [currentSessionKey]);
-
-  useLayoutEffect(() => {
-    syncBottomState();
-  }, [scrollContainerNode, syncBottomState]);
-
-  useEffect(() => {
-    const scrollElement = scrollContainerNode;
-    if (!scrollElement) return;
-
-    let frameId = 0;
-    let resizeObserver: ResizeObserver | null = null;
-
-    const scheduleSync = () => {
-      cancelAnimationFrame(frameId);
-      frameId = requestAnimationFrame(() => {
-        if (
-          followLatestRef.current
-          && performance.now() < bottomStateProgrammaticGuardUntilRef.current
-          && isAtBottomRef.current
-        ) {
-          syncBottomState(0);
-          return;
-        }
-        syncBottomState();
-      });
-    };
-
-    scrollElement.addEventListener('scroll', scheduleSync, { passive: true });
-    scheduleSync();
-
-    if (typeof ResizeObserver === 'function') {
-      resizeObserver = new ResizeObserver(() => {
-        scheduleSync();
-      });
-      resizeObserver.observe(scrollElement);
-      const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
-      if (contentColumn) {
-        resizeObserver.observe(contentColumn);
-      }
-    }
-
-    return () => {
-      cancelAnimationFrame(frameId);
-      scrollElement.removeEventListener('scroll', scheduleSync);
-      resizeObserver?.disconnect();
-    };
-  }, [currentSessionKey, scrollContainerNode, syncBottomState]);
-
-  useLayoutEffect(() => {
-    if (!pendingSessionEntryBottomRef.current) return;
-    if (pendingSessionEntryUserInterruptedRef.current) {
-      pendingSessionEntryBottomRef.current = false;
-      return;
-    }
-    if (sending && activeTurnScrollKey) {
-      pendingLocalSendFollowBottomRef.current = true;
-      pendingSessionEntryBottomRef.current = false;
-      pendingSessionEntryUserInterruptedRef.current = false;
-      return;
-    }
-    if (loading || chatListItems.length === 0) return;
-
-    let frame1 = 0;
-    let frame2 = 0;
-    let settleTimer: ReturnType<typeof setTimeout> | null = null;
-    let resizeObserver: ResizeObserver | null = null;
-
-    const cancelFrames = () => {
-      cancelAnimationFrame(frame1);
-      cancelAnimationFrame(frame2);
-    };
-    const completeSessionEntryBottom = () => {
-      pendingSessionEntryBottomRef.current = false;
-      pendingSessionEntryUserInterruptedRef.current = false;
-      cancelFrames();
-      if (settleTimer != null) {
-        clearTimeout(settleTimer);
-        settleTimer = null;
-      }
-      resizeObserver?.disconnect();
-    };
-    const scheduleCompletion = () => {
-      if (settleTimer != null) {
-        clearTimeout(settleTimer);
-      }
-      settleTimer = setTimeout(() => {
-        completeSessionEntryBottom();
-      }, SESSION_ENTRY_BOTTOM_STABILIZE_MS);
-    };
-    const applySessionEntryBottom = () => {
-      if (!pendingSessionEntryBottomRef.current) return;
-      if (pendingSessionEntryUserInterruptedRef.current) {
-        completeSessionEntryBottom();
-        return;
-      }
-
-      cancelFrames();
-      chatListRef.current?.scrollToIndex?.({
-        index: Math.max(chatListItems.length - 1, 0),
-        align: 'end',
-        behavior: 'auto',
-      });
-      frame1 = requestAnimationFrame(() => {
-        frame2 = requestAnimationFrame(() => {
-          if (!pendingSessionEntryBottomRef.current) return;
-          if (pendingSessionEntryUserInterruptedRef.current) {
-            completeSessionEntryBottom();
-            return;
-          }
-          positionScrollNearBottom(ACTIVE_TURN_BOTTOM_OFFSET_PX);
-        });
-      });
-      scheduleCompletion();
-    };
-
-    applySessionEntryBottom();
-
-    if (typeof ResizeObserver === 'function') {
-      resizeObserver = new ResizeObserver(() => {
-        applySessionEntryBottom();
-      });
-      const scrollElement = scrollContainerRef.current;
-      if (scrollElement) {
-        resizeObserver.observe(scrollElement);
-        const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
-        if (contentColumn) {
-          resizeObserver.observe(contentColumn);
-        }
-      }
-    }
-
-    return () => {
-      cancelFrames();
-      if (settleTimer != null) {
-        clearTimeout(settleTimer);
-      }
-      resizeObserver?.disconnect();
-    };
-  }, [activeTurnScrollKey, chatListItems.length, loading, positionScrollNearBottom, sending]);
-  useLayoutEffect(() => {
-    const scrollElement = scrollContainerNode;
-    if (!scrollElement) {
-      setContentColumnHorizontalOffsetPx(0);
-      return;
-    }
-
-    const updateHorizontalOffset = () => {
-      const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
-      if (!contentColumn) {
-        setContentColumnHorizontalOffsetPx(0);
-        return;
-      }
-
-      const scrollRect = scrollElement.getBoundingClientRect();
-      const contentRect = contentColumn.getBoundingClientRect();
-      const actualLeft = contentRect.left - scrollRect.left;
-      const expectedLeft = (scrollRect.width - contentRect.width) / 2;
-      const drift = expectedLeft - actualLeft;
-      setContentColumnHorizontalOffsetPx((current) => (
-        (() => {
-          const nextOffset = Math.round(current + drift);
-          return current === nextOffset ? current : nextOffset;
-        })()
-      ));
-    };
-
-    updateHorizontalOffset();
-
-    if (typeof ResizeObserver !== 'function') {
-      window.addEventListener('resize', updateHorizontalOffset);
-      return () => {
-        window.removeEventListener('resize', updateHorizontalOffset);
-      };
-    }
-
-    const observer = new ResizeObserver(() => {
-      updateHorizontalOffset();
-    });
-    observer.observe(scrollElement);
-    const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
-    if (contentColumn) {
-      observer.observe(contentColumn);
-    }
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [chatListItems.length, currentSessionKey, loading, scrollContainerNode, sending]);
-
-  useLayoutEffect(() => {
-    const scrollElement = scrollContainerNode;
-    if (!scrollElement) {
-      setComposerShellPadding({ left: 16, right: 16 });
-      return;
-    }
-
-    const updatePadding = () => {
-      const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
-      if (!contentColumn) {
-        setComposerShellPadding({ left: 16, right: 16 });
-        return;
-      }
-
-      const scrollRect = scrollElement.getBoundingClientRect();
-      const contentRect = contentColumn.getBoundingClientRect();
-      const nextLeft = Math.max(16, Math.round(contentRect.left - scrollRect.left));
-      const nextRight = Math.max(16, Math.round(scrollRect.right - contentRect.right));
-      setComposerShellPadding((current) => (
-        current.left === nextLeft && current.right === nextRight
-          ? current
-          : { left: nextLeft, right: nextRight }
-      ));
-    };
-
-    updatePadding();
-
-    if (typeof ResizeObserver !== 'function') {
-      window.addEventListener('resize', updatePadding);
-      return () => {
-        window.removeEventListener('resize', updatePadding);
-      };
-    }
-
-    const observer = new ResizeObserver(() => {
-      updatePadding();
-    });
-    observer.observe(scrollElement);
-    const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
-    if (contentColumn) {
-      observer.observe(contentColumn);
-    }
-    return () => {
-      observer.disconnect();
-    };
-  }, [contentColumnHorizontalOffsetPx, currentSessionKey, chatListItems.length, loading, scrollContainerNode, sending]);
-  useLayoutEffect(() => {
-    const previousSignature = detachedViewportSignatureRef.current;
-    detachedViewportSignatureRef.current = latestTranscriptActivitySignature;
-
-    if (previousSignature == null || previousSignature === latestTranscriptActivitySignature) return;
-    if (followLatestRef.current) return;
-
-    const scrollElement = scrollContainerRef.current;
-    const lockedScrollTop = detachedViewportScrollTopRef.current;
-    if (!scrollElement || lockedScrollTop == null) return;
-
-    const nextScrollTop = Math.min(
-      Math.max(0, lockedScrollTop),
-      Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight),
-    );
-    if (Math.abs(scrollElement.scrollTop - nextScrollTop) <= 1) return;
-
-    markProgrammaticScroll();
-    scrollElement.scrollTop = nextScrollTop;
-    syncBottomState(scrollElement.scrollHeight - scrollElement.clientHeight - nextScrollTop);
-  }, [latestTranscriptActivitySignature, markProgrammaticScroll, syncBottomState]);
-  useLayoutEffect(() => {
-    if (showSessionLoadingState || isEmpty || !scrollContainerRef.current) return;
-    if (sending && activeTurnScrollKey) return;
-    if (!followLatestRef.current) return;
-    if (!isAtBottomRef.current) return;
-
-    let frameId = 0;
-    frameId = requestAnimationFrame(() => {
-      positionScrollNearBottom(ACTIVE_TURN_BOTTOM_OFFSET_PX);
-      syncBottomState(0);
-    });
-
-    return () => {
-      cancelAnimationFrame(frameId);
-    };
-  }, [
-    activeTurnScrollKey,
-    isEmpty,
-    latestTranscriptActivitySignature,
-    positionScrollNearBottom,
-    sending,
-    showSessionLoadingState,
-    syncBottomState,
-  ]);
-  useEffect(() => {
-    const previousSignature = latestTranscriptActivitySignatureRef.current;
-    latestTranscriptActivitySignatureRef.current = latestTranscriptActivitySignature;
-
-    if (previousSignature == null || previousSignature === latestTranscriptActivitySignature) {
-      return;
-    }
-
-    if (followLatestRef.current || isScrollNearBottom()) {
-      setHasDetachedNewContent(false);
-      return;
-    }
-
-    setHasDetachedNewContent(true);
-  }, [isScrollNearBottom, latestTranscriptActivitySignature]);
-  const handleActiveTurnUserInterrupt = useCallback(() => {
-    if (activeTurnScrollKey) {
-      suppressedAutoFollowTurnKeyRef.current = activeTurnScrollKey;
-    }
-    pauseFollowingLatest();
-    activeTurnAutoScrollModeRef.current = 'idle';
-    activeTurnAutoScrollTargetRef.current = 0;
-    activeTurnAutoScrollAnimationRef.current = null;
-    setActiveTurnUserInterruptVersion((value) => value + 1);
-  }, [activeTurnScrollKey, pauseFollowingLatest]);
   const chatListContext = useMemo<ChatVirtuosoContext>(() => ({
     // Preserve the browser's native scroll anchoring so partial stream updates
     // don't tug the transcript around when the user is reading older content.
@@ -1118,254 +738,13 @@ export function Chat() {
     scrollbarGutter: 'stable both-edges',
     setScrollElement: setScrollContainerNode,
   }), [contentColumnHorizontalOffsetPx, setScrollContainerNode]);
-
-  useEffect(() => {
-    if (!hasMountedSessionRef.current) {
-      hasMountedSessionRef.current = true;
-      previousSessionKeyRef.current = currentSessionKey;
-      pendingSessionEntryUserInterruptedRef.current = false;
-      if (sending && activeTurnScrollKey) {
-        pendingLocalSendFollowBottomRef.current = true;
-        resumeFollowingLatest();
-      } else {
-        pendingSessionEntryBottomRef.current = true;
-        resumeFollowingLatest();
-      }
-      return;
-    }
-
-    if (previousSessionKeyRef.current === currentSessionKey) {
-      return;
-    }
-
-    previousSessionKeyRef.current = currentSessionKey;
-    pendingSessionEntryUserInterruptedRef.current = false;
-    if (sending && activeTurnScrollKey) {
-      pendingSessionEntryBottomRef.current = false;
-      pendingLocalSendFollowBottomRef.current = true;
-      resumeFollowingLatest();
-    } else {
-      pendingSessionEntryBottomRef.current = true;
-      resumeFollowingLatest();
-    }
-    activeTurnAutoScrollModeRef.current = 'idle';
-    activeTurnTrackedTurnKeyRef.current = null;
-    suppressedAutoFollowTurnKeyRef.current = null;
-    setActiveTurnUserInterruptVersion((value) => value + 1);
-  }, [activeTurnScrollKey, currentSessionKey, resumeFollowingLatest, sending]);
-
-  useEffect(() => {
-    if (!sending || !activeTurnScrollKey) {
-      if (!sending) {
-        pendingLocalSendFollowBottomRef.current = false;
-        suppressedAutoFollowTurnKeyRef.current = null;
-        activeTurnAutoScrollModeRef.current = 'idle';
-        activeTurnTrackedTurnKeyRef.current = activeTurnScrollKey;
-      }
-      return;
-    }
-
-    pendingSessionEntryBottomRef.current = false;
-    pendingSessionEntryUserInterruptedRef.current = false;
-
-    if (suppressedAutoFollowTurnKeyRef.current === activeTurnScrollKey) {
-      pendingLocalSendFollowBottomRef.current = false;
-      return;
-    }
-
-    const turnChanged = activeTurnTrackedTurnKeyRef.current !== activeTurnScrollKey;
-    const shouldFollowBottom = pendingLocalSendFollowBottomRef.current || (followLatestRef.current && isScrollNearBottom());
-    const nextMode: ActiveTurnAutoScrollMode = shouldFollowBottom ? 'follow-bottom' : 'idle';
-    const modeChanged = activeTurnAutoScrollModeRef.current !== nextMode;
-    if (!turnChanged && !modeChanged) {
-      pendingLocalSendFollowBottomRef.current = false;
-      return;
-    }
-
-    activeTurnTrackedTurnKeyRef.current = activeTurnScrollKey;
-    activeTurnAutoScrollModeRef.current = nextMode;
-    pendingLocalSendFollowBottomRef.current = false;
-    if (nextMode === 'idle') {
-      activeTurnAutoScrollTargetRef.current = 0;
-      activeTurnAutoScrollAnimationRef.current = null;
-    }
-    setActiveTurnUserInterruptVersion((value) => value + 1);
-  }, [activeTurnScrollKey, currentSessionKey, isScrollNearBottom, sending]);
-
-  useEffect(() => {
-    const autoScrollMode = activeTurnAutoScrollModeRef.current;
-    if (!sending || !activeTurnScrollKey || autoScrollMode === 'idle') return;
-    if (suppressedAutoFollowTurnKeyRef.current === activeTurnScrollKey) return;
-
-    let readinessFrame = 0;
-    let frame1 = 0;
-    let resizeObserver: ResizeObserver | null = null;
-    let releasedByUser = false;
-    let ignoreScrollEventsUntil = 0;
-    let pointerScrollIntentActive = false;
-
-    const cancelAutoScrollFrame = () => {
-      if (activeTurnAutoScrollFrameRef.current != null) {
-        cancelAnimationFrame(activeTurnAutoScrollFrameRef.current);
-        activeTurnAutoScrollFrameRef.current = null;
-      }
-    };
-    const applyProgrammaticScroll = (nextScrollTop: number) => {
-      ignoreScrollEventsUntil = performance.now() + ACTIVE_TURN_PROGRAMMATIC_SCROLL_GUARD_MS;
-      const scrollElement = scrollContainerRef.current;
-      if (!scrollElement) return;
-      scrollElement.scrollTop = nextScrollTop;
-    };
-    const easeOutCubic = (progress: number) => (1 - ((1 - progress) ** 3));
-    const stepAutoScroll = (timestamp: number) => {
-      activeTurnAutoScrollFrameRef.current = null;
-      if (releasedByUser) return;
-
-      const animation = activeTurnAutoScrollAnimationRef.current;
-      const scrollElement = scrollContainerRef.current;
-      if (!scrollElement) return;
-      if (!animation) return;
-
-      const progress = Math.min(1, (timestamp - animation.startedAt) / ACTIVE_TURN_AUTO_SCROLL_DURATION_MS);
-      const easedProgress = easeOutCubic(progress);
-      const nextScrollTop = animation.startTop + ((animation.targetTop - animation.startTop) * easedProgress);
-
-      applyProgrammaticScroll(nextScrollTop);
-
-      if (progress >= 1 || Math.abs(animation.targetTop - nextScrollTop) < 1) {
-        applyProgrammaticScroll(animation.targetTop);
-        activeTurnAutoScrollAnimationRef.current = null;
-        return;
-      }
-      activeTurnAutoScrollFrameRef.current = requestAnimationFrame(stepAutoScroll);
-    };
-    const startAutoScrollAnimation = (nextTargetScrollTop: number) => {
-      const scrollElement = scrollContainerRef.current;
-      if (!scrollElement) return;
-      if (nextTargetScrollTop <= scrollElement.scrollTop + 0.5) return;
-
-      activeTurnAutoScrollTargetRef.current = nextTargetScrollTop;
-      activeTurnAutoScrollAnimationRef.current = {
-        startTop: scrollElement.scrollTop,
-        targetTop: nextTargetScrollTop,
-        startedAt: performance.now(),
-      };
-
-      if (activeTurnAutoScrollFrameRef.current == null) {
-        activeTurnAutoScrollFrameRef.current = requestAnimationFrame(stepAutoScroll);
-      }
-    };
-    const updateAutoScrollTarget = (scrollElement: HTMLDivElement) => {
-      cancelAnimationFrame(frame1);
-      frame1 = requestAnimationFrame(() => {
-        if (releasedByUser) return;
-
-        const bottomVisibleScrollTop = Math.max(
-          0,
-          scrollElement.scrollHeight - scrollElement.clientHeight - ACTIVE_TURN_BOTTOM_OFFSET_PX,
-        );
-        if (bottomVisibleScrollTop > Math.max(activeTurnAutoScrollTargetRef.current, scrollElement.scrollTop) + 0.5) {
-          startAutoScrollAnimation(bottomVisibleScrollTop);
-        }
-      });
-    };
-    const releaseTopLock = () => {
-      if (releasedByUser) return;
-      releasedByUser = true;
-      activeTurnAutoScrollTargetRef.current = 0;
-      activeTurnAutoScrollAnimationRef.current = null;
-      resizeObserver?.disconnect();
-      cancelAutoScrollFrame();
-      cancelAnimationFrame(readinessFrame);
-      cancelAnimationFrame(frame1);
-      handleActiveTurnUserInterrupt();
-    };
-    const handleKeyboardInterrupt = (event: KeyboardEvent) => {
-      if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'PageUp' || event.key === 'PageDown' || event.key === 'Home' || event.key === 'End' || event.key === ' ') {
-        releaseTopLock();
-      }
-    };
-    const handlePointerScrollIntentStart = (event: PointerEvent) => {
-      pointerScrollIntentActive = true;
-      if (event.pointerType === 'mouse' && event.button !== 0) return;
-
-      const scrollElement = scrollContainerRef.current;
-      const target = event.target;
-      if (!scrollElement || !(target instanceof Node)) return;
-
-      const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
-      if (contentColumn?.contains(target)) {
-        releaseTopLock();
-      }
-    };
-    const clearPointerScrollIntent = () => {
-      pointerScrollIntentActive = false;
-    };
-    const handleManualScroll = () => {
-      if (performance.now() <= ignoreScrollEventsUntil) return;
-      if (!pointerScrollIntentActive) return;
-      releaseTopLock();
-    };
-    const ensureScrollElementsReady = () => {
-      const scrollElement = scrollContainerRef.current;
-      if (!scrollElement) {
-        readinessFrame = requestAnimationFrame(ensureScrollElementsReady);
-        return;
-      }
-
-      resizeObserver = typeof ResizeObserver === 'function'
-        ? new ResizeObserver(() => {
-            if (!releasedByUser) {
-              updateAutoScrollTarget(scrollElement);
-            }
-          })
-        : null;
-
-      scrollElement.addEventListener('scroll', handleManualScroll, { passive: true });
-      scrollElement.addEventListener('wheel', releaseTopLock, { passive: true });
-      scrollElement.addEventListener('touchmove', releaseTopLock, { passive: true });
-      scrollElement.addEventListener('pointerdown', handlePointerScrollIntentStart, { passive: true });
-      scrollElement.addEventListener('pointerup', clearPointerScrollIntent, { passive: true });
-      scrollElement.addEventListener('pointercancel', clearPointerScrollIntent, { passive: true });
-      scrollElement.addEventListener('pointerleave', clearPointerScrollIntent, { passive: true });
-      scrollElement.addEventListener('keydown', handleKeyboardInterrupt);
-      resizeObserver?.observe(scrollElement);
-      const contentColumn = scrollElement.querySelector<HTMLElement>('[data-testid="chat-content-column"]');
-      if (contentColumn) {
-        resizeObserver?.observe(contentColumn);
-      }
-      updateAutoScrollTarget(scrollElement);
-    };
-
-    readinessFrame = requestAnimationFrame(ensureScrollElementsReady);
-
-    return () => {
-      resizeObserver?.disconnect();
-      scrollContainerRef.current?.removeEventListener('scroll', handleManualScroll);
-      scrollContainerRef.current?.removeEventListener('wheel', releaseTopLock);
-      scrollContainerRef.current?.removeEventListener('touchmove', releaseTopLock);
-      scrollContainerRef.current?.removeEventListener('pointerdown', handlePointerScrollIntentStart);
-      scrollContainerRef.current?.removeEventListener('pointerup', clearPointerScrollIntent);
-      scrollContainerRef.current?.removeEventListener('pointercancel', clearPointerScrollIntent);
-      scrollContainerRef.current?.removeEventListener('pointerleave', clearPointerScrollIntent);
-      scrollContainerRef.current?.removeEventListener('keydown', handleKeyboardInterrupt);
-      activeTurnAutoScrollAnimationRef.current = null;
-      cancelAnimationFrame(readinessFrame);
-      cancelAutoScrollFrame();
-      cancelAnimationFrame(frame1);
-    };
-  }, [activeTurnScrollKey, activeTurnUserInterruptVersion, currentSessionKey, handleActiveTurnUserInterrupt, sending]);
-
   const handleEditQueuedDraft = (queuedId: string, text: string) => {
     setComposerPrefill({ text, nonce: Date.now() });
     clearQueuedMessage(currentSessionKey, queuedId);
   };
   const handleSendQueuedDraftNow = (queuedId: string) => {
     if (!isGatewayRunning) return;
-    pendingSessionEntryBottomRef.current = false;
-    pendingSessionEntryUserInterruptedRef.current = false;
-    pendingLocalSendFollowBottomRef.current = true;
-    resumeFollowingLatest();
+    prepareForLocalSend();
     void flushQueuedMessage(currentSessionKey, queuedId);
   };
   const handleSendMessage = useCallback((
@@ -1374,52 +753,9 @@ export function Chat() {
     targetAgentId?: string | null,
     options?: ChatMessageDispatchOptions,
   ) => {
-    pendingSessionEntryBottomRef.current = false;
-    pendingSessionEntryUserInterruptedRef.current = false;
-    pendingLocalSendFollowBottomRef.current = true;
-    resumeFollowingLatest();
+    prepareForLocalSend();
     void sendMessage(text, attachments, targetAgentId, options);
-  }, [resumeFollowingLatest, sendMessage]);
-  const handleJumpToLatest = useCallback(() => {
-    if (chatListItems.length === 0) return;
-
-    pendingSessionEntryBottomRef.current = false;
-    pendingSessionEntryUserInterruptedRef.current = false;
-    suppressedAutoFollowTurnKeyRef.current = null;
-    pendingLocalSendFollowBottomRef.current = true;
-    resumeFollowingLatest();
-
-    if (sending && activeTurnScrollKey) {
-      activeTurnTrackedTurnKeyRef.current = activeTurnScrollKey;
-      activeTurnAutoScrollModeRef.current = 'follow-bottom';
-      setActiveTurnUserInterruptVersion((value) => value + 1);
-    }
-
-    isAtBottomRef.current = true;
-    setIsAtBottom(true);
-    markProgrammaticScroll(ACTIVE_TURN_AUTO_SCROLL_DURATION_MS + 240);
-
-    chatListRef.current?.scrollToIndex?.({
-      index: Math.max(chatListItems.length - 1, 0),
-      align: 'end',
-      behavior: 'smooth',
-    });
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        positionScrollNearBottom(ACTIVE_TURN_BOTTOM_OFFSET_PX);
-        syncBottomState(0);
-      });
-    });
-  }, [
-    activeTurnScrollKey,
-    chatListItems.length,
-    markProgrammaticScroll,
-    positionScrollNearBottom,
-    resumeFollowingLatest,
-    sending,
-    syncBottomState,
-  ]);
+  }, [prepareForLocalSend, sendMessage]);
   const openAttachmentPreviewPane = useCallback((file: AttachedFileMeta) => {
     if (!previewPaneOpenRef.current) {
       previewAutoCollapsedSidebarRef.current = !sidebarCollapsedRef.current;
@@ -1620,6 +956,7 @@ export function Chat() {
               hideInternalRoutineProcesses={hideInternalRoutineProcesses}
               onProcessSectionExpand={handleActiveTurnUserInterrupt}
               onOpenAttachmentPreview={handleOpenAttachmentPreview}
+              scrollAnchorPrefix={item.key}
             />
           );
         }
@@ -1629,6 +966,7 @@ export function Chat() {
             message={item.item.message}
             showThinking={showThinking}
             onOpenAttachmentPreview={handleOpenAttachmentPreview}
+            scrollAnchorPrefix={item.key}
           />
         );
       case 'active-turn':
@@ -1652,6 +990,7 @@ export function Chat() {
               sending={sending}
               onProcessSectionExpand={handleActiveTurnUserInterrupt}
               onOpenAttachmentPreview={handleOpenAttachmentPreview}
+              scrollAnchorPrefix={item.key}
             />
           </div>
         ) : null;
@@ -1663,6 +1002,7 @@ export function Chat() {
             isStreaming={sending}
             hideAvatar={shouldHideStandaloneStreamingAvatar}
             onOpenAttachmentPreview={handleOpenAttachmentPreview}
+            scrollAnchorPrefix={item.key}
           />
         );
       case 'activity':
@@ -1740,7 +1080,7 @@ export function Chat() {
             className={cn(CHAT_CONTENT_COLUMN_MAX_WIDTH_CLASS, 'mx-auto flex min-h-full min-w-0 items-center justify-center')}
             style={{ width: CHAT_CONTENT_COLUMN_WIDTH_CSS }}
           >
-            <div className="bg-background shadow-lg rounded-full border border-border p-2.5">
+            <div data-testid="chat-session-loading" className="bg-background shadow-lg rounded-full border border-border p-2.5">
               <LoadingSpinner size="md" />
             </div>
           </div>
@@ -1913,28 +1253,34 @@ export function Chat() {
           </div>
       )}
 
-      {/* Temporarily hidden until we revisit the jump-to-latest affordance. */}
+      {/* Temporarily hidden until we decide to expose the jump-to-latest affordance. */}
       {!jumpToLatestButtonTemporarilyDisabled && showScrollToLatestButton && (
         <div
-          className="pointer-events-none absolute inset-x-0 z-20 flex justify-center px-4"
-          style={{ bottom: `${scrollToLatestButtonBottomPx}px` }}
+          className="pointer-events-none absolute z-20 flex justify-end"
+          style={{
+            bottom: `${scrollToLatestButtonBottomPx}px`,
+            right: `${Math.max(12, composerShellPadding.right)}px`,
+          }}
         >
           <button
             type="button"
             onClick={handleJumpToLatest}
+            aria-label={hasDetachedNewContent
+              ? (isZh ? '有新内容，回到最新' : 'New activity, jump to latest')
+              : (isZh ? '回到最新' : 'Back to latest')}
             data-testid="chat-scroll-to-latest"
             className={cn(
-              'pointer-events-auto inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium shadow-lg backdrop-blur-md transition hover:-translate-y-0.5',
+              'pointer-events-auto inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium shadow-lg backdrop-blur-md transition hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
               hasDetachedNewContent
                 ? 'border-sky-500/30 bg-sky-500/95 text-white hover:bg-sky-500'
                 : 'border-border/70 bg-background/92 text-foreground hover:bg-background',
             )}
           >
-            <ChevronDown className="h-4 w-4" />
-            <span>
+            <ChevronDown className="h-3.5 w-3.5" />
+            <span className="leading-none">
               {hasDetachedNewContent
-                ? (isZh ? '有新内容，回到最新' : 'New activity, jump to latest')
-                : (isZh ? '回到最新' : 'Back to latest')}
+                ? (isZh ? '新内容' : 'New')
+                : (isZh ? '最新' : 'Latest')}
             </span>
             {hasDetachedNewContent ? (
               <span className="inline-flex h-2 w-2 rounded-full bg-white/90" />
@@ -2221,6 +1567,7 @@ function ProcessSection({
   streamingTools,
   onExpandStart,
   onOpenAttachmentPreview,
+  scrollAnchorPrefix,
 }: {
   processMessages: RawMessage[];
   processStreamingMessage?: RawMessage | null;
@@ -2238,6 +1585,7 @@ function ProcessSection({
   streamingTools?: ToolStatus[];
   onExpandStart?: () => void;
   onOpenAttachmentPreview?: (file: AttachedFileMeta) => void;
+  scrollAnchorPrefix?: string;
 }) {
   const { i18n } = useTranslation('chat');
   const language = i18n?.resolvedLanguage || i18n?.language;
@@ -2431,6 +1779,7 @@ function ProcessSection({
                   hideAvatar
                   constrainWidth={false}
                   onOpenAttachmentPreview={onOpenAttachmentPreview}
+                  scrollAnchorPrefix={scrollAnchorPrefix ? `${scrollAnchorPrefix}:${message.id ?? message.timestamp ?? index}` : undefined}
                 />
               ))}
               {hasStreamingProcessContent && effectiveProcessStreamingMessage && (
@@ -2476,6 +1825,7 @@ function CollapsedProcessTurn({
   hideInternalRoutineProcesses,
   onProcessSectionExpand,
   onOpenAttachmentPreview,
+  scrollAnchorPrefix,
 }: {
   userMessage: RawMessage;
   intermediateMessages: RawMessage[];
@@ -2486,6 +1836,7 @@ function CollapsedProcessTurn({
   hideInternalRoutineProcesses: boolean;
   onProcessSectionExpand?: () => void;
   onOpenAttachmentPreview?: (file: AttachedFileMeta) => void;
+  scrollAnchorPrefix: string;
 }) {
   const { t } = useTranslation('chat');
   const { collapsedProcessMessage, finalDisplayMessage } = splitFinalMessageForTurnDisplay(finalMessage);
@@ -2506,6 +1857,7 @@ function CollapsedProcessTurn({
         message={userMessage}
         showThinking={showThinking}
         onOpenAttachmentPreview={onOpenAttachmentPreview}
+        scrollAnchorPrefix={`${scrollAnchorPrefix}:user`}
       />
 
       {hasProcessSection && (
@@ -2522,6 +1874,7 @@ function CollapsedProcessTurn({
           showFinalDivider={finalHasVisibleContent}
           onExpandStart={onProcessSectionExpand}
           onOpenAttachmentPreview={onOpenAttachmentPreview}
+          scrollAnchorPrefix={`${scrollAnchorPrefix}:process`}
         />
       )}
 
@@ -2531,6 +1884,7 @@ function CollapsedProcessTurn({
           showThinking={false}
           hideAvatar={hasProcessSection}
           onOpenAttachmentPreview={onOpenAttachmentPreview}
+          scrollAnchorPrefix={`${scrollAnchorPrefix}:final`}
         />
       )}
 
@@ -2541,6 +1895,7 @@ function CollapsedProcessTurn({
             message={finalMessage}
             showThinking={showThinking}
             onOpenAttachmentPreview={onOpenAttachmentPreview}
+            scrollAnchorPrefix={`${scrollAnchorPrefix}:final`}
           />
           {pipelineMissesAssistantBody && (
             <div
@@ -2573,6 +1928,7 @@ function ActiveTurn({
   sending,
   onProcessSectionExpand,
   onOpenAttachmentPreview,
+  scrollAnchorPrefix,
 }: {
   userMessage: RawMessage;
   processMessages: RawMessage[];
@@ -2590,6 +1946,7 @@ function ActiveTurn({
   sending: boolean;
   onProcessSectionExpand?: () => void;
   onOpenAttachmentPreview?: (file: AttachedFileMeta) => void;
+  scrollAnchorPrefix: string;
 }) {
   const liveProcessMessages = sending
     ? [
@@ -2636,6 +1993,7 @@ function ActiveTurn({
           message={userMessage}
           showThinking={showThinking}
           onOpenAttachmentPreview={onOpenAttachmentPreview}
+          scrollAnchorPrefix={`${scrollAnchorPrefix}:user`}
         />
       </div>
 
@@ -2658,6 +2016,7 @@ function ActiveTurn({
           streamingTools={streamingTools}
           onExpandStart={onProcessSectionExpand}
           onOpenAttachmentPreview={onOpenAttachmentPreview}
+          scrollAnchorPrefix={`${scrollAnchorPrefix}:process`}
         />
       )}
 
@@ -2667,6 +2026,7 @@ function ActiveTurn({
           showThinking={false}
           hideAvatar={hasProcessSection}
           onOpenAttachmentPreview={onOpenAttachmentPreview}
+          scrollAnchorPrefix={`${scrollAnchorPrefix}:final`}
         />
       )}
 
@@ -2677,6 +2037,7 @@ function ActiveTurn({
           hideAvatar={hasProcessSection}
           isStreaming={sending}
           onOpenAttachmentPreview={onOpenAttachmentPreview}
+          scrollAnchorPrefix={`${scrollAnchorPrefix}:final-streaming`}
         />
       )}
 
@@ -2725,6 +2086,18 @@ function AssistantAvatar({ testId }: { testId?: string }) {
   );
 }
 
+const TEXT_SCAN_BACKGROUND_IMAGE = 'linear-gradient(90deg, transparent 0%, transparent 32%, rgba(255,255,255,0.72) 44%, rgba(255,255,255,1) 52%, rgba(255,255,255,0.72) 60%, transparent 72%, transparent 100%)';
+
+const PRODUCT_NAME_SCAN_KEYFRAMES = '@keyframes chat-product-scan { 0% { background-position: 172% 50%; opacity: 0.18; } 30% { opacity: 0.58; } 56% { opacity: 1; } 100% { background-position: -72% 50%; opacity: 0.24; } }';
+
+const PRODUCT_NAME_SCAN_STYLE = {
+  backgroundImage: TEXT_SCAN_BACKGROUND_IMAGE,
+  backgroundRepeat: 'no-repeat',
+  backgroundSize: '220% 100%',
+  animation: 'chat-product-scan 2.35s cubic-bezier(0.4, 0, 0.2, 1) infinite',
+  WebkitTextFillColor: 'transparent',
+} satisfies CSSProperties;
+
 function ProductNameIndicator({
   scanning = false,
   testIdPrefix,
@@ -2745,44 +2118,31 @@ function ProductNameIndicator({
       )}
     >
       {scanning && (
-        <style>{'@keyframes chat-product-scan { 0% { background-position: -52% 50%; opacity: 0.24; } 24% { opacity: 0.46; } 50% { opacity: 1; } 76% { opacity: 0.46; } 100% { background-position: 152% 50%; opacity: 0.24; } }'}</style>
+        <style>{PRODUCT_NAME_SCAN_KEYFRAMES}</style>
       )}
-      <span
-        data-testid={`${testIdPrefix}-name`}
-        className={cn(
-          'relative z-10 truncate text-[16px] font-semibold tracking-[0.12em]',
-          scanning
-            ? 'text-foreground/62 dark:text-foreground/58'
-            : 'text-foreground/90 dark:text-foreground/92',
-        )}
-      >
-        {branding.productName}
-      </span>
-      {scanning && (
+      <span className="relative z-10 inline-flex min-w-0 max-w-full overflow-hidden align-top">
         <span
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-20 overflow-hidden"
+          data-testid={`${testIdPrefix}-name`}
+          className={cn(
+            'truncate text-[16px] font-semibold tracking-[0.12em]',
+            scanning
+              ? 'text-foreground/62 dark:text-foreground/58'
+              : 'text-foreground/90 dark:text-foreground/92',
+          )}
         >
+          {branding.productName}
+        </span>
+        {scanning && (
           <span
+            aria-hidden="true"
             data-testid={`${testIdPrefix}-scan`}
-            className="block truncate text-[16px] font-semibold tracking-[0.12em] text-transparent [background-clip:text] [-webkit-background-clip:text]"
-            style={{
-              backgroundImage: [
-                'radial-gradient(circle at 28% 50%, rgba(255,255,255,1) 0%, rgba(255,255,255,0.98) 18%, rgba(255,255,255,0.84) 34%, rgba(255,255,255,0.46) 52%, rgba(255,255,255,0.16) 68%, rgba(255,255,255,0) 84%)',
-                'radial-gradient(circle at 56% 38%, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.56) 34%, rgba(255,255,255,0.16) 56%, rgba(255,255,255,0) 76%)',
-                'radial-gradient(circle at 78% 62%, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0.38) 38%, rgba(255,255,255,0.1) 58%, rgba(255,255,255,0) 74%)',
-              ].join(', '),
-              backgroundSize: '54% 188%',
-              backgroundRepeat: 'no-repeat',
-              animation: 'chat-product-scan 3.2s cubic-bezier(0.4, 0, 0.2, 1) infinite',
-              filter: 'blur(0.38px) drop-shadow(0 0 14px rgba(255,255,255,0.26))',
-              WebkitTextFillColor: 'transparent',
-            }}
+            className="pointer-events-none absolute inset-0 truncate text-[16px] font-semibold tracking-[0.12em] text-transparent [background-clip:text] [-webkit-background-clip:text]"
+            style={PRODUCT_NAME_SCAN_STYLE}
           >
             {branding.productName}
           </span>
-        </span>
-      )}
+        )}
+      </span>
     </div>
   );
 }
@@ -2811,6 +2171,22 @@ function useRotatingProcessActivityCopy() {
   };
 }
 
+const PRE_OUTPUT_STATUS_KEYFRAMES = [
+  '@keyframes chat-pre-output-pulse { 0% { transform: scale(0.9); opacity: 0.12; } 55% { opacity: 0.28; } 100% { transform: scale(1.16); opacity: 0; } }',
+  '@keyframes chat-pre-output-dot { 0%, 100% { transform: translateY(0); opacity: 0.52; } 50% { transform: translateY(-2px); opacity: 1; } }',
+  '@keyframes chat-pre-output-rail { 0% { transform: translateX(-130%); opacity: 0.4; } 45% { opacity: 1; } 100% { transform: translateX(260%); opacity: 0.46; } }',
+].join(' ');
+
+const PROCESS_ACTIVITY_SCAN_KEYFRAMES = '@keyframes chat-process-activity-label-scan { 0% { background-position: 172% 50%; opacity: 0.18; } 30% { opacity: 0.58; } 56% { opacity: 1; } 100% { background-position: -72% 50%; opacity: 0.24; } }';
+
+const PROCESS_ACTIVITY_LABEL_SCAN_STYLE = {
+  backgroundImage: TEXT_SCAN_BACKGROUND_IMAGE,
+  backgroundRepeat: 'no-repeat',
+  backgroundSize: '220% 100%',
+  animation: 'chat-process-activity-label-scan 2.35s cubic-bezier(0.4, 0, 0.2, 1) infinite',
+  WebkitTextFillColor: 'transparent',
+} satisfies CSSProperties;
+
 function PreOutputStatusPanel({ testIdPrefix }: { testIdPrefix: string }) {
   const { activePhrase, detailLabel, statusLabel } = useRotatingProcessActivityCopy();
 
@@ -2819,7 +2195,7 @@ function PreOutputStatusPanel({ testIdPrefix }: { testIdPrefix: string }) {
       className="w-full max-w-[236px] space-y-1.5"
       data-testid={`${testIdPrefix}-pre-output-panel`}
     >
-      <style>{'@keyframes chat-pre-output-pulse { 0% { transform: scale(0.9); opacity: 0.12; } 55% { opacity: 0.28; } 100% { transform: scale(1.16); opacity: 0; } } @keyframes chat-pre-output-dot { 0%, 100% { transform: translateY(0); opacity: 0.52; } 50% { transform: translateY(-2px); opacity: 1; } } @keyframes chat-pre-output-rail { 0% { transform: translateX(-130%); opacity: 0.4; } 45% { opacity: 1; } 100% { transform: translateX(260%); opacity: 0.46; } }'}</style>
+      <style>{PRE_OUTPUT_STATUS_KEYFRAMES}</style>
       <div
         className="rounded-[18px] border border-black/[0.06] bg-[linear-gradient(180deg,rgba(255,255,255,0.82),rgba(255,255,255,0.64))] px-3 py-2 shadow-[0_12px_24px_rgba(15,23,42,0.05)] backdrop-blur-md dark:border-white/[0.08] dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.04))]"
         data-testid={`${testIdPrefix}-pre-output-card`}
@@ -2935,10 +2311,25 @@ function ProcessActivityIndicator({
       data-process-activity-detail={detailLabel}
     >
       <div
-        className="text-sm leading-6 text-muted-foreground"
+        className="max-w-full overflow-hidden px-1.5 text-[13px] leading-5 text-muted-foreground"
         data-testid="chat-process-activity-copy"
       >
-        <span data-testid="chat-process-activity-label">{resolvedLabel}</span>
+        <span className="relative inline-flex max-w-full overflow-hidden align-top">
+          <span
+            className="truncate font-medium tracking-normal"
+            data-testid="chat-process-activity-label"
+          >
+            {resolvedLabel}
+          </span>
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 truncate font-medium tracking-normal text-transparent [background-clip:text] [-webkit-background-clip:text]"
+            data-testid="chat-process-activity-label-scan"
+            style={PROCESS_ACTIVITY_LABEL_SCAN_STYLE}
+          >
+            {resolvedLabel}
+          </span>
+        </span>
       </div>
       {detail && (
         <div
@@ -2954,7 +2345,7 @@ function ProcessActivityIndicator({
   if (streamStyle) {
     return (
       <div className="w-full max-w-none space-y-2 py-1" data-testid="chat-process-activity-stream">
-        <style>{'@keyframes chat-thinking-pulse { 0% { transform: scale(0.82); opacity: 0.0; } 35% { opacity: 0.38; } 100% { transform: scale(1.55); opacity: 0; } } @keyframes chat-thinking-dot { 0%, 100% { transform: translateY(0); opacity: 0.55; } 50% { transform: translateY(-2px); opacity: 1; } } @keyframes chat-thinking-slide { 0% { transform: translateX(-70%); opacity: 0.4; } 50% { opacity: 1; } 100% { transform: translateX(140%); opacity: 0.45; } }'}</style>
+        <style>{PROCESS_ACTIVITY_SCAN_KEYFRAMES}</style>
         {statusBody}
       </div>
     );
@@ -2962,7 +2353,7 @@ function ProcessActivityIndicator({
 
   return (
     <div className="rounded-[22px] border border-black/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.34),rgba(255,255,255,0.18))] px-4 py-3 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm dark:border-white/8 dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.025))]">
-      <style>{'@keyframes chat-thinking-pulse { 0% { transform: scale(0.82); opacity: 0.0; } 35% { opacity: 0.38; } 100% { transform: scale(1.55); opacity: 0; } } @keyframes chat-thinking-dot { 0%, 100% { transform: translateY(0); opacity: 0.55; } 50% { transform: translateY(-2px); opacity: 1; } } @keyframes chat-thinking-slide { 0% { transform: translateX(-70%); opacity: 0.4; } 50% { opacity: 1; } 100% { transform: translateX(140%); opacity: 0.45; } }'}</style>
+      <style>{PROCESS_ACTIVITY_SCAN_KEYFRAMES}</style>
       <div className="space-y-2.5">
         {statusBody}
       </div>

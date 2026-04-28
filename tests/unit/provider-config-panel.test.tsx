@@ -128,7 +128,7 @@ describe('ProviderConfigPanel', () => {
     expect(applyButton).toBeDisabled();
   });
 
-  it('collapses duplicate rows that point to the same vendor/model signature', () => {
+  it('shows all saved rows even when vendor URL and model ID match', () => {
     providerStore.accounts = [
       {
         id: 'custom-a',
@@ -184,7 +184,53 @@ describe('ProviderConfigPanel', () => {
 
     render(<ProviderConfigPanel />);
 
-    expect(screen.getAllByTestId('models-config-row')).toHaveLength(1);
+    expect(screen.getAllByTestId('models-config-row')).toHaveLength(2);
+  });
+
+  it('blocks testing a new draft when provider URL and model ID already exist', async () => {
+    providerStore.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI Main',
+        authMode: 'api_key',
+        baseUrl: 'https://api.openai.com/v1',
+        apiProtocol: 'openai-completions',
+        model: 'gpt-5.4',
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerStore.statuses = [
+      {
+        id: 'openai',
+        type: 'openai',
+        name: 'OpenAI Main',
+        hasKey: true,
+        keyMasked: 'sk-***',
+        enabled: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+        model: 'gpt-5.4',
+      },
+    ];
+
+    render(<ProviderConfigPanel />);
+
+    fireEvent.click(screen.getByTestId('models-config-add-button'));
+    await screen.findByTestId('models-config-sheet');
+    fireEvent.change(screen.getByTestId('models-config-sheet-model-input'), { target: { value: 'GPT-5.4' } });
+    fireEvent.change(screen.getByTestId('models-config-sheet-base-url-input'), {
+      target: { value: 'https://api.openai.com/v1/' },
+    });
+    fireEvent.click(screen.getByTestId('models-config-sheet-test-button'));
+
+    expect(hostApiFetchMock).not.toHaveBeenCalled();
+    expect(toastErrorMock).toHaveBeenCalledWith(
+      'Duplicate model configuration: https://api.openai.com/v1 / gpt-5.4',
+    );
   });
 
   it('shows and handles the set global default action for non-global rows', async () => {
@@ -224,6 +270,10 @@ describe('ProviderConfigPanel', () => {
       },
     ];
     providerStore.defaultAccountId = 'openai';
+    providerStore.updateAccount.mockResolvedValue({
+      ...providerStore.accounts[0],
+      model: 'gpt-5.4-mini',
+    });
 
     render(<ProviderConfigPanel />);
 

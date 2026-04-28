@@ -76,9 +76,14 @@ async function getStableWindow(app: ElectronApplication): Promise<Page> {
     if (currentWindow && !currentWindow.isClosed()) {
       try {
         await currentWindow.waitForLoadState('domcontentloaded', { timeout: 2_000 });
+        await currentWindow.waitForFunction(
+          () => Boolean(document.querySelector('[data-testid="main-layout"], [data-testid="setup-page"]')),
+          { timeout: 20_000 },
+        );
         return currentWindow;
       } catch (error) {
-        if (!String(error).includes('has been closed')) {
+        const message = String(error);
+        if (!message.includes('has been closed') && !message.includes('Timeout')) {
           throw error;
         }
       }
@@ -320,6 +325,25 @@ export async function installIpcMocks(
       }
     }
   }
+}
+
+export async function retryElectronAppOperation<T>(
+  app: ElectronApplication,
+  action: () => Promise<T>,
+): Promise<T> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await action();
+    } catch (error) {
+      const message = String(error);
+      if (attempt === 2 || !message.includes('Execution context was destroyed')) {
+        throw error;
+      }
+      await getStableWindow(app);
+    }
+  }
+
+  throw new Error('Electron app operation did not complete');
 }
 
 export { closeElectronApp };

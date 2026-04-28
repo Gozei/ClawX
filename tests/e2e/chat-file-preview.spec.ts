@@ -36,35 +36,6 @@ function createPresentationSlideDataUrl(options: {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-function createSimplePdfDataUrl(text: string): string {
-  const escapedText = text
-    .replace(/\\/g, '\\\\')
-    .replace(/\(/g, '\\(')
-    .replace(/\)/g, '\\)');
-  const objects = [
-    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
-    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
-    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n',
-    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
-  ];
-  const stream = `BT /F1 24 Tf 72 720 Td (${escapedText}) Tj ET`;
-  objects.push(`5 0 obj\n<< /Length ${stream.length} >>\nstream\n${stream}\nendstream\nendobj\n`);
-
-  let pdf = '%PDF-1.4\n';
-  const offsets = [0];
-  for (const object of objects) {
-    offsets.push(Buffer.byteLength(pdf, 'latin1'));
-    pdf += object;
-  }
-  const xrefOffset = Buffer.byteLength(pdf, 'latin1');
-  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  for (const offset of offsets.slice(1)) {
-    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
-  }
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-  return `data:application/pdf;base64,${Buffer.from(pdf, 'latin1').toString('base64')}`;
-}
-
 async function installGatewaySessionMocks(
   app: ElectronApplication,
   payload: {
@@ -143,6 +114,7 @@ async function installHostApiPreviewMocks(
     docxFileSize?: number;
     docxHtml?: string;
     docxBinaryBase64?: string;
+    docxRequiresLibreOffice?: boolean;
     docxOfficePages?: boolean;
     docxOfficePdfDataUrl?: string;
     docxOfficePageCount?: number;
@@ -502,6 +474,23 @@ async function installHostApiPreviewMocks(
               }
 
               if (parsed.filePath && parsed.filePath === config.docxFilePath) {
+                if (config.docxRequiresLibreOffice) {
+                  return {
+                    ok: true,
+                    data: {
+                      status: 200,
+                      ok: true,
+                      json: {
+                        kind: 'unavailable',
+                        fileName: config.docxFileName ?? 'outline-fixture.docx',
+                        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                        fileSize: config.docxFileSize ?? 2048,
+                        reasonCode: 'requiresLibreOffice',
+                      },
+                    },
+                  };
+                }
+
                 if (config.docxOfficePages) {
                   return {
                     ok: true,
@@ -1661,6 +1650,74 @@ test.describe('Chat file preview window', () => {
     }
   });
 
+  test('does not show the LibreOffice download dialog for docx previews', async ({ launchElectronApp, homeDir }) => {
+    test.setTimeout(180_000);
+
+    const docxPath = join(homeDir, 'lo-guard.docx');
+    await writeFile(docxPath, 'docx placeholder', 'utf8');
+    const app = await launchElectronApp({ skipSetup: true });
+    const page = await getStableWindow(app);
+
+    try {
+      await installGatewaySessionMocks(app, {
+        sessionKey: SESSION_KEY,
+        messages: [
+          {
+            id: 'assistant-docx-libreoffice-guard-intro',
+            role: 'assistant',
+            content: 'Open the DOCX attachment.',
+            timestamp: Math.floor(Date.now() / 1000) - 10,
+          },
+          {
+            id: 'user-docx-libreoffice-guard-request',
+            role: 'user',
+            content: 'Preview this Word document.',
+            timestamp: Math.floor(Date.now() / 1000),
+            _attachedFiles: [
+              {
+                fileName: 'lo-guard.docx',
+                mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                fileSize: 2048,
+                preview: null,
+                filePath: docxPath,
+              },
+            ],
+          },
+        ],
+      });
+      await installHostApiPreviewMocks(app, {
+        docxFilePath: docxPath,
+        docxFileName: 'lo-guard.docx',
+        docxFileSize: 2048,
+        docxRequiresLibreOffice: true,
+      });
+
+      await page.reload();
+      await page.waitForLoadState('domcontentloaded');
+      await expect(page.getByTestId('main-layout')).toBeVisible({ timeout: 60_000 });
+      await app.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().at(-1);
+        window?.webContents.send('gateway:status-changed', {
+          state: 'running',
+          port: 18789,
+          pid: 12345,
+          connectedAt: Date.now(),
+        });
+      });
+
+      await page.getByTestId(`sidebar-session-${SESSION_KEY}`).click({ force: true });
+      const docxCard = page.getByTestId('chat-file-card').filter({ hasText: 'lo-guard.docx' }).first();
+      await expect(docxCard).toBeVisible({ timeout: 20_000 });
+      await docxCard.click({ force: true });
+
+      await expect(page.getByTestId('chat-file-preview-body')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('chat-libreoffice-global-dialog')).toHaveCount(0);
+      await expect(page.getByTestId('chat-file-preview-libreoffice-dialog')).toHaveCount(0);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
   test('keeps text-like previews on the system stack while preserving monospace only for code', async ({ launchElectronApp, homeDir }) => {
     test.setTimeout(180_000);
 
@@ -2213,7 +2270,7 @@ test.describe('Chat file preview window', () => {
       const libreOfficeDialog = page.getByTestId('chat-file-preview-libreoffice-dialog');
       await expect(libreOfficeGlobalDialog).toBeVisible({ timeout: 20_000 });
       await expect(libreOfficeDialog).toBeVisible({ timeout: 20_000 });
-      await expect(libreOfficeDialog).toContainText('该文件预览需要下载LibreOffice办公套件，是否下载？');
+      await expect(libreOfficeDialog).toContainText('该文件预览需要下载并安装 LibreOffice 预览运行时，是否继续？');
       await expect(previewPanel).toHaveCount(0);
       await page.getByTestId('chat-file-preview-libreoffice-download').click();
       await expect(libreOfficeGlobalDialog).toBeHidden({ timeout: 20_000 });

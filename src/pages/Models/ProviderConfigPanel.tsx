@@ -74,6 +74,64 @@ function normalizeConfiguredModelIds(account: ProviderAccount): string[] {
   return Array.from(new Set([account.model || '', ...(account.metadata?.customModels ?? [])].map((value) => value.trim()).filter(Boolean)));
 }
 
+function normalizeProviderUrl(value?: string): string {
+  return (value || '').trim().replace(/\/+$/, '').toLowerCase();
+}
+
+function normalizeModelId(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function getVendorDefaultBaseUrl(vendorId: ProviderType): string {
+  return PROVIDER_TYPE_INFO.find((entry) => entry.id === vendorId)?.defaultBaseUrl || '';
+}
+
+function getRowDuplicateScope(row: ModelRow): string {
+  return normalizeProviderUrl(row.account.baseUrl || getVendorDefaultBaseUrl(row.vendorId)) || `vendor:${row.vendorId}`;
+}
+
+function getDraftDuplicateScope(draft: DraftState): string {
+  return normalizeProviderUrl(draft.baseUrl || getVendorDefaultBaseUrl(draft.vendorId)) || `vendor:${draft.vendorId}`;
+}
+
+function findOriginalDraftRow(rows: ModelRow[], draft: DraftState): ModelRow | undefined {
+  if (!draft.accountId || !draft.originalModelId) {
+    return undefined;
+  }
+  const originalModelId = normalizeModelId(draft.originalModelId);
+  return rows.find((row) => row.account.id === draft.accountId && normalizeModelId(row.modelId) === originalModelId);
+}
+
+function hasDraftProviderModelIdentityChanged(rows: ModelRow[], draft: DraftState): boolean {
+  if (draft.mode === 'create') {
+    return true;
+  }
+  const originalRow = findOriginalDraftRow(rows, draft);
+  if (!originalRow) {
+    return true;
+  }
+  return getDraftDuplicateScope(draft) !== getRowDuplicateScope(originalRow)
+    || normalizeModelId(draft.modelId) !== normalizeModelId(originalRow.modelId);
+}
+
+function findDuplicateDraftModel(rows: ModelRow[], draft: DraftState): ModelRow | null {
+  const modelId = normalizeModelId(draft.modelId);
+  if (!modelId || !hasDraftProviderModelIdentityChanged(rows, draft)) {
+    return null;
+  }
+
+  const scope = getDraftDuplicateScope(draft);
+  return rows.find((row) => {
+    const isOriginalRow = draft.accountId === row.account.id
+      && normalizeModelId(draft.originalModelId || '') === normalizeModelId(row.modelId);
+    return !isOriginalRow && getRowDuplicateScope(row) === scope && normalizeModelId(row.modelId) === modelId;
+  }) ?? null;
+}
+
+function duplicateModelMessage(row: ModelRow): string {
+  return `Duplicate model configuration: ${row.account.baseUrl || getVendorDefaultBaseUrl(row.vendorId) || row.vendorLabel} / ${row.modelId}`;
+}
+
 function inferResultType(modelId: string): ResultType {
   const normalized = modelId.toLowerCase();
   if (normalized.includes('embed')) return 'embedding';
@@ -412,6 +470,11 @@ export function ProviderConfigPanel() {
       toast.error('需要模型 ID');
       return;
     }
+    const duplicate = findDuplicateDraftModel(rows, draft);
+    if (duplicate) {
+      toast.error(duplicateModelMessage(duplicate));
+      return;
+    }
     setDraftTest({ state: 'running' });
     try {
       const result = await runDraftTest(draft);
@@ -435,6 +498,11 @@ export function ProviderConfigPanel() {
 
   const handleApplyDraft = async () => {
     if (!draft || !canApplyDraft) return;
+    const duplicate = findDuplicateDraftModel(rows, draft);
+    if (duplicate) {
+      toast.error(duplicateModelMessage(duplicate));
+      return;
+    }
     setSaving(true);
     try {
       const trimmedKey = draft.apiKey.trim();

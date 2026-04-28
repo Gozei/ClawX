@@ -869,7 +869,7 @@ const ProcessEventRow = memo(function ProcessEventRow({
               {!isExpanded && previewLabel && (
                 <span
                   data-testid="chat-process-event-preview"
-                  className={cn('min-w-0 flex-1 truncate pr-2 text-[12px] leading-5', PROCESS_EVENT_TEXT_CLASS)}
+                  className={cn('min-w-0 flex-1 truncate pr-2 text-[13px] leading-6', PROCESS_EVENT_TEXT_CLASS)}
                 >
                   {previewLabel}
                 </span>

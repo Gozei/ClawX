@@ -447,35 +447,36 @@ export function buildConfiguredModelEntries(
   vendors: ProviderVendorInfo[],
   defaultAccountId: string | null,
 ): ConfiguredModelEntry[] {
-  const deduped = new Map<string, ConfiguredModelEntry>();
+  const entries: ConfiguredModelEntry[] = [];
+  const safeAccounts = accounts.length > 0 ? accounts : statuses.map((status) => legacyProviderToAccount(status));
+  const statusMap = new Map(statuses.map((status) => [status.id, status]));
+  const vendorMap = new Map(vendors.map((vendor) => [vendor.id, vendor]));
 
-  for (const item of buildProviderListItems(accounts, statuses, vendors, defaultAccountId)) {
-    for (const model of item.models.filter((entry) => entry.source !== 'recommended')) {
-      const protocol = resolveConfiguredModelProtocol(item.account, model.id);
-      const entry: ConfiguredModelEntry = {
-        key: `${item.account.id}:${model.id}`,
-        account: item.account,
-        displayName: item.displayName,
-        displayVendorName: item.displayVendorName,
-        vendorId: item.account.vendorId,
-        modelId: model.id,
-        isDefault: model.isDefault,
-        isGlobalDefault: item.account.id === defaultAccountId && model.isDefault,
+  for (const account of safeAccounts) {
+    const status = statusMap.get(account.id);
+    const vendor = vendorMap.get(account.vendorId);
+    const modelIds = normalizeConfiguredModelIds([
+      ...getConfiguredModelIds(account),
+      status?.model || '',
+    ]);
+    const defaultModel = modelIds[0];
+
+    for (const modelId of modelIds) {
+      const protocol = resolveConfiguredModelProtocol(account, modelId);
+      entries.push({
+        key: `${account.id}:${modelId}`,
+        account,
+        displayName: getResolvedDisplayName(account, vendor),
+        displayVendorName: getResolvedVendorName(account, vendor),
+        vendorId: account.vendorId,
+        modelId,
+        isDefault: modelId === defaultModel,
+        isGlobalDefault: account.id === defaultAccountId && modelId === defaultModel,
         protocol,
-        hasConfiguredCredentials: item.hasConfiguredCredentials,
-      };
-      const signature = [
-        entry.vendorId,
-        entry.displayName.trim().toLowerCase(),
-        (entry.account.baseUrl || '').trim().toLowerCase(),
-        entry.modelId.trim().toLowerCase(),
-        entry.protocol,
-      ].join('|');
-      if (!deduped.has(signature)) {
-        deduped.set(signature, entry);
-      }
+        hasConfiguredCredentials: hasConfiguredCredentials(account, status),
+      });
     }
   }
 
-  return [...deduped.values()];
+  return entries;
 }

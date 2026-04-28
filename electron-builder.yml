@@ -12,6 +12,10 @@ files:
   - dist
   - dist-electron
   - package.json
+  # readable-stream requires `string_decoder/` with a trailing slash.
+  # electron-builder treats string_decoder like a Node builtin and can skip it
+  # even when it is a production dependency, so force it into app.asar.
+  - node_modules/string_decoder/**/*
 
 extraResources:
   - from: resources/
