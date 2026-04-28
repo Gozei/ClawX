@@ -2,7 +2,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ComponentProps } from 'react';
 
-type MarkdownComponents = NonNullable<ComponentProps<typeof ReactMarkdown>['components']>;
+export type MarkdownComponents = NonNullable<ComponentProps<typeof ReactMarkdown>['components']>;
 
 export function MarkdownRenderer({
   content,

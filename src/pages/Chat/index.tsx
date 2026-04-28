@@ -4,7 +4,7 @@
  * via gateway:rpc IPC. Session selector, thinking toggle, and refresh
  * are in the toolbar; messages render with markdown + streaming.
  */
-import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ChevronDown, Loader2 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useChatStore, type AttachedFileMeta, type ChatMessageDispatchOptions, type RawMessage } from '@/stores/chat';
@@ -12,7 +12,6 @@ import { useGatewayStore } from '@/stores/gateway';
 import { useAgentsStore } from '@/stores/agents';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { ChatMessage } from './ChatMessage';
-import { ChatFilePreviewPanel } from './ChatFilePreview';
 import { ChatInput } from './ChatInput';
 import { ChatToolbarV2 } from './ChatToolbarV2';
 import { CHAT_SURFACE_MAX_WIDTH_CLASS } from './layout';
@@ -29,6 +28,8 @@ import { useChatScrollController } from './useChatScrollController';
 import { useChatTranscriptModel } from './useChatTranscriptModel';
 import { ActiveTurn, ActivityIndicator, CollapsedProcessTurn, TypingIndicator } from './ChatProcessTurn';
 import type { ChatListItem, ChatVirtuosoContext } from './transcript-types';
+
+const ChatFilePreviewPanel = lazy(() => import('./ChatFilePreview').then((module) => ({ default: module.ChatFilePreviewPanel })));
 
 const EMPTY_MESSAGES: RawMessage[] = [];
 const CHAT_COMPOSER_PREFILL_STATE_KEY = 'composerPrefillText';
@@ -886,12 +887,27 @@ export function Chat() {
               <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-black/8 transition-colors group-hover:bg-primary/45 group-focus-visible:bg-primary/55 dark:bg-white/10 dark:group-hover:bg-primary/55" />
               <div className="absolute left-1/2 top-1/2 h-12 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-primary/35 group-focus-visible:bg-primary/45" />
             </div>
-            <ChatFilePreviewPanel
-              key={selectedPreviewFile.filePath ?? `${selectedPreviewFile.fileName}:${selectedPreviewFile.mimeType}:${selectedPreviewFile.fileSize}`}
-              file={selectedPreviewFile}
-              desktopWidthPercent={previewPaneWidthPercent}
-              onClose={handleCloseAttachmentPreview}
-            />
+            <Suspense
+              fallback={(
+                <aside
+                  data-testid="chat-file-preview-panel-loading"
+                  className="flex h-full min-h-0 w-full shrink-0 items-center justify-center border-l border-black/6 bg-background/80 dark:border-white/8 lg:flex-none lg:min-w-[16%] lg:max-w-[84%]"
+                  style={{
+                    width: `${previewPaneWidthPercent}%`,
+                    flexBasis: `${previewPaneWidthPercent}%`,
+                  }}
+                >
+                  <Loader2 className="h-6 w-6 animate-spin text-foreground/46" />
+                </aside>
+              )}
+            >
+              <ChatFilePreviewPanel
+                key={selectedPreviewFile.filePath ?? `${selectedPreviewFile.fileName}:${selectedPreviewFile.mimeType}:${selectedPreviewFile.fileSize}`}
+                file={selectedPreviewFile}
+                desktopWidthPercent={previewPaneWidthPercent}
+                onClose={handleCloseAttachmentPreview}
+              />
+            </Suspense>
           </>
         ) : null}
       </div>
