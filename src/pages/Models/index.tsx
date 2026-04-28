@@ -458,9 +458,6 @@ export function Models({ embedded = false }: ModelsProps) {
                                 : t('dashboard:recentTokenHistory.usageParseError')}
                             </span>
                           )}
-                          {typeof entry.costUsd === 'number' && Number.isFinite(entry.costUsd) && (
-                            <span className="flex items-center gap-1.5 ml-auto text-foreground/80 bg-black/5 dark:bg-white/5 px-2 py-0.5 rounded-md">{t('dashboard:recentTokenHistory.cost', { amount: entry.costUsd.toFixed(4) })}</span>
-                          )}
                           {devModeUnlocked && entry.content && (
                             <Button
                               variant="outline"
