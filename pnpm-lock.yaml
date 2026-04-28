@@ -3000,7 +3000,7 @@ packages:
         optional: true
 
   '@whiskeysockets/libsignal-node@file:vendor/libsignal-node-direct.tar.gz':
-    resolution: {integrity: sha512-/bVVmcH9cQi0WljVkF/jfSMXDhq5P3HkkJw6633ZsYe7DXKP72BOPM+Oi09ZkR6SoCcXePk6i5xgYY/FiRH4xA==}
+    resolution: {integrity: sha512-/bVVmcH9cQi0WljVkF/jfSMXDhq5P3HkkJw6633ZsYe7DXKP72BOPM+Oi09ZkR6SoCcXePk6i5xgYY/FiRH4xA==, tarball: file:vendor/libsignal-node-direct.tar.gz}
     version: 2.0.1
 
   '@xmldom/xmldom@0.8.13':
@@ -6922,7 +6922,7 @@ packages:
         optional: true
 
   xlsx@file:vendor/xlsx-0.20.3.tgz:
-    resolution: {integrity: sha512-oLDq3jw7AcLqKWH2AhCpVTZl8mf6X2YReP+Neh0SJUzV/BdZYjth94tG5toiMB1PPrYtxOCfaoUCkvtuH+3AJA==}
+    resolution: {integrity: sha512-oLDq3jw7AcLqKWH2AhCpVTZl8mf6X2YReP+Neh0SJUzV/BdZYjth94tG5toiMB1PPrYtxOCfaoUCkvtuH+3AJA==, tarball: file:vendor/xlsx-0.20.3.tgz}
     version: 0.20.3
     engines: {node: '>=0.8'}
     hasBin: true
