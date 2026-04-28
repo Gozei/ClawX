@@ -6,7 +6,7 @@ metadata:
     "openclaw": {
       "emoji": "⏰",
       "user-invocable": true,
-      "requires": { "bins": ["openclaw"], "tools": ["session_status"] }
+      "requires": { "bins": ["openclaw"], "tools": ["session_status", "cron"] }
     }
   }
 ---
@@ -77,7 +77,20 @@ session_status
 date -u -d "+30 seconds" +"%Y-%m-%dT%H:%M:%SZ"
 # Result: 2026-02-26T13:30:00Z
 
-# 3. Create cron job (using main session + system-event)
+# 3. Create cron job with the cron tool (preferred, using main session + system-event)
+cron action=add job='{
+  "name": "reminder-weather",
+  "at": "2026-02-26T13:30:00Z",
+  "session": "main",
+  "systemEvent": "Check Beijing weather",
+  "agent": "machu",
+  "announce": true,
+  "channel": "discord",
+  "to": "channel:1476104553148452958",
+  "deleteAfterRun": true
+}'
+
+# Fallback only if the cron tool is unavailable:
 openclaw cron add \
   --name "reminder-weather" \
   --at "2026-02-26T13:30:00Z" \
@@ -92,7 +105,9 @@ openclaw cron add \
 
 ## Task Content (SECURITY)
 
-User-specified task content must be sanitized before passing to cron:
+User-specified task content must be sanitized before passing to cron.
+Prefer the `cron` tool so task content is passed as structured JSON instead of a shell command.
+If falling back to `openclaw cron add`, shell-injection validation is mandatory:
 
 1. **Validation Method**: REJECT dangerous patterns (not escape)
    
@@ -124,4 +139,5 @@ After creating the task, reply to user to confirm:
 2. Task content should be concise and clear
 3. If time exceeds 48 hours, suggest using calendar
 4. Always use `--session main` + `--system-event` for reliable Discord delivery
-5. Validate task content with sanitize-message.sh before creating job
+5. Prefer the `cron` tool over shelling out to `openclaw cron add`
+6. Validate task content with sanitize-message.sh before using the CLI fallback
