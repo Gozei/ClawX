@@ -34,6 +34,54 @@ async function measureActiveTurnTop(page: Page): Promise<number | null> {
   });
 }
 
+async function sampleActiveTurnTopDrift(
+  page: Page,
+  baselineTop: number,
+  durationMs: number,
+): Promise<{ maxAbsDelta: number; minDelta: number; maxDelta: number; sampleCount: number }> {
+  return await page.evaluate(
+    ({ baselineTop: baseline, durationMs: duration }) => new Promise((resolve) => {
+      const startedAt = performance.now();
+      let maxAbsDelta = 0;
+      let minDelta = 0;
+      let maxDelta = 0;
+      let sampleCount = 0;
+
+      const sample = () => {
+        const anchor = document.querySelector('[data-testid="chat-active-turn-anchor"]') as HTMLElement | null;
+        if (anchor) {
+          const delta = anchor.getBoundingClientRect().top - baseline;
+          maxAbsDelta = Math.max(maxAbsDelta, Math.abs(delta));
+          minDelta = Math.min(minDelta, delta);
+          maxDelta = Math.max(maxDelta, delta);
+          sampleCount += 1;
+        }
+
+        if (performance.now() - startedAt >= duration) {
+          resolve({ maxAbsDelta, minDelta, maxDelta, sampleCount });
+          return;
+        }
+
+        requestAnimationFrame(sample);
+      };
+
+      requestAnimationFrame(sample);
+    }),
+    { baselineTop, durationMs },
+  ) as Promise<{ maxAbsDelta: number; minDelta: number; maxDelta: number; sampleCount: number }>;
+}
+
+async function measureTranscriptDistanceFromBottom(page: Page): Promise<number | null> {
+  return await page.evaluate(() => {
+    const scrollContainer = document.querySelector('[data-testid="chat-scroll-container"]') as HTMLElement | null;
+    if (!scrollContainer) return null;
+    return Math.max(
+      0,
+      scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop,
+    );
+  });
+}
+
 test.describe('Chat stream stability', () => {
   test('keeps a short active turn anchored instead of reflowing upward while streaming', async ({ launchElectronApp }) => {
     test.setTimeout(180_000);
@@ -218,16 +266,21 @@ test.describe('Chat stream stability', () => {
 
       const beforeGrowthTop = await measureActiveTurnTop(page);
       expect(beforeGrowthTop).not.toBeNull();
+      if (beforeGrowthTop == null) {
+        throw new Error('Active turn anchor was not measurable before stream growth');
+      }
+
+      const driftDuringGrowthPromise = sampleActiveTurnTopDrift(page, beforeGrowthTop, 3_000);
 
       await expect(page.getByText('Second visible block.')).toBeVisible({ timeout: 20_000 });
-      await expect.poll(async () => {
-        const top = await measureActiveTurnTop(page);
-        return top == null || beforeGrowthTop == null ? null : Math.round(top - beforeGrowthTop);
-      }, { timeout: 20_000 }).not.toBeNull();
+      const driftDuringGrowth = await driftDuringGrowthPromise;
+      expect(driftDuringGrowth.sampleCount).toBeGreaterThan(0);
+      expect(driftDuringGrowth.maxAbsDelta).toBeLessThanOrEqual(6);
 
       const afterGrowthTop = await measureActiveTurnTop(page);
       expect(afterGrowthTop).not.toBeNull();
-      expect(Math.abs((afterGrowthTop ?? 0) - (beforeGrowthTop ?? 0))).toBeLessThanOrEqual(4);
+      expect(Math.abs((afterGrowthTop ?? 0) - beforeGrowthTop)).toBeLessThanOrEqual(4);
+      await expect.poll(async () => await measureTranscriptDistanceFromBottom(page), { timeout: 10_000 }).toBeLessThanOrEqual(2);
     } finally {
       await closeElectronApp(app);
     }

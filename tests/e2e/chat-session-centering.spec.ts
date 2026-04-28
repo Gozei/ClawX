@@ -32,6 +32,17 @@ async function sampleChatScrollTop(page: Page, settleMs = 550, sampleMs = 700): 
   }, { sampleMs, settleMs });
 }
 
+async function measureChatDistanceFromBottom(page: Page): Promise<number | null> {
+  return await page.evaluate(() => {
+    const scrollContainer = document.querySelector('[data-testid="chat-scroll-container"]') as HTMLElement | null;
+    if (!scrollContainer) return null;
+    return Math.max(
+      0,
+      scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop,
+    );
+  });
+}
+
 test.describe('Chat Session Centering', () => {
   test('keeps the composer and history content centered after switching from a blank chat to a saved session', async ({ launchElectronApp, homeDir }) => {
     const app = await launchElectronApp({ skipSetup: true });
@@ -234,6 +245,7 @@ test.describe('Chat Session Centering', () => {
       expect(scrollTopSamples.length).toBeGreaterThan(5);
       const scrollTopRange = Math.max(...scrollTopSamples) - Math.min(...scrollTopSamples);
       expect(scrollTopRange).toBeLessThanOrEqual(4);
+      await expect.poll(async () => await measureChatDistanceFromBottom(page), { timeout: 10_000 }).toBeLessThanOrEqual(2);
 
       const beforeScroll = {
         mainPane: await mainPane.boundingBox(),

@@ -57,6 +57,7 @@ describe('chat store session resume', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.clearAllTimers();
     vi.useRealTimers();
   });
@@ -1320,6 +1321,69 @@ describe('chat store session resume', () => {
       role: 'assistant',
       content: [{ type: 'text', text: cumulativeText }],
     });
+  });
+
+  it('flushes live assistant deltas on the next animation frame', async () => {
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      rafCallbacks.push(callback);
+      return rafCallbacks.length;
+    });
+    const cancelAnimationFrameMock = vi.fn();
+    vi.stubGlobal('requestAnimationFrame', requestAnimationFrameMock);
+    vi.stubGlobal('cancelAnimationFrame', cancelAnimationFrameMock);
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: { 'agent:main:main': true },
+      sending: true,
+      activeRunId: 'run-raf-stream',
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: 'running',
+    });
+
+    useChatStore.getState().handleChatEvent({
+      state: 'delta',
+      runId: 'run-raf-stream',
+      sessionKey: 'agent:main:main',
+      seq: 1,
+      message: {
+        id: 'assistant-stream-raf',
+        role: 'assistant',
+        content: 'Frame-paced answer',
+        timestamp: assistantTimestampSeconds,
+      },
+    });
+
+    expect(requestAnimationFrameMock).toHaveBeenCalledTimes(1);
+    expect(useChatStore.getState().streamingMessage).toBeNull();
+
+    rafCallbacks.shift()?.(performance.now() + 16);
+
+    expect(useChatStore.getState().streamingMessage).toMatchObject({
+      id: 'assistant-stream-raf',
+      role: 'assistant',
+      content: 'Frame-paced answer',
+    });
+    expect(cancelAnimationFrameMock).not.toHaveBeenCalled();
   });
 
   it('clears stale settled streaming state when an explicit history refresh already contains the final reply', async () => {

@@ -165,10 +165,11 @@ type PersistedSessionViewSnapshot = {
 let pendingDeltaMessages: RawMessage[] = [];
 let pendingDeltaUpdates: ToolStatus[] = [];
 let pendingDeltaClearError = false;
-let pendingDeltaFlushHandle: ReturnType<typeof setTimeout> | null = null;
+let pendingDeltaFlushHandle: number | ReturnType<typeof setTimeout> | null = null;
+let pendingDeltaFlushUsesAnimationFrame = false;
 let pendingFinalRecoveryHandle: ReturnType<typeof setTimeout> | null = null;
 let pendingDeltaSnapshotSeq = 0;
-const STREAM_DELTA_FLUSH_MS = 48;
+const STREAM_DELTA_FLUSH_FALLBACK_MS = 16;
 const PENDING_FINAL_RECOVERY_DELAY_MS = 8_000;
 
 function clearErrorRecoveryTimer(): void {
@@ -517,8 +518,18 @@ function restoreSessionView(sessionKey: string): SessionViewSnapshot {
 
 function cancelPendingDeltaFlush(): void {
   if (pendingDeltaFlushHandle) {
-    clearTimeout(pendingDeltaFlushHandle);
+    if (
+      pendingDeltaFlushUsesAnimationFrame
+      && typeof window !== 'undefined'
+      && typeof window.cancelAnimationFrame === 'function'
+      && typeof pendingDeltaFlushHandle === 'number'
+    ) {
+      window.cancelAnimationFrame(pendingDeltaFlushHandle);
+    } else {
+      clearTimeout(pendingDeltaFlushHandle);
+    }
     pendingDeltaFlushHandle = null;
+    pendingDeltaFlushUsesAnimationFrame = false;
   }
 }
 
@@ -630,9 +641,21 @@ function flushPendingDelta(set: ChatStoreSet): void {
 
 function scheduleDeltaFlush(set: ChatStoreSet): void {
   if (pendingDeltaFlushHandle) return;
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    pendingDeltaFlushUsesAnimationFrame = true;
+    pendingDeltaFlushHandle = window.requestAnimationFrame(() => {
+      pendingDeltaFlushHandle = null;
+      pendingDeltaFlushUsesAnimationFrame = false;
+      flushPendingDelta(set);
+    });
+    return;
+  }
+
+  pendingDeltaFlushUsesAnimationFrame = false;
   pendingDeltaFlushHandle = setTimeout(() => {
+    pendingDeltaFlushHandle = null;
     flushPendingDelta(set);
-  }, STREAM_DELTA_FLUSH_MS);
+  }, STREAM_DELTA_FLUSH_FALLBACK_MS);
 }
 
 function startHistoryPoll(get: () => ChatState, sessionKey: string): void {
