@@ -290,6 +290,14 @@ function getChatScrollDebugSnapshot() {
   return debugWindow.__CLAWX_CHAT_SCROLL_DEBUG__?.getSnapshot() ?? null;
 }
 
+async function waitForActiveTurnScrollDebounce() {
+  await act(async () => {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 160);
+    });
+  });
+}
+
 describe('Chat process turn rendering', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -1775,7 +1783,7 @@ describe('Chat process turn rendering', () => {
     expect(scrollContainer.scrollTop).toBe(120);
   });
 
-  it('keeps the latest streamed content visible at the bottom while auto-follow is active', () => {
+  it('keeps the latest streamed content visible at the bottom while auto-follow is active', async () => {
     const rafQueue: FrameRequestCallback[] = [];
     const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
       rafQueue.push(callback);
@@ -1885,6 +1893,19 @@ describe('Chat process turn rendering', () => {
         callback([], {} as ResizeObserver);
       }
     });
+
+    act(() => {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
+        const callback = rafQueue.shift();
+        now += 16;
+        callback?.(now);
+      }
+    });
+
+    expect(scrollContainer.scrollTop).toBe(280);
+
+    await waitForActiveTurnScrollDebounce();
 
     act(() => {
       let now = performance.now();
@@ -2099,7 +2120,7 @@ describe('Chat process turn rendering', () => {
     expect(scrollContainer.scrollTop).toBe(528);
   });
 
-  it('does not release auto-follow from a plain scroll event without user scroll intent', () => {
+  it('does not release auto-follow from a plain scroll event without user scroll intent', async () => {
     const rafQueue: FrameRequestCallback[] = [];
     const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
       rafQueue.push(callback);
@@ -2211,6 +2232,19 @@ describe('Chat process turn rendering', () => {
         callback([], {} as ResizeObserver);
       }
     });
+
+    act(() => {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
+        const callback = rafQueue.shift();
+        now += 16;
+        callback?.(now);
+      }
+    });
+
+    expect(scrollContainer.scrollTop).toBe(280);
+
+    await waitForActiveTurnScrollDebounce();
 
     act(() => {
       let now = performance.now();

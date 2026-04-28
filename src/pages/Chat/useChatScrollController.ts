@@ -4,6 +4,7 @@ import type { VirtuosoHandle } from 'react-virtuoso';
 
 const CHAT_BOTTOM_OFFSET_PX = 0;
 const ACTIVE_TURN_AUTO_SCROLL_DURATION_MS = 500;
+const ACTIVE_TURN_AUTO_SCROLL_TARGET_DEBOUNCE_MS = 150;
 const ACTIVE_TURN_PROGRAMMATIC_SCROLL_GUARD_MS = 80;
 const ACTIVE_TURN_NEAR_BOTTOM_THRESHOLD_PX = 48;
 const DETACHED_USER_SCROLL_CAPTURE_MS = 450;
@@ -74,6 +75,27 @@ type ChatScrollDebugApi = {
   clearEvents: () => void;
   getEvents: () => ChatScrollDebugEvent[];
   getSnapshot: () => ChatScrollDebugSnapshot;
+};
+
+type ChatScrollTopTarget = number | (() => number | null);
+
+type ApplyScrollTopToOptions = {
+  debounceMs?: number;
+  easingDurationMs?: number;
+  guardMs?: number | null;
+  minDeltaPx?: number;
+  onWrite?: () => void;
+};
+
+type ScrollTopAnimationState = {
+  durationMs: number;
+  guardMs: number | null | undefined;
+  minDeltaPx: number;
+  onWrite?: () => void;
+  startedAt: number;
+  startTop: number;
+  target: ChatScrollTopTarget;
+  targetTop: number;
 };
 
 declare global {
@@ -308,8 +330,10 @@ export function useChatScrollController({
   const previousSessionKeyRef = useRef(currentSessionKey);
   const hasMountedSessionRef = useRef(false);
   const activeTurnAutoScrollTargetRef = useRef(0);
-  const activeTurnAutoScrollFrameRef = useRef<number | null>(null);
-  const activeTurnAutoScrollAnimationRef = useRef<{ startTop: number; targetTop: number; startedAt: number } | null>(null);
+  const scheduledScrollTopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollTopAnimationFrameRef = useRef<number | null>(null);
+  const scrollTopAnimationStepRef = useRef<FrameRequestCallback>(() => {});
+  const scrollTopAnimationRef = useRef<ScrollTopAnimationState | null>(null);
   const bottomStateProgrammaticGuardUntilRef = useRef(0);
   const detachedViewportAnchorRef = useRef<DetachedViewportAnchor | null>(null);
   const detachedViewportScrollTopRef = useRef<number | null>(null);
@@ -461,20 +485,158 @@ export function useChatScrollController({
       nextGuardUntil,
     );
   }, []);
+  const clearScheduledScrollTop = useCallback(() => {
+    if (scheduledScrollTopTimerRef.current == null) return;
+    clearTimeout(scheduledScrollTopTimerRef.current);
+    scheduledScrollTopTimerRef.current = null;
+  }, []);
+  const cancelScrollTopAnimation = useCallback(() => {
+    scrollTopAnimationRef.current = null;
+    if (scrollTopAnimationFrameRef.current == null) return;
+    cancelAnimationFrame(scrollTopAnimationFrameRef.current);
+    scrollTopAnimationFrameRef.current = null;
+  }, []);
+  const cancelScrollTopTransition = useCallback(() => {
+    clearScheduledScrollTop();
+    cancelScrollTopAnimation();
+  }, [cancelScrollTopAnimation, clearScheduledScrollTop]);
+  const resolveScrollTopTarget = useCallback((target: ChatScrollTopTarget) => {
+    const scrollElement = scrollContainerRef.current;
+    if (!scrollElement) return null;
+
+    const nextScrollTop = typeof target === 'function' ? target() : target;
+    if (nextScrollTop == null || !Number.isFinite(nextScrollTop)) return null;
+
+    return Math.min(
+      Math.max(0, nextScrollTop),
+      Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight),
+    );
+  }, []);
+  const writeScrollTop = useCallback((nextScrollTop: number, options: ApplyScrollTopToOptions = {}) => {
+    const scrollElement = scrollContainerRef.current;
+    if (!scrollElement) return null;
+
+    const clampedScrollTop = Math.min(
+      Math.max(0, nextScrollTop),
+      Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight),
+    );
+    const minDeltaPx = options.minDeltaPx ?? 0;
+    if (Math.abs(scrollElement.scrollTop - clampedScrollTop) <= minDeltaPx) {
+      return clampedScrollTop;
+    }
+
+    if (options.guardMs !== null) {
+      markProgrammaticScroll(options.guardMs ?? ACTIVE_TURN_PROGRAMMATIC_SCROLL_GUARD_MS);
+    }
+    scrollElement.scrollTop = clampedScrollTop;
+    options.onWrite?.();
+    return clampedScrollTop;
+  }, [markProgrammaticScroll]);
+  const easeOutCubic = useCallback((progress: number) => (1 - ((1 - progress) ** 3)), []);
+  const scheduleScrollTopAnimationFrame = useCallback(() => {
+    if (scrollTopAnimationFrameRef.current != null) return;
+    scrollTopAnimationFrameRef.current = requestAnimationFrame((timestamp) => {
+      scrollTopAnimationStepRef.current(timestamp);
+    });
+  }, []);
+  useLayoutEffect(() => {
+    scrollTopAnimationStepRef.current = (timestamp: number) => {
+      scrollTopAnimationFrameRef.current = null;
+
+      const animation = scrollTopAnimationRef.current;
+      if (!animation) return;
+
+      const nextTargetTop = resolveScrollTopTarget(animation.target);
+      if (nextTargetTop == null) {
+        scrollTopAnimationRef.current = null;
+        return;
+      }
+
+      animation.targetTop = nextTargetTop;
+      const progress = Math.min(1, (timestamp - animation.startedAt) / animation.durationMs);
+      const easedProgress = easeOutCubic(progress);
+      const nextScrollTop = animation.startTop + ((nextTargetTop - animation.startTop) * easedProgress);
+
+      writeScrollTop(nextScrollTop, {
+        guardMs: animation.guardMs,
+        minDeltaPx: animation.minDeltaPx,
+        onWrite: animation.onWrite,
+      });
+
+      if (progress >= 1 || Math.abs(nextTargetTop - nextScrollTop) < 1) {
+        writeScrollTop(nextTargetTop, {
+          guardMs: animation.guardMs,
+          minDeltaPx: animation.minDeltaPx,
+          onWrite: animation.onWrite,
+        });
+        scrollTopAnimationRef.current = null;
+        return;
+      }
+
+      scheduleScrollTopAnimationFrame();
+    };
+  }, [easeOutCubic, resolveScrollTopTarget, scheduleScrollTopAnimationFrame, writeScrollTop]);
+  const runScrollTopApply = useCallback((target: ChatScrollTopTarget, options: ApplyScrollTopToOptions = {}) => {
+    const scrollElement = scrollContainerRef.current;
+    if (!scrollElement) return null;
+
+    const nextTargetTop = resolveScrollTopTarget(target);
+    if (nextTargetTop == null) return null;
+
+    const minDeltaPx = options.minDeltaPx ?? 0;
+    if (Math.abs(scrollElement.scrollTop - nextTargetTop) <= minDeltaPx) {
+      return nextTargetTop;
+    }
+
+    if ((options.easingDurationMs ?? 0) <= 0) {
+      cancelScrollTopAnimation();
+      return writeScrollTop(nextTargetTop, options);
+    }
+
+    cancelScrollTopAnimation();
+    scrollTopAnimationRef.current = {
+      durationMs: options.easingDurationMs ?? 0,
+      guardMs: options.guardMs,
+      minDeltaPx,
+      onWrite: options.onWrite,
+      startedAt: performance.now(),
+      startTop: scrollElement.scrollTop,
+      target,
+      targetTop: nextTargetTop,
+    };
+    scheduleScrollTopAnimationFrame();
+    return nextTargetTop;
+  }, [cancelScrollTopAnimation, resolveScrollTopTarget, scheduleScrollTopAnimationFrame, writeScrollTop]);
+  const applyScrollTopTo = useCallback((target: ChatScrollTopTarget, options: ApplyScrollTopToOptions = {}) => {
+    const debounceMs = options.debounceMs ?? 0;
+    if (debounceMs > 0) {
+      clearScheduledScrollTop();
+      scheduledScrollTopTimerRef.current = setTimeout(() => {
+        scheduledScrollTopTimerRef.current = null;
+        runScrollTopApply(target, {
+          ...options,
+          debounceMs: 0,
+        });
+      }, debounceMs);
+      return null;
+    }
+
+    clearScheduledScrollTop();
+    return runScrollTopApply(target, options);
+  }, [clearScheduledScrollTop, runScrollTopApply]);
+  const scrollListToLatest = useCallback((behavior: 'auto' | 'smooth' = 'auto') => {
+    chatListRef.current?.scrollToIndex?.({
+      index: Math.max(chatListItemCount - 1, 0),
+      align: 'end',
+      behavior,
+    });
+  }, [chatListItemCount]);
   const restoreDetachedViewport = useCallback(() => {
     const scrollElement = scrollContainerRef.current;
     if (!scrollElement) return;
 
-    const clampScrollTop = (scrollTop: number) => Math.min(
-      Math.max(0, scrollTop),
-      Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight),
-    );
     const applyScrollTopLock = (scrollTop: number) => {
-      const nextScrollTop = clampScrollTop(scrollTop);
-      if (Math.abs(scrollElement.scrollTop - nextScrollTop) > 1) {
-        markProgrammaticScroll();
-        scrollElement.scrollTop = nextScrollTop;
-      }
+      const nextScrollTop = applyScrollTopTo(scrollTop, { minDeltaPx: 1 }) ?? scrollTop;
       detachedViewportScrollTopRef.current = nextScrollTop;
       if (detachedViewportAnchorRef.current) {
         detachedViewportAnchorRef.current = {
@@ -544,7 +706,7 @@ export function useChatScrollController({
         strategy: 'missing-scroll-top',
       },
     });
-  }, [appendDebugEvent, markProgrammaticScroll, sending]);
+  }, [appendDebugEvent, applyScrollTopTo, sending]);
   const getDistanceFromBottom = useCallback(() => {
     const scrollElement = scrollContainerRef.current;
     if (!scrollElement) return null;
@@ -568,12 +730,11 @@ export function useChatScrollController({
   const pinScrollToBottom = useCallback((guardMs = ACTIVE_TURN_PROGRAMMATIC_SCROLL_GUARD_MS) => {
     const scrollElement = scrollContainerRef.current;
     if (!scrollElement) return null;
-    markProgrammaticScroll(guardMs);
     const nextScrollTop = getPinnedBottomScrollTop(scrollElement);
-    scrollElement.scrollTop = nextScrollTop;
+    const appliedScrollTop = applyScrollTopTo(nextScrollTop, { guardMs });
     syncBottomState(0);
-    return nextScrollTop;
-  }, [markProgrammaticScroll, syncBottomState]);
+    return appliedScrollTop;
+  }, [applyScrollTopTo, syncBottomState]);
   const resumeFollowingFromUserBottom = useCallback(() => {
     suppressedAutoFollowTurnKeyRef.current = null;
     resumeFollowingLatest('user-intent');
@@ -933,9 +1094,9 @@ export function useChatScrollController({
     pauseFollowingLatest();
     activeTurnAutoScrollModeRef.current = 'idle';
     activeTurnAutoScrollTargetRef.current = 0;
-    activeTurnAutoScrollAnimationRef.current = null;
+    cancelScrollTopTransition();
     setActiveTurnUserInterruptVersion((value) => value + 1);
-  }, [activeTurnScrollKey, pauseFollowingLatest]);
+  }, [activeTurnScrollKey, cancelScrollTopTransition, pauseFollowingLatest]);
 
   useLayoutEffect(() => {
     if (!pendingLocalSendFollowBottomRef.current) return;
@@ -948,11 +1109,7 @@ export function useChatScrollController({
     let frame1 = 0;
     let frame2 = 0;
     frame1 = requestAnimationFrame(() => {
-      chatListRef.current?.scrollToIndex?.({
-        index: Math.max(chatListItemCount - 1, 0),
-        align: 'end',
-        behavior: 'auto',
-      });
+      scrollListToLatest('auto');
       pinScrollToBottom(ACTIVE_TURN_AUTO_SCROLL_DURATION_MS + 240);
       frame2 = requestAnimationFrame(() => {
         pinScrollToBottom(ACTIVE_TURN_AUTO_SCROLL_DURATION_MS + 240);
@@ -964,11 +1121,11 @@ export function useChatScrollController({
       cancelAnimationFrame(frame2);
     };
   }, [
-    chatListItemCount,
     isEmpty,
     latestTranscriptActivitySignature,
     markProgrammaticScroll,
     pinScrollToBottom,
+    scrollListToLatest,
     showSessionLoadingState,
   ]);
 
@@ -1093,10 +1250,18 @@ export function useChatScrollController({
     pendingLocalSendFollowBottomRef.current = false;
     if (nextMode === 'idle') {
       activeTurnAutoScrollTargetRef.current = 0;
-      activeTurnAutoScrollAnimationRef.current = null;
+      cancelScrollTopTransition();
     }
     setActiveTurnUserInterruptVersion((value) => value + 1);
-  }, [activeTurnScrollKey, cancelPendingSessionEntryBottom, currentSessionKey, isFollowingLatest, isScrollNearBottom, sending]);
+  }, [
+    activeTurnScrollKey,
+    cancelPendingSessionEntryBottom,
+    cancelScrollTopTransition,
+    currentSessionKey,
+    isFollowingLatest,
+    isScrollNearBottom,
+    sending,
+  ]);
 
   useEffect(() => {
     const autoScrollMode = activeTurnAutoScrollModeRef.current;
@@ -1111,90 +1276,59 @@ export function useChatScrollController({
     let pointerScrollIntentActive = false;
     let attachedScrollElement: HTMLDivElement | null = null;
 
-    const cancelAutoScrollFrame = () => {
-      if (activeTurnAutoScrollFrameRef.current != null) {
-        cancelAnimationFrame(activeTurnAutoScrollFrameRef.current);
-        activeTurnAutoScrollFrameRef.current = null;
-      }
-    };
-    const applyProgrammaticScroll = (nextScrollTop: number) => {
+    const markActiveTurnProgrammaticWrite = () => {
       ignoreScrollEventsUntil = performance.now() + ACTIVE_TURN_PROGRAMMATIC_SCROLL_GUARD_MS;
-      const scrollElement = scrollContainerRef.current;
-      if (!scrollElement) return;
-      scrollElement.scrollTop = nextScrollTop;
     };
-    const easeOutCubic = (progress: number) => (1 - ((1 - progress) ** 3));
-    const stepAutoScroll = (timestamp: number) => {
-      activeTurnAutoScrollFrameRef.current = null;
-      if (releasedByUser) return;
-
-      const animation = activeTurnAutoScrollAnimationRef.current;
-      const scrollElement = scrollContainerRef.current;
-      if (!scrollElement) return;
-      if (!animation) return;
-
-      const progress = Math.min(1, (timestamp - animation.startedAt) / ACTIVE_TURN_AUTO_SCROLL_DURATION_MS);
-      const easedProgress = easeOutCubic(progress);
-      const nextScrollTop = animation.startTop + ((animation.targetTop - animation.startTop) * easedProgress);
-
-      applyProgrammaticScroll(nextScrollTop);
-
-      if (progress >= 1 || Math.abs(animation.targetTop - nextScrollTop) < 1) {
-        applyProgrammaticScroll(animation.targetTop);
-        activeTurnAutoScrollAnimationRef.current = null;
-        return;
-      }
-      activeTurnAutoScrollFrameRef.current = requestAnimationFrame(stepAutoScroll);
+    const getNextAutoScrollTarget = (scrollElement: HTMLDivElement) => {
+      const bottomVisibleScrollTop = getPinnedBottomScrollTop(scrollElement);
+      return bottomVisibleScrollTop > Math.max(activeTurnAutoScrollTargetRef.current, scrollElement.scrollTop) + 0.5
+        ? bottomVisibleScrollTop
+        : null;
     };
-    const startAutoScrollAnimation = (nextTargetScrollTop: number) => {
-      const scrollElement = scrollContainerRef.current;
-      if (!scrollElement) return;
-      const distanceToTarget = nextTargetScrollTop - scrollElement.scrollTop;
-      if (distanceToTarget <= 0.5) return;
-
-      activeTurnAutoScrollTargetRef.current = nextTargetScrollTop;
-      if (distanceToTarget <= ACTIVE_TURN_NEAR_BOTTOM_THRESHOLD_PX) {
-        activeTurnAutoScrollAnimationRef.current = null;
-        cancelAutoScrollFrame();
-        applyProgrammaticScroll(nextTargetScrollTop);
-        return;
-      }
-
-      activeTurnAutoScrollAnimationRef.current = {
-        startTop: scrollElement.scrollTop,
-        targetTop: nextTargetScrollTop,
-        startedAt: performance.now(),
-      };
-
-      if (activeTurnAutoScrollFrameRef.current == null) {
-        activeTurnAutoScrollFrameRef.current = requestAnimationFrame(stepAutoScroll);
-      }
-    };
-    const updateAutoScrollTarget = (scrollElement: HTMLDivElement, options: { immediate?: boolean } = {}) => {
+    const updateAutoScrollTarget = (scrollElement: HTMLDivElement, options: { debounce?: boolean; immediate?: boolean } = {}) => {
       cancelAnimationFrame(frame1);
       frame1 = requestAnimationFrame(() => {
         if (releasedByUser) return;
 
-        const bottomVisibleScrollTop = getPinnedBottomScrollTop(scrollElement);
-        if (bottomVisibleScrollTop > Math.max(activeTurnAutoScrollTargetRef.current, scrollElement.scrollTop) + 0.5) {
-          if (options.immediate) {
-            activeTurnAutoScrollTargetRef.current = bottomVisibleScrollTop;
-            activeTurnAutoScrollAnimationRef.current = null;
-            cancelAutoScrollFrame();
-            applyProgrammaticScroll(bottomVisibleScrollTop);
-            return;
-          }
-          startAutoScrollAnimation(bottomVisibleScrollTop);
+        const bottomVisibleScrollTop = getNextAutoScrollTarget(scrollElement);
+        if (bottomVisibleScrollTop == null) return;
+        if (options.immediate) {
+          activeTurnAutoScrollTargetRef.current = bottomVisibleScrollTop;
+          applyScrollTopTo(bottomVisibleScrollTop, {
+            guardMs: null,
+            onWrite: markActiveTurnProgrammaticWrite,
+          });
+          return;
         }
+
+        activeTurnAutoScrollTargetRef.current = bottomVisibleScrollTop;
+        const target = () => {
+          const currentScrollElement = scrollContainerRef.current;
+          if (!currentScrollElement || releasedByUser) return null;
+          return getPinnedBottomScrollTop(currentScrollElement);
+        };
+        if (options.debounce) {
+          applyScrollTopTo(target, {
+            debounceMs: ACTIVE_TURN_AUTO_SCROLL_TARGET_DEBOUNCE_MS,
+            easingDurationMs: ACTIVE_TURN_AUTO_SCROLL_DURATION_MS,
+            guardMs: null,
+            onWrite: markActiveTurnProgrammaticWrite,
+          });
+          return;
+        }
+        applyScrollTopTo(target, {
+          easingDurationMs: ACTIVE_TURN_AUTO_SCROLL_DURATION_MS,
+          guardMs: null,
+          onWrite: markActiveTurnProgrammaticWrite,
+        });
       });
     };
     const releaseTopLock = () => {
       if (releasedByUser) return;
       releasedByUser = true;
       activeTurnAutoScrollTargetRef.current = 0;
-      activeTurnAutoScrollAnimationRef.current = null;
       resizeObserver?.disconnect();
-      cancelAutoScrollFrame();
+      cancelScrollTopTransition();
       cancelAnimationFrame(readinessFrame);
       cancelAnimationFrame(frame1);
       handleActiveTurnUserInterrupt();
@@ -1237,7 +1371,10 @@ export function useChatScrollController({
         ? new ResizeObserver((entries) => {
             if (!releasedByUser) {
               const viewportResized = entries.some((entry) => entry.target === scrollElement);
-              updateAutoScrollTarget(scrollElement, { immediate: viewportResized });
+              updateAutoScrollTarget(scrollElement, {
+                debounce: !viewportResized,
+                immediate: viewportResized,
+              });
             }
           })
         : null;
@@ -1270,12 +1407,19 @@ export function useChatScrollController({
       attachedScrollElement?.removeEventListener('pointercancel', clearPointerScrollIntent);
       attachedScrollElement?.removeEventListener('pointerleave', clearPointerScrollIntent);
       attachedScrollElement?.removeEventListener('keydown', handleKeyboardInterrupt);
-      activeTurnAutoScrollAnimationRef.current = null;
+      cancelScrollTopTransition();
       cancelAnimationFrame(readinessFrame);
-      cancelAutoScrollFrame();
       cancelAnimationFrame(frame1);
     };
-  }, [activeTurnScrollKey, activeTurnUserInterruptVersion, currentSessionKey, handleActiveTurnUserInterrupt, sending]);
+  }, [
+    activeTurnScrollKey,
+    activeTurnUserInterruptVersion,
+    applyScrollTopTo,
+    cancelScrollTopTransition,
+    currentSessionKey,
+    handleActiveTurnUserInterrupt,
+    sending,
+  ]);
 
   const prepareForLocalSend = useCallback(() => {
     cancelPendingSessionEntryBottom();
@@ -1301,11 +1445,7 @@ export function useChatScrollController({
     setIsAtBottom(true);
     markProgrammaticScroll(ACTIVE_TURN_AUTO_SCROLL_DURATION_MS + 240);
 
-    chatListRef.current?.scrollToIndex?.({
-      index: Math.max(chatListItemCount - 1, 0),
-      align: 'end',
-      behavior: 'smooth',
-    });
+    scrollListToLatest('smooth');
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -1319,6 +1459,7 @@ export function useChatScrollController({
     markProgrammaticScroll,
     pinScrollToBottom,
     resumeFollowingLatest,
+    scrollListToLatest,
     sending,
   ]);
 
