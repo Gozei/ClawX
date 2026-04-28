@@ -632,6 +632,51 @@ describe('ChatInput agent targeting', () => {
     });
   });
 
+  it('falls back to the current global default account when the saved default model ref is stale', async () => {
+    const onSend = vi.fn();
+    agentsState.defaultModelRef = 'custom-customd6/glm-5';
+    providerState.accounts = [
+      {
+        id: 'custom-custombc',
+        vendorId: 'custom',
+        label: 'Jingdong',
+        authMode: 'api_key',
+        model: 'qwen3.5-plus',
+        metadata: { customModels: ['glm-5'] },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [
+      { id: 'custom-custombc', hasKey: true, model: 'qwen3.5-plus' },
+    ];
+    providerState.vendors = [
+      { id: 'custom', name: 'Custom' },
+    ];
+    providerState.defaultAccountId = 'custom-custombc';
+
+    render(<ChatInput onSend={onSend} />);
+
+    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Jingdong / qwen3.5-plus');
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '使用默认模型' } });
+    fireEvent.click(screen.getByTestId('chat-send-button'));
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(
+        '使用默认模型',
+        undefined,
+        null,
+        {
+          sessionKey: 'agent:main:main',
+          modelRef: 'custom-custombc/qwen3.5-plus',
+        },
+      );
+    });
+  });
+
   it('applies model switches to the targeted agent session when a role is selected', async () => {
     agentsState.agents = [
       {

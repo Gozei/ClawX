@@ -136,6 +136,38 @@ describe('gateway supervisor process cleanup', () => {
   });
 });
 
+describe('gateway doctor repair output logging', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('normalizes buffered doctor repair output lines', async () => {
+    const { appendNormalizedOutputLines } = await import('@electron/gateway/supervisor');
+    const lines: string[] = [];
+
+    appendNormalizedOutputLines(lines, Buffer.from(' first line \n\nsecond line\r\n'));
+
+    expect(lines).toEqual(['first line', 'second line']);
+  });
+
+  it('summarizes long doctor repair output instead of logging every line', async () => {
+    const { summarizeBufferedOutput } = await import('@electron/gateway/supervisor');
+    const lines = Array.from({ length: 15 }, (_, index) => `line-${index + 1}`);
+
+    const summary = summarizeBufferedOutput(lines, 'stdout');
+
+    expect(summary).toContain('stdout: line-1 | line-2');
+    expect(summary).toContain('(+3 more lines)');
+    expect(summary).not.toContain('line-15');
+  });
+
+  it('omits summaries for empty doctor repair output', async () => {
+    const { summarizeBufferedOutput } = await import('@electron/gateway/supervisor');
+
+    expect(summarizeBufferedOutput([], 'stdout')).toBe('');
+  });
+});
+
 describe('waitForPortFree quickCheckFirst', () => {
   let listenCallCount: number;
   let nextListenAvailable: boolean;
