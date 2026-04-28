@@ -145,13 +145,19 @@
         "notAvailable": "暂无",
         "mainAgent": "主 Agent"
     },
+    "time": {
+        "soon": "即将运行",
+        "overdue": "已过期"
+    },
     "status": {
         "ok": "成功",
         "error": "失败",
         "skipped": "跳过",
         "unknown": "未知",
+        "pending": "待运行",
         "delivered": "已投递",
         "not-delivered": "未投递",
+        "pending-delivery": "待投递",
         "not-requested": "未请求",
         "paused": "已暂停"
     },
