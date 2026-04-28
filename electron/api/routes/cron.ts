@@ -605,6 +605,42 @@ function normalizeCronDeliveryPatch(rawDelivery: unknown): Record<string, unknow
   return patch;
 }
 
+function normalizeCronPayloadPatch(
+  rawPayload: unknown,
+  fallbackMessage: unknown,
+  sessionTarget: unknown,
+): GatewayCronJob['payload'] | undefined {
+  const record = asRecord(rawPayload);
+  const target = typeof sessionTarget === 'string' ? sessionTarget.trim() : '';
+  const forceSystemEvent = target === 'main';
+
+  if (record) {
+    const kind = typeof record.kind === 'string' ? record.kind.trim() : '';
+    const text = typeof record.text === 'string' ? record.text : undefined;
+    const message = typeof record.message === 'string' ? record.message : undefined;
+    if (forceSystemEvent || kind === 'systemEvent') {
+      return { kind: 'systemEvent', text: (text ?? message ?? '').trim() };
+    }
+    const payload: GatewayCronJob['payload'] = { kind: 'agentTurn', message: (message ?? text ?? '').trim() };
+    if (typeof record.model === 'string' && record.model.trim()) payload.model = record.model.trim();
+    if (typeof record.thinking === 'string' && record.thinking.trim()) payload.thinking = record.thinking.trim();
+    if (typeof record.timeoutSeconds === 'number' && Number.isFinite(record.timeoutSeconds) && record.timeoutSeconds > 0) {
+      payload.timeoutSeconds = Math.round(record.timeoutSeconds);
+    }
+    if (record.lightContext === true) payload.lightContext = true;
+    return payload;
+  }
+
+  if (typeof fallbackMessage === 'string') {
+    const text = fallbackMessage.trim();
+    return forceSystemEvent
+      ? { kind: 'systemEvent', text }
+      : { kind: 'agentTurn', message: text };
+  }
+
+  return undefined;
+}
+
 function buildCronUpdatePatch(input: Record<string, unknown>): Record<string, unknown> {
   const patch = { ...input };
 
@@ -612,8 +648,9 @@ function buildCronUpdatePatch(input: Record<string, unknown>): Record<string, un
     patch.schedule = normalizeCronSchedule(patch.schedule);
   }
 
-  if (typeof patch.message === 'string') {
-    patch.payload = { kind: 'agentTurn', message: patch.message };
+  if ('payload' in patch || typeof patch.message === 'string') {
+    const payload = normalizeCronPayloadPatch(patch.payload, patch.message, patch.sessionTarget);
+    if (payload) patch.payload = payload;
     delete patch.message;
   }
 
@@ -987,7 +1024,7 @@ export async function handleCronRoutes(
         agentId: input.agentId,
         sessionKey: input.sessionKey,
         schedule: normalizeCronSchedule(input.schedule),
-        payload: input.payload ?? { kind: 'agentTurn', message: input.message },
+        payload: normalizeCronPayloadPatch(input.payload, input.message, input.sessionTarget) ?? { kind: 'agentTurn', message: input.message },
         enabled: false,
         deleteAfterRun: input.deleteAfterRun,
         wakeMode: input.wakeMode ?? 'next-heartbeat',

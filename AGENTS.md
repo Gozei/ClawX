@@ -112,3 +112,27 @@
 18. **通信路径变更 checklist** — 改动涉及 gateway events、runtime send/receive、delivery 或 fallback 时，推送前必须运行 `pnpm run comms:replay` 和 `pnpm run comms:compare`
 19. **UI 变更须补 E2E 测试** — 任何用户可见的 UI 变更必须在同 PR 中补充或更新 Playwright E2E spec
 20. **文档同步规则** — 功能或架构变更后，须检查 `README.md` 和 `README.zh-CN.md` 是否需要更新；若行为/流程/接口有变，须在同 PR/commit 中更新文档
+
+## CHANGELOG 格式规范
+
+每次发版前，在 `CHANGELOG.md` 顶部添加新版本块，格式如下：
+
+```markdown
+## v{x.y.z}
+
+[此版本的核心价值，一句话]
+
+### 新功能
+- [一句话描述]
+
+### 问题修复
+- [一句话描述]
+```
+
+### 格式要求
+
+- 每个条目只需一句话描述，简洁明了
+- 描述必须是完整的一句话，末尾不加句号
+- 新功能按影响力排序，问题修复按严重程度排序
+- 发版前执行 `pnpm run release-notes` 自动将最新版本段提取为 `release-notes.md`，供 electron-builder 写入 yml 的 `releaseNotes` 字段
+- `release-notes.md` 由脚本自动生成，勿手动编辑（已在 `.gitignore` 中）

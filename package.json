@@ -17,7 +17,15 @@
             "libsignal": "file:vendor/libsignal-node-direct.tar.gz",
             "@whiskeysockets/libsignal-node": "file:vendor/libsignal-node-direct.tar.gz",
             "isbinaryfile": "^5.0.0",
-            "https-proxy-agent": "7.0.6"
+            "https-proxy-agent": "7.0.6",
+            "fast-xml-parser": ">=4.5.5",
+            "protobufjs": ">=7.5.5",
+            "tar": ">=7.5.11",
+            "form-data@<2.5.4": "2.5.5",
+            "@xmldom/xmldom@<0.8.13": "0.8.13",
+            "path-to-regexp@>=8.0.0 <8.4.0": "8.4.2",
+            "basic-ftp@<=5.2.2": "5.3.1",
+            "lodash@<=4.17.23": "4.18.1"
         },
         "supportedArchitectures": {
             "os": [
@@ -41,7 +49,7 @@
         "init": "pnpm install && pnpm run uv:download",
         "predev": "zx scripts/prepare-preinstalled-skills-dev.mjs",
         "dev": "vite",
-        "build": "vite build && zx scripts/bundle-openclaw.mjs && zx scripts/bundle-openclaw-plugins.mjs && zx scripts/bundle-preinstalled-skills.mjs && electron-builder",
+        "build": "pnpm run package && electron-builder",
         "build:vite": "vite build",
         "bundle:openclaw-plugins": "zx scripts/bundle-openclaw-plugins.mjs",
         "bundle:preinstalled-skills": "zx scripts/bundle-preinstalled-skills.mjs",
@@ -66,7 +74,8 @@
         "prep:win-binaries": "pnpm run uv:download:win && pnpm run node:download:win",
         "prep:win-binaries:x64": "pnpm run uv:download:win:x64 && pnpm run node:download:win:x64",
         "icons": "zx scripts/generate-icons.mjs",
-        "package": "vite build && zx scripts/bundle-openclaw.mjs && zx scripts/bundle-openclaw-plugins.mjs && zx scripts/bundle-preinstalled-skills.mjs",
+        "release-notes": "node scripts/generate-release-notes.mjs",
+        "package": "pnpm run release-notes && vite build && zx scripts/bundle-openclaw.mjs && zx scripts/bundle-openclaw-plugins.mjs && zx scripts/bundle-preinstalled-skills.mjs",
         "package:mac": "pnpm run package && electron-builder --mac --publish never",
         "package:mac:arm64": "pnpm run package && electron-builder --mac --arm64 --publish never",
         "package:mac:local": "SKIP_PREINSTALLED_SKILLS=1 pnpm run package && electron-builder --mac --publish never",
@@ -106,7 +115,7 @@
         "react-virtuoso": "^4.18.5",
         "setimmediate": "1.0.5",
         "ws": "^8.19.0",
-        "xlsx": "^0.18.5"
+        "xlsx": "file:vendor/xlsx-0.20.3.tgz"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -166,7 +175,7 @@
         "tailwindcss": "^3.4.19",
         "tailwindcss-animate": "^1.0.7",
         "typescript": "^5.9.3",
-        "vite": "^7.3.1",
+        "vite": "^7.3.2",
         "vite-plugin-electron": "^0.29.0",
         "vite-plugin-electron-renderer": "^0.14.6",
         "vitest": "^4.0.18",
