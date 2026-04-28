@@ -383,6 +383,8 @@
       "slowHint": "仍在处理中，请继续等待系统完成安装"
     },
     "currentVersion": "当前版本",
+    "changelog": "更新日志",
+    "changelogTitle": "更新日志",
     "whatsNew": "更新内容：",
     "errorDetails": "错误详情：",
     "help": "开启自动更新后，更新将自动下载并安装。"

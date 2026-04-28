@@ -91,6 +91,32 @@ test.describe('Settings hub menu', () => {
     }
   });
 
+  test('opens and closes the update changelog dialog', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+
+    try {
+      const page = await getStableWindow(app);
+      await expect(page.getByTestId('main-layout')).toBeVisible();
+
+      await openSettingsHub(page);
+      await page.getByTestId('settings-hub-menu-settings').click({ force: true });
+      await expect(page.getByTestId('settings-page')).toBeVisible();
+      await expect(page.getByTestId('settings-updates-section')).toBeVisible();
+
+      await page.getByTestId('settings-changelog-button').click();
+
+      const dialog = page.getByTestId('settings-changelog-dialog');
+      await expect(dialog).toBeVisible();
+      await expect(dialog).toContainText(/Changelog|更新日志/);
+      await expect(dialog).toContainText('v0.7.1');
+
+      await page.getByTestId('settings-changelog-close').click();
+      await expect(dialog).toHaveCount(0);
+    } finally {
+      await closeElectronApp(app);
+    }
+  });
+
   test('keeps selected menu visuals coordinated with the icon shell', async ({ launchElectronApp }) => {
     const app = await launchElectronApp({ skipSetup: true });
 

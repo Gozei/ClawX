@@ -383,6 +383,8 @@
       "slowHint": "Still working. Keep waiting for the system installer to finish"
     },
     "currentVersion": "Current Version",
+    "changelog": "Changelog",
+    "changelogTitle": "Changelog",
     "whatsNew": "What's New:",
     "errorDetails": "Error Details:",
     "help": "When auto-update is enabled, updates are downloaded and installed automatically."
