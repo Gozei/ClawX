@@ -238,26 +238,35 @@ test.describe('Models config table', () => {
 
   test('prefills the selected vendor base url and only lets custom edit it', async ({ launchElectronApp }) => {
     const app = await launchElectronApp({ skipSetup: true });
+    let page: Awaited<ReturnType<typeof getStableWindow>> | null = null;
     try {
-      const page = await getStableWindow(app);
+      page = await getStableWindow(app);
 
       await openModelsFromSettings(page);
 
       await page.getByTestId('models-config-add-button').click();
       const vendorSelect = page.getByTestId('models-config-sheet-vendor-select');
       const baseUrlInput = page.getByTestId('models-config-sheet-base-url-input');
+      const labelInput = page.getByTestId('models-config-sheet-label-input');
 
+      await expect(page.getByLabel('模型厂商')).toBeVisible();
+      await expect(page.getByText('先选择模型服务提供商，协议、接口地址和推荐模型会随厂商自动联动。')).toBeVisible();
       await vendorSelect.selectOption('openai');
+      await expect(labelInput).toHaveValue('OpenAI');
       await expect(baseUrlInput).toHaveValue('https://api.openai.com/v1');
       await expect(baseUrlInput).toHaveAttribute('readonly', '');
 
       await vendorSelect.selectOption('custom');
+      await expect(labelInput).toHaveValue('自定义');
       await expect(baseUrlInput).toHaveValue('');
       await expect(baseUrlInput).not.toHaveAttribute('readonly', '');
 
       await baseUrlInput.fill('https://api.example.com/v1');
       await expect(baseUrlInput).toHaveValue('https://api.example.com/v1');
     } finally {
+      if (page) {
+        await stopGatewayForTeardown(page);
+      }
       await closeElectronApp(app);
     }
   });
