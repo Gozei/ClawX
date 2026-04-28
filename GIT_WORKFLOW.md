@@ -10,6 +10,8 @@
 - `develop` 是 staging 总分支，用于集成日常开发改动并进行测试验证。
 - 所有开发分支都应基于最新的 `develop` 创建。
 - 日常功能、修复和维护改动通过 Pull Request 合并回 `develop`。
+- 除 `main` 和 `develop` 之外的所有分支，Pull Request 目标分支只能是 `develop`。
+- `develop` 分支的 Pull Request 目标分支只能是 `main`。
 - 只有当 `develop` 分支经过充分测试后，才可以发布或合并到 `main`。
 
 ## 分支命名
@@ -73,8 +75,9 @@ tommy/fix/bug
 - 请求 review 前应先运行项目要求的检查。
 - 不要在同一个分支中混入无关的格式化、清理或重构。
 - 不要提交密钥、API Key、凭证或本地环境配置文件。
-- 日常开发 Pull Request 的目标分支应为 `develop`。
-- 发布 Pull Request 的目标分支应为 `main`，来源分支应为已经充分测试的 `develop`。
+- 除 `main` 和 `develop` 之外的所有分支，Pull Request 目标分支只能是 `develop`。
+- `develop` 分支的 Pull Request 目标分支只能是 `main`，用于发布或同步已经充分测试的改动。
+- 普通开发分支不允许直接向 `main` 提 Pull Request。
 - Pull Request 名称应与 commit message 规范保持一致。
 - PR 合并策略：默认使用 **Squash Merge**，保持主分支历史线性整洁。仅在确需保留细粒度提交历史时使用 Merge Commit，避免使用 Rebase Merge 以防重写公共历史。
 

@@ -43,6 +43,7 @@ async function sanitizeConfig(
 
   const config = JSON.parse(raw) as Record<string, unknown>;
   let modified = false;
+  const CORE_BUNDLED_PLUGIN_IDS = new Set(['acpx']);
   const BUILTIN_CHANNEL_IDS = new Set([
     'discord',
     'telegram',
@@ -56,14 +57,6 @@ async function sanitizeConfig(
     'googlechat',
     'mattermost',
   ]);
-  const SAFE_BUNDLED_ALLOWLIST_PLUGIN_IDS = new Set([
-    'acpx',
-    'copilot-proxy',
-    'device-pair',
-    'phone-control',
-    'talk-voice',
-  ]);
-
   /** Non-throwing async existence check. */
   async function fileExists(p: string): Promise<boolean> {
     try {
@@ -154,8 +147,8 @@ async function sanitizeConfig(
     }
 
     // Mirror production logic: exclude both built-in channels AND bundled
-    // extension IDs from the "external" set, then re-add only the safe
-    // enabledByDefault utility plugins.
+    // extension IDs from the "external" set. Only core bundled runtime
+    // plugins and explicitly enabled bundled plugins are kept.
     const bundledAll = new Set(bundledPlugins?.all ?? []);
     const bundledEnabledByDefault = bundledPlugins?.enabledByDefault ?? [];
 
@@ -171,12 +164,16 @@ async function sanitizeConfig(
       }
     }
 
-    // Re-add enabledByDefault plugins when allowlist is non-empty
     if (nextAllow.length > 0) {
       for (const pluginId of bundledEnabledByDefault) {
-        if (!SAFE_BUNDLED_ALLOWLIST_PLUGIN_IDS.has(pluginId)) {
-          continue;
+        if (!CORE_BUNDLED_PLUGIN_IDS.has(pluginId)) continue;
+        if (!nextAllow.includes(pluginId)) {
+          nextAllow.push(pluginId);
         }
+      }
+
+      for (const [pluginId, entry] of Object.entries(entries)) {
+        if (!bundledAll.has(pluginId) || entry?.enabled !== true) continue;
         if (!nextAllow.includes(pluginId)) {
           nextAllow.push(pluginId);
         }
@@ -643,19 +640,19 @@ describe('sanitizeOpenClawConfig (blocklist approach)', () => {
     expect(modified).toBe(false);
   });
 
-  // ── enabledByDefault bundled plugin allowlist tests ──────────────
+  // ── bundled plugin allowlist tests ──────────────
 
-  it('adds only safe enabledByDefault bundled plugins to plugins.allow when allowlist is non-empty', async () => {
+  it('keeps only core enabledByDefault bundled plugins in plugins.allow when allowlist is non-empty', async () => {
     await writeConfig({
       plugins: {
-        allow: ['customPlugin'],
+        allow: ['customPlugin', 'device-pair', 'browser'],
         entries: { customPlugin: { enabled: true } },
       },
     });
 
     const bundled = {
-      all: ['device-pair', 'browser', 'openai', 'diffs'],
-      enabledByDefault: ['device-pair', 'browser', 'openai'],
+      all: ['acpx', 'device-pair', 'browser', 'openai', 'diffs'],
+      enabledByDefault: ['acpx', 'device-pair', 'browser', 'openai'],
     };
 
     const modified = await sanitizeConfig(configPath, bundled);
@@ -665,7 +662,8 @@ describe('sanitizeOpenClawConfig (blocklist approach)', () => {
     const plugins = result.plugins as Record<string, unknown>;
     const allow = plugins.allow as string[];
     expect(allow).toContain('customPlugin');
-    expect(allow).toContain('device-pair');
+    expect(allow).toContain('acpx');
+    expect(allow).not.toContain('device-pair');
     expect(allow).not.toContain('browser');
     expect(allow).not.toContain('openai');
     // 'diffs' is bundled but NOT enabledByDefault — should not be added
@@ -684,8 +682,8 @@ describe('sanitizeOpenClawConfig (blocklist approach)', () => {
     });
 
     const bundled = {
-      all: ['device-pair', 'browser', 'old-bundled'],  // old-bundled still bundled
-      enabledByDefault: ['device-pair', 'browser'],      // but no longer enabledByDefault
+      all: ['acpx', 'device-pair', 'browser', 'old-bundled'],  // old-bundled still bundled
+      enabledByDefault: ['acpx', 'device-pair', 'browser'],      // but no longer enabledByDefault
     };
 
     const modified = await sanitizeConfig(configPath, bundled);
@@ -696,7 +694,8 @@ describe('sanitizeOpenClawConfig (blocklist approach)', () => {
     const allow = plugins.allow as string[];
     expect(allow).toContain('customPlugin');      // external — preserved
     expect(allow).toContain('unknown-plugin');    // not bundled — treated as external, preserved
-    expect(allow).toContain('device-pair');       // safe enabledByDefault utility plugin
+    expect(allow).toContain('acpx');              // core bundled runtime — preserved
+    expect(allow).not.toContain('device-pair');   // bundled defaults stay out unless explicitly enabled
     expect(allow).not.toContain('browser');       // bundled browser/provider ids stay out
     expect(allow).not.toContain('old-bundled');   // bundled but demoted — removed
   });
@@ -710,8 +709,8 @@ describe('sanitizeOpenClawConfig (blocklist approach)', () => {
     });
 
     const bundled = {
-      all: ['device-pair', 'diffs', 'openai'],
-      enabledByDefault: ['device-pair', 'openai'],  // diffs no longer enabledByDefault
+      all: ['acpx', 'device-pair', 'diffs', 'openai'],
+      enabledByDefault: ['acpx', 'device-pair', 'openai'],  // diffs no longer enabledByDefault
     };
 
     const modified = await sanitizeConfig(configPath, bundled);
@@ -721,9 +720,35 @@ describe('sanitizeOpenClawConfig (blocklist approach)', () => {
     const plugins = result.plugins as Record<string, unknown>;
     const allow = plugins.allow as string[];
     expect(allow).toContain('customPlugin');
-    expect(allow).toContain('device-pair');
+    expect(allow).toContain('acpx');
+    expect(allow).not.toContain('device-pair');
     expect(allow).not.toContain('openai');
     expect(allow).not.toContain('diffs');  // demoted — removed
+  });
+
+  it('keeps bundled plugin IDs that are explicitly enabled in plugins.entries', async () => {
+    await writeConfig({
+      plugins: {
+        allow: ['customPlugin', 'device-pair'],
+        entries: {
+          customPlugin: { enabled: true },
+          'device-pair': { enabled: true },
+        },
+      },
+    });
+
+    const bundled = {
+      all: ['device-pair', 'browser'],
+      enabledByDefault: ['device-pair', 'browser'],
+    };
+
+    const modified = await sanitizeConfig(configPath, bundled);
+    expect(modified).toBe(false);
+
+    const result = await readConfig();
+    const plugins = result.plugins as Record<string, unknown>;
+    const allow = plugins.allow as string[];
+    expect(allow).toEqual(['customPlugin', 'device-pair']);
   });
 
   it('does not add enabledByDefault plugins when allowlist is empty (no external plugins)', async () => {
@@ -735,8 +760,8 @@ describe('sanitizeOpenClawConfig (blocklist approach)', () => {
     });
 
     const bundled = {
-      all: ['browser', 'openai'],
-      enabledByDefault: ['browser', 'openai'],
+      all: ['acpx', 'browser', 'openai'],
+      enabledByDefault: ['acpx', 'browser', 'openai'],
     };
 
     const modified = await sanitizeConfig(configPath, bundled);

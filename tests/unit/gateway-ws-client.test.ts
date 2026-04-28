@@ -203,37 +203,27 @@ describe('connectGatewaySocket', () => {
 });
 
 describe('getDynamicProbeInterval', () => {
-  it('returns 2000ms for the first 30s on non-Windows platforms', () => {
-    expect(getDynamicProbeInterval(0)).toBe(2000);
-    expect(getDynamicProbeInterval(15_000)).toBe(2000);
-    expect(getDynamicProbeInterval(29_999)).toBe(2000);
+  it('returns 500ms for the first 5s', () => {
+    expect(getDynamicProbeInterval(0)).toBe(500);
+    expect(getDynamicProbeInterval(2_500)).toBe(500);
+    expect(getDynamicProbeInterval(4_999)).toBe(500);
   });
 
-  it('returns 1000ms between 30s and 120s on non-Windows platforms', () => {
-    expect(getDynamicProbeInterval(30_000)).toBe(1000);
-    expect(getDynamicProbeInterval(60_000)).toBe(1000);
-    expect(getDynamicProbeInterval(119_999)).toBe(1000);
+  it('returns 1000ms between 5s and 15s', () => {
+    expect(getDynamicProbeInterval(5_000)).toBe(1000);
+    expect(getDynamicProbeInterval(10_000)).toBe(1000);
+    expect(getDynamicProbeInterval(14_999)).toBe(1000);
   });
 
-  it('returns 500ms after 120s on non-Windows platforms', () => {
-    expect(getDynamicProbeInterval(120_000)).toBe(500);
+  it('returns 500ms after 15s', () => {
+    expect(getDynamicProbeInterval(15_000)).toBe(500);
+    expect(getDynamicProbeInterval(60_000)).toBe(500);
     expect(getDynamicProbeInterval(300_000)).toBe(500);
   });
 
-  it('returns 500ms for the first 5s on Windows', () => {
+  it('ignores platform parameter (unified strategy)', () => {
     expect(getDynamicProbeInterval(0, 'win32')).toBe(500);
-    expect(getDynamicProbeInterval(2_500, 'win32')).toBe(500);
-    expect(getDynamicProbeInterval(4_999, 'win32')).toBe(500);
-  });
-
-  it('returns 1000ms between 5s and 15s on Windows', () => {
-    expect(getDynamicProbeInterval(5_000, 'win32')).toBe(1000);
     expect(getDynamicProbeInterval(10_000, 'win32')).toBe(1000);
-    expect(getDynamicProbeInterval(14_999, 'win32')).toBe(1000);
-  });
-
-  it('returns 500ms after 15s on Windows', () => {
-    expect(getDynamicProbeInterval(15_000, 'win32')).toBe(500);
     expect(getDynamicProbeInterval(60_000, 'win32')).toBe(500);
   });
 });

@@ -12,9 +12,11 @@ import { confirmGatewayImpact } from '@/lib/gateway-impact-confirm';
 import { hostApiFetch } from '@/lib/host-api';
 import {
   PROVIDER_TYPE_INFO,
+  getRecommendedModelOptions,
   resolveProviderApiKeyForSave,
   type ProviderAuthMode,
   type ProviderType,
+  type ProviderVendorInfo,
 } from '@/lib/providers';
 import { buildConfiguredModelEntries, buildProviderAccountId } from '@/lib/provider-accounts';
 import { cn } from '@/lib/utils';
@@ -62,6 +64,8 @@ type DraftState = {
 type TestStatus = {
   state: 'idle' | 'running' | 'success' | 'error';
   signature?: string;
+  cacheSignature?: string;
+  model?: string;
   output?: string;
   latencyMs?: number;
   error?: string;
@@ -70,6 +74,113 @@ type TestStatus = {
 };
 
 const DEFAULT_PROTOCOL: NonNullable<ProviderAccount['apiProtocol']> = 'openai-completions';
+const TEST_RESULT_CACHE_STORAGE_KEY = 'clawx.models.testResults.v1';
+
+const VENDOR_DISPLAY_NAMES: Partial<Record<ProviderType, string>> = {
+  google: 'Google Gemini',
+  bigmodel: '智谱 AI',
+  ark: '火山方舟',
+  moonshot: '月之暗面 Kimi',
+  siliconflow: '硅基流动',
+  'minimax-portal': 'MiniMax（国际）',
+  'minimax-portal-cn': 'MiniMax（中国）',
+  modelstudio: '通义千问 / 阿里云百炼',
+  custom: '自定义',
+};
+
+const PROVIDER_FORM_DEFAULTS: Partial<Record<ProviderType, {
+  baseUrl?: string;
+  apiProtocol?: NonNullable<ProviderAccount['apiProtocol']>;
+}>> = {
+  anthropic: {
+    baseUrl: 'https://api.anthropic.com/v1',
+    apiProtocol: 'anthropic-messages',
+  },
+  openai: {
+    baseUrl: 'https://api.openai.com/v1',
+    apiProtocol: 'openai-responses',
+  },
+  google: {
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+  },
+  openrouter: {
+    baseUrl: 'https://openrouter.ai/api/v1',
+    apiProtocol: DEFAULT_PROTOCOL,
+  },
+  'minimax-portal': {
+    baseUrl: 'https://api.minimax.io/anthropic',
+    apiProtocol: 'anthropic-messages',
+  },
+  'minimax-portal-cn': {
+    baseUrl: 'https://api.minimaxi.com/anthropic',
+    apiProtocol: 'anthropic-messages',
+  },
+};
+
+function getVendorDefaults(
+  vendorId: ProviderType,
+  vendors: ProviderVendorInfo[] = [],
+): {
+  label: string;
+  baseUrl: string;
+  apiProtocol: NonNullable<ProviderAccount['apiProtocol']>;
+  modelId: string;
+  authMode: ProviderAuthMode;
+} {
+  const vendor = vendors.find((entry) => entry.id === vendorId);
+  const staticInfo = PROVIDER_TYPE_INFO.find((entry) => entry.id === vendorId);
+  const fallback = PROVIDER_FORM_DEFAULTS[vendorId];
+  const displayName = VENDOR_DISPLAY_NAMES[vendorId] || vendor?.name || staticInfo?.name || vendorId;
+
+  return {
+    label: displayName,
+    baseUrl: vendor?.defaultBaseUrl || vendor?.providerConfig?.baseUrl || staticInfo?.defaultBaseUrl || fallback?.baseUrl || '',
+    apiProtocol: vendor?.providerConfig?.api || fallback?.apiProtocol || DEFAULT_PROTOCOL,
+    modelId: vendor?.defaultModelId || staticInfo?.defaultModelId || '',
+    authMode: vendor?.defaultAuthMode || (vendorId === 'ollama' ? 'local' : 'api_key'),
+  };
+}
+
+function getVendorDisplayName(vendorId: ProviderType, vendors: ProviderVendorInfo[] = []): string {
+  return getVendorDefaults(vendorId, vendors).label;
+}
+
+function getModelPlaceholder(
+  draft: Pick<DraftState, 'vendorId' | 'baseUrl' | 'apiProtocol'>,
+  recommendedModels: Array<{ value: string }>,
+): string {
+  const staticInfo = PROVIDER_TYPE_INFO.find((entry) => entry.id === draft.vendorId);
+  return recommendedModels[0]?.value || staticInfo?.modelIdPlaceholder || 'gpt-5.4 / glm-5 / qwen3.5-plus';
+}
+
+function formatRecommendedModels(recommendedModels: Array<{ value: string; label: string }>): string {
+  return recommendedModels.slice(0, 3).map((model) => model.label || model.value).join('、');
+}
+
+function getProtocolHelp(draft: DraftState, vendorName: string): string {
+  if (draft.vendorId === 'custom') {
+    return '选择服务接口兼容格式，自定义服务通常使用 OpenAI Completions';
+  }
+  return `已根据 ${vendorName} 自动选择，避免协议和厂商不匹配`;
+}
+
+function getBaseUrlHelp(draft: DraftState, vendorName: string): string {
+  if (draft.vendorId === 'custom') {
+    return '填写模型服务接口地址，例如 https://api.example.com/v1';
+  }
+  if (draft.authMode === 'local') {
+    return '本地模型服务地址已自动填写，如需变更请在对应服务中配置';
+  }
+  return `${vendorName} 默认 API 地址已自动填写，通常无需修改`;
+}
+
+function getApiKeyHelp(draft: DraftState, vendorName: string): string {
+  const savedKeyText = draft.mode === 'edit' ? '；留空会沿用已保存密钥' : '';
+  if (draft.vendorId === 'custom') {
+    return `从对应服务商控制台获取 API Key${savedKeyText}`;
+  }
+  return `从 ${vendorName} 控制台获取 API Key${savedKeyText}`;
+}
 
 function normalizeConfiguredModelIds(account: ProviderAccount): string[] {
   return Array.from(new Set([account.model || '', ...(account.metadata?.customModels ?? [])].map((value) => value.trim()).filter(Boolean)));
@@ -141,18 +252,18 @@ function buildRowDraft(row: ModelRow): DraftState {
   };
 }
 
-function buildCreateDraft(vendorId: ProviderType): DraftState {
-  const vendor = PROVIDER_TYPE_INFO.find((entry) => entry.id === vendorId);
+function buildCreateDraft(vendorId: ProviderType, vendors: ProviderVendorInfo[] = []): DraftState {
+  const defaults = getVendorDefaults(vendorId, vendors);
   return {
     mode: 'create',
     accountId: null,
     vendorId,
-    label: vendor?.name || vendorId,
-    baseUrl: vendor?.defaultBaseUrl || '',
-    apiProtocol: DEFAULT_PROTOCOL,
-    modelId: vendor?.defaultModelId || '',
+    label: defaults.label,
+    baseUrl: defaults.baseUrl,
+    apiProtocol: defaults.apiProtocol,
+    modelId: defaults.modelId,
     apiKey: '',
-    authMode: vendorId === 'ollama' ? 'local' : 'api_key',
+    authMode: defaults.authMode,
   };
 }
 
@@ -168,11 +279,65 @@ function getDraftSignature(draft: DraftState): string {
   });
 }
 
+function getResultCacheSignature(draft: Pick<DraftState, 'vendorId' | 'baseUrl' | 'apiProtocol' | 'modelId' | 'authMode'>): string {
+  return JSON.stringify({
+    vendorId: draft.vendorId,
+    baseUrl: draft.baseUrl.trim(),
+    apiProtocol: draft.apiProtocol,
+    modelId: draft.modelId.trim(),
+    authMode: draft.authMode,
+  });
+}
+
+function readCachedTestResults(): Record<string, TestStatus> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(TEST_RESULT_CACHE_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed as Record<string, TestStatus>;
+  } catch {
+    return {};
+  }
+}
+
+function writeCachedTestResults(results: Record<string, TestStatus>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(TEST_RESULT_CACHE_STORAGE_KEY, JSON.stringify(results));
+  } catch {
+    // Best-effort UI cache only; connection testing should not fail because persistence is unavailable.
+  }
+}
+
+function getCachedResult(test: TestStatus | undefined, cacheSignature: string): TestStatus | undefined {
+  if (!test || test.state === 'running') return undefined;
+  return test.cacheSignature === cacheSignature ? test : undefined;
+}
+
+function getRowCacheKey(row: ModelRow): string {
+  return `${row.account.id}:${row.modelId.trim()}`;
+}
+
 function formatTestSummary(test?: TestStatus): string {
   if (!test || test.state === 'idle') return '未测试';
   if (test.state === 'running') return '测试中';
   if (test.state === 'error') return '失败';
   return test.applied ? '成功并已应用' : '成功';
+}
+
+function formatConnectionTestOutput(
+  test: TestStatus | undefined,
+  fallbackModelId?: string,
+  emptyLabel = '尚未返回',
+): string {
+  if (!test) return emptyLabel;
+  if (test.state === 'success') {
+    const testedModel = test.model?.trim() || fallbackModelId?.trim();
+    return testedModel ? `连接成功，模型：${testedModel}` : test.output || '连接成功';
+  }
+  return test.error || test.output || emptyLabel;
 }
 
 function getStatusTone(test?: TestStatus): string {
@@ -280,7 +445,7 @@ export function ProviderConfigPanel() {
   const [draftTest, setDraftTest] = useState<TestStatus>({ state: 'idle' });
   const [saving, setSaving] = useState(false);
   const [testingRowKey, setTestingRowKey] = useState<string | null>(null);
-  const [resultsByRow, setResultsByRow] = useState<Record<string, TestStatus>>({});
+  const [resultsByRow, setResultsByRow] = useState<Record<string, TestStatus>>(() => readCachedTestResults());
   const [deletingRowKeys, setDeletingRowKeys] = useState<string[]>([]);
 
   useEffect(() => {
@@ -304,6 +469,19 @@ export function ProviderConfigPanel() {
     && draftTest.signature === draftSignature
     && !saving,
   );
+  const draftVendorId = draft?.vendorId;
+  const draftBaseUrl = draft?.baseUrl;
+  const draftApiProtocol = draft?.apiProtocol;
+  const draftVendorName = draft ? getVendorDisplayName(draft.vendorId, vendorOptions) : '';
+  const draftRecommendedModels = useMemo(
+    () => draftVendorId
+      ? getRecommendedModelOptions(draftVendorId, {
+        baseUrl: draftBaseUrl,
+        apiProtocol: draftApiProtocol,
+      })
+      : [],
+    [draftApiProtocol, draftBaseUrl, draftVendorId],
+  );
 
   const runDraftTest = async (payload: DraftState): Promise<TestStatus> => {
     const result = await hostApiFetch<ProviderConnectionTestResult>('/api/provider-drafts/test', {
@@ -321,6 +499,8 @@ export function ProviderConfigPanel() {
     return {
       state: result.valid ? 'success' : 'error',
       signature: getDraftSignature(payload),
+      cacheSignature: getResultCacheSignature(payload),
+      model: result.model || payload.modelId.trim(),
       output: result.output,
       latencyMs: result.latencyMs,
       error: result.error,
@@ -329,16 +509,39 @@ export function ProviderConfigPanel() {
     };
   };
 
+  const setCachedRowResult = (rowKey: string, result: TestStatus) => {
+    if (result.state === 'running') {
+      setResultsByRow((current) => ({ ...current, [rowKey]: result }));
+      return;
+    }
+    setResultsByRow((current) => {
+      const next = { ...current, [rowKey]: result };
+      writeCachedTestResults(next);
+      return next;
+    });
+  };
+
+  const removeCachedRowResult = (rowKey: string) => {
+    setResultsByRow((current) => {
+      if (!current[rowKey]) return current;
+      const next = { ...current };
+      delete next[rowKey];
+      writeCachedTestResults(next);
+      return next;
+    });
+  };
+
   const handleOpenCreate = () => {
-    const nextDraft = buildCreateDraft(vendorOptions[0]?.id || 'custom');
+    const nextDraft = buildCreateDraft(vendorOptions[0]?.id || 'custom', vendorOptions);
     setDraft(nextDraft);
     setDraftTest({ state: 'idle' });
     setSheetOpen(true);
   };
 
   const handleOpenEdit = (row: ModelRow) => {
-    setDraft(buildRowDraft(row));
-    setDraftTest(resultsByRow[row.key] || { state: 'idle' });
+    const rowDraft = buildRowDraft(row);
+    setDraft(rowDraft);
+    setDraftTest(getCachedResult(resultsByRow[getRowCacheKey(row)], getResultCacheSignature(rowDraft)) || { state: 'idle' });
     setSheetOpen(true);
   };
 
@@ -346,7 +549,7 @@ export function ProviderConfigPanel() {
     setTestingRowKey(row.key);
     try {
       const result = await runDraftTest(buildRowDraft(row));
-      setResultsByRow((current) => ({ ...current, [row.key]: result }));
+      setCachedRowResult(getRowCacheKey(row), result);
       if (result.state === 'success') {
         toast.success(`测试成功 · ${result.latencyMs ?? '—'}ms`);
       } else {
@@ -370,6 +573,7 @@ export function ProviderConfigPanel() {
         const removed = await removeAccount(row.account.id);
         if (!removed) return;
       }
+      removeCachedRowResult(getRowCacheKey(row));
       await refreshProviderSnapshot();
       toast.success('已删除配置');
     } catch (error) {
@@ -446,6 +650,7 @@ export function ProviderConfigPanel() {
       const failed: TestStatus = {
         state: 'error',
         signature: getDraftSignature(draft),
+        cacheSignature: getResultCacheSignature(draft),
         error: String(error),
         testedAt: new Date().toISOString(),
       };
@@ -460,6 +665,7 @@ export function ProviderConfigPanel() {
     try {
       const trimmedKey = draft.apiKey.trim();
       const effectiveKey = resolveProviderApiKeyForSave(draft.vendorId, trimmedKey);
+      let appliedRowKey: string | null = null;
 
       if (draft.mode === 'create') {
         const accountId = buildProviderAccountId(draft.vendorId, null, vendors);
@@ -486,22 +692,26 @@ export function ProviderConfigPanel() {
           const setDefault = await setDefaultAccount(accountId);
           if (!setDefault) return;
         }
+        appliedRowKey = `${accountId}:${draft.modelId.trim()}`;
       } else if (draft.accountId) {
         const account = accounts.find((entry) => entry.id === draft.accountId);
         if (!account) throw new Error('配置不存在');
         const updates = applyModelChangeToAccount(account, draft);
         const updated = await updateAccount(draft.accountId, updates, trimmedKey || undefined);
         if (!updated) return;
+        if (draft.originalModelId && draft.originalModelId !== draft.modelId.trim()) {
+          removeCachedRowResult(`${draft.accountId}:${draft.originalModelId}`);
+        }
+        appliedRowKey = `${draft.accountId}:${draft.modelId.trim()}`;
       }
 
       const nextResult: TestStatus = {
         ...draftTest,
         applied: true,
       };
-      const key = draft.mode === 'create'
-        ? `${draft.vendorId}:${draft.modelId.trim()}`
-        : `${draft.accountId}:${draft.modelId.trim()}`;
-      setResultsByRow((current) => ({ ...current, [key]: nextResult }));
+      if (appliedRowKey) {
+        setCachedRowResult(appliedRowKey, nextResult);
+      }
       setSheetOpen(false);
       setDraft(null);
       toast.success('已应用到 OpenClaw');
@@ -517,10 +727,12 @@ export function ProviderConfigPanel() {
       if (!current) return current;
       const next = { ...current, [key]: value };
       if (key === 'vendorId') {
-        const vendor = PROVIDER_TYPE_INFO.find((entry) => entry.id === value);
-        next.baseUrl = vendor?.defaultBaseUrl || '';
-        next.modelId = vendor?.defaultModelId || '';
-        next.authMode = value === 'ollama' ? 'local' : 'api_key';
+        const defaults = getVendorDefaults(value as ProviderType, vendorOptions);
+        next.label = defaults.label;
+        next.baseUrl = defaults.baseUrl;
+        next.apiProtocol = defaults.apiProtocol;
+        next.modelId = defaults.modelId;
+        next.authMode = defaults.authMode;
       }
       return next;
     });
@@ -619,7 +831,7 @@ export function ProviderConfigPanel() {
                       <td className="px-4 py-4">
                         <div className="min-w-[220px] max-w-[320px]">
                           <div className="line-clamp-2 text-[13px] leading-6 text-foreground/68">
-                            {result?.output || result?.error || '尚未返回'}
+                            {formatConnectionTestOutput(result, row.modelId)}
                           </div>
                         </div>
                       </td>
@@ -710,7 +922,7 @@ export function ProviderConfigPanel() {
           {draft && (
             <div className="mt-6 space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="draft-vendor">厂商</Label>
+                <Label htmlFor="draft-vendor">模型厂商</Label>
                 <Select
                   id="draft-vendor"
                   data-testid="models-config-sheet-vendor-select"
@@ -719,9 +931,10 @@ export function ProviderConfigPanel() {
                   disabled={draft.mode === 'edit'}
                 >
                   {vendorOptions.map((vendor) => (
-                    <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
+                    <option key={vendor.id} value={vendor.id}>{getVendorDisplayName(vendor.id, vendorOptions)}</option>
                   ))}
                 </Select>
+                <p className="text-[12px] leading-5 text-muted-foreground">先选择模型服务提供商，协议、接口地址和推荐模型会随厂商自动联动。</p>
               </div>
 
               <div className="space-y-2">
@@ -732,49 +945,68 @@ export function ProviderConfigPanel() {
                   value={draft.label}
                   onChange={(event) => updateDraft('label', event.target.value)}
                 />
+                <p className="text-[12px] leading-5 text-muted-foreground">仅用于本地识别，默认跟随模型厂商，可自定义。</p>
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="draft-model">模型</Label>
+                  <Label htmlFor="draft-model">模型 ID</Label>
                   <Input
                     id="draft-model"
                     data-testid="models-config-sheet-model-input"
+                    list={draftRecommendedModels.length > 0 ? 'models-config-model-recommendations' : undefined}
                     value={draft.modelId}
                     onChange={(event) => updateDraft('modelId', event.target.value)}
-                    placeholder="gpt-5.4 / glm-5 / qwen3.5-plus"
+                    placeholder={getModelPlaceholder(draft, draftRecommendedModels)}
                   />
+                  {draftRecommendedModels.length > 0 ? (
+                    <datalist id="models-config-model-recommendations">
+                      {draftRecommendedModels.map((model) => (
+                        <option key={model.value} value={model.value}>{model.label}</option>
+                      ))}
+                    </datalist>
+                  ) : null}
+                  <p className="text-[12px] leading-5 text-muted-foreground">
+                    {draftRecommendedModels.length > 0
+                      ? `可直接输入模型 ID，也可选择推荐：${formatRecommendedModels(draftRecommendedModels)}`
+                      : '填写厂商提供的模型 ID，例如 gpt-5.4、claude-sonnet-4.5 或 qwen3.5-plus。'}
+                  </p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="draft-protocol">协议</Label>
+                  <Label htmlFor="draft-protocol">协议（接口格式）</Label>
                   <Select
                     id="draft-protocol"
                     data-testid="models-config-sheet-protocol-select"
                     value={draft.apiProtocol}
                     onChange={(event) => updateDraft('apiProtocol', event.target.value as DraftState['apiProtocol'])}
+                    disabled={draft.vendorId !== 'custom'}
                   >
-                    <option value="openai-completions">OpenAI Completions</option>
+                    <option value="openai-completions">OpenAI Completions（兼容）</option>
                     <option value="openai-responses">OpenAI Responses</option>
                     <option value="anthropic-messages">Anthropic Messages</option>
                   </Select>
+                  <p className="text-[12px] leading-5 text-muted-foreground">{getProtocolHelp(draft, draftVendorName)}</p>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="draft-base-url">Base URL</Label>
+                <Label htmlFor="draft-base-url">Base URL（接口地址）</Label>
                 <Input
                   id="draft-base-url"
                   data-testid="models-config-sheet-base-url-input"
                   value={draft.baseUrl}
                   onChange={(event) => updateDraft('baseUrl', event.target.value)}
                   placeholder="https://api.example.com/v1"
+                  readOnly={draft.vendorId !== 'custom'}
                 />
+                <p className="text-[12px] leading-5 text-muted-foreground">{getBaseUrlHelp(draft, draftVendorName)}</p>
               </div>
 
               {draft.authMode !== 'local' && (
                 <div className="space-y-2">
-                  <Label htmlFor="draft-api-key">API Key</Label>
-                  <Input id="draft-api-key" type="password" value={draft.apiKey} onChange={(event) => updateDraft('apiKey', event.target.value)} placeholder={draft.mode === 'edit' ? '留空表示沿用已保存密钥' : '输入新的 API Key'} />
+                  <Label htmlFor="draft-api-key">API Key（密钥）</Label>
+                  <Input id="draft-api-key" type="password" value={draft.apiKey} onChange={(event) => updateDraft('apiKey', event.target.value)} placeholder={draft.mode === 'edit' ? '留空表示沿用已保存密钥' : `输入 ${draftVendorName} API Key`} />
+                  <p className="text-[12px] leading-5 text-muted-foreground">{getApiKeyHelp(draft, draftVendorName)}</p>
                 </div>
               )}
 
@@ -782,7 +1014,7 @@ export function ProviderConfigPanel() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-[13px] font-semibold text-foreground">自动化测试结果</p>
-                    <p className="mt-1 text-[12px] text-muted-foreground">发送一次简短探测请求，展示是否可调用、回复摘要和延迟。</p>
+                    <p className="mt-1 text-[12px] text-muted-foreground">向 {draftVendorName} 发送一次简短探测请求，确认 API Key、接口地址和模型 ID 是否可用。</p>
                   </div>
                   <span className={cn(
                     'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-medium',
@@ -799,7 +1031,7 @@ export function ProviderConfigPanel() {
                   <div>最近测试：{formatTimestamp(draftTest.testedAt)}</div>
                   <div>回复延迟：{typeof draftTest.latencyMs === 'number' ? `${draftTest.latencyMs} ms` : '—'}</div>
                   <div className="rounded-xl border border-black/6 bg-background px-3 py-2 dark:border-white/8">
-                    {draftTest.output || draftTest.error || '尚未测试'}
+                    {formatConnectionTestOutput(draftTest, draft.modelId, '尚未测试')}
                   </div>
                 </div>
               </div>

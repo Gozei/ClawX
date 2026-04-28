@@ -12,6 +12,7 @@ import crypto from 'crypto';
 import { access, readFile, writeFile, mkdir, chmod } from 'fs/promises';
 import { constants } from 'fs';
 import path from 'path';
+import { homedir } from 'os';
 
 export interface DeviceIdentity {
   deviceId: string;
@@ -117,6 +118,19 @@ export async function loadOrCreateDeviceIdentity(filePath: string): Promise<Devi
   await writeFile(filePath, `${JSON.stringify(stored, null, 2)}\n`, { mode: 0o600 });
   try { await chmod(filePath, 0o600); } catch { /* ignore */ }
   return identity;
+}
+
+/**
+ * Keep OpenClaw CLI and agent tool Gateway clients on the same authenticated
+ * device identity as the ClawX Main process.
+ */
+export async function syncDeviceIdentityToOpenClawState(identity: DeviceIdentity): Promise<void> {
+  const filePath = path.join(homedir(), '.openclaw', 'identity', 'device.json');
+  const stored = { version: 1, ...identity, updatedBy: 'clawx', updatedAtMs: Date.now() };
+  const dir = path.dirname(filePath);
+  if (!(await fileExists(dir))) await mkdir(dir, { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(stored, null, 2)}\n`, { mode: 0o600 });
+  try { await chmod(filePath, 0o600); } catch { /* ignore */ }
 }
 
 /** Sign a string payload with the Ed25519 private key, returns base64url signature. */

@@ -85,6 +85,14 @@ export interface ProviderTypeInfo {
   hidden?: boolean;
 }
 
+export interface ProviderBackendConfig {
+  baseUrl: string;
+  api: 'openai-completions' | 'openai-responses' | 'anthropic-messages';
+  apiKeyEnv?: string;
+  models?: Array<Record<string, unknown>>;
+  headers?: Record<string, string>;
+}
+
 export type ProviderAuthMode =
   | 'api_key'
   | 'oauth_device'
@@ -100,6 +108,7 @@ export type ProviderVendorCategory =
 export interface ProviderVendorInfo extends ProviderTypeInfo {
   category: ProviderVendorCategory;
   envVar?: string;
+  providerConfig?: ProviderBackendConfig;
   supportedAuthModes: ProviderAuthMode[];
   defaultAuthMode: ProviderAuthMode;
   supportsMultipleAccounts: boolean;

@@ -13,6 +13,7 @@ import { captureTelemetryEvent, trackMetric } from '../utils/telemetry';
 import { getSetting } from '../utils/store';
 import {
   loadOrCreateDeviceIdentity,
+  syncDeviceIdentityToOpenClawState,
   type DeviceIdentity,
 } from '../utils/device-identity';
 import {
@@ -180,6 +181,11 @@ export class GatewayManager extends EventEmitter {
     try {
       const identityPath = path.join(app.getPath('userData'), 'clawx-device-identity.json');
       this.deviceIdentity = await loadOrCreateDeviceIdentity(identityPath);
+      try {
+        await syncDeviceIdentityToOpenClawState(this.deviceIdentity);
+      } catch (syncErr) {
+        logger.warn('Failed to sync device identity for OpenClaw Gateway clients:', syncErr);
+      }
       logger.debug(`Device identity loaded (deviceId=${this.deviceIdentity.deviceId})`);
     } catch (err) {
       logger.warn('Failed to load device identity, scopes will be limited:', err);

@@ -51,8 +51,8 @@ export function resolveChannelStartupPolicyForConfiguredChannels(
 ): ChannelStartupPolicy {
   if (configuredChannels.length === 0) {
     return {
-      skipChannels: false,
-      channelStartupSummary: 'idle(no configured channels)',
+      skipChannels: true,
+      channelStartupSummary: 'skipped(no configured channels)',
     };
   }
 

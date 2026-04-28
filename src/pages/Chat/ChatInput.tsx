@@ -65,6 +65,8 @@ type ModelOption = {
   label: string;
 };
 
+type ProviderListItemForModelOption = ReturnType<typeof buildProviderListItems>[number];
+
 const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
 const GOOGLE_OAUTH_RUNTIME_PROVIDER = 'google-gemini-cli';
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = {
@@ -92,6 +94,23 @@ function getRuntimeProviderKey(account: ProviderAccount): string {
     return 'minimax-portal';
   }
   return account.vendorId;
+}
+
+function getPreferredModelValue(
+  providerItems: ProviderListItemForModelOption[],
+  providerDefaultAccountId: string | null,
+): string {
+  if (!providerDefaultAccountId) return '';
+  for (const item of providerItems) {
+    if (item.account.id !== providerDefaultAccountId) continue;
+    const runtimeProviderKey = getRuntimeProviderKey(item.account);
+    const configuredModels = item.models.filter((model) => model.source !== 'recommended');
+    const preferredModel = configuredModels.find((model) => model.isDefault) || configuredModels[0];
+    if (runtimeProviderKey && preferredModel?.id) {
+      return `${runtimeProviderKey}/${preferredModel.id}`;
+    }
+  }
+  return '';
 }
 
 function resolveComposerSessionKey(
@@ -270,11 +289,18 @@ export function ChatInput({
     || defaultModelRef
     || ''
   ).trim();
+  const preferredModelValue = useMemo(
+    () => getPreferredModelValue(providerItems, providerDefaultAccountId),
+    [providerDefaultAccountId, providerItems],
+  );
   const selectedModelValue = useMemo(() => {
-    if (!effectiveModelRef) return '';
-    return modelOptions.some((option) => option.value === effectiveModelRef) ? effectiveModelRef : '';
-  }, [effectiveModelRef, modelOptions]);
+    if (effectiveModelRef && modelOptions.some((option) => option.value === effectiveModelRef)) {
+      return effectiveModelRef;
+    }
+    return preferredModelValue;
+  }, [effectiveModelRef, modelOptions, preferredModelValue]);
   const activeModelValue = selectedModelValue;
+  const activeModelRef = activeModelValue || effectiveModelRef;
   const selectedModelLabel = useMemo(
     () => modelOptions.find((option) => option.value === selectedModelValue)?.label || t('composer.selectModel'),
     [modelOptions, selectedModelValue, t],
@@ -757,24 +783,24 @@ export function ChatInput({
     if (canQueueDraft) {
       onQueueOfflineMessage?.(textToSend, attachmentsToSend, targetAgentId, {
         sessionKey: activeComposerSessionKey,
-        modelRef: effectiveModelRef || null,
+        modelRef: activeModelRef || null,
       });
       toast.success(isZh ? '已加入待发送队列' : 'Added to the send queue');
     } else {
       onSend(textToSend, attachmentsToSend, targetAgentId, {
         sessionKey: activeComposerSessionKey,
-        modelRef: effectiveModelRef || null,
+        modelRef: activeModelRef || null,
       });
     }
     setPickerOpen(false);
   }, [
     activeComposerSessionKey,
+    activeModelRef,
     attachments,
     canQueueDraft,
     canSend,
     clearComposerDraft,
     currentSessionKey,
-    effectiveModelRef,
     input,
     isZh,
     onQueueOfflineMessage,
