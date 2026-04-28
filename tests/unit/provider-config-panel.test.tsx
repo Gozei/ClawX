@@ -5,6 +5,7 @@ import { ProviderConfigPanel } from '@/pages/Models/ProviderConfigPanel';
 const hostApiFetchMock = vi.fn();
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
+const confirmGatewayImpactMock = vi.fn();
 
 const providerStore = {
   accounts: [] as Array<Record<string, unknown>>,
@@ -42,6 +43,10 @@ vi.mock('@/lib/host-api', () => ({
   hostApiFetch: (...args: unknown[]) => hostApiFetchMock(...args),
 }));
 
+vi.mock('@/lib/gateway-impact-confirm', () => ({
+  confirmGatewayImpact: (...args: unknown[]) => confirmGatewayImpactMock(...args),
+}));
+
 vi.mock('sonner', () => ({
   toast: {
     success: (...args: unknown[]) => toastSuccessMock(...args),
@@ -52,7 +57,7 @@ vi.mock('sonner', () => ({
 describe('ProviderConfigPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    window.localStorage.clear();
+    confirmGatewayImpactMock.mockResolvedValue(true);
     providerStore.accounts = [];
     providerStore.statuses = [];
     providerStore.vendors = [
@@ -64,6 +69,16 @@ describe('ProviderConfigPanel', () => {
       },
     ];
     providerStore.defaultAccountId = null;
+    providerStore.refreshProviderSnapshot.mockReset();
+    providerStore.refreshProviderSnapshot.mockResolvedValue(undefined);
+    providerStore.createAccount.mockReset();
+    providerStore.createAccount.mockResolvedValue(true);
+    providerStore.updateAccount.mockReset();
+    providerStore.updateAccount.mockResolvedValue(true);
+    providerStore.removeAccount.mockReset();
+    providerStore.removeAccount.mockResolvedValue(true);
+    providerStore.setDefaultAccount.mockReset();
+    providerStore.setDefaultAccount.mockResolvedValue(true);
     agentsStore.fetchAgents.mockReset();
     agentsStore.fetchAgents.mockResolvedValue(undefined);
   });
@@ -431,7 +446,7 @@ describe('ProviderConfigPanel', () => {
       },
     ];
     providerStore.defaultAccountId = 'openai';
-    providerStore.updateAccount.mockResolvedValueOnce(true);
+    hostApiFetchMock.mockResolvedValue({ success: true });
 
     render(<ProviderConfigPanel />);
 
@@ -443,13 +458,65 @@ describe('ProviderConfigPanel', () => {
     fireEvent.click(globalDefaultButtons[0]!);
 
     await waitFor(() => {
-      expect(providerStore.updateAccount).toHaveBeenCalledWith('openai', expect.objectContaining({
-        model: 'gpt-5.4-mini',
-      }));
+      expect(confirmGatewayImpactMock).toHaveBeenCalledTimes(1);
     });
-    expect(hostApiFetchMock).not.toHaveBeenCalled();
+    expect(hostApiFetchMock).toHaveBeenCalledTimes(1);
+    expect(hostApiFetchMock).toHaveBeenNthCalledWith(1, '/api/provider-accounts/openai', expect.objectContaining({
+      method: 'PUT',
+    }));
+    expect(providerStore.updateAccount).not.toHaveBeenCalled();
     expect(providerStore.setDefaultAccount).not.toHaveBeenCalled();
+    expect(providerStore.refreshProviderSnapshot).toHaveBeenCalledTimes(2);
     expect(agentsStore.fetchAgents).toHaveBeenCalledTimes(1);
     expect(toastSuccessMock).toHaveBeenCalledWith('已设为全局默认模型');
+  });
+
+  it('keeps the row visible when delete is cancelled by the gateway-impact confirmation', async () => {
+    providerStore.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI 主账号',
+        authMode: 'api_key',
+        baseUrl: 'https://api.openai.com/v1',
+        apiProtocol: 'openai-completions',
+        model: 'gpt-5.4',
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerStore.statuses = [
+      {
+        id: 'openai',
+        type: 'openai',
+        name: 'OpenAI 主账号',
+        hasKey: true,
+        keyMasked: 'sk-***',
+        enabled: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+        model: 'gpt-5.4',
+      },
+    ];
+    providerStore.removeAccount.mockResolvedValue(false);
+
+    render(<ProviderConfigPanel />);
+
+    expect(screen.getAllByTestId('models-config-row')).toHaveLength(1);
+    const deleteButton = screen.getByTestId('models-config-delete-openai:gpt-5.4');
+
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => {
+      expect(providerStore.removeAccount).toHaveBeenCalledWith('openai');
+    });
+    await waitFor(() => {
+      expect(deleteButton).not.toBeDisabled();
+    });
+    expect(screen.getAllByTestId('models-config-row')).toHaveLength(1);
+    expect(screen.getByText('gpt-5.4')).toBeInTheDocument();
+    expect(toastSuccessMock).not.toHaveBeenCalledWith('已删除配置');
   });
 });

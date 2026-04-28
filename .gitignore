@@ -76,3 +76,4 @@ tmp-playwright-*/
 tmp_origin_wubin_chat_index.tsx
 .win-agent/
 .opencode/
+.codex/environments/environment.toml

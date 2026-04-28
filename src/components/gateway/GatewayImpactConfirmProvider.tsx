@@ -52,6 +52,7 @@ export function GatewayImpactConfirmProvider({ children }: GatewayImpactConfirmP
         open={!!pendingRequest}
         title={pendingRequest?.title || ''}
         message={pendingRequest?.message || ''}
+        overlayClassName="z-[70]"
         confirmLabel={pendingRequest?.confirmLabel}
         cancelLabel={pendingRequest?.cancelLabel}
         onConfirm={() => closeDialog(true)}
