@@ -1742,19 +1742,11 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
           }
         }
 
-        const preservedBundledPluginIds = new Set<string>([
-          ...allowArr2.filter((pluginId) => bundled.all.has(pluginId)),
-          ...Object.entries(pEntries)
-            .filter(([pluginId, entry]) => bundled.all.has(pluginId) && entry?.enabled !== false)
-            .map(([pluginId]) => pluginId),
-        ]);
+        const explicitlyEnabledBundledPluginIds = Object.entries(pEntries)
+          .filter(([pluginId, entry]) => bundled.all.has(pluginId) && entry?.enabled === true)
+          .map(([pluginId]) => pluginId);
 
-        for (const pluginId of bundled.enabledByDefault) {
-          if (!nextAllow.includes(pluginId)) {
-            nextAllow.push(pluginId);
-          }
-        }
-        for (const pluginId of preservedBundledPluginIds) {
+        for (const pluginId of explicitlyEnabledBundledPluginIds) {
           if (!nextAllow.includes(pluginId)) {
             nextAllow.push(pluginId);
           }

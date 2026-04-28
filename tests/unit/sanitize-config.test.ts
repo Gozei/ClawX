@@ -56,14 +56,6 @@ async function sanitizeConfig(
     'googlechat',
     'mattermost',
   ]);
-  const SAFE_BUNDLED_ALLOWLIST_PLUGIN_IDS = new Set([
-    'acpx',
-    'copilot-proxy',
-    'device-pair',
-    'phone-control',
-    'talk-voice',
-  ]);
-
   /** Non-throwing async existence check. */
   async function fileExists(p: string): Promise<boolean> {
     try {
@@ -154,10 +146,9 @@ async function sanitizeConfig(
     }
 
     // Mirror production logic: exclude both built-in channels AND bundled
-    // extension IDs from the "external" set, then re-add only the safe
-    // enabledByDefault utility plugins.
+    // extension IDs from the "external" set. Bundled plugins are only kept
+    // when they are explicitly enabled in plugins.entries.
     const bundledAll = new Set(bundledPlugins?.all ?? []);
-    const bundledEnabledByDefault = bundledPlugins?.enabledByDefault ?? [];
 
     const externalPluginIds = allow.filter(
       (id) => !BUILTIN_CHANNEL_IDS.has(id) && !bundledAll.has(id),
@@ -171,12 +162,9 @@ async function sanitizeConfig(
       }
     }
 
-    // Re-add enabledByDefault plugins when allowlist is non-empty
     if (nextAllow.length > 0) {
-      for (const pluginId of bundledEnabledByDefault) {
-        if (!SAFE_BUNDLED_ALLOWLIST_PLUGIN_IDS.has(pluginId)) {
-          continue;
-        }
+      for (const [pluginId, entry] of Object.entries(entries)) {
+        if (!bundledAll.has(pluginId) || entry?.enabled !== true) continue;
         if (!nextAllow.includes(pluginId)) {
           nextAllow.push(pluginId);
         }
@@ -643,12 +631,12 @@ describe('sanitizeOpenClawConfig (blocklist approach)', () => {
     expect(modified).toBe(false);
   });
 
-  // ── enabledByDefault bundled plugin allowlist tests ──────────────
+  // ── bundled plugin allowlist tests ──────────────
 
-  it('adds only safe enabledByDefault bundled plugins to plugins.allow when allowlist is non-empty', async () => {
+  it('does not add enabledByDefault bundled plugins to plugins.allow when allowlist is non-empty', async () => {
     await writeConfig({
       plugins: {
-        allow: ['customPlugin'],
+        allow: ['customPlugin', 'device-pair', 'browser'],
         entries: { customPlugin: { enabled: true } },
       },
     });
@@ -665,7 +653,7 @@ describe('sanitizeOpenClawConfig (blocklist approach)', () => {
     const plugins = result.plugins as Record<string, unknown>;
     const allow = plugins.allow as string[];
     expect(allow).toContain('customPlugin');
-    expect(allow).toContain('device-pair');
+    expect(allow).not.toContain('device-pair');
     expect(allow).not.toContain('browser');
     expect(allow).not.toContain('openai');
     // 'diffs' is bundled but NOT enabledByDefault — should not be added
@@ -696,7 +684,7 @@ describe('sanitizeOpenClawConfig (blocklist approach)', () => {
     const allow = plugins.allow as string[];
     expect(allow).toContain('customPlugin');      // external — preserved
     expect(allow).toContain('unknown-plugin');    // not bundled — treated as external, preserved
-    expect(allow).toContain('device-pair');       // safe enabledByDefault utility plugin
+    expect(allow).not.toContain('device-pair');   // bundled defaults stay out unless explicitly enabled
     expect(allow).not.toContain('browser');       // bundled browser/provider ids stay out
     expect(allow).not.toContain('old-bundled');   // bundled but demoted — removed
   });
@@ -721,9 +709,34 @@ describe('sanitizeOpenClawConfig (blocklist approach)', () => {
     const plugins = result.plugins as Record<string, unknown>;
     const allow = plugins.allow as string[];
     expect(allow).toContain('customPlugin');
-    expect(allow).toContain('device-pair');
+    expect(allow).not.toContain('device-pair');
     expect(allow).not.toContain('openai');
     expect(allow).not.toContain('diffs');  // demoted — removed
+  });
+
+  it('keeps bundled plugin IDs that are explicitly enabled in plugins.entries', async () => {
+    await writeConfig({
+      plugins: {
+        allow: ['customPlugin', 'device-pair'],
+        entries: {
+          customPlugin: { enabled: true },
+          'device-pair': { enabled: true },
+        },
+      },
+    });
+
+    const bundled = {
+      all: ['device-pair', 'browser'],
+      enabledByDefault: ['device-pair', 'browser'],
+    };
+
+    const modified = await sanitizeConfig(configPath, bundled);
+    expect(modified).toBe(false);
+
+    const result = await readConfig();
+    const plugins = result.plugins as Record<string, unknown>;
+    const allow = plugins.allow as string[];
+    expect(allow).toEqual(['customPlugin', 'device-pair']);
   });
 
   it('does not add enabledByDefault plugins when allowlist is empty (no external plugins)', async () => {
