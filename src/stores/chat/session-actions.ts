@@ -29,6 +29,26 @@ function resolveDefaultCanonicalPrefix(): string {
   return `agent:${defaultAgentId}`;
 }
 
+function isColdStartDefaultSessionState(state: {
+  currentSessionKey: string;
+  sessions: unknown[];
+  messages: unknown[];
+  sessionLabels: Record<string, string>;
+  sessionLastActivity: Record<string, number>;
+  pendingFinal?: boolean;
+  activeRunId?: string | null;
+  lastUserMessageAt?: number | null;
+}): boolean {
+  return state.currentSessionKey === DEFAULT_SESSION_KEY
+    && state.sessions.length === 0
+    && state.messages.length === 0
+    && Object.keys(state.sessionLabels).length === 0
+    && Object.keys(state.sessionLastActivity).length === 0
+    && !state.pendingFinal
+    && !state.activeRunId
+    && !state.lastUserMessageAt;
+}
+
 function parseSessionUpdatedAtMs(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return toMs(value);
@@ -174,18 +194,26 @@ export function createSessionActions(
             }
           }
           const currentState = get();
-          const currentIsUnusedDraft = isUnusedDraftSession(currentState, nextSessionKey);
+          const shouldCreateStartupDraft = isColdStartDefaultSessionState(currentState);
+          if (shouldCreateStartupDraft) {
+            const prefix = resolveDefaultCanonicalPrefix()
+              || getCanonicalPrefixFromSessions(dedupedSessions)
+              || DEFAULT_CANONICAL_PREFIX;
+            nextSessionKey = `${prefix}:session-${Date.now()}`;
+          }
+          const currentIsUnusedDraft = shouldCreateStartupDraft || isUnusedDraftSession(currentState, nextSessionKey);
           const hasLocalSessionEntry = localSessions.some((session) => session.key === nextSessionKey);
           if (!dedupedSessions.find((s) => s.key === nextSessionKey) && dedupedSessions.length > 0) {
             // Preserve locally-created blank drafts and pending local sessions.
-            // The initial ghost key is neither, so it still yields to
-            // persisted history when no startup draft exists.
+            // Cold start creates a fresh draft instead of auto-selecting
+            // persisted history from the sidebar.
             if (!currentIsUnusedDraft && !hasLocalSessionEntry) {
               nextSessionKey = dedupedSessions[0].key;
             }
           }
 
-          const sessionsWithCurrent = !dedupedSessions.find((s) => s.key === nextSessionKey) && nextSessionKey && !isUnusedDraftSession(get(), nextSessionKey)
+          const shouldMaterializeCurrentSession = !currentIsUnusedDraft && !isUnusedDraftSession(get(), nextSessionKey);
+          const sessionsWithCurrent = !dedupedSessions.find((s) => s.key === nextSessionKey) && nextSessionKey && shouldMaterializeCurrentSession
             ? [
               ...dedupedSessions,
               { key: nextSessionKey, displayName: nextSessionKey },
@@ -208,7 +236,7 @@ export function createSessionActions(
             },
           }));
 
-          if (currentSessionKey !== nextSessionKey) {
+          if (currentSessionKey !== nextSessionKey && shouldMaterializeCurrentSession) {
             get().loadHistory();
           }
 

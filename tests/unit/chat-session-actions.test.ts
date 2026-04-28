@@ -195,7 +195,8 @@ describe('chat session actions', () => {
     expect(h.read().sessions.some((session) => session.key === 'agent:foo:session-draft')).toBe(false);
   });
 
-  it('loadSessions keeps the blank default session selected on cold start', async () => {
+  it('loadSessions creates a blank draft session on cold start', async () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1711111111111);
     const { createSessionActions } = await import('@/stores/chat/session-actions');
     const h = makeHarness({
       currentSessionKey: 'agent:main:main',
@@ -222,12 +223,13 @@ describe('chat session actions', () => {
 
     await actions.loadSessions();
 
-    expect(h.read().currentSessionKey).toBe('agent:main:main');
+    expect(h.read().currentSessionKey).toBe('agent:main:session-1711111111111');
     expect(h.read().sessions.map((session) => session.key)).toEqual([
       'agent:main:session-latest',
       'agent:main:main',
     ]);
     expect(h.read().loadHistory).not.toHaveBeenCalled();
+    nowSpy.mockRestore();
   });
 
   it('renameSession persists and updates the local label with a 30-character cap', async () => {

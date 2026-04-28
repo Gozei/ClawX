@@ -93,6 +93,15 @@ describe('ProcessEventMessage', () => {
         }}
         showThinking
         chatProcessDisplayMode="all"
+        streamingTools={[
+          {
+            id: 'browser-2',
+            toolCallId: 'browser-2',
+            name: 'browser',
+            status: 'completed',
+            durationMs: 1234,
+          },
+        ]}
       />,
     );
 
@@ -138,6 +147,8 @@ describe('ProcessEventMessage', () => {
     expect(preview).toBeInTheDocument();
     expect(preview).toHaveClass('flex-1');
     expect(preview).toHaveClass('text-[13px]');
+    expect(row).not.toHaveTextContent('1.2s');
+    expect(row).not.toHaveTextContent('1234ms');
     expect(within(row).getByTestId('chat-process-event-toggle-icon')).toHaveClass('opacity-0');
 
     fireEvent.click(within(row).getByTestId('chat-process-event-toggle'));

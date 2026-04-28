@@ -203,6 +203,84 @@ describe('chat store session resume', () => {
     expect(next.pendingFinal).toBe(true);
   });
 
+  it('hydrates current-turn process events from the local transcript during quiet live refreshes', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'sessions.list') return Promise.resolve({ sessions: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+    hostApiFetchMock.mockReset();
+    hostApiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/sessions/history') {
+        return Promise.resolve({
+          success: true,
+          resolved: true,
+          messages: [
+            { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+            {
+              id: 'assistant-process-1',
+              role: 'assistant',
+              content: [
+                { type: 'thinking', thinking: 'checking sources' },
+                { type: 'tool_use', id: 'tool-1', name: 'web_search', input: { query: 'docs' } },
+              ],
+              timestamp: toolTimestampSeconds,
+            },
+          ],
+          thinkingLevel: 'high',
+        });
+      }
+      return Promise.resolve({ success: true });
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Question', timestamp: userTimestampSeconds },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: { 'agent:main:main': true },
+      sending: true,
+      activeRunId: 'run-live',
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: 'running',
+    });
+
+    await useChatStore.getState().loadHistory(true);
+
+    const next = useChatStore.getState();
+    expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/history', {
+      method: 'POST',
+      body: JSON.stringify({ sessionKey: 'agent:main:main', limit: 200 }),
+    });
+    expect(gatewayRpcMock).not.toHaveBeenCalledWith(
+      'chat.history',
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(next.messages.map((message) => message.id)).toEqual([
+      'user-1',
+      'assistant-process-1',
+    ]);
+    expect(next.thinkingLevel).toBe('high');
+    expect(next.sending).toBe(true);
+    expect(next.pendingFinal).toBe(true);
+  });
+
   it('keeps a just-finished assistant reply when quiet history refresh lags behind persistence', async () => {
     gatewayRpcMock.mockReset();
     gatewayRpcMock.mockImplementation((method: string) => {
@@ -1801,9 +1879,11 @@ describe('chat store session resume', () => {
     });
 
     await useChatStore.getState().loadSessions();
+    const startupDraftSessionKey = useChatStore.getState().currentSessionKey;
     await useChatStore.getState().sendMessage('现在使用哪个模型？');
 
     expect(useChatStore.getState().sessionModels['agent:main:main']).toBe('custom-custombc/qwen3.5-plus');
+    expect(useChatStore.getState().sessionModels[startupDraftSessionKey]).toBe('custom-custombc/qwen3.5-plus');
     expect(hostApiFetchMock).toHaveBeenCalledWith('/api/agents/main/model/runtime', {
       method: 'PUT',
       body: JSON.stringify({ modelRef: 'custom-custombc/qwen3.5-plus' }),
@@ -1850,7 +1930,7 @@ describe('chat store session resume', () => {
     await useChatStore.getState().loadSessions();
 
     expect(gatewayRpcMock).not.toHaveBeenCalled();
-    expect(useChatStore.getState().currentSessionKey).toBe('agent:main:main');
+    expect(useChatStore.getState().currentSessionKey).toMatch(/^agent:main:session-\d+$/);
     expect(useChatStore.getState().sessions.map((session) => session.key)).toEqual([
       'agent:main:session-recovered',
       'agent:main:main',
@@ -2416,7 +2496,8 @@ describe('chat store session resume', () => {
     expect(useChatStore.getState().sessionLabels['agent:main:session-preview']).toBe('Preview from host route');
   });
 
-  it('keeps the blank default session selected on cold start even when newer history exists', async () => {
+  it('creates a blank draft session on cold start even when newer history exists', async () => {
+    vi.setSystemTime(new Date('2026-04-28T09:30:00.000Z'));
     gatewayRpcMock.mockReset();
     gatewayRpcMock.mockImplementation((method: string) => {
       throw new Error(`Unexpected gateway RPC: ${method}`);
@@ -2499,7 +2580,7 @@ describe('chat store session resume', () => {
 
     const next = useChatStore.getState();
     expect(gatewayRpcMock).not.toHaveBeenCalled();
-    expect(next.currentSessionKey).toBe('agent:main:main');
+    expect(next.currentSessionKey).toBe(`agent:main:session-${Date.now()}`);
     expect(next.sessions.map((session) => session.key)).toEqual([
       'agent:main:session-latest',
       'agent:main:main',

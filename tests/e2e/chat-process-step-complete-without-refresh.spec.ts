@@ -185,6 +185,7 @@ test.describe('Chat process step completion', () => {
                         id: 'write-process-1',
                         name: 'write',
                         content: `Successfully wrote 149 bytes to ${toolPath}`,
+                        durationMs: 1234,
                       },
                     ],
                     timestamp: Math.floor(Date.now() / 1000),
@@ -231,9 +232,11 @@ test.describe('Chat process step completion', () => {
       ]);
       const completedSummary = page.getByTestId('chat-process-event-summary').first();
       const completedPreview = page.getByTestId('chat-process-event-preview').first();
+      const completedRow = page.getByTestId('chat-process-event-row').first();
       await expect(completedPreview).toBeVisible();
       await expect(completedSummary).toHaveCSS('font-size', '13px');
       await expect(completedPreview).toHaveCSS('font-size', '13px');
+      await expect(completedRow).not.toContainText('1.2s');
       const processActivity = page.getByTestId('chat-process-activity-label');
       await expect(processActivity).toBeVisible();
       await expect(processActivity).toHaveCSS('font-size', '13px');
