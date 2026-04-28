@@ -36,12 +36,34 @@ const makeAttachedFile = vi.fn((ref: { filePath: string; mimeType: string }) => 
 const setErrorRecoveryTimer = vi.fn();
 const getLastChatEventAt = vi.fn(() => 0);
 const upsertToolStatuses = vi.fn((_current, updates) => updates);
+const createDeltaFlushScheduler = vi.fn((state: {
+  handle: ReturnType<typeof setTimeout> | null;
+  usesAnimationFrame: boolean;
+}) => {
+  const cancelPendingDeltaFlush = () => {
+    if (state.handle) {
+      clearTimeout(state.handle);
+    }
+    state.handle = null;
+    state.usesAnimationFrame = false;
+  };
+  const scheduleDeltaFlush = (flushFn: () => void) => {
+    if (state.handle) return;
+    state.usesAnimationFrame = false;
+    state.handle = setTimeout(() => {
+      state.handle = null;
+      flushFn();
+    }, 0);
+  };
+  return { cancelPendingDeltaFlush, scheduleDeltaFlush };
+});
 
 vi.mock('@/stores/chat/helpers', () => ({
   appendAssistantMessage: (...args: unknown[]) => appendAssistantMessage(...args),
   clearErrorRecoveryTimer: (...args: unknown[]) => clearErrorRecoveryTimer(...args),
   clearHistoryPoll: (...args: unknown[]) => clearHistoryPoll(...args),
   collectToolUpdates: (...args: unknown[]) => collectToolUpdates(...args),
+  createDeltaFlushScheduler: (...args: unknown[]) => createDeltaFlushScheduler(...args),
   createLocalAssistantMessage: (...args: unknown[]) => createLocalAssistantMessage(...args),
   createToolResultProcessMessage: (...args: unknown[]) => createToolResultProcessMessage(...args),
   extractImagesAsAttachedFiles: (...args: unknown[]) => extractImagesAsAttachedFiles(...args),

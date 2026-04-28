@@ -170,22 +170,15 @@ function trimDeferredHistoryForActiveTurn(
 ): RawMessage[] {
   if (!activeTurnUserMessage) return deferredHistoryMessages;
 
-  let activeTurnHistoryIndex = -1;
-  for (let index = deferredHistoryMessages.length - 1; index >= 0; index -= 1) {
-    if (isSameActiveTurnUserMessage(deferredHistoryMessages[index], activeTurnUserMessage)) {
-      activeTurnHistoryIndex = index;
-      break;
-    }
-  }
-
-  if (activeTurnHistoryIndex < 0) {
+  const lastHistoryIndex = deferredHistoryMessages.length - 1;
+  if (!isSameActiveTurnUserMessage(deferredHistoryMessages[lastHistoryIndex], activeTurnUserMessage)) {
     return deferredHistoryMessages;
   }
 
   // `useDeferredValue` can briefly expose both hydrated and optimistic copies
-  // of the same active-turn user message. Remove the trailing duplicate cluster
-  // so the composer prompt renders exactly once.
-  let trimStartIndex = activeTurnHistoryIndex;
+  // of the same active-turn user message. Only remove a trailing duplicate
+  // cluster; earlier completed turns may legitimately have the same text.
+  let trimStartIndex = lastHistoryIndex;
   while (
     trimStartIndex > 0
     && isSameActiveTurnUserMessage(deferredHistoryMessages[trimStartIndex - 1], activeTurnUserMessage)

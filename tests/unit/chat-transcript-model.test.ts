@@ -263,6 +263,25 @@ describe('buildChatTranscriptModel', () => {
     expect(insideWindow.displayHistoryItems).toEqual([]);
   });
 
+  it('does not trim a previous completed turn when the active prompt text repeats', () => {
+    const previousUser = userMessage('previous-user', 'Same prompt.', fixedNow / 1000 - 30);
+    const previousAssistant = assistantMessage('previous-assistant', 'Previous answer.', fixedNow / 1000 - 29);
+    const activeUser = userMessage('active-user', 'Same prompt.', fixedNow / 1000);
+
+    const model = buildChatTranscriptModel(modelInput({
+      messages: [previousUser, previousAssistant, activeUser],
+      deferredHistoryMessages: [previousUser, previousAssistant],
+      sending: true,
+      lastUserMessageAt: fixedNow,
+    }));
+
+    expect(model.displayHistoryItems.map((item) => item.key)).toEqual([
+      'previous-user',
+      'previous-assistant',
+    ]);
+    expect(model.activeTurn?.userMessage).toBe(activeUser);
+  });
+
   it('keeps final replies that only contain attachments visible in the active turn', () => {
     const activeUser = userMessage('active-user', 'Create a file.');
     const final = assistantMessage('assistant-final', [
