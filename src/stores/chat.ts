@@ -796,7 +796,9 @@ function isEquivalentRecentAssistantMessage(
 }
 
 function normalizeAssistantStreamText(value: string): string {
-  return value.replace(/[\s\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u3000\uFEFF]+/g, '');
+  return value
+    .replace(/(\*\*|__|~~|`+)/g, '')
+    .replace(/[\s\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u3000\uFEFF]+/g, '');
 }
 
 function isAssistantDeltaSnapshotMessage(message: RawMessage): boolean {

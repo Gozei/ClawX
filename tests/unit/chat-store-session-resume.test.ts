@@ -1327,7 +1327,7 @@ describe('chat store session resume', () => {
     const { useChatStore } = await import('@/stores/chat');
     const persistedReply = [
       { type: 'text', text: 'The deployment finished successfully: build →' },
-      { type: 'text', text: ' release, checksum A B C 123.' },
+      { type: 'text', text: ' **release**, checksum A B C 123.' },
     ];
 
     useChatStore.setState({
@@ -1394,7 +1394,7 @@ describe('chat store session resume', () => {
               role: 'assistant',
               content: [
                 { type: 'text', text: 'The deployment finished successfully: build →' },
-                { type: 'text', text: ' release, checksum A B C 123.' },
+                { type: 'text', text: ' **release**, checksum A B C 123.' },
               ],
               timestamp: assistantTimestampSeconds,
             },
