@@ -23,6 +23,34 @@ test.describe('Deep AI Worker Electron smoke flows', () => {
     await expect(page.getByRole('button', { name: '\u4e2d\u6587' })).toBeVisible();
   });
 
+  test('keeps setup welcome actions fully visible in a compact window', async ({ electronApp }) => {
+    const page = await electronApp.firstWindow();
+    await page.waitForLoadState('domcontentloaded');
+
+    await electronApp.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      window?.setSize(1280, 720);
+    });
+
+    await expect(page.getByTestId('setup-page')).toBeVisible();
+    await expect(page.getByTestId('setup-welcome-step')).toBeVisible();
+
+    const skipButton = page.getByTestId('setup-skip-button');
+    const nextButton = page.getByTestId('setup-next-button');
+    await expect(skipButton).toBeVisible();
+    await expect(nextButton).toBeVisible();
+
+    const viewportHeight = await page.evaluate(() => window.innerHeight);
+    const skipBox = await skipButton.boundingBox();
+    const nextBox = await nextButton.boundingBox();
+
+    expect(skipBox).not.toBeNull();
+    expect(nextBox).not.toBeNull();
+    expect((skipBox?.y ?? 0) + (skipBox?.height ?? 0)).toBeLessThanOrEqual(viewportHeight);
+    expect((nextBox?.y ?? 0) + (nextBox?.height ?? 0)).toBeLessThanOrEqual(viewportHeight);
+    expect(viewportHeight - ((nextBox?.y ?? 0) + (nextBox?.height ?? 0))).toBeGreaterThanOrEqual(4);
+  });
+
   test('can skip setup and navigate to the models page', async ({ page }) => {
     await completeSetup(page);
     await expect(page.getByTestId('chat-welcome-title')).toBeVisible();

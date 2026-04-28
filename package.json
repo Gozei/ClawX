@@ -99,6 +99,7 @@
         "@jvmr/pptx-to-html": "^1.0.1",
         "@sinclair/typebox": "^0.34.48",
         "@whiskeysockets/baileys": "7.0.0-rc.9",
+        "@whiskeysockets/libsignal-node": "file:vendor/libsignal-node-direct.tar.gz",
         "@xmldom/xmldom": "^0.9.10",
         "clawhub": "^0.9.0",
         "docx-preview": "0.3.7",
