@@ -14,6 +14,7 @@ import {
   resolveProviderApiKeyForSave,
   type ProviderAuthMode,
   type ProviderType,
+  type ProviderVendorInfo,
 } from '@/lib/providers';
 import { buildConfiguredModelEntries, buildProviderAccountId } from '@/lib/provider-accounts';
 import { cn } from '@/lib/utils';
@@ -69,6 +70,58 @@ type TestStatus = {
 };
 
 const DEFAULT_PROTOCOL: NonNullable<ProviderAccount['apiProtocol']> = 'openai-completions';
+
+const PROVIDER_FORM_DEFAULTS: Partial<Record<ProviderType, {
+  baseUrl?: string;
+  apiProtocol?: NonNullable<ProviderAccount['apiProtocol']>;
+}>> = {
+  anthropic: {
+    baseUrl: 'https://api.anthropic.com/v1',
+    apiProtocol: 'anthropic-messages',
+  },
+  openai: {
+    baseUrl: 'https://api.openai.com/v1',
+    apiProtocol: 'openai-responses',
+  },
+  google: {
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+  },
+  openrouter: {
+    baseUrl: 'https://openrouter.ai/api/v1',
+    apiProtocol: DEFAULT_PROTOCOL,
+  },
+  'minimax-portal': {
+    baseUrl: 'https://api.minimax.io/anthropic',
+    apiProtocol: 'anthropic-messages',
+  },
+  'minimax-portal-cn': {
+    baseUrl: 'https://api.minimaxi.com/anthropic',
+    apiProtocol: 'anthropic-messages',
+  },
+};
+
+function getVendorDefaults(
+  vendorId: ProviderType,
+  vendors: ProviderVendorInfo[] = [],
+): {
+  label: string;
+  baseUrl: string;
+  apiProtocol: NonNullable<ProviderAccount['apiProtocol']>;
+  modelId: string;
+  authMode: ProviderAuthMode;
+} {
+  const vendor = vendors.find((entry) => entry.id === vendorId);
+  const staticInfo = PROVIDER_TYPE_INFO.find((entry) => entry.id === vendorId);
+  const fallback = PROVIDER_FORM_DEFAULTS[vendorId];
+
+  return {
+    label: vendor?.name || staticInfo?.name || vendorId,
+    baseUrl: vendor?.defaultBaseUrl || vendor?.providerConfig?.baseUrl || staticInfo?.defaultBaseUrl || fallback?.baseUrl || '',
+    apiProtocol: vendor?.providerConfig?.api || fallback?.apiProtocol || DEFAULT_PROTOCOL,
+    modelId: vendor?.defaultModelId || staticInfo?.defaultModelId || '',
+    authMode: vendor?.defaultAuthMode || (vendorId === 'ollama' ? 'local' : 'api_key'),
+  };
+}
 
 function normalizeConfiguredModelIds(account: ProviderAccount): string[] {
   return Array.from(new Set([account.model || '', ...(account.metadata?.customModels ?? [])].map((value) => value.trim()).filter(Boolean)));
@@ -140,18 +193,18 @@ function buildRowDraft(row: ModelRow): DraftState {
   };
 }
 
-function buildCreateDraft(vendorId: ProviderType): DraftState {
-  const vendor = PROVIDER_TYPE_INFO.find((entry) => entry.id === vendorId);
+function buildCreateDraft(vendorId: ProviderType, vendors: ProviderVendorInfo[] = []): DraftState {
+  const defaults = getVendorDefaults(vendorId, vendors);
   return {
     mode: 'create',
     accountId: null,
     vendorId,
-    label: vendor?.name || vendorId,
-    baseUrl: vendor?.defaultBaseUrl || '',
-    apiProtocol: DEFAULT_PROTOCOL,
-    modelId: vendor?.defaultModelId || '',
+    label: defaults.label,
+    baseUrl: defaults.baseUrl,
+    apiProtocol: defaults.apiProtocol,
+    modelId: defaults.modelId,
     apiKey: '',
-    authMode: vendorId === 'ollama' ? 'local' : 'api_key',
+    authMode: defaults.authMode,
   };
 }
 
@@ -331,7 +384,7 @@ export function ProviderConfigPanel() {
   };
 
   const handleOpenCreate = () => {
-    const nextDraft = buildCreateDraft(vendorOptions[0]?.id || 'custom');
+    const nextDraft = buildCreateDraft(vendorOptions[0]?.id || 'custom', vendorOptions);
     setDraft(nextDraft);
     setDraftTest({ state: 'idle' });
     setSheetOpen(true);
@@ -496,10 +549,11 @@ export function ProviderConfigPanel() {
       if (!current) return current;
       const next = { ...current, [key]: value };
       if (key === 'vendorId') {
-        const vendor = PROVIDER_TYPE_INFO.find((entry) => entry.id === value);
-        next.baseUrl = vendor?.defaultBaseUrl || '';
-        next.modelId = vendor?.defaultModelId || '';
-        next.authMode = value === 'ollama' ? 'local' : 'api_key';
+        const defaults = getVendorDefaults(value as ProviderType, vendorOptions);
+        next.baseUrl = defaults.baseUrl;
+        next.apiProtocol = defaults.apiProtocol;
+        next.modelId = defaults.modelId;
+        next.authMode = defaults.authMode;
       }
       return next;
     });
@@ -738,6 +792,7 @@ export function ProviderConfigPanel() {
                   value={draft.baseUrl}
                   onChange={(event) => updateDraft('baseUrl', event.target.value)}
                   placeholder="https://api.example.com/v1"
+                  readOnly={draft.vendorId !== 'custom'}
                 />
               </div>
 

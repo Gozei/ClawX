@@ -1,4 +1,4 @@
-import { completeSetup, expect, openModelsFromSettings, test } from './fixtures/electron';
+import { closeElectronApp, completeSetup, expect, getStableWindow, openModelsFromSettings, test } from './fixtures/electron';
 
 const SEEDED_ACCOUNT_ID = 'models-config-openai-e2e';
 
@@ -61,5 +61,30 @@ test.describe('Models config table', () => {
     await expect(page.getByTestId('models-config-row')).toHaveCount(2);
     await expect(page.getByText('全局默认')).toBeVisible();
     await expect(page.getByText(/^默认$/)).toHaveCount(0);
+  });
+  test('prefills the selected vendor base url and only lets custom edit it', async ({ launchElectronApp }) => {
+    const app = await launchElectronApp({ skipSetup: true });
+    try {
+      const page = await getStableWindow(app);
+
+      await openModelsFromSettings(page);
+
+      await page.getByTestId('models-config-add-button').click();
+      const vendorSelect = page.getByTestId('models-config-sheet-vendor-select');
+      const baseUrlInput = page.getByTestId('models-config-sheet-base-url-input');
+
+      await vendorSelect.selectOption('openai');
+      await expect(baseUrlInput).toHaveValue('https://api.openai.com/v1');
+      await expect(baseUrlInput).toHaveAttribute('readonly', '');
+
+      await vendorSelect.selectOption('custom');
+      await expect(baseUrlInput).toHaveValue('');
+      await expect(baseUrlInput).not.toHaveAttribute('readonly', '');
+
+      await baseUrlInput.fill('https://api.example.com/v1');
+      await expect(baseUrlInput).toHaveValue('https://api.example.com/v1');
+    } finally {
+      await closeElectronApp(app);
+    }
   });
 });

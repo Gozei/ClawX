@@ -54,6 +54,14 @@ describe('ProviderConfigPanel', () => {
     vi.clearAllMocks();
     providerStore.accounts = [];
     providerStore.statuses = [];
+    providerStore.vendors = [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        hidden: false,
+        supportsMultipleAccounts: false,
+      },
+    ];
     providerStore.defaultAccountId = null;
     agentsStore.fetchAgents.mockReset();
     agentsStore.fetchAgents.mockResolvedValue(undefined);
@@ -64,6 +72,50 @@ describe('ProviderConfigPanel', () => {
 
     expect(screen.getByTestId('models-config-empty-state')).toBeInTheDocument();
     expect(screen.getByText('还没有模型配置')).toBeInTheDocument();
+  });
+
+  it('prefills built-in provider base urls and leaves only custom editable', async () => {
+    providerStore.vendors = [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        hidden: false,
+        supportsMultipleAccounts: false,
+        providerConfig: {
+          baseUrl: 'https://api.openai.com/v1',
+          api: 'openai-responses',
+        },
+        defaultModelId: 'gpt-5.4',
+        defaultAuthMode: 'api_key',
+      },
+      {
+        id: 'custom',
+        name: 'Custom',
+        hidden: false,
+        supportsMultipleAccounts: true,
+        defaultAuthMode: 'api_key',
+      },
+    ];
+
+    render(<ProviderConfigPanel />);
+
+    fireEvent.click(screen.getByTestId('models-config-add-button'));
+
+    const baseUrlInput = await screen.findByTestId('models-config-sheet-base-url-input') as HTMLInputElement;
+    const protocolSelect = screen.getByTestId('models-config-sheet-protocol-select') as HTMLSelectElement;
+
+    expect(baseUrlInput).toHaveValue('https://api.openai.com/v1');
+    expect(baseUrlInput).toHaveAttribute('readonly');
+    expect(protocolSelect).toHaveValue('openai-responses');
+
+    fireEvent.change(screen.getByTestId('models-config-sheet-vendor-select'), { target: { value: 'custom' } });
+
+    expect(baseUrlInput).toHaveValue('');
+    expect(baseUrlInput).not.toHaveAttribute('readonly');
+
+    fireEvent.change(baseUrlInput, { target: { value: 'https://api.example.com/v1' } });
+
+    expect(baseUrlInput).toHaveValue('https://api.example.com/v1');
   });
 
   it('only enables apply after the current draft test succeeds', async () => {
@@ -224,6 +276,7 @@ describe('ProviderConfigPanel', () => {
       },
     ];
     providerStore.defaultAccountId = 'openai';
+    providerStore.updateAccount.mockResolvedValueOnce(true);
 
     render(<ProviderConfigPanel />);
 
