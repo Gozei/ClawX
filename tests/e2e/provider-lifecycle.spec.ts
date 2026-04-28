@@ -67,6 +67,9 @@ test.describe('Models config lifecycle', () => {
     await expect(page.getByTestId('models-config-row')).toHaveCount(1);
 
     await page.getByTestId(`models-config-delete-${SEEDED_ACCOUNT_ID}:${SEEDED_MODEL_ID}`).click({ force: true });
+    const confirmDialog = page.getByTestId('gateway-impact-confirm-dialog');
+    await expect(confirmDialog).toBeVisible();
+    await confirmDialog.getByRole('button', { name: /Apply and Restart|应用并重启/ }).click();
     await expect(page.getByTestId('models-config-row')).toHaveCount(0);
     await expect(page.getByTestId('models-config-empty-state')).toBeVisible();
 
@@ -84,5 +87,22 @@ test.describe('Models config lifecycle', () => {
     } finally {
       await closeElectronApp(relaunchedApp);
     }
+  });
+
+  test('keeps the saved config visible when delete confirmation is cancelled', async ({ page }) => {
+    await completeSetup(page);
+    await seedConfiguredModel(page);
+
+    await openModelsFromSettings(page);
+    await expect(page.getByTestId('models-config-row')).toHaveCount(1);
+
+    await page.getByTestId(`models-config-delete-${SEEDED_ACCOUNT_ID}:${SEEDED_MODEL_ID}`).click({ force: true });
+    const confirmDialog = page.getByTestId('gateway-impact-confirm-dialog');
+    await expect(confirmDialog).toBeVisible();
+    await confirmDialog.getByRole('button', { name: /Cancel|取消/ }).click();
+
+    await expect(page.getByTestId('gateway-impact-confirm-dialog')).toHaveCount(0);
+    await expect(page.getByTestId('models-config-row')).toHaveCount(1);
+    await expect(page.getByText(SEEDED_PROVIDER_LABEL)).toBeVisible();
   });
 });

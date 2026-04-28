@@ -8,6 +8,7 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAgentsStore } from '@/stores/agents';
 import { useProviderStore, type ProviderAccount } from '@/stores/providers';
+import { confirmGatewayImpact } from '@/lib/gateway-impact-confirm';
 import { hostApiFetch } from '@/lib/host-api';
 import {
   PROVIDER_TYPE_INFO,
@@ -271,7 +272,6 @@ export function ProviderConfigPanel() {
     createAccount,
     updateAccount,
     removeAccount,
-    setDefaultAccount,
   } = useProviderStore();
   const fetchAgents = useAgentsStore((state) => state.fetchAgents);
 
@@ -288,9 +288,8 @@ export function ProviderConfigPanel() {
   }, [refreshProviderSnapshot]);
 
   const rows = useMemo(
-    () => buildModelRows(accounts, statuses, vendors, defaultAccountId)
-      .filter((row) => !deletingRowKeys.includes(row.key)),
-    [accounts, statuses, vendors, defaultAccountId, deletingRowKeys],
+    () => buildModelRows(accounts, statuses, vendors, defaultAccountId),
+    [accounts, statuses, vendors, defaultAccountId],
   );
 
   const vendorOptions = useMemo(
@@ -374,13 +373,20 @@ export function ProviderConfigPanel() {
       await refreshProviderSnapshot();
       toast.success('已删除配置');
     } catch (error) {
-      setDeletingRowKeys((current) => current.filter((key) => key !== row.key));
       toast.error(`删除失败: ${error}`);
+    } finally {
+      setDeletingRowKeys((current) => current.filter((key) => key !== row.key));
     }
   };
 
   const handleSetDefaultModel = async (row: ModelRow) => {
     try {
+      const confirmed = await confirmGatewayImpact({
+        mode: 'refresh',
+        willApplyChanges: true,
+      });
+      if (!confirmed) return;
+
       const currentModelIds = normalizeConfiguredModelIds(row.account);
       const nextModelIds = [row.modelId, ...currentModelIds.filter((modelId) => modelId !== row.modelId)];
       const nextMetadata = { ...(row.account.metadata ?? {}) };
@@ -390,15 +396,30 @@ export function ProviderConfigPanel() {
       } else {
         delete nextMetadata.customModels;
       }
-      const updated = await updateAccount(row.account.id, {
-        model: nextModelIds[0],
-        metadata: nextMetadata,
+      const updateResult = await hostApiFetch<{ success: boolean; error?: string }>(`/api/provider-accounts/${encodeURIComponent(row.account.id)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          updates: {
+            model: nextModelIds[0],
+            metadata: nextMetadata,
+          },
+        }),
       });
-      if (!updated) return;
-      if (defaultAccountId !== row.account.id) {
-        const setDefault = await setDefaultAccount(row.account.id);
-        if (!setDefault) return;
+      if (!updateResult.success) {
+        throw new Error(updateResult.error || 'Failed to update provider account');
       }
+
+      if (defaultAccountId !== row.account.id) {
+        const defaultResult = await hostApiFetch<{ success: boolean; error?: string }>('/api/provider-accounts/default', {
+          method: 'PUT',
+          body: JSON.stringify({ accountId: row.account.id }),
+        });
+        if (!defaultResult.success) {
+          throw new Error(defaultResult.error || 'Failed to set default provider account');
+        }
+      }
+
+      await refreshProviderSnapshot();
       await fetchAgents();
       toast.success('已设为全局默认模型');
     } catch (error) {
@@ -549,6 +570,7 @@ export function ProviderConfigPanel() {
               <tbody className="divide-y divide-black/6 text-[14px] dark:divide-white/8">
                 {rows.map((row) => {
                   const result = resultsByRow[row.key];
+                  const isDeleting = deletingRowKeys.includes(row.key);
                   return (
                     <tr key={row.key} data-testid="models-config-row" className="align-top">
                       <td className="px-5 py-4">
@@ -653,8 +675,16 @@ export function ProviderConfigPanel() {
                           </Tooltip>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <Button data-testid={`models-config-delete-${row.key}`} variant="ghost" size="icon" className="h-8 w-8 rounded-full text-red-500 hover:text-red-600" aria-label="删除模型配置" onClick={() => void handleDeleteRow(row)}>
-                                <Trash2 className="h-4 w-4" />
+                              <Button
+                                data-testid={`models-config-delete-${row.key}`}
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 rounded-full text-red-500 hover:text-red-600"
+                                aria-label="删除模型配置"
+                                onClick={() => void handleDeleteRow(row)}
+                                disabled={isDeleting}
+                              >
+                                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent side="top">删除</TooltipContent>
