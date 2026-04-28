@@ -879,6 +879,7 @@ export function useChatScrollController({
   }, [isFollowingLatest, isScrollNearBottom, latestTranscriptActivitySignature]);
 
   const handleActiveTurnUserInterrupt = useCallback(() => {
+    pendingLocalSendFollowBottomRef.current = false;
     if (activeTurnScrollKey) {
       suppressedAutoFollowTurnKeyRef.current = activeTurnScrollKey;
     }
@@ -888,6 +889,41 @@ export function useChatScrollController({
     activeTurnAutoScrollAnimationRef.current = null;
     setActiveTurnUserInterruptVersion((value) => value + 1);
   }, [activeTurnScrollKey, pauseFollowingLatest]);
+
+  useLayoutEffect(() => {
+    if (!pendingLocalSendFollowBottomRef.current) return;
+    if (showSessionLoadingState || isEmpty || !scrollContainerRef.current) return;
+
+    isAtBottomRef.current = true;
+    setIsAtBottom(true);
+    markProgrammaticScroll(ACTIVE_TURN_AUTO_SCROLL_DURATION_MS + 240);
+
+    let frame1 = 0;
+    let frame2 = 0;
+    frame1 = requestAnimationFrame(() => {
+      chatListRef.current?.scrollToIndex?.({
+        index: Math.max(chatListItemCount - 1, 0),
+        align: 'end',
+        behavior: 'auto',
+      });
+      pinScrollToBottom(ACTIVE_TURN_AUTO_SCROLL_DURATION_MS + 240);
+      frame2 = requestAnimationFrame(() => {
+        pinScrollToBottom(ACTIVE_TURN_AUTO_SCROLL_DURATION_MS + 240);
+      });
+    });
+
+    return () => {
+      cancelAnimationFrame(frame1);
+      cancelAnimationFrame(frame2);
+    };
+  }, [
+    chatListItemCount,
+    isEmpty,
+    latestTranscriptActivitySignature,
+    markProgrammaticScroll,
+    pinScrollToBottom,
+    showSessionLoadingState,
+  ]);
 
   useLayoutEffect(() => {
     const scrollElement = scrollContainerNode;
