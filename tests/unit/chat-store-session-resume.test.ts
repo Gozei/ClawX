@@ -1323,6 +1323,124 @@ describe('chat store session resume', () => {
     });
   });
 
+  it('does not append a final event that only differs from history by assistant whitespace', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+    const persistedReply = [
+      { type: 'text', text: 'The deployment finished successfully: build →' },
+      { type: 'text', text: ' release, checksum A B C 123.' },
+    ];
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Summarize deployment status.', timestamp: userTimestampSeconds },
+        {
+          id: 'assistant-history',
+          role: 'assistant',
+          content: persistedReply,
+          timestamp: assistantTimestampSeconds,
+        },
+      ],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: { 'agent:main:main': true },
+      sending: true,
+      activeRunId: 'run-final-duplicate',
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: userTimestampMs,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: 'running',
+    });
+
+    useChatStore.getState().handleChatEvent({
+      state: 'final',
+      runId: 'run-final-duplicate',
+      sessionKey: 'agent:main:main',
+      message: {
+        id: 'assistant-live-final',
+        role: 'assistant',
+        content: 'The deployment finished successfully: build → release, checksum ABC123.',
+        timestamp: assistantTimestampSeconds + 1,
+      },
+    });
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual(['user-1', 'assistant-history']);
+    expect(next.sending).toBe(false);
+    expect(next.activeRunId).toBeNull();
+    expect(next.streamingMessage).toBeNull();
+  });
+
+  it('dedupes assistant messages that already exist in loaded history with only whitespace differences', async () => {
+    hostApiFetchMock.mockReset();
+    hostApiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/sessions/history') {
+        return Promise.resolve({
+          success: true,
+          resolved: true,
+          messages: [
+            { id: 'user-1', role: 'user', content: 'Summarize deployment status.', timestamp: userTimestampSeconds },
+            {
+              id: 'assistant-history',
+              role: 'assistant',
+              content: [
+                { type: 'text', text: 'The deployment finished successfully: build →' },
+                { type: 'text', text: ' release, checksum A B C 123.' },
+              ],
+              timestamp: assistantTimestampSeconds,
+            },
+            {
+              id: 'assistant-live-final',
+              role: 'assistant',
+              content: 'The deployment finished successfully: build → release, checksum ABC123.',
+              timestamp: assistantTimestampSeconds + 1,
+            },
+          ],
+        });
+      }
+      return Promise.resolve({ success: true });
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: null,
+    });
+
+    await useChatStore.getState().loadHistory();
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual(['user-1', 'assistant-history']);
+  });
+
   it('flushes live assistant deltas on the next animation frame', async () => {
     const rafCallbacks: FrameRequestCallback[] = [];
     const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
