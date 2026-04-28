@@ -180,6 +180,52 @@ describe('ProviderConfigPanel', () => {
     expect(applyButton).toBeDisabled();
   });
 
+  it('uses the configured model in the test result summary instead of the provider reply', async () => {
+    providerStore.accounts = [
+      {
+        id: 'custom-mini',
+        vendorId: 'custom',
+        label: 'MiniMax',
+        authMode: 'api_key',
+        baseUrl: 'https://api.example.com/v1',
+        apiProtocol: 'openai-completions',
+        model: 'minimax2.7',
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerStore.statuses = [
+      {
+        id: 'custom-mini',
+        type: 'custom',
+        name: 'MiniMax',
+        hasKey: true,
+        keyMasked: 'sk-***',
+        enabled: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+        model: 'minimax2.7',
+      },
+    ];
+    hostApiFetchMock.mockResolvedValue({
+      valid: true,
+      latencyMs: 4005,
+      output: '连接成功 模型: Meta-L',
+      model: 'minimax2.7',
+    });
+
+    render(<ProviderConfigPanel />);
+
+    fireEvent.click(screen.getByTestId('models-config-test-custom-mini:minimax2.7'));
+
+    await waitFor(() => {
+      expect(screen.getByText('连接成功，模型：minimax2.7')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('连接成功 模型: Meta-L')).not.toBeInTheDocument();
+  });
+
   it('collapses duplicate rows that point to the same vendor/model signature', () => {
     providerStore.accounts = [
       {

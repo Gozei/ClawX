@@ -62,6 +62,7 @@ type DraftState = {
 type TestStatus = {
   state: 'idle' | 'running' | 'success' | 'error';
   signature?: string;
+  model?: string;
   output?: string;
   latencyMs?: number;
   error?: string;
@@ -227,6 +228,19 @@ function formatTestSummary(test?: TestStatus): string {
   return test.applied ? '成功并已应用' : '成功';
 }
 
+function formatConnectionTestOutput(
+  test: TestStatus | undefined,
+  fallbackModelId?: string,
+  emptyLabel = '尚未返回',
+): string {
+  if (!test) return emptyLabel;
+  if (test.state === 'success') {
+    const testedModel = test.model?.trim() || fallbackModelId?.trim();
+    return testedModel ? `连接成功，模型：${testedModel}` : test.output || '连接成功';
+  }
+  return test.error || test.output || emptyLabel;
+}
+
 function getStatusTone(test?: TestStatus): string {
   if (test?.state === 'success') {
     return 'text-emerald-600 dark:text-emerald-400';
@@ -375,6 +389,7 @@ export function ProviderConfigPanel() {
     return {
       state: result.valid ? 'success' : 'error',
       signature: getDraftSignature(payload),
+      model: result.model || payload.modelId.trim(),
       output: result.output,
       latencyMs: result.latencyMs,
       error: result.error,
@@ -651,7 +666,7 @@ export function ProviderConfigPanel() {
                       <td className="px-4 py-4">
                         <div className="min-w-[220px] max-w-[320px]">
                           <div className="line-clamp-2 text-[13px] leading-6 text-foreground/68">
-                            {result?.output || result?.error || '尚未返回'}
+                            {formatConnectionTestOutput(result, row.modelId)}
                           </div>
                         </div>
                       </td>
@@ -824,7 +839,7 @@ export function ProviderConfigPanel() {
                   <div>最近测试：{formatTimestamp(draftTest.testedAt)}</div>
                   <div>回复延迟：{typeof draftTest.latencyMs === 'number' ? `${draftTest.latencyMs} ms` : '—'}</div>
                   <div className="rounded-xl border border-black/6 bg-background px-3 py-2 dark:border-white/8">
-                    {draftTest.output || draftTest.error || '尚未测试'}
+                    {formatConnectionTestOutput(draftTest, draft.modelId, '尚未测试')}
                   </div>
                 </div>
               </div>
