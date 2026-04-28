@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { useSettingsStore } from '@/stores/settings';
 import { useGatewayStore } from '@/stores/gateway';
 import { useUpdateStore } from '@/stores/update';
+import changelogRaw from '../../../CHANGELOG.md?raw';
 import { UpdateSettings } from '@/components/settings/UpdateSettings';
 import { LogsPanel } from '@/components/settings/LogsPanel';
 import {
@@ -93,6 +94,20 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
   const { status: gatewayStatus, restart: restartGateway } = useGatewayStore();
   const currentVersion = useUpdateStore((state) => state.currentVersion);
   const updateSetAutoDownload = useUpdateStore((state) => state.setAutoDownload);
+
+  // Extract version summary from CHANGELOG.md
+  const versionSummary = (() => {
+    const lines = changelogRaw.split('\n');
+    const versionIdx = lines.findIndex((l) => l.startsWith('## v'));
+    if (versionIdx === -1) return '';
+    for (let i = versionIdx + 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line && !line.startsWith('#') && !line.startsWith('##') && !line.startsWith('###')) {
+        return line;
+      }
+    }
+    return '';
+  })();
   const [controlUiInfo, setControlUiInfo] = useState<ControlUiInfo | null>(null);
   const [openclawCliCommand, setOpenclawCliCommand] = useState('');
   const [openclawCliError, setOpenclawCliError] = useState<string | null>(null);
@@ -1252,6 +1267,9 @@ export function AppSettingsContent({ embedded = false }: AppSettingsContentProps
                 </p>
                 <p>{t('about.basedOn')}</p>
                 <p>{t('about.version', { version: currentVersion })}</p>
+                {versionSummary && (
+                  <p className="text-muted-foreground">{versionSummary}</p>
+                )}
                 <div className="flex gap-4 pt-3">
                   <Button
                     variant="link"

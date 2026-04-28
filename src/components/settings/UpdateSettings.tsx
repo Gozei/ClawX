@@ -10,21 +10,6 @@ import { useUpdateStore } from '@/stores/update';
 import { useTranslation } from 'react-i18next';
 import { ChangelogDialog } from '@/components/settings/ChangelogDialog';
 import { MarkdownRenderer } from '@/pages/Chat/MarkdownRenderer';
-import changelogRaw from '../../../CHANGELOG.md?raw';
-
-// Extract the version summary from CHANGELOG.md (first non-heading line after version)
-function getVersionSummary(): string {
-  const lines = changelogRaw.split('\n');
-  const versionIdx = lines.findIndex((l) => l.startsWith('## v'));
-  if (versionIdx === -1) return '';
-  for (let i = versionIdx + 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line && !line.startsWith('#') && !line.startsWith('##') && !line.startsWith('###')) {
-      return line.replace(/^\*\*/, '').replace(/\*\*$/, '');
-    }
-  }
-  return '';
-}
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -184,9 +169,6 @@ export function UpdateSettings() {
         <div className="space-y-1">
           <p className="text-sm font-medium">{t('updates.currentVersion')}</p>
           <p className="text-2xl font-bold">v{currentVersion}</p>
-          {getVersionSummary() && (
-            <p className="text-sm text-muted-foreground">{getVersionSummary()}</p>
-          )}
         </div>
         {renderStatusIcon()}
       </div>
