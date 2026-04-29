@@ -130,7 +130,6 @@ const NO_RESPONSE_RECOVERY_DELAY_MS = 5_000;
 const NO_RESPONSE_RECOVERY_MAX_WINDOW_MS = 10 * 60_000;
 const CHAT_EVENT_DEDUPE_TTL_MS = 30_000;
 const AUTO_SESSION_LABEL_MAX_CHARS = 30;
-const ASSISTANT_CONTAINED_DUPLICATE_MIN_CHARS = 32;
 const _chatEventDedupe = new Map<string, number>();
 const _sessionViewSnapshots = new Map<string, SessionViewSnapshot>();
 const _historyIncompleteRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -882,16 +881,34 @@ function getContainedAssistantDuplicateDirection(
 
   const existingText = normalizeAssistantStreamText(getComparableMessageText(existing));
   const candidateText = normalizeAssistantStreamText(getComparableMessageText(candidate));
+  if (existingText === candidateText) return null;
+
+  // First check prefix match - this is unambiguous
+  if (candidateText.startsWith(existingText)) return 'candidate-contains-existing';
+  if (existingText.startsWith(candidateText)) return 'existing-contains-candidate';
+
+  // For substring matching (not prefix), use heuristics to avoid false positives.
+  // We only dedupe when:
+  // 1. The existing message has meaningful length (>= 6 chars after normalization)
+  // 2. AND the candidate is meaningfully longer (ratio >= 1.2)
+  // This handles cases like status prefixes (e.g., "Tavily...\n\n" + original message)
+  const MIN_CONTENT_LENGTH = 6;
+  const MIN_LENGTH_RATIO = 1.2;
   if (
-    existingText.length < ASSISTANT_CONTAINED_DUPLICATE_MIN_CHARS
-    || candidateText.length < ASSISTANT_CONTAINED_DUPLICATE_MIN_CHARS
-    || existingText === candidateText
+    existingText.length >= MIN_CONTENT_LENGTH
+    && candidateText.length >= existingText.length * MIN_LENGTH_RATIO
+    && candidateText.includes(existingText)
   ) {
-    return null;
+    return 'candidate-contains-existing';
+  }
+  if (
+    candidateText.length >= MIN_CONTENT_LENGTH
+    && existingText.length >= candidateText.length * MIN_LENGTH_RATIO
+    && existingText.includes(candidateText)
+  ) {
+    return 'existing-contains-candidate';
   }
 
-  if (candidateText.includes(existingText)) return 'candidate-contains-existing';
-  if (existingText.includes(candidateText)) return 'existing-contains-candidate';
   return null;
 }
 
