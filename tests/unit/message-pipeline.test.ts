@@ -11,8 +11,9 @@ import {
   normalizeMessagePipeline,
   filterMessagePipeline,
   dedupeMessagePipeline,
+  isSettledFinalAssistantMessage,
 } from '@/utils/messagePipeline';
-import type { RawMessage } from '@/stores/chat/types';
+import type { ContentBlock, RawMessage } from '@/stores/chat/types';
 
 describe('normalizeAssistantStreamText', () => {
   it('removes markdown bold formatting', () => {
@@ -188,6 +189,145 @@ describe('dedupeAssistantMessages', () => {
     const deduped = dedupeAssistantMessages(messages);
     expect(deduped).toHaveLength(2);
     expect(deduped[1]._attachedFiles).toHaveLength(2);
+  });
+
+  it('keeps candidate when existing is thinking-only and candidate has final text with the same id', () => {
+    const messages: RawMessage[] = [
+      { id: 'u1', role: 'user', content: 'hi' },
+      { id: 'msg_abc', role: 'assistant', content: [{ type: 'thinking', thinking: '...' }] },
+      {
+        id: 'msg_abc',
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '...' },
+          { type: 'text', text: 'Hello!' },
+        ],
+      },
+    ];
+    const deduped = dedupeAssistantMessages(messages);
+    expect(deduped).toHaveLength(2);
+    const blocks = deduped[1].content as ContentBlock[];
+    expect(blocks.find((block) => block.type === 'text')?.text).toBe('Hello!');
+  });
+
+  it('keeps richer message when normalized text is equal but candidate has thinking', () => {
+    const messages: RawMessage[] = [
+      { id: 'u1', role: 'user', content: 'hi' },
+      { id: 'a1', role: 'assistant', content: 'Hello world' },
+      {
+        id: 'a2',
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '...' },
+          { type: 'text', text: 'Hello world' },
+        ],
+      },
+    ];
+    const deduped = dedupeAssistantMessages(messages);
+    const blocks = deduped[1].content as ContentBlock[];
+    expect(Array.isArray(deduped[1].content)).toBe(true);
+    expect(blocks.some((block) => block.type === 'thinking')).toBe(true);
+  });
+
+  it('does not collapse tool_use-only intermediate messages into finals through empty-prefix matching', () => {
+    const messages: RawMessage[] = [
+      { id: 'u1', role: 'user', content: 'hi' },
+      {
+        id: 'a-tool',
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 't1', name: 'read', input: {} }],
+      },
+      {
+        id: 'a-final',
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '...' },
+          { type: 'text', text: 'The answer is 42' },
+        ],
+      },
+    ];
+    const deduped = dedupeAssistantMessages(messages);
+    expect(deduped).toHaveLength(3);
+    expect(deduped.map((message) => message.id)).toEqual(['u1', 'a-tool', 'a-final']);
+  });
+});
+
+describe('isSettledFinalAssistantMessage', () => {
+  it('treats stream-delta-snapshot-* messages as unsettled', () => {
+    const msg: RawMessage = {
+      id: 'stream-delta-snapshot-7',
+      role: 'assistant',
+      content: 'partial',
+    };
+    expect(isSettledFinalAssistantMessage(msg)).toBe(false);
+  });
+
+  it('treats *-delta-snapshot suffix messages as unsettled', () => {
+    const msg: RawMessage = {
+      id: 'msg_abc-delta-snapshot',
+      role: 'assistant',
+      content: 'partial',
+    };
+    expect(isSettledFinalAssistantMessage(msg)).toBe(false);
+  });
+
+  it('treats tool-only content blocks as unsettled', () => {
+    const msg: RawMessage = {
+      id: 'a',
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 't', name: 'x', input: {} }],
+    };
+    expect(isSettledFinalAssistantMessage(msg)).toBe(false);
+  });
+
+  it('treats OpenAI tool_calls-only messages as unsettled', () => {
+    const msg: RawMessage & { tool_calls: Array<{ id: string; function: { name: string } }> } = {
+      id: 'a',
+      role: 'assistant',
+      content: '',
+      tool_calls: [{ id: 'call-1', function: { name: 'x' } }],
+    };
+    expect(isSettledFinalAssistantMessage(msg)).toBe(false);
+  });
+
+  it('treats stop_reason=tool_use as unsettled even with text', () => {
+    const msg: RawMessage = {
+      id: 'a',
+      role: 'assistant',
+      stopReason: 'tool_use',
+      content: [{ type: 'text', text: 'I will use a tool' }],
+    };
+    expect(isSettledFinalAssistantMessage(msg)).toBe(false);
+  });
+
+  it('treats text without stopReason but with tool blocks as unsettled', () => {
+    const msg: RawMessage = {
+      id: 'a',
+      role: 'assistant',
+      content: [
+        { type: 'text', text: 'using tool' },
+        { type: 'tool_use', id: 't', name: 'x', input: {} },
+      ],
+    };
+    expect(isSettledFinalAssistantMessage(msg)).toBe(false);
+  });
+
+  it('treats internal control messages as unsettled', () => {
+    expect(isSettledFinalAssistantMessage({ id: 'a', role: 'assistant', content: 'HEARTBEAT_OK' })).toBe(false);
+    expect(isSettledFinalAssistantMessage({ id: 'a', role: 'assistant', content: 'NO_REPLY' })).toBe(false);
+  });
+
+  it('accepts thinking plus final text as settled', () => {
+    const msg: RawMessage = {
+      id: 'a',
+      role: 'assistant',
+      stopReason: 'end_turn',
+      content: [
+        { type: 'thinking', thinking: '...' },
+        { type: 'text', text: 'Final' },
+      ],
+    };
+    expect(isSettledFinalAssistantMessage(msg)).toBe(true);
   });
 });
 

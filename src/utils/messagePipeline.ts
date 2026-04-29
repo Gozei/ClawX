@@ -147,6 +147,7 @@ function normalizeToolName(name: string | undefined): string {
 function normalizeToolStatus(rawStatus: unknown, fallback: 'running' | 'completed' | 'error'): ToolStatus['status'] {
   const status = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : '';
   if (status.includes('retry')) return 'retrying';
+  if (status === 'running' || status === 'started' || status === 'in_progress' || status === 'in-progress') return 'running';
   if (status === 'error' || status === 'failed') return 'error';
   if (status === 'completed' || status === 'success' || status === 'done') return 'completed';
   return fallback;
@@ -416,24 +417,46 @@ export function enrichCachedAttachments(
 }
 
 function isToolOnlyMessage(message: RawMessage | undefined): boolean {
-  if (!message || message.role !== 'assistant') return false;
+  if (!message) return false;
+  if (isToolResultRole(message.role)) return true;
+
+  const msg = message as unknown as Record<string, unknown>;
   const content = message.content;
-  if (!Array.isArray(content)) return false;
+  const toolCalls = msg.tool_calls ?? msg.toolCalls;
+  const hasOpenAITools = Array.isArray(toolCalls) && toolCalls.length > 0;
+
+  if (!Array.isArray(content)) {
+    if (hasOpenAITools) {
+      const textContent = typeof content === 'string' ? content.trim() : '';
+      return textContent.length === 0;
+    }
+    return false;
+  }
 
   let hasText = false;
-  let hasToolContent = false;
+  let hasToolContent = hasOpenAITools;
+  let hasNonToolContent = false;
 
   for (const block of content as ContentBlock[]) {
-    if (block.type === 'text' && block.text?.trim()) hasText = true;
     if (
       block.type === 'tool_use'
       || block.type === 'toolCall'
       || block.type === 'tool_result'
       || block.type === 'toolResult'
-    ) hasToolContent = true;
+    ) {
+      hasToolContent = true;
+      continue;
+    }
+    if (block.type === 'text' && block.text?.trim()) {
+      hasText = true;
+      continue;
+    }
+    if (block.type === 'image') {
+      hasNonToolContent = true;
+    }
   }
 
-  return hasToolContent && !hasText;
+  return hasToolContent && !hasText && !hasNonToolContent;
 }
 
 // ============================================================================
@@ -518,25 +541,83 @@ function normalizeAssistantStreamText(value: string): string {
     .replace(/[\s\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u3000\uFEFF]+/g, '');
 }
 
-function isSettledFinalAssistantMessage(message: RawMessage | undefined): boolean {
-  if (!message || message.role !== 'assistant') return false;
+function isAssistantDeltaSnapshotMessage(message: RawMessage): boolean {
+  if (message.role !== 'assistant') return false;
+  const id = typeof message.id === 'string' ? message.id : '';
+  return id.startsWith('stream-delta-snapshot-') || id.endsWith('-delta-snapshot');
+}
+
+function isInternalAssistantControlMessage(message: RawMessage | null | undefined): boolean {
+  if (!message) return false;
+  const role = message.role ?? 'assistant';
+  if (role !== 'assistant') return false;
+  return isInternalMessage({
+    ...message,
+    role,
+  });
+}
+
+function normalizeStopReason(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase().replace(/[-_\s]/g, '') : '';
+}
+
+function isToolUseStopReason(value: unknown): boolean {
+  return normalizeStopReason(value) === 'tooluse';
+}
+
+function hasToolInteractionContent(message: RawMessage): boolean {
   const content = message.content;
-  if (typeof content !== 'string' && !Array.isArray(content)) return false;
-
-  if (typeof content === 'string') return content.trim().length > 0;
-  if (!Array.isArray(content)) return false;
-
-  for (const block of content as ContentBlock[]) {
-    if (block.type === 'text' && block.text?.trim()) return true;
-    if (
-      block.type === 'tool_use'
-      || block.type === 'toolCall'
-      || block.type === 'tool_result'
-      || block.type === 'toolResult'
-    ) return true;
+  if (Array.isArray(content)) {
+    for (const block of content as ContentBlock[]) {
+      if (
+        block.type === 'tool_use'
+        || block.type === 'toolCall'
+        || block.type === 'tool_result'
+        || block.type === 'toolResult'
+      ) {
+        return true;
+      }
+    }
   }
 
+  const msg = message as unknown as Record<string, unknown>;
+  const toolCalls = msg.tool_calls ?? msg.toolCalls;
+  return Array.isArray(toolCalls) && toolCalls.length > 0;
+}
+
+function hasNonToolAssistantContent(message: RawMessage | undefined): boolean {
+  if (!message) return false;
+  if (Array.isArray(message._attachedFiles) && message._attachedFiles.length > 0) return true;
+  if (typeof message.content === 'string' && message.content.trim()) return true;
+
+  const content = message.content;
+  if (Array.isArray(content)) {
+    for (const block of content as ContentBlock[]) {
+      if (block.type === 'text' && block.text && block.text.trim()) return true;
+      if (block.type === 'thinking' && block.thinking && block.thinking.trim()) return true;
+      if (block.type === 'image') return true;
+    }
+  }
+
+  const msg = message as unknown as Record<string, unknown>;
+  if (typeof msg.text === 'string' && msg.text.trim()) return true;
+
   return false;
+}
+
+function isSettledFinalAssistantMessage(message: RawMessage | undefined): boolean {
+  if (!message || message.role !== 'assistant') return false;
+  if (isAssistantDeltaSnapshotMessage(message)) return false;
+  if (isInternalAssistantControlMessage(message)) return false;
+  if (isToolOnlyMessage(message)) return false;
+  if (!hasNonToolAssistantContent(message)) return false;
+  if (isToolUseStopReason(message.stopReason)) return false;
+
+  if (!message.stopReason && hasToolInteractionContent(message)) {
+    return false;
+  }
+
+  return true;
 }
 
 type DuplicateDirection = 'candidate-contains-existing' | 'existing-contains-candidate' | null;
@@ -551,6 +632,7 @@ function getContainedAssistantDuplicateDirection(
   const existingText = normalizeAssistantStreamText(getComparableMessageText(existing));
   const candidateText = normalizeAssistantStreamText(getComparableMessageText(candidate));
   if (existingText === candidateText) return null;
+  if (!existingText || !candidateText) return null;
 
   // First check prefix match - this is unambiguous
   if (candidateText.startsWith(existingText)) return 'candidate-contains-existing';
@@ -575,6 +657,23 @@ function getContainedAssistantDuplicateDirection(
   }
 
   return null;
+}
+
+function getAssistantContentRichnessScore(message: RawMessage): number {
+  const content = message.content;
+  if (!Array.isArray(content)) {
+    return typeof content === 'string' && content.trim() ? 1 : 0;
+  }
+
+  let score = 0;
+  for (const block of content as ContentBlock[]) {
+    if (block.type === 'text' && block.text?.trim()) score += 2;
+    if (block.type === 'thinking' && block.thinking?.trim()) score += 1;
+    if (block.type === 'tool_use' || block.type === 'toolCall') score += 1;
+    if (block.type === 'tool_result' || block.type === 'toolResult') score += 1;
+    if (block.type === 'image') score += 1;
+  }
+  return score;
 }
 
 function mergeAttachedFilesForDuplicate(preferred: RawMessage, duplicate: RawMessage): RawMessage {
@@ -641,10 +740,22 @@ export function dedupeAssistantMessages(messages: RawMessage[]): RawMessage[] {
       if (existingIndex >= 0) {
         const existing = currentTurnAssistants[existingIndex];
         const direction = getContainedAssistantDuplicateDirection(existing, message);
-        const shouldPreferCandidate = direction === 'candidate-contains-existing';
-        const replacement = shouldPreferCandidate
-          ? mergeAttachedFilesForDuplicate(message, existing)
-          : mergeAttachedFilesForDuplicate(existing, message);
+        const existingSettled = isSettledFinalAssistantMessage(existing);
+        const candidateSettled = isSettledFinalAssistantMessage(message);
+        const shouldPreferCandidate = direction === 'candidate-contains-existing'
+          || (
+            direction == null
+            && (
+              (!existingSettled && candidateSettled)
+              || (
+                existingSettled === candidateSettled
+                && getAssistantContentRichnessScore(message) > getAssistantContentRichnessScore(existing)
+              )
+            )
+          );
+        const preferred = shouldPreferCandidate ? message : existing;
+        const dropped = shouldPreferCandidate ? existing : message;
+        const replacement = mergeAttachedFilesForDuplicate(preferred, dropped);
         const dedupedIndex = deduped.indexOf(existing);
         if (dedupedIndex >= 0) {
           deduped[dedupedIndex] = replacement;
@@ -684,8 +795,12 @@ export {
   buildMessageContentKey,
   getComparableMessageText,
   normalizeAssistantStreamText,
+  isAssistantDeltaSnapshotMessage,
+  isInternalAssistantControlMessage,
+  isToolOnlyMessage,
+  hasNonToolAssistantContent,
+  hasToolInteractionContent,
+  isToolUseStopReason,
   isSettledFinalAssistantMessage,
-  getContainedAssistantDuplicateDirection,
-  mergeAttachedFilesForDuplicate,
   messageExistsByIdentityOrText,
 };

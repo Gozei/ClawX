@@ -3,6 +3,10 @@ import { invokeIpc } from '@/lib/api-client';
 import { normalizeAppError } from '@/lib/error-model';
 import { hostApiFetch } from '@/lib/host-api';
 import { sanitizeToolOutputText } from '@/lib/tool-output-text';
+import {
+  hasNonToolAssistantContent,
+  isToolOnlyMessage,
+} from '@/utils/messagePipeline';
 import type { AttachedFileMeta, ChatComposerDraft, ChatSession, ContentBlock, RawMessage, ToolStatus } from './types';
 
 export const CHAT_HISTORY_RPC_TIMEOUT_MS = 60_000;
@@ -963,52 +967,6 @@ function getCanonicalPrefixFromSessions(sessions: ChatSession[]): string | null 
   return `${parts[0]}:${parts[1]}`;
 }
 
-function isToolOnlyMessage(message: RawMessage | undefined): boolean {
-  if (!message) return false;
-  if (isToolResultRole(message.role)) return true;
-
-  const msg = message as unknown as Record<string, unknown>;
-  const content = message.content;
-
-  // Check OpenAI-format tool_calls field (real-time streaming from OpenAI-compatible models)
-  const toolCalls = msg.tool_calls ?? msg.toolCalls;
-  const hasOpenAITools = Array.isArray(toolCalls) && toolCalls.length > 0;
-
-  if (!Array.isArray(content)) {
-    // Content is not an array — check if there's OpenAI-format tool_calls
-    if (hasOpenAITools) {
-      // Has tool calls but content might be empty/string — treat as tool-only
-      // if there's no meaningful text content
-      const textContent = typeof content === 'string' ? content.trim() : '';
-      return textContent.length === 0;
-    }
-    return false;
-  }
-
-  let hasTool = hasOpenAITools;
-  let hasText = false;
-  let hasNonToolContent = false;
-
-  for (const block of content as ContentBlock[]) {
-    if (block.type === 'tool_use' || block.type === 'tool_result' || block.type === 'toolCall' || block.type === 'toolResult') {
-      hasTool = true;
-      continue;
-    }
-    if (block.type === 'text' && block.text && block.text.trim()) {
-      hasText = true;
-      continue;
-    }
-    // Only actual image output disqualifies a tool-only message.
-    // Thinking blocks are internal reasoning that can accompany tool_use — they
-    // should NOT prevent the message from being treated as an intermediate tool step.
-    if (block.type === 'image') {
-      hasNonToolContent = true;
-    }
-  }
-
-  return hasTool && !hasText && !hasNonToolContent;
-}
-
 function isToolResultRole(role: unknown): boolean {
   if (!role) return false;
   const normalized = String(role).toLowerCase();
@@ -1073,7 +1031,7 @@ function normalizeToolFailureMessage(value: unknown): string | undefined {
 
 function normalizeToolStatus(rawStatus: unknown, fallback: 'running' | 'completed' | 'error'): ToolStatus['status'] {
   const status = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : '';
-  if (status === 'running' || status === 'started' || status === 'in_progress') return 'running';
+  if (status === 'running' || status === 'started' || status === 'in_progress' || status === 'in-progress') return 'running';
   if (status.includes('retry')) return 'retrying';
   if (status === 'error' || status === 'failed') return 'error';
   if (status === 'completed' || status === 'success' || status === 'done') return 'completed';
@@ -1296,26 +1254,6 @@ const EMPTY_ASSISTANT_RESPONSE_ERROR = translateChat(
   'sessionErrors.emptyAssistantResponse',
   'The selected provider returned an empty response. Check the provider base URL, API protocol, model, and API key.',
 );
-
-function hasNonToolAssistantContent(message: RawMessage | undefined): boolean {
-  if (!message) return false;
-  if (Array.isArray(message._attachedFiles) && message._attachedFiles.length > 0) return true;
-  if (typeof message.content === 'string' && message.content.trim()) return true;
-
-  const content = message.content;
-  if (Array.isArray(content)) {
-    for (const block of content as ContentBlock[]) {
-      if (block.type === 'text' && block.text && block.text.trim()) return true;
-      if (block.type === 'thinking' && block.thinking && block.thinking.trim()) return true;
-      if (block.type === 'image') return true;
-    }
-  }
-
-  const msg = message as unknown as Record<string, unknown>;
-  if (typeof msg.text === 'string' && msg.text.trim()) return true;
-
-  return false;
-}
 
 function isAssistantLikeRole(role: unknown): boolean {
   return role === 'assistant' || role == null || role === '';

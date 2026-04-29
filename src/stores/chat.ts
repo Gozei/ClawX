@@ -32,6 +32,12 @@ import {
   getMessageText,
   isPreCompactionMemoryFlushPrompt,
   isInternalMessage,
+  isAssistantDeltaSnapshotMessage,
+  isInternalAssistantControlMessage,
+  isSettledFinalAssistantMessage,
+  isToolOnlyMessage,
+  hasNonToolAssistantContent,
+  hasToolInteractionContent,
 } from '../utils/messagePipeline';
 import { validateMessageArray } from '../utils/messageValidation';
 import { buildCronSessionHistoryPath, isCronSessionKey } from './chat/cron-session-utils';
@@ -805,12 +811,6 @@ function isEquivalentRecentAssistantMessage(
   });
 }
 
-function isAssistantDeltaSnapshotMessage(message: RawMessage): boolean {
-  if (message.role !== 'assistant') return false;
-  const id = typeof message.id === 'string' ? message.id : '';
-  return id.startsWith('stream-delta-snapshot-') || id.endsWith('-delta-snapshot');
-}
-
 function assistantTextContainsSnapshot(message: RawMessage, snapshot: RawMessage): boolean {
   const messageText = normalizeAssistantStreamText(getComparableMessageText(message));
   const snapshotText = normalizeAssistantStreamText(getComparableMessageText(snapshot));
@@ -833,56 +833,10 @@ function removeContainedAssistantDeltaSnapshots(
   return changed ? nextMessages : messages;
 }
 
-function normalizeStopReason(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase().replace(/[-_\s]/g, '') : '';
-}
-
-function isToolUseStopReason(value: unknown): boolean {
-  return normalizeStopReason(value) === 'tooluse';
-}
-
-function hasToolInteractionContent(message: RawMessage): boolean {
-  const content = message.content;
-  if (Array.isArray(content)) {
-    for (const block of content as ContentBlock[]) {
-      if (
-        block.type === 'tool_use'
-        || block.type === 'toolCall'
-        || block.type === 'tool_result'
-        || block.type === 'toolResult'
-      ) {
-        return true;
-      }
-    }
-  }
-
-  const msg = message as unknown as Record<string, unknown>;
-  const toolCalls = msg.tool_calls ?? msg.toolCalls;
-  return Array.isArray(toolCalls) && toolCalls.length > 0;
-}
-
 function hasRenderableAssistantPayload(message: RawMessage): boolean {
   return hasNonToolAssistantContent(message)
     || isToolOnlyMessage(message)
     || hasToolInteractionContent(message);
-}
-
-function isSettledFinalAssistantMessage(message: RawMessage | undefined): boolean {
-  if (!message || message.role !== 'assistant') return false;
-  if (isAssistantDeltaSnapshotMessage(message)) return false;
-  if (isInternalAssistantControlMessage(message)) return false;
-  if (isToolOnlyMessage(message)) return false;
-  if (!hasNonToolAssistantContent(message)) return false;
-  if (isToolUseStopReason(message.stopReason)) return false;
-
-  // Text-bearing tool-use turns are process messages, not final replies.  A
-  // final assistant message can still contain process blocks when the provider
-  // sends a stop reason, so only classify missing-stop tool turns as process.
-  if (!message.stopReason && hasToolInteractionContent(message)) {
-    return false;
-  }
-
-  return true;
 }
 
 function getMessageTimestampMs(message: RawMessage | undefined): number | null {
@@ -2260,62 +2214,6 @@ function getCanonicalPrefixFromSessionKey(sessionKey: string): string | null {
   return `${parts[0]}:${parts[1]}`;
 }
 
-function isToolOnlyMessage(message: RawMessage | undefined): boolean {
-  if (!message) return false;
-  if (isToolResultRole(message.role)) return true;
-
-  const msg = message as unknown as Record<string, unknown>;
-  const content = message.content;
-
-  // Check OpenAI-format tool_calls field (real-time streaming from OpenAI-compatible models)
-  const toolCalls = msg.tool_calls ?? msg.toolCalls;
-  const hasOpenAITools = Array.isArray(toolCalls) && toolCalls.length > 0;
-
-  if (!Array.isArray(content)) {
-    // Content is not an array — check if there's OpenAI-format tool_calls
-    if (hasOpenAITools) {
-      // Has tool calls but content might be empty/string — treat as tool-only
-      // if there's no meaningful text content
-      const textContent = typeof content === 'string' ? content.trim() : '';
-      return textContent.length === 0;
-    }
-    return false;
-  }
-
-  let hasTool = hasOpenAITools;
-  let hasText = false;
-  let hasNonToolContent = false;
-
-  for (const block of content as ContentBlock[]) {
-    if (block.type === 'tool_use' || block.type === 'tool_result' || block.type === 'toolCall' || block.type === 'toolResult') {
-      hasTool = true;
-      continue;
-    }
-    if (block.type === 'text' && block.text && block.text.trim()) {
-      hasText = true;
-      continue;
-    }
-    // Only actual image output disqualifies a tool-only message.
-    // Thinking blocks are internal reasoning that can accompany tool_use — they
-    // should NOT prevent the message from being treated as an intermediate tool step.
-    if (block.type === 'image') {
-      hasNonToolContent = true;
-    }
-  }
-
-  return hasTool && !hasText && !hasNonToolContent;
-}
-
-function isInternalAssistantControlMessage(message: RawMessage | null | undefined): boolean {
-  if (!message) return false;
-  const role = message.role ?? 'assistant';
-  if (role !== 'assistant') return false;
-  return isInternalMessage({
-    ...message,
-    role,
-  });
-}
-
 function summarizeToolOutput(text: string): string | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
@@ -2503,26 +2401,6 @@ function collectToolUpdates(message: unknown, eventState: string): ToolStatus[] 
   const toolResultUpdate = extractToolResultUpdate(message, eventState);
   if (toolResultUpdate) updates.push(toolResultUpdate);
   return updates;
-}
-
-function hasNonToolAssistantContent(message: RawMessage | undefined): boolean {
-  if (!message) return false;
-  if (Array.isArray(message._attachedFiles) && message._attachedFiles.length > 0) return true;
-  if (typeof message.content === 'string' && message.content.trim()) return true;
-
-  const content = message.content;
-  if (Array.isArray(content)) {
-    for (const block of content as ContentBlock[]) {
-      if (block.type === 'text' && block.text && block.text.trim()) return true;
-      if (block.type === 'thinking' && block.thinking && block.thinking.trim()) return true;
-      if (block.type === 'image') return true;
-    }
-  }
-
-  const msg = message as unknown as Record<string, unknown>;
-  if (typeof msg.text === 'string' && msg.text.trim()) return true;
-
-  return false;
 }
 
 function isEmptyAssistantResponse(message: RawMessage | undefined): boolean {
