@@ -57,6 +57,7 @@ test.describe('Deep AI Worker Electron smoke flows', () => {
     await openModelsFromSettings(page);
     await expect(page.getByTestId('models-page-title')).toBeVisible();
     await expect(page.getByTestId('models-config-panel')).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Model Configurations|模型配置/ })).toBeVisible();
   });
 
   test('persists skipped setup across relaunch for the same isolated profile', async ({ electronApp, launchElectronApp }) => {

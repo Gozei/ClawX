@@ -47,6 +47,99 @@ vi.mock('@/lib/gateway-impact-confirm', () => ({
   confirmGatewayImpact: (...args: unknown[]) => confirmGatewayImpactMock(...args),
 }));
 
+vi.mock('react-i18next', () => {
+  const translations: Record<string, string> = {
+    'aiProviders.modelsConfig.actions.add': '新增配置',
+    'aiProviders.modelsConfig.actions.apply': '应用到 OpenClaw',
+    'aiProviders.modelsConfig.actions.cancel': '取消',
+    'aiProviders.modelsConfig.actions.delete': '删除',
+    'aiProviders.modelsConfig.actions.deleteConfig': '删除模型配置',
+    'aiProviders.modelsConfig.actions.edit': '编辑',
+    'aiProviders.modelsConfig.actions.editConfig': '编辑模型配置',
+    'aiProviders.modelsConfig.actions.setGlobalDefault': '设为全局默认',
+    'aiProviders.modelsConfig.actions.test': '测试',
+    'aiProviders.modelsConfig.actions.testConnection': '测试连接',
+    'aiProviders.modelsConfig.badges.globalDefault': '全局默认',
+    'aiProviders.modelsConfig.columns.actions': '操作',
+    'aiProviders.modelsConfig.columns.capability': '能力',
+    'aiProviders.modelsConfig.columns.config': '模型配置',
+    'aiProviders.modelsConfig.columns.summary': '摘要',
+    'aiProviders.modelsConfig.columns.testResult': '测试结果',
+    'aiProviders.modelsConfig.description': '用表格管理厂商、模型、测试结果。测试通过后，才允许应用到 OpenClaw。',
+    'aiProviders.modelsConfig.empty.cta': '新增首个配置',
+    'aiProviders.modelsConfig.empty.description': '先新增一个配置，测试成功后再应用到 OpenClaw。',
+    'aiProviders.modelsConfig.empty.title': '还没有模型配置',
+    'aiProviders.modelsConfig.fields.accountName': '账户名称',
+    'aiProviders.modelsConfig.fields.apiKey': 'API Key（密钥）',
+    'aiProviders.modelsConfig.fields.baseUrl': 'Base URL（接口地址）',
+    'aiProviders.modelsConfig.fields.modelId': '模型 ID',
+    'aiProviders.modelsConfig.fields.protocol': '协议（接口格式）',
+    'aiProviders.modelsConfig.fields.vendor': '模型厂商',
+    'aiProviders.modelsConfig.help.accountName': '仅用于本地识别，默认跟随模型厂商，可自定义。',
+    'aiProviders.modelsConfig.help.apiKeyCustom': '从对应服务商控制台获取 API Key{{savedKeyText}}',
+    'aiProviders.modelsConfig.help.apiKeySavedSuffix': '；留空会沿用已保存密钥',
+    'aiProviders.modelsConfig.help.apiKeyVendor': '从 {{vendor}} 控制台获取 API Key{{savedKeyText}}',
+    'aiProviders.modelsConfig.help.baseUrlCustom': '填写模型服务接口地址，例如 https://api.example.com/v1',
+    'aiProviders.modelsConfig.help.baseUrlLocal': '本地模型服务地址已自动填写，如需变更请在对应服务中配置',
+    'aiProviders.modelsConfig.help.baseUrlVendor': '{{vendor}} 默认 API 地址已自动填写，通常无需修改',
+    'aiProviders.modelsConfig.help.model': '填写厂商提供的模型 ID，例如 gpt-5.4、claude-sonnet-4.5 或 qwen3.5-plus。',
+    'aiProviders.modelsConfig.help.modelRecommended': '可直接输入模型 ID，也可选择推荐：{{models}}',
+    'aiProviders.modelsConfig.help.protocolCustom': '选择服务接口兼容格式，自定义服务通常使用 OpenAI Completions',
+    'aiProviders.modelsConfig.help.protocolVendor': '已根据 {{vendor}} 自动选择，避免协议和厂商不匹配',
+    'aiProviders.modelsConfig.help.vendor': '先选择模型服务提供商，协议、接口地址和推荐模型会随厂商自动联动。',
+    'aiProviders.modelsConfig.listSeparator': '、',
+    'aiProviders.modelsConfig.placeholders.apiKey': '输入 {{vendor}} API Key',
+    'aiProviders.modelsConfig.placeholders.keepSavedKey': '留空表示沿用已保存密钥',
+    'aiProviders.modelsConfig.protocolOptions.openaiCompletions': 'OpenAI Completions（兼容）',
+    'aiProviders.modelsConfig.resultTypes.chat': '聊天',
+    'aiProviders.modelsConfig.resultTypes.code': '代码',
+    'aiProviders.modelsConfig.resultTypes.general': '通用',
+    'aiProviders.modelsConfig.resultTypes.reasoning': '推理',
+    'aiProviders.modelsConfig.resultTypes.vision': '图像',
+    'aiProviders.modelsConfig.sheet.createTitle': '新增模型配置',
+    'aiProviders.modelsConfig.sheet.description': '先测试，再应用。只有最近一次测试成功且配置未变，才允许回写到 OpenClaw。',
+    'aiProviders.modelsConfig.sheet.editTitle': '编辑模型配置',
+    'aiProviders.modelsConfig.status.connectionSuccess': '连接成功',
+    'aiProviders.modelsConfig.status.connectionSuccessModel': '连接成功，模型：{{model}}',
+    'aiProviders.modelsConfig.status.failed': '失败',
+    'aiProviders.modelsConfig.status.noLatency': '无延迟数据',
+    'aiProviders.modelsConfig.status.noOutput': '尚未返回',
+    'aiProviders.modelsConfig.status.notTested': '未测试',
+    'aiProviders.modelsConfig.status.success': '成功',
+    'aiProviders.modelsConfig.status.successApplied': '成功并已应用',
+    'aiProviders.modelsConfig.status.testing': '测试中',
+    'aiProviders.modelsConfig.testCard.description': '向 {{vendor}} 发送一次简短探测请求，确认 API Key、接口地址和模型 ID 是否可用。',
+    'aiProviders.modelsConfig.testCard.lastTest': '最近测试：{{value}}',
+    'aiProviders.modelsConfig.testCard.latency': '回复延迟：{{value}}',
+    'aiProviders.modelsConfig.testCard.title': '自动化测试结果',
+    'aiProviders.modelsConfig.title': '模型配置',
+    'aiProviders.modelsConfig.toast.applied': '已应用到 OpenClaw',
+    'aiProviders.modelsConfig.toast.applyFailed': '应用失败: {{error}}',
+    'aiProviders.modelsConfig.toast.configMissing': '配置不存在',
+    'aiProviders.modelsConfig.toast.defaultFailed': '设置失败: {{error}}',
+    'aiProviders.modelsConfig.toast.defaultUpdated': '已设为全局默认模型',
+    'aiProviders.modelsConfig.toast.deleted': '已删除配置',
+    'aiProviders.modelsConfig.toast.deleteFailed': '删除失败: {{error}}',
+    'aiProviders.modelsConfig.toast.duplicateModel': '模型配置已存在：{{target}}',
+    'aiProviders.modelsConfig.toast.modelRequired': '需要模型 ID',
+    'aiProviders.modelsConfig.toast.testFailed': '测试失败',
+    'aiProviders.modelsConfig.toast.testSuccess': '测试成功 · {{latency}}ms',
+    'aiProviders.modelsConfig.tooltips.currentGlobalDefault': '当前全局默认模型',
+  };
+
+  const t = (key: string, values?: Record<string, unknown>) => {
+    let text = translations[key] ?? key;
+    for (const [name, value] of Object.entries(values ?? {})) {
+      text = text.replaceAll(`{{${name}}}`, String(value));
+    }
+    return text;
+  };
+
+  return {
+    useTranslation: () => ({ t }),
+  };
+});
+
 vi.mock('sonner', () => ({
   toast: {
     success: (...args: unknown[]) => toastSuccessMock(...args),

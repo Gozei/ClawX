@@ -102,6 +102,112 @@
       "multiAccountReady": "支持多账户",
       "singletonVendor": "单例提供商"
     },
+    "modelsConfig": {
+      "title": "模型配置",
+      "description": "用表格管理厂商、模型、测试结果。测试通过后，才允许应用到 OpenClaw。",
+      "listSeparator": "、",
+      "columns": {
+        "config": "模型配置",
+        "capability": "能力",
+        "testResult": "测试结果",
+        "summary": "摘要",
+        "actions": "操作"
+      },
+      "empty": {
+        "title": "还没有模型配置",
+        "description": "先新增一个配置，测试成功后再应用到 OpenClaw。",
+        "cta": "新增首个配置"
+      },
+      "actions": {
+        "add": "新增配置",
+        "apply": "应用到 OpenClaw",
+        "cancel": "取消",
+        "delete": "删除",
+        "deleteConfig": "删除模型配置",
+        "edit": "编辑",
+        "editConfig": "编辑模型配置",
+        "setGlobalDefault": "设为全局默认",
+        "test": "测试",
+        "testConnection": "测试连接"
+      },
+      "badges": {
+        "globalDefault": "全局默认"
+      },
+      "fields": {
+        "apiKey": "API Key（密钥）",
+        "accountName": "账户名称",
+        "baseUrl": "Base URL（接口地址）",
+        "modelId": "模型 ID",
+        "protocol": "协议（接口格式）",
+        "vendor": "模型厂商"
+      },
+      "help": {
+        "accountName": "仅用于本地识别，默认跟随模型厂商，可自定义。",
+        "apiKeyCustom": "从对应服务商控制台获取 API Key{{savedKeyText}}",
+        "apiKeySavedSuffix": "；留空会沿用已保存密钥",
+        "apiKeyVendor": "从 {{vendor}} 控制台获取 API Key{{savedKeyText}}",
+        "baseUrlCustom": "填写模型服务接口地址，例如 https://api.example.com/v1",
+        "baseUrlLocal": "本地模型服务地址已自动填写，如需变更请在对应服务中配置",
+        "baseUrlVendor": "{{vendor}} 默认 API 地址已自动填写，通常无需修改",
+        "model": "填写厂商提供的模型 ID，例如 gpt-5.4、claude-sonnet-4.5 或 qwen3.5-plus。",
+        "modelRecommended": "可直接输入模型 ID，也可选择推荐：{{models}}",
+        "protocolCustom": "选择服务接口兼容格式，自定义服务通常使用 OpenAI Completions",
+        "protocolVendor": "已根据 {{vendor}} 自动选择，避免协议和厂商不匹配",
+        "vendor": "先选择模型服务提供商，协议、接口地址和推荐模型会随厂商自动联动。"
+      },
+      "placeholders": {
+        "apiKey": "输入 {{vendor}} API Key",
+        "keepSavedKey": "留空表示沿用已保存密钥"
+      },
+      "protocolOptions": {
+        "openaiCompletions": "OpenAI Completions（兼容）"
+      },
+      "resultTypes": {
+        "chat": "聊天",
+        "code": "代码",
+        "general": "通用",
+        "reasoning": "推理",
+        "vision": "图像"
+      },
+      "sheet": {
+        "createTitle": "新增模型配置",
+        "description": "先测试，再应用。只有最近一次测试成功且配置未变，才允许回写到 OpenClaw。",
+        "editTitle": "编辑模型配置"
+      },
+      "status": {
+        "connectionSuccess": "连接成功",
+        "connectionSuccessModel": "连接成功，模型：{{model}}",
+        "failed": "失败",
+        "noLatency": "无延迟数据",
+        "noOutput": "尚未返回",
+        "notTested": "未测试",
+        "success": "成功",
+        "successApplied": "成功并已应用",
+        "testing": "测试中"
+      },
+      "testCard": {
+        "description": "向 {{vendor}} 发送一次简短探测请求，确认 API Key、接口地址和模型 ID 是否可用。",
+        "lastTest": "最近测试：{{value}}",
+        "latency": "回复延迟：{{value}}",
+        "title": "自动化测试结果"
+      },
+      "toast": {
+        "applied": "已应用到 OpenClaw",
+        "applyFailed": "应用失败: {{error}}",
+        "configMissing": "配置不存在",
+        "defaultFailed": "设置失败: {{error}}",
+        "defaultUpdated": "已设为全局默认模型",
+        "deleted": "已删除配置",
+        "deleteFailed": "删除失败: {{error}}",
+        "duplicateModel": "模型配置已存在：{{target}}",
+        "modelRequired": "需要模型 ID",
+        "testFailed": "测试失败",
+        "testSuccess": "测试成功 · {{latency}}ms"
+      },
+      "tooltips": {
+        "currentGlobalDefault": "当前全局默认模型"
+      }
+    },
     "authModes": {
       "apiKey": "API 密钥",
       "oauthDevice": "OAuth 设备登录",
