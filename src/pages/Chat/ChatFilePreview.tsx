@@ -36,7 +36,6 @@ import { invokeIpc } from '@/lib/api-client';
 import { hostApiFetch } from '@/lib/host-api';
 import { cn } from '@/lib/utils';
 import type { AttachedFileMeta } from '@/stores/chat';
-import { FileTypeIcon } from './file-icon';
 import { LibreOfficeDownloadDialog } from './LibreOfficeDownloadDialog';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import type {
@@ -115,13 +114,6 @@ type PdfDocumentLike = {
   getPage: (pageNumber: number) => Promise<PdfPageLike>;
   destroy?: () => Promise<void> | void;
 };
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
 
 function buildPreviewCacheKey(file: AttachedFileMeta): string {
   return `${file.filePath ?? ''}|${file.fileName}|${file.mimeType}`;
@@ -799,19 +791,17 @@ function resolveUnavailableReason(
 
 function PreviewMeta({
   fileName,
-  mimeType,
-  fileSize,
+  mimeType: _mimeType,
+  fileSize: _fileSize,
 }: {
   fileName: string;
   mimeType: string;
   fileSize: number;
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-3" style={{ fontFamily: SYSTEM_UI_FONT_FAMILY }}>
-      <FileTypeIcon mimeType={mimeType} fileName={fileName} />
+    <div className="flex min-w-0 items-center" style={{ fontFamily: SYSTEM_UI_FONT_FAMILY }}>
       <div className="min-w-0">
         <div className="truncate text-[14px] font-semibold text-foreground">{fileName}</div>
-        <div className="truncate text-[12px] text-foreground/58">{formatFileSize(fileSize)}</div>
       </div>
     </div>
   );
@@ -2966,6 +2956,7 @@ export function ChatFilePreviewWindowPage() {
   const { t } = useTranslation(['chat', 'common']);
   const [searchParams] = useSearchParams();
   const file = useMemo(() => createPreviewFileFromSearchParams(searchParams), [searchParams]);
+  const isMac = window.electron.platform === 'darwin';
   const initialPresentationSlideIndex = useMemo(() => {
     const parsedSlideIndex = Number.parseInt(searchParams.get('slideIndex') ?? '', 10);
     return Number.isFinite(parsedSlideIndex) && parsedSlideIndex > 0 ? parsedSlideIndex : undefined;
@@ -3023,15 +3014,19 @@ export function ChatFilePreviewWindowPage() {
     >
         <div
           data-testid="chat-file-preview-window-header"
-          className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-black/6 px-4 dark:border-white/8"
+          className={cn(
+            'relative flex h-14 shrink-0 items-center justify-end gap-3 border-b border-black/6 px-4 dark:border-white/8',
+          )}
           onDoubleClick={handleToggleMaximize}
           style={{ WebkitAppRegion: 'drag' } as CSSProperties}
         >
-          <PreviewMeta
-            fileName={file.fileName}
-            mimeType={file.mimeType}
-            fileSize={preview?.fileSize ?? file.fileSize}
-          />
+          <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+            <PreviewMeta
+              fileName={file.fileName}
+              mimeType={file.mimeType}
+              fileSize={preview?.fileSize ?? file.fileSize}
+            />
+          </div>
           <div className="flex items-center gap-3" style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}>
             <div className="flex items-center gap-1">
               <Button
@@ -3047,46 +3042,48 @@ export function ChatFilePreviewWindowPage() {
                 <FolderOpen className="h-4 w-4" />
               </Button>
             </div>
-            <div className="flex items-center gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 rounded-md"
-                onClick={handleMinimize}
-                data-testid="chat-file-preview-window-minimize"
-                title={t('common:actions.minimize', 'Minimize')}
-              >
-                <Minus className="h-4 w-4" />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 rounded-md"
-                onClick={handleToggleMaximize}
-                data-testid="chat-file-preview-window-maximize"
-                data-state={isWindowMaximized ? 'restore' : 'maximize'}
-                title={isWindowMaximized ? t('common:actions.restore', 'Restore') : t('common:actions.maximize', 'Maximize')}
-              >
-                {isWindowMaximized ? (
-                  <Minimize2 data-testid="chat-file-preview-window-restore-icon" className="h-4 w-4" />
-                ) : (
-                  <Maximize2 data-testid="chat-file-preview-window-maximize-icon" className="h-4 w-4" />
-                )}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 rounded-md"
-                onClick={handleClose}
-                data-testid="chat-file-preview-window-close"
-                title={t('common:actions.close')}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
+            {!isMac && (
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-md"
+                  onClick={handleMinimize}
+                  data-testid="chat-file-preview-window-minimize"
+                  title={t('common:actions.minimize', 'Minimize')}
+                >
+                  <Minus className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-md"
+                  onClick={handleToggleMaximize}
+                  data-testid="chat-file-preview-window-maximize"
+                  data-state={isWindowMaximized ? 'restore' : 'maximize'}
+                  title={isWindowMaximized ? t('common:actions.restore', 'Restore') : t('common:actions.maximize', 'Maximize')}
+                >
+                  {isWindowMaximized ? (
+                    <Minimize2 data-testid="chat-file-preview-window-restore-icon" className="h-4 w-4" />
+                  ) : (
+                    <Maximize2 data-testid="chat-file-preview-window-maximize-icon" className="h-4 w-4" />
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-md"
+                  onClick={handleClose}
+                  data-testid="chat-file-preview-window-close"
+                  title={t('common:actions.close')}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </div>
         </div>
 

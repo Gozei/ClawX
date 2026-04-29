@@ -283,9 +283,13 @@ export function ChatInput({
         }));
     })
   ), [providerItems]);
-  const effectiveModelRef = (
+  const sessionBackedModelRef = (
     sessionModels[activeComposerSessionKey]
     || activeComposerSession?.model
+    || ''
+  ).trim();
+  const effectiveModelRef = (
+    sessionBackedModelRef
     || defaultModelRef
     || ''
   ).trim();
@@ -294,18 +298,37 @@ export function ChatInput({
     [providerDefaultAccountId, providerItems],
   );
   const selectedModelValue = useMemo(() => {
+    // 会话已选模型优先反显，并与发送参数保持同源一致
+    if (sessionBackedModelRef) {
+      return sessionBackedModelRef;
+    }
     if (effectiveModelRef && modelOptions.some((option) => option.value === effectiveModelRef)) {
       return effectiveModelRef;
     }
     return preferredModelValue;
-  }, [effectiveModelRef, modelOptions, preferredModelValue]);
+  }, [effectiveModelRef, modelOptions, preferredModelValue, sessionBackedModelRef]);
   const activeModelValue = selectedModelValue;
   const activeModelRef = activeModelValue || effectiveModelRef;
   const selectedModelLabel = useMemo(
-    () => modelOptions.find((option) => option.value === selectedModelValue)?.label || t('composer.selectModel'),
+    () => modelOptions.find((option) => option.value === selectedModelValue)?.label || selectedModelValue || t('composer.selectModel'),
     [modelOptions, selectedModelValue, t],
   );
   const isZh = (i18n?.resolvedLanguage || i18n?.language || '').startsWith('zh');
+  const isModelInOptions = useCallback((modelRef: string | null | undefined) => {
+    const normalized = (modelRef || '').trim();
+    return !!normalized && modelOptions.some((option) => option.value === normalized);
+  }, [modelOptions]);
+  const resolveFallbackModelRef = useCallback(() => {
+    const normalizedDefaultModelRef = (defaultModelRef || '').trim();
+    if (isModelInOptions(normalizedDefaultModelRef)) return normalizedDefaultModelRef;
+    if (isModelInOptions(preferredModelValue)) return preferredModelValue;
+    return '';
+  }, [defaultModelRef, isModelInOptions, preferredModelValue]);
+  const getModelValidationErrorMessage = useCallback(() => (
+    isZh
+      ? '当前会话模型不可用，且未找到可用默认模型，请先在模型设置中配置模型'
+      : 'Current session model is unavailable and no default model can be used. Please configure a model first.'
+  ), [isZh]);
   const queueActionLabel = isZh ? '加入队列' : 'Queue to send';
   const canEditDraft = !disabled || !!onQueueOfflineMessage;
   const hasModelOptions = modelOptions.length > 0;
@@ -762,130 +785,6 @@ export function ChatInput({
     });
   }, [prefillNonce, prefillText, updateCurrentComposerDraft]);
 
-  const handleSubmitDraft = useCallback(() => {
-    if (!canSend && !canQueueDraft) return;
-    const readyAttachments = attachments.filter(a => a.status === 'ready');
-    // Capture values before clearing — clear input immediately for snappy UX,
-    // but keep attachments available for the async send
-    const textToSend = input.trim();
-    const attachmentsToSend = readyAttachments.length > 0 ? readyAttachments : undefined;
-    console.log(`[handleSend] text="${textToSend.substring(0, 50)}", attachments=${attachments.length}, ready=${readyAttachments.length}, sending=${!!attachmentsToSend}`);
-    if (attachmentsToSend) {
-      console.log('[handleSend] Attachment details:', attachmentsToSend.map(a => ({
-        id: a.id, fileName: a.fileName, mimeType: a.mimeType, fileSize: a.fileSize,
-        stagedPath: a.stagedPath, status: a.status, hasPreview: !!a.preview,
-      })));
-    }
-    clearComposerDraft(currentSessionKey);
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
-    if (canQueueDraft) {
-      onQueueOfflineMessage?.(textToSend, attachmentsToSend, targetAgentId, {
-        sessionKey: activeComposerSessionKey,
-        modelRef: activeModelRef || null,
-      });
-      toast.success(isZh ? '已加入待发送队列' : 'Added to the send queue');
-    } else {
-      onSend(textToSend, attachmentsToSend, targetAgentId, {
-        sessionKey: activeComposerSessionKey,
-        modelRef: activeModelRef || null,
-      });
-    }
-    setPickerOpen(false);
-  }, [
-    activeComposerSessionKey,
-    activeModelRef,
-    attachments,
-    canQueueDraft,
-    canSend,
-    clearComposerDraft,
-    currentSessionKey,
-    input,
-    isZh,
-    onQueueOfflineMessage,
-    onSend,
-    targetAgentId,
-  ]);
-
-  const handleStop = useCallback(() => {
-    if (!canStop) return;
-    onStop?.();
-  }, [canStop, onStop]);
-
-  const handlePrimaryAction = useCallback(() => {
-    if (canQueueDraft || !sending) {
-      handleSubmitDraft();
-      return;
-    }
-    handleStop();
-  }, [canQueueDraft, handleStop, handleSubmitDraft, sending]);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Backspace' && !input && targetAgentId) {
-        updateCurrentTargetAgentId(null);
-        return;
-      }
-      if (e.key === 'Enter' && !e.shiftKey) {
-        const nativeEvent = e.nativeEvent as KeyboardEvent;
-        if (isComposingRef.current || nativeEvent.isComposing || nativeEvent.keyCode === 229) {
-          return;
-        }
-        e.preventDefault();
-        handleSubmitDraft();
-      }
-    },
-    [handleSubmitDraft, input, targetAgentId, updateCurrentTargetAgentId],
-  );
-
-  // Handle paste (Ctrl/Cmd+V with files)
-  const handlePaste = useCallback(
-    (e: React.ClipboardEvent) => {
-      if (!canEditDraft) return;
-      const items = e.clipboardData?.items;
-      if (!items) return;
-
-      const pastedFiles: globalThis.File[] = [];
-      for (const item of Array.from(items)) {
-        if (item.kind === 'file') {
-          const file = item.getAsFile();
-          if (file) pastedFiles.push(file);
-        }
-      }
-      if (pastedFiles.length > 0) {
-        e.preventDefault();
-        stageBufferFiles(pastedFiles);
-      }
-    },
-    [canEditDraft, stageBufferFiles],
-  );
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(false);
-  }, []);
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      if (!canEditDraft) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setDragOver(false);
-      if (e.dataTransfer?.files?.length) {
-        stageBufferFiles(Array.from(e.dataTransfer.files));
-      }
-    },
-    [canEditDraft, stageBufferFiles],
-  );
-
   const setSessionModel = useCallback((modelRef: string | null) => {
     useChatStore.setState((state) => {
       const nextSessionModels = { ...state.sessionModels };
@@ -965,6 +864,166 @@ export function ChatInput({
       setModelSwitchPending(false);
     }
   }, [activeComposerSessionKey, allowLocalOnlyModelPersistence, modelOptions, selectedModelLabel, selectedModelValue, setSessionModel, t]);
+
+  useEffect(() => {
+    if (!sessionBackedModelRef || modelSwitchPending || modelOptions.length === 0) return;
+    if (isModelInOptions(sessionBackedModelRef)) return;
+    const fallbackModelRef = resolveFallbackModelRef();
+    if (!fallbackModelRef) {
+      toast.error(getModelValidationErrorMessage());
+      return;
+    }
+    if (fallbackModelRef === sessionBackedModelRef) return;
+    void handleModelChange(fallbackModelRef);
+  }, [
+    getModelValidationErrorMessage,
+    handleModelChange,
+    isModelInOptions,
+    modelOptions.length,
+    modelSwitchPending,
+    resolveFallbackModelRef,
+    sessionBackedModelRef,
+  ]);
+
+  const handleSubmitDraft = useCallback(async () => {
+    if (!canSend && !canQueueDraft) return;
+    let modelRefForDispatch = activeModelRef || null;
+    const normalizedSessionModelRef = sessionBackedModelRef.trim();
+    if (normalizedSessionModelRef && !isModelInOptions(normalizedSessionModelRef)) {
+      const fallbackModelRef = resolveFallbackModelRef();
+      if (!fallbackModelRef) {
+        toast.error(getModelValidationErrorMessage());
+        return;
+      }
+      await handleModelChange(fallbackModelRef);
+      modelRefForDispatch = fallbackModelRef;
+    }
+    const readyAttachments = attachments.filter(a => a.status === 'ready');
+    // Capture values before clearing — clear input immediately for snappy UX,
+    // but keep attachments available for the async send
+    const textToSend = input.trim();
+    const attachmentsToSend = readyAttachments.length > 0 ? readyAttachments : undefined;
+    console.log(`[handleSend] text="${textToSend.substring(0, 50)}", attachments=${attachments.length}, ready=${readyAttachments.length}, sending=${!!attachmentsToSend}`);
+    if (attachmentsToSend) {
+      console.log('[handleSend] Attachment details:', attachmentsToSend.map(a => ({
+        id: a.id, fileName: a.fileName, mimeType: a.mimeType, fileSize: a.fileSize,
+        stagedPath: a.stagedPath, status: a.status, hasPreview: !!a.preview,
+      })));
+    }
+    clearComposerDraft(currentSessionKey);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+    if (canQueueDraft) {
+      onQueueOfflineMessage?.(textToSend, attachmentsToSend, targetAgentId, {
+        sessionKey: activeComposerSessionKey,
+        modelRef: modelRefForDispatch,
+      });
+      toast.success(isZh ? '已加入待发送队列' : 'Added to the send queue');
+    } else {
+      onSend(textToSend, attachmentsToSend, targetAgentId, {
+        sessionKey: activeComposerSessionKey,
+        modelRef: modelRefForDispatch,
+      });
+    }
+    setPickerOpen(false);
+  }, [
+    activeComposerSessionKey,
+    activeModelRef,
+    attachments,
+    canQueueDraft,
+    canSend,
+    clearComposerDraft,
+    currentSessionKey,
+    getModelValidationErrorMessage,
+    handleModelChange,
+    input,
+    isModelInOptions,
+    isZh,
+    onQueueOfflineMessage,
+    onSend,
+    resolveFallbackModelRef,
+    sessionBackedModelRef,
+    targetAgentId,
+  ]);
+
+  const handleStop = useCallback(() => {
+    if (!canStop) return;
+    onStop?.();
+  }, [canStop, onStop]);
+
+  const handlePrimaryAction = useCallback(() => {
+    if (canQueueDraft || !sending) {
+      void handleSubmitDraft();
+      return;
+    }
+    handleStop();
+  }, [canQueueDraft, handleStop, handleSubmitDraft, sending]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Backspace' && !input && targetAgentId) {
+        updateCurrentTargetAgentId(null);
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        const nativeEvent = e.nativeEvent as KeyboardEvent;
+        if (isComposingRef.current || nativeEvent.isComposing || nativeEvent.keyCode === 229) {
+          return;
+        }
+        e.preventDefault();
+        void handleSubmitDraft();
+      }
+    },
+    [handleSubmitDraft, input, targetAgentId, updateCurrentTargetAgentId],
+  );
+
+  // Handle paste (Ctrl/Cmd+V with files)
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (!canEditDraft) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const pastedFiles: globalThis.File[] = [];
+      for (const item of Array.from(items)) {
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file) pastedFiles.push(file);
+        }
+      }
+      if (pastedFiles.length > 0) {
+        e.preventDefault();
+        stageBufferFiles(pastedFiles);
+      }
+    },
+    [canEditDraft, stageBufferFiles],
+  );
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (!canEditDraft) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOver(false);
+      if (e.dataTransfer?.files?.length) {
+        stageBufferFiles(Array.from(e.dataTransfer.files));
+      }
+    },
+    [canEditDraft, stageBufferFiles],
+  );
 
   return (
       <div

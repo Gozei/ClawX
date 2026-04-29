@@ -1057,6 +1057,36 @@ function updateSessionEntry(
   return found;
 }
 
+function upsertSessionEntry(
+  sessionsJson: Record<string, unknown>,
+  sessionKey: string,
+  updater: (session: Record<string, unknown>) => Record<string, unknown>,
+): void {
+  const found = updateSessionEntry(sessionsJson, sessionKey, updater);
+  if (found) return;
+
+  if (Array.isArray(sessionsJson.sessions)) {
+    const nextEntry = updater({ key: sessionKey });
+    (sessionsJson.sessions as Array<Record<string, unknown>>).push({
+      ...nextEntry,
+      key: sessionKey,
+    });
+    return;
+  }
+
+  const existing = sessionsJson[sessionKey];
+  const baseEntry = typeof existing === 'object' && existing !== null
+    ? existing as Record<string, unknown>
+    : {};
+  sessionsJson[sessionKey] = sanitizeSessionStoreEntryForObjectMap(
+    sessionKey,
+    updater({
+      ...baseEntry,
+      key: sessionKey,
+    }),
+  );
+}
+
 function parseSessionModelRef(modelRef: unknown): { modelProvider: string; model: string } | null {
   const normalizedModelRef = typeof modelRef === 'string' ? modelRef.trim() : '';
   if (!normalizedModelRef) {
@@ -1204,7 +1234,7 @@ export async function handleSessionRoutes(
       const sessionsIndex = await loadMutableSessionStoreDocument(resolved.sessionsJsonPath);
       const sessionsJson = sessionsIndex.document;
 
-      const found = updateSessionEntry(
+      upsertSessionEntry(
         sessionsJson,
         sessionKey,
         (session) => {
@@ -1318,11 +1348,6 @@ export async function handleSessionRoutes(
           return nextSession;
         },
       );
-
-      if (!found) {
-        sendJson(res, 404, { success: false, error: `Session not found: ${sessionKey}` });
-        return true;
-      }
 
       await writeSessionStoreDocument(resolved.sessionsJsonPath, sessionsJson);
       sendJson(res, 200, { success: true, modelRef: normalizedModelRef || null });
