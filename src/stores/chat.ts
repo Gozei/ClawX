@@ -130,6 +130,7 @@ const NO_RESPONSE_RECOVERY_DELAY_MS = 5_000;
 const NO_RESPONSE_RECOVERY_MAX_WINDOW_MS = 10 * 60_000;
 const CHAT_EVENT_DEDUPE_TTL_MS = 30_000;
 const AUTO_SESSION_LABEL_MAX_CHARS = 30;
+const ASSISTANT_CONTAINED_DUPLICATE_MIN_CHARS = 32;
 const _chatEventDedupe = new Map<string, number>();
 const _sessionViewSnapshots = new Map<string, SessionViewSnapshot>();
 const _historyIncompleteRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -849,6 +850,51 @@ function messageExistsByIdentityOrText(messages: RawMessage[], candidate: RawMes
   });
 }
 
+function mergeAttachedFilesForDuplicate(preferred: RawMessage, duplicate: RawMessage): RawMessage {
+  const duplicateFiles = duplicate._attachedFiles ?? [];
+  if (duplicateFiles.length === 0) return preferred;
+
+  const preferredFiles = preferred._attachedFiles ?? [];
+  const seen = new Set(
+    preferredFiles.map((file) => file.filePath || `${file.fileName}:${file.mimeType}:${file.fileSize}`),
+  );
+  const mergedFiles = [...preferredFiles];
+
+  for (const file of duplicateFiles) {
+    const key = file.filePath || `${file.fileName}:${file.mimeType}:${file.fileSize}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    mergedFiles.push(file);
+  }
+
+  return {
+    ...preferred,
+    _attachedFiles: mergedFiles,
+  };
+}
+
+function getContainedAssistantDuplicateDirection(
+  existing: RawMessage,
+  candidate: RawMessage,
+): 'candidate-contains-existing' | 'existing-contains-candidate' | null {
+  if (existing.role !== 'assistant' || candidate.role !== 'assistant') return null;
+  if (!isSettledFinalAssistantMessage(existing) || !isSettledFinalAssistantMessage(candidate)) return null;
+
+  const existingText = normalizeAssistantStreamText(getComparableMessageText(existing));
+  const candidateText = normalizeAssistantStreamText(getComparableMessageText(candidate));
+  if (
+    existingText.length < ASSISTANT_CONTAINED_DUPLICATE_MIN_CHARS
+    || candidateText.length < ASSISTANT_CONTAINED_DUPLICATE_MIN_CHARS
+    || existingText === candidateText
+  ) {
+    return null;
+  }
+
+  if (candidateText.includes(existingText)) return 'candidate-contains-existing';
+  if (existingText.includes(candidateText)) return 'existing-contains-candidate';
+  return null;
+}
+
 function dedupeAssistantMessagesWithinTurns(messages: RawMessage[]): RawMessage[] {
   let changed = false;
   let currentTurnAssistants: RawMessage[] = [];
@@ -861,9 +907,27 @@ function dedupeAssistantMessagesWithinTurns(messages: RawMessage[]): RawMessage[
       continue;
     }
 
-    if (message.role === 'assistant' && messageExistsByIdentityOrText(currentTurnAssistants, message)) {
-      changed = true;
-      continue;
+    if (message.role === 'assistant') {
+      const existingIndex = currentTurnAssistants.findIndex((assistant) => (
+        messageExistsByIdentityOrText([assistant], message)
+        || getContainedAssistantDuplicateDirection(assistant, message) != null
+      ));
+
+      if (existingIndex >= 0) {
+        const existing = currentTurnAssistants[existingIndex];
+        const direction = getContainedAssistantDuplicateDirection(existing, message);
+        const shouldPreferCandidate = direction === 'candidate-contains-existing';
+        const replacement = shouldPreferCandidate
+          ? mergeAttachedFilesForDuplicate(message, existing)
+          : mergeAttachedFilesForDuplicate(existing, message);
+        const dedupedIndex = deduped.indexOf(existing);
+        if (dedupedIndex >= 0) {
+          deduped[dedupedIndex] = replacement;
+        }
+        currentTurnAssistants[existingIndex] = replacement;
+        changed = true;
+        continue;
+      }
     }
 
     deduped.push(message);
