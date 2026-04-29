@@ -14,6 +14,12 @@ import {
 } from '../../shared/inbound-user-text';
 import { useGatewayStore } from './gateway';
 import { useAgentsStore } from './agents';
+import {
+  enrichToolResultAttachments,
+  enrichCachedAttachments,
+  filterMessages,
+  dedupeAssistantMessages,
+} from '../utils/messagePipeline';
 import { buildCronSessionHistoryPath, isCronSessionKey } from './chat/cron-session-utils';
 import {
   CHAT_HISTORY_LABEL_PREFETCH_LIMIT,
@@ -849,113 +855,6 @@ function messageExistsByIdentityOrText(messages: RawMessage[], candidate: RawMes
   });
 }
 
-function mergeAttachedFilesForDuplicate(preferred: RawMessage, duplicate: RawMessage): RawMessage {
-  const duplicateFiles = duplicate._attachedFiles ?? [];
-  if (duplicateFiles.length === 0) return preferred;
-
-  const preferredFiles = preferred._attachedFiles ?? [];
-  const seen = new Set(
-    preferredFiles.map((file) => file.filePath || `${file.fileName}:${file.mimeType}:${file.fileSize}`),
-  );
-  const mergedFiles = [...preferredFiles];
-
-  for (const file of duplicateFiles) {
-    const key = file.filePath || `${file.fileName}:${file.mimeType}:${file.fileSize}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    mergedFiles.push(file);
-  }
-
-  return {
-    ...preferred,
-    _attachedFiles: mergedFiles,
-  };
-}
-
-function getContainedAssistantDuplicateDirection(
-  existing: RawMessage,
-  candidate: RawMessage,
-): 'candidate-contains-existing' | 'existing-contains-candidate' | null {
-  if (existing.role !== 'assistant' || candidate.role !== 'assistant') return null;
-  if (!isSettledFinalAssistantMessage(existing) || !isSettledFinalAssistantMessage(candidate)) return null;
-
-  const existingText = normalizeAssistantStreamText(getComparableMessageText(existing));
-  const candidateText = normalizeAssistantStreamText(getComparableMessageText(candidate));
-  if (existingText === candidateText) return null;
-
-  // First check prefix match - this is unambiguous
-  if (candidateText.startsWith(existingText)) return 'candidate-contains-existing';
-  if (existingText.startsWith(candidateText)) return 'existing-contains-candidate';
-
-  // For substring matching (not prefix), use heuristics to avoid false positives.
-  // We only dedupe when:
-  // 1. The existing message has meaningful length (>= 6 chars after normalization)
-  // 2. AND the candidate is meaningfully longer (ratio >= 1.2)
-  // This handles cases like status prefixes (e.g., "Tavily...\n\n" + original message)
-  const MIN_CONTENT_LENGTH = 6;
-  const MIN_LENGTH_RATIO = 1.2;
-  if (
-    existingText.length >= MIN_CONTENT_LENGTH
-    && candidateText.length >= existingText.length * MIN_LENGTH_RATIO
-    && candidateText.includes(existingText)
-  ) {
-    return 'candidate-contains-existing';
-  }
-  if (
-    candidateText.length >= MIN_CONTENT_LENGTH
-    && existingText.length >= candidateText.length * MIN_LENGTH_RATIO
-    && existingText.includes(candidateText)
-  ) {
-    return 'existing-contains-candidate';
-  }
-
-  return null;
-}
-
-function dedupeAssistantMessagesWithinTurns(messages: RawMessage[]): RawMessage[] {
-  let changed = false;
-  let currentTurnAssistants: RawMessage[] = [];
-  const deduped: RawMessage[] = [];
-
-  for (const message of messages) {
-    if (message.role === 'user') {
-      currentTurnAssistants = [];
-      deduped.push(message);
-      continue;
-    }
-
-    if (message.role === 'assistant') {
-      const existingIndex = currentTurnAssistants.findIndex((assistant) => (
-        messageExistsByIdentityOrText([assistant], message)
-        || getContainedAssistantDuplicateDirection(assistant, message) != null
-      ));
-
-      if (existingIndex >= 0) {
-        const existing = currentTurnAssistants[existingIndex];
-        const direction = getContainedAssistantDuplicateDirection(existing, message);
-        const shouldPreferCandidate = direction === 'candidate-contains-existing';
-        const replacement = shouldPreferCandidate
-          ? mergeAttachedFilesForDuplicate(message, existing)
-          : mergeAttachedFilesForDuplicate(existing, message);
-        const dedupedIndex = deduped.indexOf(existing);
-        if (dedupedIndex >= 0) {
-          deduped[dedupedIndex] = replacement;
-        }
-        currentTurnAssistants[existingIndex] = replacement;
-        changed = true;
-        continue;
-      }
-    }
-
-    deduped.push(message);
-    if (message.role === 'assistant') {
-      currentTurnAssistants.push(message);
-    }
-  }
-
-  return changed ? deduped : messages;
-}
-
 function normalizeStopReason(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase().replace(/[-_\s]/g, '') : '';
 }
@@ -1727,172 +1626,6 @@ function getToolCallFilePath(msg: RawMessage, toolCallId: string): string | unde
   }
 
   return undefined;
-}
-
-/**
- * Collect all tool call file paths from a message into a Map<toolCallId, filePath>.
- */
-function collectToolCallPaths(msg: RawMessage, paths: Map<string, string>): void {
-  const content = msg.content;
-  if (Array.isArray(content)) {
-    for (const block of content as ContentBlock[]) {
-      if ((block.type === 'tool_use' || block.type === 'toolCall') && block.id) {
-        const args = (block.input ?? block.arguments) as Record<string, unknown> | undefined;
-        if (args) {
-          const fp = args.file_path ?? args.filePath ?? args.path ?? args.file;
-          if (typeof fp === 'string') paths.set(block.id, fp);
-        }
-      }
-    }
-  }
-  const msgAny = msg as unknown as Record<string, unknown>;
-  const toolCalls = msgAny.tool_calls ?? msgAny.toolCalls;
-  if (Array.isArray(toolCalls)) {
-    for (const tc of toolCalls as Array<Record<string, unknown>>) {
-      const id = typeof tc.id === 'string' ? tc.id : '';
-      if (!id) continue;
-      const fn = (tc.function ?? tc) as Record<string, unknown>;
-      let args: Record<string, unknown> | undefined;
-      try {
-        args = typeof fn.arguments === 'string' ? JSON.parse(fn.arguments) : (fn.arguments ?? fn.input) as Record<string, unknown>;
-      } catch { /* ignore */ }
-      if (args) {
-        const fp = args.file_path ?? args.filePath ?? args.path ?? args.file;
-        if (typeof fp === 'string') paths.set(id, fp);
-      }
-    }
-  }
-}
-
-/**
- * Before filtering tool_result messages from history, scan them for any file/image
- * content and attach those to the immediately following assistant message.
- * This mirrors channel push message behavior where tool outputs surface files to the UI.
- * Handles:
- *   - Image content blocks (base64 / url)
- *   - [media attached: path (mime) | path] text patterns in tool result output
- *   - Raw file paths in tool result text
- */
-function enrichWithToolResultFiles(messages: RawMessage[]): RawMessage[] {
-  const pending: AttachedFileMeta[] = [];
-  const toolCallPaths = new Map<string, string>();
-
-  return messages.map((msg) => {
-    // Track file paths from assistant tool call arguments for later matching
-    if (msg.role === 'assistant') {
-      collectToolCallPaths(msg, toolCallPaths);
-    }
-
-    if (isToolResultRole(msg.role)) {
-      // Resolve file path from the matching tool call
-      const matchedPath = msg.toolCallId ? toolCallPaths.get(msg.toolCallId) : undefined;
-
-      // 1. Image/file content blocks in the structured content array
-      const imageFiles = extractImagesAsAttachedFiles(msg.content);
-      if (matchedPath) {
-        for (const f of imageFiles) {
-          if (!f.filePath) {
-            f.filePath = matchedPath;
-            f.fileName = matchedPath.split(/[\\/]/).pop() || 'image';
-          }
-        }
-      }
-      pending.push(...imageFiles);
-
-      // 2. [media attached: ...] patterns in tool result text output
-      const text = getMessageText(msg.content);
-      if (text) {
-        const mediaRefs = extractMediaRefs(text);
-        const mediaRefPaths = new Set(mediaRefs.map(r => r.filePath));
-        for (const ref of mediaRefs) {
-          pending.push(makeAttachedFile(ref));
-        }
-        // 3. Raw file paths in tool result text (documents, audio, video, etc.)
-        for (const ref of extractRawFilePaths(text)) {
-          if (!mediaRefPaths.has(ref.filePath)) {
-            pending.push(makeAttachedFile(ref));
-          }
-        }
-      }
-
-      return msg; // will be filtered later
-    }
-
-    if (msg.role === 'assistant' && pending.length > 0) {
-      const toAttach = pending.splice(0);
-      // Deduplicate against files already on the assistant message
-      const existingPaths = new Set(
-        (msg._attachedFiles || []).map(f => f.filePath).filter(Boolean),
-      );
-      const newFiles = toAttach.filter(f => !f.filePath || !existingPaths.has(f.filePath));
-      if (newFiles.length === 0) return msg;
-      return {
-        ...msg,
-        _attachedFiles: [...(msg._attachedFiles || []), ...newFiles],
-      };
-    }
-
-    return msg;
-  });
-}
-
-/**
- * Restore _attachedFiles for messages loaded from history.
- * Handles:
- *   1. [media attached: path (mime) | path] patterns (attachment-button flow)
- *   2. Raw image file paths typed in message text (e.g. /Users/.../image.png)
- * Uses local cache for previews when available; missing previews are loaded async.
- */
-function enrichWithCachedImages(messages: RawMessage[]): RawMessage[] {
-  return messages.map((msg, idx) => {
-    // Only process user and assistant messages; skip if already enriched
-    if ((msg.role !== 'user' && msg.role !== 'assistant') || msg._attachedFiles) return msg;
-    const text = getMessageText(msg.content);
-
-    // Path 1: [media attached: path (mime) | path] — guaranteed format from attachment button
-    const mediaRefs = extractMediaRefs(text);
-    const mediaRefPaths = new Set(mediaRefs.map(r => r.filePath));
-
-    // Path 2: Raw file paths.
-    // For assistant messages: scan own text AND the nearest preceding user message text,
-    // but only for non-tool-only assistant messages (i.e. the final answer turn).
-    // Tool-only messages (thinking + tool calls) should not show file previews — those
-    // belong to the final answer message that comes after the tool results.
-    // User messages never get raw-path previews so the image is not shown twice.
-    let rawRefs: Array<{ filePath: string; mimeType: string }> = [];
-    if (msg.role === 'assistant' && !isToolOnlyMessage(msg)) {
-      // Own text
-      rawRefs = extractRawFilePaths(text).filter(r => !mediaRefPaths.has(r.filePath));
-
-      // Nearest preceding user message text (look back up to 5 messages)
-      const seenPaths = new Set(rawRefs.map(r => r.filePath));
-      for (let i = idx - 1; i >= Math.max(0, idx - 5); i--) {
-        const prev = messages[i];
-        if (!prev) break;
-        if (prev.role === 'user') {
-          const prevText = getMessageText(prev.content);
-          for (const ref of extractRawFilePaths(prevText)) {
-            if (!mediaRefPaths.has(ref.filePath) && !seenPaths.has(ref.filePath)) {
-              seenPaths.add(ref.filePath);
-              rawRefs.push(ref);
-            }
-          }
-          break; // only use the nearest user message
-        }
-      }
-    }
-
-    const allRefs = [...mediaRefs, ...rawRefs];
-    if (allRefs.length === 0) return msg;
-
-    const files: AttachedFileMeta[] = allRefs.map(ref => {
-      const cached = _imageCache.get(ref.filePath);
-      if (cached) return { ...cached, filePath: ref.filePath };
-      const fileName = ref.filePath.split(/[\\/]/).pop() || 'file';
-      return { fileName, mimeType: ref.mimeType, fileSize: 0, preview: null, filePath: ref.filePath };
-    });
-    return { ...msg, _attachedFiles: files };
-  });
 }
 
 async function materializeAssistantOutputs(
@@ -4241,12 +3974,11 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       // messages with stale data from the old session.
       if (!isCurrentSession()) return;
 
-      // Before filtering: attach images/files from tool_result messages to the next assistant message
-      const messagesWithToolImages = enrichWithToolResultFiles(rawMessages);
-      const normalizedMessages = messagesWithToolImages.map((msg) => createToolResultProcessMessage(msg) ?? msg);
-      const filteredMessages = normalizedMessages.filter((msg) => !isToolResultRole(msg.role) && !isInternalMessage(msg));
-      // Restore file attachments for user/assistant messages (from cache + text patterns)
-      const enrichedMessages = enrichWithCachedImages(filteredMessages);
+      // Pipeline: normalize -> filter -> enrich attachments
+      const { messages: enrichedToolResults } = enrichToolResultAttachments(rawMessages);
+      const normalizedMessages = enrichedToolResults.map((msg) => createToolResultProcessMessage(msg) ?? msg);
+      const filteredMessages = filterMessages(normalizedMessages);
+      const enrichedMessages = enrichCachedAttachments(filteredMessages, _imageCache);
 
       // Preserve the optimistic user message during an active send.
       // The Gateway may not include the user's message in chat.history
@@ -4420,7 +4152,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       const deferredMergeResult = shouldDeferHistoryCurrentTurn
         ? mergeDeferredCurrentTurnMessages(get().messages, finalMessages, effectiveHistoryLastUserMessageAt)
         : { messages: finalMessages, appendedProcessCount: 0 };
-      const mergedMessagesForActiveSend = dedupeAssistantMessagesWithinTurns(deferredMergeResult.messages);
+      const mergedMessagesForActiveSend = dedupeAssistantMessages(deferredMergeResult.messages);
 
       if (historyRecentAssistant || historyEmptyAssistant || historySettledAssistant || loadedHistoryHasOrderedAssistantAfterUser || shouldDeferSettledHistoryFinal) {
         clearHistoryPoll();
