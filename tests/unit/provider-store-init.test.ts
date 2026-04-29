@@ -3,13 +3,19 @@ import { act } from '@testing-library/react';
 
 // Mock fetchProviderSnapshot before importing the store
 const mockFetchProviderSnapshot = vi.fn();
+const mockHostApiFetch = vi.fn();
+const mockConfirmGatewayImpact = vi.fn();
 vi.mock('@/lib/provider-accounts', () => ({
   fetchProviderSnapshot: (...args: unknown[]) => mockFetchProviderSnapshot(...args),
 }));
 
 // Mock hostApiFetch (used by other store methods)
 vi.mock('@/lib/host-api', () => ({
-  hostApiFetch: vi.fn(),
+  hostApiFetch: (...args: unknown[]) => mockHostApiFetch(...args),
+}));
+
+vi.mock('@/lib/gateway-impact-confirm', () => ({
+  confirmGatewayImpact: (...args: unknown[]) => mockConfirmGatewayImpact(...args),
 }));
 
 // Import store after mocks are in place
@@ -27,6 +33,7 @@ describe('useProviderStore – init()', () => {
       error: null,
     });
     vi.clearAllMocks();
+    mockConfirmGatewayImpact.mockResolvedValue(true);
   });
 
   it('init() calls refreshProviderSnapshot and populates state', async () => {
@@ -112,5 +119,24 @@ describe('useProviderStore – init()', () => {
     });
     expect(useProviderStore.getState().statuses).toEqual(snapshot2.statuses);
     expect(mockFetchProviderSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('setDefaultAccount() can skip the gateway-impact confirmation for compound flows', async () => {
+    mockHostApiFetch.mockResolvedValueOnce({ success: true });
+
+    await act(async () => {
+      const saved = await useProviderStore
+        .getState()
+        .setDefaultAccount('acc-1', { skipImpactConfirm: true });
+
+      expect(saved).toBe(true);
+    });
+
+    expect(mockConfirmGatewayImpact).not.toHaveBeenCalled();
+    expect(mockHostApiFetch).toHaveBeenCalledWith('/api/provider-accounts/default', {
+      method: 'PUT',
+      body: JSON.stringify({ accountId: 'acc-1' }),
+    });
+    expect(useProviderStore.getState().defaultAccountId).toBe('acc-1');
   });
 });

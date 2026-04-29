@@ -787,7 +787,7 @@ export function ProviderConfigPanel() {
         }, effectiveKey);
         if (!created) return;
         if (!defaultAccountId) {
-          const setDefault = await setDefaultAccount(accountId);
+          const setDefault = await setDefaultAccount(accountId, { skipImpactConfirm: true });
           if (!setDefault) return;
         }
         appliedRowKey = `${accountId}:${draft.modelId.trim()}`;

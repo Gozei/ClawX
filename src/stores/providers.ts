@@ -27,6 +27,23 @@ export type { ProviderSnapshot } from '@/lib/provider-accounts';
 
 let refreshProviderSnapshotInFlight: Promise<void> | null = null;
 
+type ProviderMutationOptions = {
+  skipImpactConfirm?: boolean;
+};
+
+async function confirmProviderGatewayImpact(
+  mode: 'refresh' | 'restart',
+  options?: ProviderMutationOptions,
+): Promise<boolean> {
+  if (options?.skipImpactConfirm) {
+    return true;
+  }
+  return await confirmGatewayImpact({
+    mode,
+    willApplyChanges: true,
+  });
+}
+
 interface ProviderState {
   statuses: ProviderWithKeyInfo[];
   accounts: ProviderAccount[];
@@ -38,8 +55,8 @@ interface ProviderState {
   // Actions
   init: () => Promise<void>;
   refreshProviderSnapshot: () => Promise<void>;
-  createAccount: (account: ProviderAccount, apiKey?: string) => Promise<boolean>;
-  removeAccount: (accountId: string) => Promise<boolean>;
+  createAccount: (account: ProviderAccount, apiKey?: string, options?: ProviderMutationOptions) => Promise<boolean>;
+  removeAccount: (accountId: string, options?: ProviderMutationOptions) => Promise<boolean>;
   validateAccountApiKey: (
     accountId: string,
     apiKey: string,
@@ -49,21 +66,36 @@ interface ProviderState {
 
   // Legacy compatibility aliases
   fetchProviders: () => Promise<void>;
-  addProvider: (config: Omit<ProviderConfig, 'createdAt' | 'updatedAt'>, apiKey?: string) => Promise<boolean>;
-  addAccount: (account: ProviderAccount, apiKey?: string) => Promise<boolean>;
-  updateProvider: (providerId: string, updates: Partial<ProviderConfig>, apiKey?: string) => Promise<boolean>;
-  updateAccount: (accountId: string, updates: Partial<ProviderAccount>, apiKey?: string) => Promise<boolean>;
-  deleteProvider: (providerId: string) => Promise<boolean>;
-  deleteAccount: (accountId: string) => Promise<boolean>;
-  setApiKey: (providerId: string, apiKey: string) => Promise<boolean>;
+  addProvider: (
+    config: Omit<ProviderConfig, 'createdAt' | 'updatedAt'>,
+    apiKey?: string,
+    options?: ProviderMutationOptions
+  ) => Promise<boolean>;
+  addAccount: (account: ProviderAccount, apiKey?: string, options?: ProviderMutationOptions) => Promise<boolean>;
+  updateProvider: (
+    providerId: string,
+    updates: Partial<ProviderConfig>,
+    apiKey?: string,
+    options?: ProviderMutationOptions
+  ) => Promise<boolean>;
+  updateAccount: (
+    accountId: string,
+    updates: Partial<ProviderAccount>,
+    apiKey?: string,
+    options?: ProviderMutationOptions
+  ) => Promise<boolean>;
+  deleteProvider: (providerId: string, options?: ProviderMutationOptions) => Promise<boolean>;
+  deleteAccount: (accountId: string, options?: ProviderMutationOptions) => Promise<boolean>;
+  setApiKey: (providerId: string, apiKey: string, options?: ProviderMutationOptions) => Promise<boolean>;
   updateProviderWithKey: (
     providerId: string,
     updates: Partial<ProviderConfig>,
-    apiKey?: string
+    apiKey?: string,
+    options?: ProviderMutationOptions
   ) => Promise<boolean>;
   deleteApiKey: (providerId: string) => Promise<void>;
-  setDefaultProvider: (providerId: string) => Promise<boolean>;
-  setDefaultAccount: (accountId: string) => Promise<boolean>;
+  setDefaultProvider: (providerId: string, options?: ProviderMutationOptions) => Promise<boolean>;
+  setDefaultAccount: (accountId: string, options?: ProviderMutationOptions) => Promise<boolean>;
   validateApiKey: (
     providerId: string,
     apiKey: string,
@@ -114,12 +146,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
 
   fetchProviders: async () => get().refreshProviderSnapshot(),
   
-  addProvider: async (config, apiKey) => {
+  addProvider: async (config, apiKey, options) => {
     if (guardGatewayTransitioning()) return false;
-    const confirmed = await confirmGatewayImpact({
-      mode: 'refresh',
-      willApplyChanges: true,
-    });
+    const confirmed = await confirmProviderGatewayImpact('refresh', options);
     if (!confirmed) {
       return false;
     }
@@ -166,12 +195,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  createAccount: async (account, apiKey) => {
+  createAccount: async (account, apiKey, options) => {
     if (guardGatewayTransitioning()) return false;
-    const confirmed = await confirmGatewayImpact({
-      mode: 'refresh',
-      willApplyChanges: true,
-    });
+    const confirmed = await confirmProviderGatewayImpact('refresh', options);
     if (!confirmed) {
       return false;
     }
@@ -193,14 +219,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  addAccount: async (account, apiKey) => get().createAccount(account, apiKey),
+  addAccount: async (account, apiKey, options) => get().createAccount(account, apiKey, options),
   
-  updateProvider: async (providerId, updates, apiKey) => {
+  updateProvider: async (providerId, updates, apiKey, options) => {
     if (guardGatewayTransitioning()) return false;
-    const confirmed = await confirmGatewayImpact({
-      mode: 'refresh',
-      willApplyChanges: true,
-    });
+    const confirmed = await confirmProviderGatewayImpact('refresh', options);
     if (!confirmed) {
       return false;
     }
@@ -249,12 +272,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  updateAccount: async (accountId, updates, apiKey) => {
+  updateAccount: async (accountId, updates, apiKey, options) => {
     if (guardGatewayTransitioning()) return false;
-    const confirmed = await confirmGatewayImpact({
-      mode: 'refresh',
-      willApplyChanges: true,
-    });
+    const confirmed = await confirmProviderGatewayImpact('refresh', options);
     if (!confirmed) {
       return false;
     }
@@ -276,12 +296,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
   
-  deleteProvider: async (providerId) => {
+  deleteProvider: async (providerId, options) => {
     if (guardGatewayTransitioning()) return false;
-    const confirmed = await confirmGatewayImpact({
-      mode: 'restart',
-      willApplyChanges: true,
-    });
+    const confirmed = await confirmProviderGatewayImpact('restart', options);
     if (!confirmed) {
       return false;
     }
@@ -303,12 +320,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  removeAccount: async (accountId) => {
+  removeAccount: async (accountId, options) => {
     if (guardGatewayTransitioning()) return false;
-    const confirmed = await confirmGatewayImpact({
-      mode: 'restart',
-      willApplyChanges: true,
-    });
+    const confirmed = await confirmProviderGatewayImpact('restart', options);
     if (!confirmed) {
       return false;
     }
@@ -329,14 +343,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  deleteAccount: async (accountId) => get().removeAccount(accountId),
+  deleteAccount: async (accountId, options) => get().removeAccount(accountId, options),
   
-  setApiKey: async (providerId, apiKey) => {
+  setApiKey: async (providerId, apiKey, options) => {
     if (guardGatewayTransitioning()) return false;
-    const confirmed = await confirmGatewayImpact({
-      mode: 'refresh',
-      willApplyChanges: true,
-    });
+    const confirmed = await confirmProviderGatewayImpact('refresh', options);
     if (!confirmed) {
       return false;
     }
@@ -359,12 +370,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  updateProviderWithKey: async (providerId, updates, apiKey) => {
+  updateProviderWithKey: async (providerId, updates, apiKey, options) => {
     if (guardGatewayTransitioning()) return false;
-    const confirmed = await confirmGatewayImpact({
-      mode: 'refresh',
-      willApplyChanges: true,
-    });
+    const confirmed = await confirmProviderGatewayImpact('refresh', options);
     if (!confirmed) {
       return false;
     }
@@ -418,12 +426,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
   
-  setDefaultProvider: async (providerId) => {
+  setDefaultProvider: async (providerId, options) => {
     if (guardGatewayTransitioning()) return false;
-    const confirmed = await confirmGatewayImpact({
-      mode: 'refresh',
-      willApplyChanges: true,
-    });
+    const confirmed = await confirmProviderGatewayImpact('refresh', options);
     if (!confirmed) {
       return false;
     }
@@ -445,12 +450,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     }
   },
 
-  setDefaultAccount: async (accountId) => {
+  setDefaultAccount: async (accountId, options) => {
     if (guardGatewayTransitioning()) return false;
-    const confirmed = await confirmGatewayImpact({
-      mode: 'refresh',
-      willApplyChanges: true,
-    });
+    const confirmed = await confirmProviderGatewayImpact('refresh', options);
     if (!confirmed) {
       return false;
     }

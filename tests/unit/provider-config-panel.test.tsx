@@ -231,6 +231,7 @@ describe('ProviderConfigPanel', () => {
       expect(providerStore.createAccount).toHaveBeenCalledTimes(1);
     });
     const createdAccount = providerStore.createAccount.mock.calls[0]?.[0] as { id: string };
+    expect(providerStore.setDefaultAccount).toHaveBeenCalledWith(createdAccount.id, { skipImpactConfirm: true });
     const cached = JSON.parse(window.localStorage.getItem('clawx.models.testResults.v1') || '{}') as Record<string, unknown>;
 
     expect(cached[`${createdAccount.id}:qwen3.5-plus`]).toMatchObject({
