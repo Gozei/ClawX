@@ -849,6 +849,69 @@ function messageExistsByIdentityOrText(messages: RawMessage[], candidate: RawMes
   });
 }
 
+function mergeAttachedFilesForDuplicate(preferred: RawMessage, duplicate: RawMessage): RawMessage {
+  const duplicateFiles = duplicate._attachedFiles ?? [];
+  if (duplicateFiles.length === 0) return preferred;
+
+  const preferredFiles = preferred._attachedFiles ?? [];
+  const seen = new Set(
+    preferredFiles.map((file) => file.filePath || `${file.fileName}:${file.mimeType}:${file.fileSize}`),
+  );
+  const mergedFiles = [...preferredFiles];
+
+  for (const file of duplicateFiles) {
+    const key = file.filePath || `${file.fileName}:${file.mimeType}:${file.fileSize}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    mergedFiles.push(file);
+  }
+
+  return {
+    ...preferred,
+    _attachedFiles: mergedFiles,
+  };
+}
+
+function getContainedAssistantDuplicateDirection(
+  existing: RawMessage,
+  candidate: RawMessage,
+): 'candidate-contains-existing' | 'existing-contains-candidate' | null {
+  if (existing.role !== 'assistant' || candidate.role !== 'assistant') return null;
+  if (!isSettledFinalAssistantMessage(existing) || !isSettledFinalAssistantMessage(candidate)) return null;
+
+  const existingText = normalizeAssistantStreamText(getComparableMessageText(existing));
+  const candidateText = normalizeAssistantStreamText(getComparableMessageText(candidate));
+  if (existingText === candidateText) return null;
+
+  // First check prefix match - this is unambiguous
+  if (candidateText.startsWith(existingText)) return 'candidate-contains-existing';
+  if (existingText.startsWith(candidateText)) return 'existing-contains-candidate';
+
+  // For substring matching (not prefix), use heuristics to avoid false positives.
+  // We only dedupe when:
+  // 1. The existing message has meaningful length (>= 6 chars after normalization)
+  // 2. AND the candidate is meaningfully longer (ratio >= 1.2)
+  // This handles cases like status prefixes (e.g., "Tavily...\n\n" + original message)
+  const MIN_CONTENT_LENGTH = 6;
+  const MIN_LENGTH_RATIO = 1.2;
+  if (
+    existingText.length >= MIN_CONTENT_LENGTH
+    && candidateText.length >= existingText.length * MIN_LENGTH_RATIO
+    && candidateText.includes(existingText)
+  ) {
+    return 'candidate-contains-existing';
+  }
+  if (
+    candidateText.length >= MIN_CONTENT_LENGTH
+    && existingText.length >= candidateText.length * MIN_LENGTH_RATIO
+    && existingText.includes(candidateText)
+  ) {
+    return 'existing-contains-candidate';
+  }
+
+  return null;
+}
+
 function dedupeAssistantMessagesWithinTurns(messages: RawMessage[]): RawMessage[] {
   let changed = false;
   let currentTurnAssistants: RawMessage[] = [];
@@ -861,9 +924,27 @@ function dedupeAssistantMessagesWithinTurns(messages: RawMessage[]): RawMessage[
       continue;
     }
 
-    if (message.role === 'assistant' && messageExistsByIdentityOrText(currentTurnAssistants, message)) {
-      changed = true;
-      continue;
+    if (message.role === 'assistant') {
+      const existingIndex = currentTurnAssistants.findIndex((assistant) => (
+        messageExistsByIdentityOrText([assistant], message)
+        || getContainedAssistantDuplicateDirection(assistant, message) != null
+      ));
+
+      if (existingIndex >= 0) {
+        const existing = currentTurnAssistants[existingIndex];
+        const direction = getContainedAssistantDuplicateDirection(existing, message);
+        const shouldPreferCandidate = direction === 'candidate-contains-existing';
+        const replacement = shouldPreferCandidate
+          ? mergeAttachedFilesForDuplicate(message, existing)
+          : mergeAttachedFilesForDuplicate(existing, message);
+        const dedupedIndex = deduped.indexOf(existing);
+        if (dedupedIndex >= 0) {
+          deduped[dedupedIndex] = replacement;
+        }
+        currentTurnAssistants[existingIndex] = replacement;
+        changed = true;
+        continue;
+      }
     }
 
     deduped.push(message);

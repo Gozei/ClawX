@@ -1441,6 +1441,164 @@ describe('chat store session resume', () => {
     expect(next.messages.map((message) => message.id)).toEqual(['user-1', 'assistant-history']);
   });
 
+  it('collapses a shorter assistant reply when a later same-turn reply contains it with a status prefix', async () => {
+    const shortReply = [
+      '✅ PT 已生成!',
+      '',
+      '沁哥，给你做了份中国算力市场深度分析PPT，乔布斯风极简科技感：',
+      '',
+      '内容涵盖：',
+      '市场规模：280 EFLOPS 总算力，2 万亿核心产业',
+      'AI 算力：年增 50%+，智能算力占比 40%',
+    ].join('\n');
+    const expandedReply = [
+      'Tavily 搜索限额用完了。沁哥，我基于现有知识为您整理算力市场分析并生成 PPT。',
+      '',
+      shortReply,
+    ].join('\n');
+
+    hostApiFetchMock.mockReset();
+    hostApiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/sessions/history') {
+        return Promise.resolve({
+          success: true,
+          resolved: true,
+          messages: [
+            { id: 'user-1', role: 'user', content: '查一下算力市场，然后整合一下，生成一个PPT给我', timestamp: userTimestampSeconds },
+            {
+              id: 'assistant-short',
+              role: 'assistant',
+              content: shortReply,
+              timestamp: assistantTimestampSeconds,
+              _attachedFiles: [
+                {
+                  fileName: '算力市场分析 PPT.html',
+                  mimeType: 'text/html',
+                  fileSize: 1024,
+                  preview: null,
+                  filePath: 'C:\\Users\\Administrator\\.openclaw\\workspace\\算力市场分析 PPT.html',
+                },
+              ],
+            },
+            {
+              id: 'assistant-expanded',
+              role: 'assistant',
+              content: expandedReply,
+              timestamp: assistantTimestampSeconds + 1,
+            },
+          ],
+        });
+      }
+      return Promise.resolve({ success: true });
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: null,
+    });
+
+    await useChatStore.getState().loadHistory();
+
+    const next = useChatStore.getState();
+    expect(next.messages.map((message) => message.id)).toEqual(['user-1', 'assistant-expanded']);
+    expect(next.messages[1]?.content).toBe(expandedReply);
+    expect(next.messages[1]?._attachedFiles?.[0]?.fileName).toBe('算力市场分析 PPT.html');
+  });
+
+  it('collapses short prefix-only assistant replies when expanded version arrives', async () => {
+    // When a short message like "✅ PT 已生成!" appears first as a prefix,
+    // then an expanded version with a status prefix arrives, the short message should be deduped.
+    // Uses prefix matching to avoid false positives on messages where the short text
+    // appears in the middle/end rather than at the beginning.
+    const shortPrefix = '✅ PT 已生成!';
+    const expandedReply = [
+      'Tavily 搜索限额用完了。沁哥，我基于现有知识为您整理算力市场分析并生成 PPT。',
+      '',
+      shortPrefix,
+      '',
+      '内容涵盖：市场规模、产业链、主要玩家...',
+    ].join('\n');
+
+    hostApiFetchMock.mockReset();
+    hostApiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/sessions/history') {
+        return Promise.resolve({
+          success: true,
+          resolved: true,
+          messages: [
+            { id: 'user-1', role: 'user', content: '查一下算力市场', timestamp: userTimestampSeconds },
+            {
+              id: 'assistant-short-prefix',
+              role: 'assistant',
+              content: shortPrefix,
+              timestamp: assistantTimestampSeconds,
+              _attachedFiles: [{ fileName: 'PPT.html', mimeType: 'text/html', fileSize: 1024 }],
+            },
+            {
+              id: 'assistant-expanded',
+              role: 'assistant',
+              content: expandedReply,
+              timestamp: assistantTimestampSeconds + 1,
+            },
+          ],
+        });
+      }
+      return Promise.resolve({ success: true });
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:main',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:main' }],
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+      sendStage: null,
+    });
+
+    await useChatStore.getState().loadHistory();
+
+    const next = useChatStore.getState();
+    // Should keep the expanded message and merge attached files from short message
+    expect(next.messages.map((message) => message.id)).toEqual(['user-1', 'assistant-expanded']);
+    expect(next.messages[1]?._attachedFiles?.[0]?.fileName).toBe('PPT.html');
+  });
+
   it('flushes live assistant deltas on the next animation frame', async () => {
     const rafCallbacks: FrameRequestCallback[] = [];
     const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
