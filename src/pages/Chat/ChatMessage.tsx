@@ -3,7 +3,7 @@
  * Renders user / assistant / system / toolresult messages
  * with markdown, thinking sections, images, and tool cards.
  */
-import { useState, useCallback, useEffect, useMemo, useRef, memo, isValidElement, type ReactNode } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, memo, isValidElement, lazy, Suspense, type ReactNode } from 'react';
 import { Sparkles, Copy, Check, ChevronDown, ChevronRight, Wrench, X, FolderOpen, ZoomIn, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { FileTypeIcon } from './file-icon';
 import { createPortal } from 'react-dom';
@@ -20,7 +20,7 @@ import type { ProviderAccount } from '@/lib/providers';
 import { buildProviderListItems } from '@/lib/provider-accounts';
 import { extractText, extractThinking, extractImages, extractToolUse, formatTimestamp, extractAssistantRuntimeErrorText } from './message-utils';
 import { StreamingMarkdownPreview } from './StreamingMarkdownPreview';
-import { MarkdownRenderer } from './MarkdownRenderer';
+import type { MarkdownComponents } from './MarkdownRenderer';
 import { ClampedFileName } from './ClampedFileName';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
@@ -49,6 +49,7 @@ interface ExtractedImage { url?: string; data?: string; mimeType: string; }
 
 const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
 const GOOGLE_OAUTH_RUNTIME_PROVIDER = 'google-gemini-cli';
+const MarkdownRenderer = lazy(() => import('./MarkdownRenderer').then((module) => ({ default: module.MarkdownRenderer })));
 
 function getRuntimeProviderKey(account: ProviderAccount): string {
   if (account.authMode === 'oauth_browser') {
@@ -857,9 +858,17 @@ const MessageBubble = memo(function MessageBubble({
         </div>
       ) : (
         <div className={cn('chat-markdown prose prose-sm dark:prose-invert min-w-0 max-w-none break-words leading-[1.82]', usesAssistantStreamStyle && '[&>*]:my-3 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0')} style={{ fontSize }}>
-          <MarkdownRenderer
-            content={text}
-            components={{
+          <Suspense
+            fallback={(
+              <StreamingMarkdownPreview
+                anchorPrefix={`${anchorPrefix}:markdown-loading`}
+                content={text}
+              />
+            )}
+          >
+            <MarkdownRenderer
+              content={text}
+              components={{
               code({ className, children, ...props }) {
                 const match = /language-(\w+)/.exec(className || '');
                 const isInline = !match && !className;
@@ -951,8 +960,9 @@ const MessageBubble = memo(function MessageBubble({
                   </a>
                 );
               },
-            }}
-          />
+            } satisfies MarkdownComponents}
+            />
+          </Suspense>
         </div>
       )}
 
@@ -982,7 +992,9 @@ const ThinkingBlock = memo(function ThinkingBlock({ content }: { content: string
       {expanded && (
         <div className="min-w-0 px-3 pb-3 text-muted-foreground">
           <div className="chat-markdown prose prose-sm dark:prose-invert min-w-0 max-w-none opacity-75">
-            <MarkdownRenderer content={content} />
+            <Suspense fallback={<StreamingMarkdownPreview content={content} />}>
+              <MarkdownRenderer content={content} />
+            </Suspense>
           </div>
         </div>
       )}

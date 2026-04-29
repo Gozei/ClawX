@@ -19,6 +19,7 @@ import {
   CHAT_HISTORY_LABEL_PREFETCH_LIMIT,
   CHAT_HISTORY_RPC_TIMEOUT_MS,
   createAssistantDeltaSnapshot,
+  createDeltaFlushScheduler,
   getAssistantRuntimeErrorNotice,
   hasAssistantFinalTextContent,
   hasComposerDraftContent,
@@ -26,6 +27,7 @@ import {
   isUnusedDraftSession,
   isFailedToolResultMessage,
   shouldContinueAssistantDelta,
+  type DeltaFlushScheduleState,
 } from './chat/helpers';
 import {
   DEFAULT_CANONICAL_PREFIX,
@@ -165,10 +167,13 @@ type PersistedSessionViewSnapshot = {
 let pendingDeltaMessages: RawMessage[] = [];
 let pendingDeltaUpdates: ToolStatus[] = [];
 let pendingDeltaClearError = false;
-let pendingDeltaFlushHandle: ReturnType<typeof setTimeout> | null = null;
+const _deltaFlushScheduleState: DeltaFlushScheduleState = {
+  handle: null,
+  usesAnimationFrame: false,
+};
+const { cancelPendingDeltaFlush, scheduleDeltaFlush } = createDeltaFlushScheduler(_deltaFlushScheduleState);
 let pendingFinalRecoveryHandle: ReturnType<typeof setTimeout> | null = null;
 let pendingDeltaSnapshotSeq = 0;
-const STREAM_DELTA_FLUSH_MS = 48;
 const PENDING_FINAL_RECOVERY_DELAY_MS = 8_000;
 
 function clearErrorRecoveryTimer(): void {
@@ -515,13 +520,6 @@ function restoreSessionView(sessionKey: string): SessionViewSnapshot {
   return cloneSessionViewSnapshot(snapshot ?? EMPTY_SESSION_VIEW_SNAPSHOT);
 }
 
-function cancelPendingDeltaFlush(): void {
-  if (pendingDeltaFlushHandle) {
-    clearTimeout(pendingDeltaFlushHandle);
-    pendingDeltaFlushHandle = null;
-  }
-}
-
 function resetPendingDeltaState(): void {
   pendingDeltaMessages = [];
   pendingDeltaUpdates = [];
@@ -626,13 +624,6 @@ function flushPendingDelta(set: ChatStoreSet): void {
         : state.streamingTools,
     };
   });
-}
-
-function scheduleDeltaFlush(set: ChatStoreSet): void {
-  if (pendingDeltaFlushHandle) return;
-  pendingDeltaFlushHandle = setTimeout(() => {
-    flushPendingDelta(set);
-  }, STREAM_DELTA_FLUSH_MS);
 }
 
 function startHistoryPoll(get: () => ChatState, sessionKey: string): void {
@@ -788,18 +779,26 @@ function isEquivalentRecentAssistantMessage(
   candidate: RawMessage,
 ): boolean {
   const candidateRole = candidate.role || 'assistant';
+  const candidateText = candidateRole === 'assistant'
+    ? normalizeAssistantStreamText(getComparableMessageText(candidate))
+    : '';
   const candidateContentKey = buildMessageContentKey(candidate.content);
-  if (!candidateContentKey) return false;
+  if (!candidateText && !candidateContentKey) return false;
 
   return messages.slice(-3).some((message) => {
     const role = message.role || 'assistant';
     if (role !== candidateRole) return false;
-    return buildMessageContentKey(message.content) === candidateContentKey;
+    if (candidateText && normalizeAssistantStreamText(getComparableMessageText(message)) === candidateText) {
+      return true;
+    }
+    return !!candidateContentKey && buildMessageContentKey(message.content) === candidateContentKey;
   });
 }
 
 function normalizeAssistantStreamText(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
+  return value
+    .replace(/(\*\*|__|~~|`+)/g, '')
+    .replace(/[\s\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u3000\uFEFF]+/g, '');
 }
 
 function isAssistantDeltaSnapshotMessage(message: RawMessage): boolean {
@@ -833,12 +832,47 @@ function removeContainedAssistantDeltaSnapshots(
 function messageExistsByIdentityOrText(messages: RawMessage[], candidate: RawMessage): boolean {
   if (candidate.id && messages.some((message) => message.id === candidate.id)) return true;
   const candidateText = getComparableMessageText(candidate);
+  const candidateAssistantText = candidate.role === 'assistant'
+    ? normalizeAssistantStreamText(candidateText)
+    : '';
   const candidateContentKey = buildMessageContentKey(candidate.content);
   return messages.some((message) => {
     if (message.role !== candidate.role) return false;
+    if (
+      candidateAssistantText
+      && normalizeAssistantStreamText(getComparableMessageText(message)) === candidateAssistantText
+    ) {
+      return true;
+    }
     if (candidateText && getComparableMessageText(message) === candidateText) return true;
     return !!candidateContentKey && buildMessageContentKey(message.content) === candidateContentKey;
   });
+}
+
+function dedupeAssistantMessagesWithinTurns(messages: RawMessage[]): RawMessage[] {
+  let changed = false;
+  let currentTurnAssistants: RawMessage[] = [];
+  const deduped: RawMessage[] = [];
+
+  for (const message of messages) {
+    if (message.role === 'user') {
+      currentTurnAssistants = [];
+      deduped.push(message);
+      continue;
+    }
+
+    if (message.role === 'assistant' && messageExistsByIdentityOrText(currentTurnAssistants, message)) {
+      changed = true;
+      continue;
+    }
+
+    deduped.push(message);
+    if (message.role === 'assistant') {
+      currentTurnAssistants.push(message);
+    }
+  }
+
+  return changed ? deduped : messages;
 }
 
 function normalizeStopReason(value: unknown): string {
@@ -1127,10 +1161,7 @@ function schedulePendingFinalRecovery(
             }
           : null;
         const shouldAppendStreamingSnapshot = !!streamingSnapshot
-          && !s.messages.some((message) => (
-            (streamingSnapshot.id && message.id === streamingSnapshot.id)
-            || buildMessageContentKey(message.content) === buildMessageContentKey(streamingSnapshot.content)
-          ));
+          && !messageExistsByIdentityOrText(s.messages, streamingSnapshot);
 
         return {
           messages: shouldAppendStreamingSnapshot
@@ -1172,7 +1203,6 @@ function finalizeStreamingAssistantIfStale(set: ChatStoreSet, get: () => ChatSta
 
   const msgId = streamingAssistant.id || `stale-stream-${Date.now()}`;
   set((s) => {
-    const alreadyExists = s.messages.some((message) => message.id === msgId);
     const msgWithImages: RawMessage = s.pendingToolImages.length > 0
       ? {
           ...streamingAssistant,
@@ -1185,6 +1215,7 @@ function finalizeStreamingAssistantIfStale(set: ChatStoreSet, get: () => ChatSta
           role: 'assistant',
           id: msgId,
         };
+    const alreadyExists = messageExistsByIdentityOrText(s.messages, msgWithImages);
     return {
       messages: alreadyExists ? s.messages : [...s.messages, msgWithImages],
       sending: false,
@@ -4308,7 +4339,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       const deferredMergeResult = shouldDeferHistoryCurrentTurn
         ? mergeDeferredCurrentTurnMessages(get().messages, finalMessages, effectiveHistoryLastUserMessageAt)
         : { messages: finalMessages, appendedProcessCount: 0 };
-      const mergedMessagesForActiveSend = deferredMergeResult.messages;
+      const mergedMessagesForActiveSend = dedupeAssistantMessagesWithinTurns(deferredMergeResult.messages);
 
       if (historyRecentAssistant || historyEmptyAssistant || historySettledAssistant || loadedHistoryHasOrderedAssistantAfterUser || shouldDeferSettledHistoryFinal) {
         clearHistoryPoll();
@@ -5021,7 +5052,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         }
         mergePendingDeltaUpdates(updates);
         set({ sendStage: 'running', sessionNotice: null });
-        scheduleDeltaFlush(set);
+        scheduleDeltaFlush(() => flushPendingDelta(set));
         break;
       }
       case 'final': {

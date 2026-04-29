@@ -275,6 +275,29 @@ vi.mock('@/pages/Chat/ChatToolbarV2', () => ({
   ChatToolbarV2: () => <div data-testid="chat-toolbar" />,
 }));
 
+type ChatScrollDebugSnapshotForTest = {
+  activeTurnAutoScrollMode: string;
+  isAtBottom: boolean;
+  mode: string;
+};
+
+function getChatScrollDebugSnapshot() {
+  const debugWindow = window as typeof window & {
+    __CLAWX_CHAT_SCROLL_DEBUG__?: {
+      getSnapshot: () => ChatScrollDebugSnapshotForTest;
+    };
+  };
+  return debugWindow.__CLAWX_CHAT_SCROLL_DEBUG__?.getSnapshot() ?? null;
+}
+
+async function waitForActiveTurnScrollDebounce() {
+  await act(async () => {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 160);
+    });
+  });
+}
+
 describe('Chat process turn rendering', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -440,6 +463,134 @@ describe('Chat process turn rendering', () => {
     expect(virtuosoState.lastProps).not.toHaveProperty('alignToBottom');
   });
 
+  it('keeps a switched history session pinned when transcript layout remeasures during entry', () => {
+    const rafQueue: FrameRequestCallback[] = [];
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      rafQueue.push(callback);
+      return rafQueue.length;
+    });
+    const resizeObserverCallbacks: ResizeObserverCallback[] = [];
+    class MockResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeObserverCallbacks.push(callback);
+      }
+
+      observe() {}
+
+      disconnect() {}
+
+      unobserve() {}
+    }
+    const flushRaf = () => {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
+        const callback = rafQueue.shift();
+        now += 16;
+        callback?.(now);
+      }
+    };
+
+    vi.stubGlobal('requestAnimationFrame', requestAnimationFrameMock);
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal('ResizeObserver', MockResizeObserver as unknown as typeof ResizeObserver);
+
+    chatState.currentSessionKey = 'agent:main:session-a';
+    chatState.sending = false;
+    chatState.sessionRunningState = {};
+    chatState.sendStage = null;
+    chatState.pendingFinal = false;
+    chatState.streamingMessage = null;
+    chatState.lastUserMessageAt = null;
+    chatState.messages = [
+      {
+        id: 'session-a-user-1',
+        role: 'user',
+        content: 'Session A history.',
+        timestamp: fixedNow / 1000 - 10,
+      },
+      {
+        id: 'session-a-assistant-1',
+        role: 'assistant',
+        content: 'Session A answer.',
+        timestamp: fixedNow / 1000 - 9,
+      },
+    ];
+
+    const { rerender } = render(<Chat />);
+    act(flushRaf);
+
+    chatState.currentSessionKey = 'agent:main:session-b';
+    chatState.messages = [
+      {
+        id: 'session-b-user-1',
+        role: 'user',
+        content: 'Open a long saved session.',
+        timestamp: fixedNow / 1000 - 5,
+      },
+      {
+        id: 'session-b-assistant-1',
+        role: 'assistant',
+        content: Array.from(
+          { length: 80 },
+          (_value, index) => `Long history line ${index + 1}.`,
+        ).join('\n'),
+        timestamp: fixedNow / 1000 - 4,
+      },
+    ];
+
+    act(() => {
+      rerender(<Chat />);
+    });
+
+    const scrollContainer = screen.getByTestId('chat-scroll-container');
+    scrollContainer.scrollTop = 0;
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 640,
+    });
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1200,
+    });
+
+    act(flushRaf);
+    act(() => {
+      for (const callback of resizeObserverCallbacks) {
+        callback([{ target: scrollContainer } as ResizeObserverEntry], {} as ResizeObserver);
+      }
+    });
+    act(flushRaf);
+    expect(scrollContainer.scrollTop).toBe(560);
+
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1600,
+    });
+    act(() => {
+      for (const callback of resizeObserverCallbacks) {
+        callback([{ target: scrollContainer } as ResizeObserverEntry], {} as ResizeObserver);
+      }
+    });
+    act(flushRaf);
+
+    expect(scrollContainer.scrollTop).toBe(960);
+
+    fireEvent.pointerDown(scrollContainer);
+    scrollContainer.scrollTop = 700;
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 2000,
+    });
+    act(() => {
+      for (const callback of resizeObserverCallbacks) {
+        callback([{ target: scrollContainer } as ResizeObserverEntry], {} as ResizeObserver);
+      }
+    });
+    act(flushRaf);
+
+    expect(scrollContainer.scrollTop).toBe(700);
+  });
+
   it('cancels session-entry bottom docking once a running turn takes ownership', () => {
     const rafQueue: FrameRequestCallback[] = [];
     const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
@@ -584,7 +735,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(544);
+    expect(scrollContainer.scrollTop).toBe(560);
     expect(requestAnimationFrameMock).toHaveBeenCalled();
   });
 
@@ -769,7 +920,7 @@ describe('Chat process turn rendering', () => {
     expect(virtuosoState.lastProps).toMatchObject({
       initialTopMostItemIndex: { index: 'LAST', align: 'end' },
     });
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
   });
 
   it('keeps the original bubble-style process content when the final answer has not started yet', () => {
@@ -1423,7 +1574,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
     expect(requestAnimationFrameMock.mock.calls.length).toBeGreaterThan(3);
   });
 
@@ -1632,7 +1783,7 @@ describe('Chat process turn rendering', () => {
     expect(scrollContainer.scrollTop).toBe(120);
   });
 
-  it('keeps the latest streamed content visible at the bottom while auto-follow is active', () => {
+  it('keeps the latest streamed content visible at the bottom while auto-follow is active', async () => {
     const rafQueue: FrameRequestCallback[] = [];
     const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
       rafQueue.push(callback);
@@ -1730,7 +1881,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
 
     Object.defineProperty(scrollContainer, 'scrollHeight', {
       configurable: true,
@@ -1752,10 +1903,224 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(512);
+    expect(scrollContainer.scrollTop).toBe(280);
+
+    await waitForActiveTurnScrollDebounce();
+
+    act(() => {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
+        const callback = rafQueue.shift();
+        now += 16;
+        callback?.(now);
+      }
+    });
+
+    expect(scrollContainer.scrollTop).toBe(528);
   });
 
-  it('does not release auto-follow from a plain scroll event without user scroll intent', () => {
+  it('pins to the bottom immediately when the transcript viewport resizes during active follow', () => {
+    const rafQueue: FrameRequestCallback[] = [];
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      rafQueue.push(callback);
+      return rafQueue.length;
+    });
+    const resizeObserverCallbacks: ResizeObserverCallback[] = [];
+    class MockResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeObserverCallbacks.push(callback);
+      }
+
+      observe() {}
+
+      disconnect() {}
+
+      unobserve() {}
+    }
+
+    vi.stubGlobal('requestAnimationFrame', requestAnimationFrameMock);
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal('ResizeObserver', MockResizeObserver as unknown as typeof ResizeObserver);
+
+    settingsState.assistantMessageStyle = 'stream';
+    chatState.messages = [
+      {
+        id: 'history-user-1',
+        role: 'user',
+        content: 'Old question one.',
+        timestamp: fixedNow / 1000 - 5,
+      },
+      {
+        id: 'history-assistant-1',
+        role: 'assistant',
+        content: 'Old answer one.',
+        timestamp: fixedNow / 1000 - 4,
+      },
+      {
+        id: 'history-user-2',
+        role: 'user',
+        content: 'Stream the latest answer here.',
+        timestamp: fixedNow / 1000 - 1,
+      },
+    ];
+    chatState.pendingFinal = false;
+    chatState.streamingMessage = null;
+    chatState.lastUserMessageAt = fixedNow / 1000 - 1;
+    chatState.sessionRunningState = { 'agent:main:main': true };
+
+    render(<Chat />);
+
+    const scrollContainer = screen.getByTestId('chat-scroll-container');
+    const activeTurnAnchor = screen.getByTestId('chat-active-turn-anchor');
+    scrollContainer.scrollTop = 120;
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 640,
+    });
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 920,
+    });
+
+    vi.spyOn(scrollContainer, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 80,
+      width: 960,
+      height: 640,
+      top: 80,
+      right: 960,
+      bottom: 720,
+      left: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    vi.spyOn(activeTurnAnchor, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 520,
+      width: 960,
+      height: 240,
+      top: 520,
+      right: 960,
+      bottom: 760,
+      left: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    act(() => {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
+        const callback = rafQueue.shift();
+        now += 16;
+        callback?.(now);
+      }
+    });
+
+    expect(scrollContainer.scrollTop).toBe(280);
+
+    rafQueue.length = 0;
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 560,
+    });
+
+    const activeFollowResizeObserver = resizeObserverCallbacks[resizeObserverCallbacks.length - 1];
+    expect(activeFollowResizeObserver).toBeDefined();
+    act(() => {
+      activeFollowResizeObserver?.([
+        { target: scrollContainer } as ResizeObserverEntry,
+      ], {} as ResizeObserver);
+    });
+
+    act(() => {
+      const callback = rafQueue.shift();
+      callback?.(performance.now() + 16);
+    });
+
+    expect(scrollContainer.scrollTop).toBe(360);
+    expect(rafQueue).toHaveLength(0);
+  });
+
+  it('keeps the bottom pinned when completed markdown reflows after streaming finishes', () => {
+    const rafQueue: FrameRequestCallback[] = [];
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      rafQueue.push(callback);
+      return rafQueue.length;
+    });
+    const resizeObserverCallbacks: ResizeObserverCallback[] = [];
+    class MockResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeObserverCallbacks.push(callback);
+      }
+
+      observe() {}
+
+      disconnect() {}
+
+      unobserve() {}
+    }
+
+    vi.stubGlobal('requestAnimationFrame', requestAnimationFrameMock);
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal('ResizeObserver', MockResizeObserver as unknown as typeof ResizeObserver);
+
+    chatState.sending = false;
+    chatState.sessionRunningState = {};
+    chatState.sendStage = null;
+    chatState.pendingFinal = false;
+    chatState.streamingMessage = null;
+    chatState.lastUserMessageAt = fixedNow / 1000 - 1;
+    chatState.messages = [
+      {
+        id: 'history-user-1',
+        role: 'user',
+        content: 'Write a long markdown answer.',
+        timestamp: fixedNow / 1000 - 1,
+      },
+      {
+        id: 'history-assistant-1',
+        role: 'assistant',
+        content: [
+          { type: 'text', text: '## Result\n\nA long final answer with markdown formatting.' },
+        ],
+        timestamp: fixedNow / 1000,
+      },
+    ];
+
+    render(<Chat />);
+
+    const scrollContainer = screen.getByTestId('chat-scroll-container');
+    const contentColumn = screen.getByTestId('chat-content-column');
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 640,
+    });
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 920,
+    });
+    scrollContainer.scrollTop = 280;
+
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1168,
+    });
+
+    act(() => {
+      for (const callback of resizeObserverCallbacks) {
+        callback([
+          { target: contentColumn } as ResizeObserverEntry,
+        ], {} as ResizeObserver);
+      }
+    });
+
+    act(() => {
+      const callback = rafQueue.shift();
+      callback?.(performance.now() + 16);
+    });
+
+    expect(scrollContainer.scrollTop).toBe(528);
+  });
+
+  it('does not release auto-follow from a plain scroll event without user scroll intent', async () => {
     const rafQueue: FrameRequestCallback[] = [];
     const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
       rafQueue.push(callback);
@@ -1853,7 +2218,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
 
     fireEvent.scroll(scrollContainer);
 
@@ -1877,7 +2242,20 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(512);
+    expect(scrollContainer.scrollTop).toBe(280);
+
+    await waitForActiveTurnScrollDebounce();
+
+    act(() => {
+      let now = performance.now();
+      for (let frameIndex = 0; rafQueue.length > 0 && frameIndex < 48; frameIndex += 1) {
+        const callback = rafQueue.shift();
+        now += 16;
+        callback?.(now);
+      }
+    });
+
+    expect(scrollContainer.scrollTop).toBe(528);
   });
 
   it('stops auto-following once the user manually scrolls during streaming', () => {
@@ -1978,7 +2356,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
 
     fireEvent.wheel(scrollContainer, { deltaY: -120 });
 
@@ -2000,7 +2378,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
   });
 
   it('stops auto-following once the user clicks inside the transcript during streaming', () => {
@@ -2101,7 +2479,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
 
     fireEvent.pointerDown(activeTurnAnchor, {
       button: 0,
@@ -2126,10 +2504,10 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
   });
 
-  it('lets the user keep scrolling up and back down after interrupting auto-follow', () => {
+  it('resumes auto-following after the user scrolls back to the bottom', () => {
     const rafQueue: FrameRequestCallback[] = [];
     const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
       rafQueue.push(callback);
@@ -2227,7 +2605,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
 
     fireEvent.wheel(scrollContainer, { deltaY: -120 });
     scrollContainer.scrollTop = 96;
@@ -2252,6 +2630,7 @@ describe('Chat process turn rendering', () => {
     });
 
     expect(scrollContainer.scrollTop).toBe(96);
+    expect(getChatScrollDebugSnapshot()?.mode).toBe('detached');
 
     fireEvent.wheel(scrollContainer, { deltaY: 120 });
     scrollContainer.scrollTop = 244;
@@ -2275,7 +2654,12 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(244);
+    expect(scrollContainer.scrollTop).toBe(280);
+    expect(getChatScrollDebugSnapshot()).toMatchObject({
+      activeTurnAutoScrollMode: 'follow-bottom',
+      isAtBottom: true,
+      mode: 'following',
+    });
     expect(requestAnimationFrameMock).toHaveBeenCalled();
   });
 
@@ -2419,7 +2803,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
 
     const eventToggle = screen.getAllByTestId('chat-process-event-toggle')[0];
     fireEvent.pointerDown(eventToggle);
@@ -2443,7 +2827,7 @@ describe('Chat process turn rendering', () => {
       }
     });
 
-    expect(scrollContainer.scrollTop).toBe(264);
+    expect(scrollContainer.scrollTop).toBe(280);
   });
 
   it('hides the persisted copy of an optimistic user message when the active turn already renders it', () => {

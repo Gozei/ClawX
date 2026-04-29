@@ -1612,7 +1612,7 @@ async function ensurePresentationPreviewCache(options: {
     try {
       summary = await extractPresentationTextPreviewFromBuffer(options.buffer);
     } catch {
-      summary = null;
+      // Text extraction is best-effort; image/HTML rendering can still provide a preview.
     }
 
     const imageExport = await tryExportPresentationImagesLocally({

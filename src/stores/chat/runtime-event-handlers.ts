@@ -3,6 +3,7 @@ import {
   clearErrorRecoveryTimer,
   clearHistoryPoll,
   collectToolUpdates,
+  createDeltaFlushScheduler,
   createLocalAssistantMessage,
   createToolResultProcessMessage,
   extractImagesAsAttachedFiles,
@@ -23,6 +24,7 @@ import {
   makeAttachedFile,
   setErrorRecoveryTimer,
   upsertToolStatuses,
+  type DeltaFlushScheduleState,
 } from './helpers';
 import type { AttachedFileMeta, RawMessage, ToolStatus } from './types';
 import type { ChatGet, ChatSet } from './store-api';
@@ -30,19 +32,16 @@ import type { ChatGet, ChatSet } from './store-api';
 let pendingDeltaMessage: RawMessage | null = null;
 let pendingDeltaUpdates: ToolStatus[] = [];
 let pendingDeltaClearError = false;
-let pendingDeltaFlushHandle: ReturnType<typeof setTimeout> | null = null;
+const _deltaFlushScheduleState: DeltaFlushScheduleState = {
+  handle: null,
+  usesAnimationFrame: false,
+};
+const { cancelPendingDeltaFlush, scheduleDeltaFlush } = createDeltaFlushScheduler(_deltaFlushScheduleState);
 let pendingFinalRecoveryHandle: ReturnType<typeof setTimeout> | null = null;
 const PENDING_FINAL_RECOVERY_DELAY_MS = 20_000;
 // 如果距离最后一个 chat 事件不超过此时间，recovery 定时器推迟而非强制终止，
 // 以避免在长工具执行期间过早结束流式会话。
 const RECOVERY_ACTIVE_THRESHOLD_MS = 45_000;
-
-function cancelPendingDeltaFlush(): void {
-  if (pendingDeltaFlushHandle) {
-    clearTimeout(pendingDeltaFlushHandle);
-    pendingDeltaFlushHandle = null;
-  }
-}
 
 function resetPendingDeltaState(): void {
   pendingDeltaMessage = null;
@@ -84,13 +83,6 @@ function flushPendingDelta(set: ChatSet): void {
     })(),
     streamingTools: nextUpdates.length > 0 ? upsertToolStatuses(s.streamingTools, nextUpdates) : s.streamingTools,
   }));
-}
-
-function scheduleDeltaFlush(set: ChatSet): void {
-  if (pendingDeltaFlushHandle) return;
-  pendingDeltaFlushHandle = setTimeout(() => {
-    flushPendingDelta(set);
-  }, 16);
 }
 
 function mergePendingDeltaUpdates(updates: ToolStatus[]): void {
@@ -246,7 +238,7 @@ export function handleRuntimeEventState(
             pendingDeltaMessage = event.message as unknown as RawMessage;
           }
           mergePendingDeltaUpdates(updates);
-          scheduleDeltaFlush(set);
+          scheduleDeltaFlush(() => flushPendingDelta(set));
           break;
         }
         case 'final': {
