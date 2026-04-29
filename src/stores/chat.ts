@@ -2334,10 +2334,13 @@ async function syncSessionPreferredModelToRuntime(
     return;
   }
 
-  const expectedRuntimeModel = _runtimePatchedAgentModels.has(agentId)
+  // Do not assume runtime already matches agent config on first send.
+  // Gateway runtime can drift from stored config; force one sync per agent.
+  const hasSyncedRuntimeModel = _runtimePatchedAgentModels.has(agentId);
+  const expectedRuntimeModel = hasSyncedRuntimeModel
     ? (_runtimePatchedAgentModels.get(agentId) || null)
-    : resolveAgentConfiguredModel(agentId);
-  if (expectedRuntimeModel === preferredModel) {
+    : null;
+  if (hasSyncedRuntimeModel && expectedRuntimeModel === preferredModel) {
     return;
   }
 
@@ -2371,6 +2374,25 @@ async function syncSessionPreferredModelToRuntime(
 
   _runtimeAgentModelSyncInFlight.set(agentId, request);
   await request;
+}
+
+async function persistSessionPreferredModel(
+  sessionKey: string,
+  modelRefOverride?: string | null,
+): Promise<void> {
+  const preferredModel = resolveSessionPreferredModel(sessionKey, modelRefOverride);
+  if (!preferredModel) return;
+
+  const result = await hostApiFetch<{ success?: boolean; error?: string }>('/api/sessions/model', {
+    method: 'POST',
+    body: JSON.stringify({
+      sessionKey,
+      modelRef: preferredModel,
+    }),
+  });
+  if (result?.success === false) {
+    throw new Error(result.error || `Failed to persist session model for ${sessionKey}`);
+  }
 }
 
 function resolveMainSessionKeyForAgent(agentId: string | undefined | null): string | null {
@@ -4921,17 +4943,25 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, false),
           }));
         }
-      } else if (autoSessionLabel) {
-        queueAutoSessionLabelPersistence(set, currentSessionKey, autoSessionLabel);
-        if (result.result?.runId) {
+      } else {
+        try {
+          await persistSessionPreferredModel(currentSessionKey, explicitModelRef);
+        } catch (persistError) {
+          console.warn('[sendMessage] Failed to persist session model after successful send:', persistError);
+        }
+
+        if (autoSessionLabel) {
+          queueAutoSessionLabelPersistence(set, currentSessionKey, autoSessionLabel);
+          if (result.result?.runId) {
+            set({ activeRunId: result.result.runId, sendStage: 'awaiting_runtime' });
+          } else {
+            set({ sendStage: 'awaiting_runtime' });
+          }
+        } else if (result.result?.runId) {
           set({ activeRunId: result.result.runId, sendStage: 'awaiting_runtime' });
         } else {
           set({ sendStage: 'awaiting_runtime' });
         }
-      } else if (result.result?.runId) {
-        set({ activeRunId: result.result.runId, sendStage: 'awaiting_runtime' });
-      } else {
-        set({ sendStage: 'awaiting_runtime' });
       }
     } catch (err) {
       const errStr = String(err);

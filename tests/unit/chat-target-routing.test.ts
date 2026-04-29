@@ -333,6 +333,63 @@ describe('chat target routing', () => {
     expect(runtimeModelOrder).toBeLessThan(chatSendOrder);
   });
 
+  it('forces a runtime model sync on first send even when model matches agent config', async () => {
+    const { useChatStore } = await import('@/stores/chat');
+
+    agentsState.defaultModelRef = 'custom-custombc/gpt-5.4';
+    agentsState.agents = [
+      {
+        id: 'main',
+        name: 'Main',
+        isDefault: true,
+        modelDisplay: 'GPT-5.4',
+        modelRef: 'custom-custombc/gpt-5.4',
+        overrideModelRef: null,
+        inheritedModel: true,
+        workspace: '~/.openclaw/workspace',
+        agentDir: '~/.openclaw/agents/main/agent',
+        mainSessionKey: 'agent:main:main',
+        channelTypes: [],
+        skillIds: [],
+        workflowSteps: [],
+        triggerModes: [],
+        description: null,
+      },
+    ];
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:session-123',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:session-123', model: 'custom-custombc/gpt-5.4' }],
+      sessionModels: { 'agent:main:session-123': 'custom-custombc/gpt-5.4' },
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().sendMessage('模型校验');
+
+    expect(hostApiFetchMock).toHaveBeenCalledWith('/api/agents/main/model/runtime', {
+      method: 'PUT',
+      body: JSON.stringify({ modelRef: 'custom-custombc/gpt-5.4' }),
+    });
+    const sendCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.send');
+    const sendMessagePayload = String((sendCall?.[1] as { message?: unknown })?.message);
+    expect(sendMessagePayload).toContain('"preferredModel": "custom-custombc/gpt-5.4"');
+  });
+
   it('flushes queued messages with their queued model snapshot without overwriting the current session model', async () => {
     const { useChatStore } = await import('@/stores/chat');
 

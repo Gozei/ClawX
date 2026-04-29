@@ -1258,6 +1258,134 @@ describe('ChatInput agent targeting', () => {
     expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Moonshot / kimi-k2.5');
   });
 
+  it('keeps a session-saved model as the displayed and sent value even when it is absent from model options', async () => {
+    const onSend = vi.fn();
+    providerState.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI',
+        authMode: 'api_key',
+        model: 'gpt-5.4',
+        metadata: { customModels: ['gpt-5.4-mini'] },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [
+      { id: 'openai', hasKey: true, model: 'gpt-5.4' },
+    ];
+    providerState.vendors = [
+      { id: 'openai', name: 'OpenAI' },
+    ];
+    providerState.defaultAccountId = 'openai';
+    chatState.sessions = [{ key: 'agent:main:main', model: 'moonshot/kimi-k2.5' }];
+    chatState.sessionModels = { 'agent:main:main': 'moonshot/kimi-k2.5' };
+    agentsState.defaultModelRef = 'openai/gpt-5.4';
+
+    render(<ChatInput onSend={onSend} />);
+
+    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('moonshot/kimi-k2.5');
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '保持会话模型' } });
+    fireEvent.click(screen.getByTestId('chat-send-button'));
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(
+        '保持会话模型',
+        undefined,
+        null,
+        {
+          sessionKey: 'agent:main:main',
+          modelRef: 'moonshot/kimi-k2.5',
+        },
+      );
+    });
+  });
+
+  it('falls back to default model and persists it when the session model is unavailable', async () => {
+    const onSend = vi.fn();
+    providerState.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI',
+        authMode: 'api_key',
+        model: 'gpt-5.4',
+        metadata: { customModels: ['gpt-5.4-mini'] },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [
+      { id: 'openai', hasKey: true, model: 'gpt-5.4' },
+    ];
+    providerState.vendors = [
+      { id: 'openai', name: 'OpenAI' },
+    ];
+    providerState.defaultAccountId = 'openai';
+    chatState.sessions = [{ key: 'agent:main:main', model: 'moonshot/kimi-k2.5' }];
+    chatState.sessionModels = { 'agent:main:main': 'moonshot/kimi-k2.5' };
+    agentsState.defaultModelRef = 'openai/gpt-5.4';
+    hostApiFetchMock.mockResolvedValue({ success: true });
+
+    render(<ChatInput onSend={onSend} />);
+
+    await waitFor(() => {
+      expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/model', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionKey: 'agent:main:main',
+          modelRef: 'openai/gpt-5.4',
+        }),
+      });
+      expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('OpenAI / gpt-5.4');
+      expect(chatState.sessionModels['agent:main:main']).toBe('openai/gpt-5.4');
+    });
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '继续会话' } });
+    fireEvent.click(screen.getByTestId('chat-send-button'));
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(
+        '继续会话',
+        undefined,
+        null,
+        {
+          sessionKey: 'agent:main:main',
+          modelRef: 'openai/gpt-5.4',
+        },
+      );
+    });
+  });
+
+  it('blocks send with error when session model is unavailable and no fallback default exists', async () => {
+    const onSend = vi.fn();
+    providerState.accounts = [];
+    providerState.statuses = [];
+    providerState.vendors = [];
+    providerState.defaultAccountId = null;
+    chatState.sessions = [{ key: 'agent:main:main', model: 'moonshot/kimi-k2.5' }];
+    chatState.sessionModels = { 'agent:main:main': 'moonshot/kimi-k2.5' };
+    agentsState.defaultModelRef = null;
+
+    render(<ChatInput onSend={onSend} />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '发送失败校验' } });
+    fireEvent.click(screen.getByTestId('chat-send-button'));
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Current session model is unavailable and no default model can be used. Please configure a model first.',
+      );
+    });
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it('clears the current draft and ignores in-flight attachment staging when switching sessions', async () => {
     agentsState.agents = [
       {

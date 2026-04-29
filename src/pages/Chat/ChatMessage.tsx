@@ -797,6 +797,115 @@ const MessageMetaBar = memo(function MessageMetaBar({
   );
 });
 
+function createMarkdownComponentOverrides(
+  getAnchorProps?: (blockType: string, children: ReactNode) => ChatScrollBlockAnchorProps,
+): MarkdownComponents {
+  const buildAnchor = (blockType: string, children: ReactNode) => (
+    getAnchorProps ? getAnchorProps(blockType, children) : {}
+  );
+
+  return {
+    code({ inline, className, children, ...props }) {
+      // 优先使用 react-markdown 的 inline 标记，避免无 language 的 fenced code 被误判成行内代码
+      const inferredLanguage = /language-(\w+)/.exec(className || '');
+      const inferredInlineFallback = !inferredLanguage && !className;
+      const isInline = typeof inline === 'boolean' ? inline : inferredInlineFallback;
+
+      if (isInline) {
+        return (
+          <code
+            className="rounded bg-background/50 px-1.5 py-0.5 text-sm font-mono break-words [overflow-wrap:anywhere]"
+            {...props}
+          >
+            {children}
+          </code>
+        );
+      }
+
+      return (
+        <pre
+          className="max-w-full overflow-x-auto rounded-lg bg-background/50 p-4"
+          {...buildAnchor('code', children)}
+        >
+          <code className={cn('text-sm font-mono', className)} {...props}>
+            {children}
+          </code>
+        </pre>
+      );
+    },
+    blockquote({ children, node: _node, ...props }) {
+      return (
+        <blockquote {...props} {...buildAnchor('blockquote', children)}>
+          {children}
+        </blockquote>
+      );
+    },
+    h1({ children, node: _node, ...props }) {
+      return (
+        <h1 {...props} {...buildAnchor('heading-1', children)}>
+          {children}
+        </h1>
+      );
+    },
+    h2({ children, node: _node, ...props }) {
+      return (
+        <h2 {...props} {...buildAnchor('heading-2', children)}>
+          {children}
+        </h2>
+      );
+    },
+    h3({ children, node: _node, ...props }) {
+      return (
+        <h3 {...props} {...buildAnchor('heading-3', children)}>
+          {children}
+        </h3>
+      );
+    },
+    h4({ children, node: _node, ...props }) {
+      return (
+        <h4 {...props} {...buildAnchor('heading-4', children)}>
+          {children}
+        </h4>
+      );
+    },
+    h5({ children, node: _node, ...props }) {
+      return (
+        <h5 {...props} {...buildAnchor('heading-5', children)}>
+          {children}
+        </h5>
+      );
+    },
+    h6({ children, node: _node, ...props }) {
+      return (
+        <h6 {...props} {...buildAnchor('heading-6', children)}>
+          {children}
+        </h6>
+      );
+    },
+    li({ children, node: _node, ...props }) {
+      return (
+        <li {...props} {...buildAnchor('list-item', children)}>
+          {children}
+        </li>
+      );
+    },
+    p({ children, node: _node, ...props }) {
+      return (
+        <p {...props} {...buildAnchor('paragraph', children)}>
+          {children}
+        </p>
+      );
+    },
+    a({ href, children }) {
+      return (
+        <a href={href} target="_blank" rel="noopener noreferrer" className="break-words text-primary hover:underline [overflow-wrap:anywhere]">
+          {children}
+        </a>
+      );
+    },
+  };
+}
+
 // ── Message Bubble ──────────────────────────────────────────────
 
 const MessageBubble = memo(function MessageBubble({
@@ -818,6 +927,10 @@ const MessageBubble = memo(function MessageBubble({
 }) {
   const usesAssistantStreamStyle = !isUser && assistantMessageStyle === 'stream';
   const createBlockAnchorProps = createBlockAnchorFactory(anchorPrefix);
+  const markdownComponents = useMemo(
+    () => createMarkdownComponentOverrides(createBlockAnchorProps),
+    [createBlockAnchorProps],
+  );
 
   return (
     <div
@@ -868,99 +981,7 @@ const MessageBubble = memo(function MessageBubble({
           >
             <MarkdownRenderer
               content={text}
-              components={{
-              code({ className, children, ...props }) {
-                const match = /language-(\w+)/.exec(className || '');
-                const isInline = !match && !className;
-                if (isInline) {
-                  return (
-                    <code className="rounded bg-background/50 px-1.5 py-0.5 text-sm font-mono break-words [overflow-wrap:anywhere]" {...props}>
-                      {children}
-                    </code>
-                  );
-                }
-                return (
-                  <pre
-                    className="max-w-full overflow-x-auto rounded-lg bg-background/50 p-4"
-                    {...createBlockAnchorProps('code', children)}
-                  >
-                    <code className={cn('text-sm font-mono', className)} {...props}>
-                      {children}
-                    </code>
-                  </pre>
-                );
-              },
-              blockquote({ children, node: _node, ...props }) {
-                return (
-                  <blockquote {...props} {...createBlockAnchorProps('blockquote', children)}>
-                    {children}
-                  </blockquote>
-                );
-              },
-              h1({ children, node: _node, ...props }) {
-                return (
-                  <h1 {...props} {...createBlockAnchorProps('heading-1', children)}>
-                    {children}
-                  </h1>
-                );
-              },
-              h2({ children, node: _node, ...props }) {
-                return (
-                  <h2 {...props} {...createBlockAnchorProps('heading-2', children)}>
-                    {children}
-                  </h2>
-                );
-              },
-              h3({ children, node: _node, ...props }) {
-                return (
-                  <h3 {...props} {...createBlockAnchorProps('heading-3', children)}>
-                    {children}
-                  </h3>
-                );
-              },
-              h4({ children, node: _node, ...props }) {
-                return (
-                  <h4 {...props} {...createBlockAnchorProps('heading-4', children)}>
-                    {children}
-                  </h4>
-                );
-              },
-              h5({ children, node: _node, ...props }) {
-                return (
-                  <h5 {...props} {...createBlockAnchorProps('heading-5', children)}>
-                    {children}
-                  </h5>
-                );
-              },
-              h6({ children, node: _node, ...props }) {
-                return (
-                  <h6 {...props} {...createBlockAnchorProps('heading-6', children)}>
-                    {children}
-                  </h6>
-                );
-              },
-              li({ children, node: _node, ...props }) {
-                return (
-                  <li {...props} {...createBlockAnchorProps('list-item', children)}>
-                    {children}
-                  </li>
-                );
-              },
-              p({ children, node: _node, ...props }) {
-                return (
-                  <p {...props} {...createBlockAnchorProps('paragraph', children)}>
-                    {children}
-                  </p>
-                );
-              },
-              a({ href, children }) {
-                return (
-                  <a href={href} target="_blank" rel="noopener noreferrer" className="break-words text-primary hover:underline [overflow-wrap:anywhere]">
-                    {children}
-                  </a>
-                );
-              },
-            } satisfies MarkdownComponents}
+              components={markdownComponents}
             />
           </Suspense>
         </div>
@@ -976,6 +997,10 @@ const ThinkingBlock = memo(function ThinkingBlock({ content }: { content: string
   const [expanded, setExpanded] = useState(false);
   const preview = content.replace(/\s+/g, ' ').trim();
   const summary = preview.length > 84 ? `${preview.slice(0, 81)}...` : preview;
+  const markdownComponents = useMemo(
+    () => createMarkdownComponentOverrides(),
+    [],
+  );
 
   return (
     <div className="w-full min-w-0 rounded-lg border border-black/10 bg-black/5 text-[14px] dark:border-white/10 dark:bg-white/5">
@@ -993,7 +1018,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ content }: { content: string
         <div className="min-w-0 px-3 pb-3 text-muted-foreground">
           <div className="chat-markdown prose prose-sm dark:prose-invert min-w-0 max-w-none opacity-75">
             <Suspense fallback={<StreamingMarkdownPreview content={content} />}>
-              <MarkdownRenderer content={content} />
+              <MarkdownRenderer content={content} components={markdownComponents} />
             </Suspense>
           </div>
         </div>
