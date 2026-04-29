@@ -6,7 +6,8 @@
  * from external sources (Gateway API, local storage).
  */
 
-import type { AttachedFileMeta, ContentBlock, RawMessage } from '../stores/chat/types';
+import type { AttachedFileMeta, ContentBlock, RawMessage, ToolStatus } from '../stores/chat/types';
+import { sanitizeInboundUserText } from '../../shared/inbound-user-text';
 
 /**
  * Check if a role represents a tool result message.
@@ -136,31 +137,25 @@ function makeAttachedFile(ref: { filePath: string; mimeType: string }): Attached
 }
 
 function cloneAttachedFiles(files: AttachedFileMeta[] | undefined): AttachedFileMeta[] | undefined {
-  if (!files) return undefined;
-  return files.map((f) => ({ ...f }));
+  return files?.map((file) => ({ ...file }));
 }
 
 function normalizeToolName(name: string | undefined): string {
-  if (!name) return 'unknown';
-  // Strip MCP server prefix if present (e.g. "mcp_server.tool" -> "tool")
-  const dotIndex = name.indexOf('.');
-  return dotIndex >= 0 ? name.slice(dotIndex + 1) : name;
+  return (name || 'tool').trim() || 'tool';
 }
 
-function normalizeToolStatus(status: unknown, fallback: string): string {
-  if (typeof status !== 'string') return fallback;
-  const normalized = status.toLowerCase();
-  if (['running', 'retrying', 'completed', 'error'].includes(normalized)) return normalized;
+function normalizeToolStatus(rawStatus: unknown, fallback: 'running' | 'completed' | 'error'): ToolStatus['status'] {
+  const status = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : '';
+  if (status.includes('retry')) return 'retrying';
+  if (status === 'error' || status === 'failed') return 'error';
+  if (status === 'completed' || status === 'success' || status === 'done') return 'completed';
   return fallback;
 }
 
 function parseDurationMs(value: unknown): number | undefined {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string') {
-    const parsed = parseInt(value, 10);
-    return isNaN(parsed) ? undefined : parsed;
-  }
-  return undefined;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = typeof value === 'string' ? Number(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function collectToolCallPaths(msg: RawMessage, toolCallPaths: Map<string, string>): void {
@@ -315,7 +310,7 @@ export function normalizeToolResultMessages(messages: RawMessage[]): RawMessage[
   return messages.map((msg) => createToolResultProcessMessage(msg) ?? msg);
 }
 
-function createToolResultProcessMessage(message: RawMessage): RawMessage | null {
+export function createToolResultProcessMessage(message: RawMessage): RawMessage | null {
   if (!isToolResultRole(message.role)) return null;
 
   const msg = message as RawMessage & {
@@ -468,21 +463,53 @@ export function filterMessages(messages: RawMessage[]): RawMessage[] {
 }
 
 // ============================================================================
+// High-level Pipeline Wrappers
+// ============================================================================
+
+/**
+ * Normalize raw messages from external sources.
+ * Enriches tool result attachments and normalizes tool_result messages to
+ * assistant process messages.
+ */
+export function normalizeMessagePipeline(messages: RawMessage[]): RawMessage[] {
+  const { messages: enriched } = enrichToolResultAttachments(messages);
+  return normalizeToolResultMessages(enriched);
+}
+
+/**
+ * Filter messages for display.
+ * Removes tool_result role messages and internal/system messages.
+ */
+export function filterMessagePipeline(messages: RawMessage[]): RawMessage[] {
+  return filterMessages(messages);
+}
+
+/**
+ * Deduplicate assistant messages within the same turn.
+ * Thin wrapper around dedupeAssistantMessages for pipeline consistency.
+ */
+export function dedupeMessagePipeline(messages: RawMessage[]): RawMessage[] {
+  return dedupeAssistantMessages(messages);
+}
+
+// ============================================================================
 // Deduplication Pipeline
 // ============================================================================
 
-function getComparableMessageText(message: RawMessage): string {
-  const content = message.content;
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
+function cleanUserMessageText(text: string): string {
+  const cleaned = sanitizeInboundUserText(text);
+  return isPreCompactionMemoryFlushPrompt(cleaned) ? '' : cleaned;
+}
 
-  const parts: string[] = [];
-  for (const block of content as ContentBlock[]) {
-    if (block.type === 'text' && block.text) {
-      parts.push(block.text);
-    }
-  }
-  return parts.join('\n');
+function getComparableMessageText(
+  message: Pick<RawMessage, 'role' | 'content'> | null | undefined,
+): string {
+  if (!message) return '';
+  const rawText = getMessageText(message.content);
+  const comparableText = message.role === 'user'
+    ? cleanUserMessageText(rawText)
+    : rawText;
+  return comparableText.trim();
 }
 
 function normalizeAssistantStreamText(value: string): string {
@@ -562,12 +589,19 @@ function mergeAttachedFilesForDuplicate(preferred: RawMessage, duplicate: RawMes
   };
 }
 
+function buildMessageContentKey(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return JSON.stringify(content);
+  return '';
+}
+
 function messageExistsByIdentityOrText(messages: RawMessage[], candidate: RawMessage): boolean {
   if (candidate.id && messages.some((message) => message.id === candidate.id)) return true;
   const candidateText = getComparableMessageText(candidate);
   const candidateAssistantText = candidate.role === 'assistant'
     ? normalizeAssistantStreamText(candidateText)
     : '';
+  const candidateContentKey = buildMessageContentKey(candidate.content);
   return messages.some((message) => {
     if (message.role !== candidate.role) return false;
     if (
@@ -577,7 +611,7 @@ function messageExistsByIdentityOrText(messages: RawMessage[], candidate: RawMes
       return true;
     }
     if (candidateText && getComparableMessageText(message) === candidateText) return true;
-    return false;
+    return !!candidateContentKey && buildMessageContentKey(message.content) === candidateContentKey;
   });
 }
 
@@ -636,6 +670,7 @@ export function dedupeAssistantMessages(messages: RawMessage[]): RawMessage[] {
 
 export {
   isInternalMessage,
+  isToolResultRole,
   getMessageText,
   isPreCompactionMemoryFlushPrompt,
   extractTextFromContent,
@@ -643,6 +678,10 @@ export {
   extractRawFilePaths,
   makeAttachedFile,
   cloneAttachedFiles,
+  normalizeToolName,
+  normalizeToolStatus,
+  parseDurationMs,
+  buildMessageContentKey,
   getComparableMessageText,
   normalizeAssistantStreamText,
   isSettledFinalAssistantMessage,

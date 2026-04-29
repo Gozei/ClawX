@@ -7,6 +7,10 @@ import {
   normalizeAssistantStreamText,
   isInternalMessage,
   isPreCompactionMemoryFlushPrompt,
+  normalizeToolResultMessages,
+  normalizeMessagePipeline,
+  filterMessagePipeline,
+  dedupeMessagePipeline,
 } from '@/utils/messagePipeline';
 import type { RawMessage } from '@/stores/chat/types';
 
@@ -240,5 +244,132 @@ describe('enrichCachedAttachments', () => {
     ];
     const enriched = enrichCachedAttachments(messages);
     expect(enriched[0]._attachedFiles).toHaveLength(1);
+  });
+});
+
+describe('normalizeToolResultMessages', () => {
+  it('converts toolresult to assistant process message', () => {
+    const messages: RawMessage[] = [
+      {
+        id: 'tool-1',
+        role: 'toolresult',
+        toolCallId: 'call-123',
+        toolName: 'read_file',
+        content: 'File contents here',
+      },
+    ];
+    const normalized = normalizeToolResultMessages(messages);
+    expect(normalized).toHaveLength(1);
+    expect(normalized[0].role).toBe('assistant');
+    expect(normalized[0].id).toBe('tool-1-tool-result');
+    expect(Array.isArray(normalized[0].content)).toBe(true);
+    const block = normalized[0].content![0] as { type: string; name: string; status: string };
+    expect(block.type).toBe('tool_result');
+    expect(block.name).toBe('read_file');
+    expect(block.status).toBe('completed');
+  });
+
+  it('handles error status in toolresult', () => {
+    const messages: RawMessage[] = [
+      {
+        id: 'tool-err',
+        role: 'toolresult',
+        toolCallId: 'call-err',
+        toolName: 'failed_tool',
+        content: '',
+        error: 'Something went wrong',
+      },
+    ];
+    const normalized = normalizeToolResultMessages(messages);
+    expect(normalized).toHaveLength(1);
+    const block = normalized[0].content![0] as { type: string; status: string };
+    expect(block.status).toBe('error');
+  });
+
+  it('passes through non-toolresult messages unchanged', () => {
+    const messages: RawMessage[] = [
+      { id: 'u1', role: 'user', content: 'Hello' },
+      { id: 'a1', role: 'assistant', content: 'Hi there' },
+    ];
+    const normalized = normalizeToolResultMessages(messages);
+    expect(normalized).toHaveLength(2);
+    expect(normalized[0].role).toBe('user');
+    expect(normalized[1].role).toBe('assistant');
+  });
+
+  it('extracts aggregated output from details', () => {
+    const messages: RawMessage[] = [
+      {
+        id: 'tool-agg',
+        role: 'toolresult',
+        toolCallId: 'call-agg',
+        toolName: 'search',
+        content: 'partial',
+        details: { aggregated: 'Full aggregated result here' },
+      },
+    ];
+    const normalized = normalizeToolResultMessages(messages);
+    const block = normalized[0].content![0] as { type: string; text: string };
+    expect(block.text).toBe('Full aggregated result here');
+  });
+});
+
+describe('normalizeMessagePipeline', () => {
+  it('enriches and normalizes raw messages', () => {
+    const messages: RawMessage[] = [
+      { id: 'u1', role: 'user', content: 'Run the tool' },
+      {
+        id: 'tool-1',
+        role: 'toolresult',
+        toolCallId: 'call-1',
+        toolName: 'execute',
+        content: 'Done',
+      },
+      { id: 'a1', role: 'assistant', content: 'Here is the result' },
+    ];
+    const result = normalizeMessagePipeline(messages);
+    expect(result).toHaveLength(3);
+    // toolresult is converted to assistant
+    expect(result[1].role).toBe('assistant');
+    expect(result[2].role).toBe('assistant');
+  });
+});
+
+describe('filterMessagePipeline', () => {
+  it('filters tool_result and internal messages', () => {
+    const messages: RawMessage[] = [
+      { id: 'sys', role: 'system', content: 'System prompt' },
+      { id: 'u1', role: 'user', content: 'Hello' },
+      {
+        id: 'tool-1',
+        role: 'assistant', // Already normalized from toolresult
+        content: [{ type: 'tool_result', name: 'tool', status: 'completed', text: 'result' }],
+      },
+    ];
+    const filtered = filterMessagePipeline(messages);
+    // Only user message remains (system filtered, tool_result role messages filtered)
+    expect(filtered).toHaveLength(2);
+    expect(filtered[0].id).toBe('u1');
+  });
+});
+
+describe('dedupeMessagePipeline', () => {
+  it('deduplicates assistant messages within same turn', () => {
+    const messages: RawMessage[] = [
+      { id: 'u1', role: 'user', content: 'Question' },
+      { id: 'a1', role: 'assistant', content: 'Answer' },
+      { id: 'a2', role: 'assistant', content: 'Answer' }, // duplicate
+    ];
+    const deduped = dedupeMessagePipeline(messages);
+    expect(deduped).toHaveLength(2);
+  });
+
+  it('is equivalent to dedupeAssistantMessages', () => {
+    const messages: RawMessage[] = [
+      { id: 'u1', role: 'user', content: 'Q' },
+      { id: 'a1', role: 'assistant', content: 'A' },
+      { id: 'a2', role: 'assistant', content: 'A' },
+    ];
+    expect(dedupeMessagePipeline(messages)).toEqual(dedupeAssistantMessages(messages));
   });
 });
