@@ -14,6 +14,32 @@ import {
 } from '../../shared/inbound-user-text';
 import { useGatewayStore } from './gateway';
 import { useAgentsStore } from './agents';
+import {
+  normalizeMessagePipeline,
+  filterMessagePipeline,
+  dedupeMessagePipeline,
+  enrichCachedAttachments,
+  createToolResultProcessMessage,
+  isToolResultRole,
+  normalizeToolStatus,
+  parseDurationMs,
+  extractTextFromContent,
+  cloneAttachedFiles,
+  buildMessageContentKey,
+  getComparableMessageText,
+  normalizeAssistantStreamText,
+  messageExistsByIdentityOrText,
+  getMessageText,
+  isPreCompactionMemoryFlushPrompt,
+  isInternalMessage,
+  isAssistantDeltaSnapshotMessage,
+  isInternalAssistantControlMessage,
+  isSettledFinalAssistantMessage,
+  isToolOnlyMessage,
+  hasNonToolAssistantContent,
+  hasToolInteractionContent,
+} from '../utils/messagePipeline';
+import { validateMessageArray } from '../utils/messageValidation';
 import { buildCronSessionHistoryPath, isCronSessionKey } from './chat/cron-session-utils';
 import {
   CHAT_HISTORY_LABEL_PREFETCH_LIMIT,
@@ -277,10 +303,6 @@ function queueAutoSessionLabelPersistence(
       syncPersistedSessionLabel(set, sessionKey, persistedLabel);
     }
   });
-}
-
-function cloneAttachedFiles(files: AttachedFileMeta[] | undefined): AttachedFileMeta[] | undefined {
-  return files?.map((file) => ({ ...file }));
 }
 
 function cloneMessage(message: RawMessage): RawMessage {
@@ -768,12 +790,6 @@ function isDuplicateChatEvent(eventState: string, event: Record<string, unknown>
   return false;
 }
 
-function buildMessageContentKey(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) return JSON.stringify(content);
-  return '';
-}
-
 function isEquivalentRecentAssistantMessage(
   messages: RawMessage[],
   candidate: RawMessage,
@@ -793,18 +809,6 @@ function isEquivalentRecentAssistantMessage(
     }
     return !!candidateContentKey && buildMessageContentKey(message.content) === candidateContentKey;
   });
-}
-
-function normalizeAssistantStreamText(value: string): string {
-  return value
-    .replace(/(\*\*|__|~~|`+)/g, '')
-    .replace(/[\s\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u3000\uFEFF]+/g, '');
-}
-
-function isAssistantDeltaSnapshotMessage(message: RawMessage): boolean {
-  if (message.role !== 'assistant') return false;
-  const id = typeof message.id === 'string' ? message.id : '';
-  return id.startsWith('stream-delta-snapshot-') || id.endsWith('-delta-snapshot');
 }
 
 function assistantTextContainsSnapshot(message: RawMessage, snapshot: RawMessage): boolean {
@@ -829,183 +833,10 @@ function removeContainedAssistantDeltaSnapshots(
   return changed ? nextMessages : messages;
 }
 
-function messageExistsByIdentityOrText(messages: RawMessage[], candidate: RawMessage): boolean {
-  if (candidate.id && messages.some((message) => message.id === candidate.id)) return true;
-  const candidateText = getComparableMessageText(candidate);
-  const candidateAssistantText = candidate.role === 'assistant'
-    ? normalizeAssistantStreamText(candidateText)
-    : '';
-  const candidateContentKey = buildMessageContentKey(candidate.content);
-  return messages.some((message) => {
-    if (message.role !== candidate.role) return false;
-    if (
-      candidateAssistantText
-      && normalizeAssistantStreamText(getComparableMessageText(message)) === candidateAssistantText
-    ) {
-      return true;
-    }
-    if (candidateText && getComparableMessageText(message) === candidateText) return true;
-    return !!candidateContentKey && buildMessageContentKey(message.content) === candidateContentKey;
-  });
-}
-
-function mergeAttachedFilesForDuplicate(preferred: RawMessage, duplicate: RawMessage): RawMessage {
-  const duplicateFiles = duplicate._attachedFiles ?? [];
-  if (duplicateFiles.length === 0) return preferred;
-
-  const preferredFiles = preferred._attachedFiles ?? [];
-  const seen = new Set(
-    preferredFiles.map((file) => file.filePath || `${file.fileName}:${file.mimeType}:${file.fileSize}`),
-  );
-  const mergedFiles = [...preferredFiles];
-
-  for (const file of duplicateFiles) {
-    const key = file.filePath || `${file.fileName}:${file.mimeType}:${file.fileSize}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    mergedFiles.push(file);
-  }
-
-  return {
-    ...preferred,
-    _attachedFiles: mergedFiles,
-  };
-}
-
-function getContainedAssistantDuplicateDirection(
-  existing: RawMessage,
-  candidate: RawMessage,
-): 'candidate-contains-existing' | 'existing-contains-candidate' | null {
-  if (existing.role !== 'assistant' || candidate.role !== 'assistant') return null;
-  if (!isSettledFinalAssistantMessage(existing) || !isSettledFinalAssistantMessage(candidate)) return null;
-
-  const existingText = normalizeAssistantStreamText(getComparableMessageText(existing));
-  const candidateText = normalizeAssistantStreamText(getComparableMessageText(candidate));
-  if (existingText === candidateText) return null;
-
-  // First check prefix match - this is unambiguous
-  if (candidateText.startsWith(existingText)) return 'candidate-contains-existing';
-  if (existingText.startsWith(candidateText)) return 'existing-contains-candidate';
-
-  // For substring matching (not prefix), use heuristics to avoid false positives.
-  // We only dedupe when:
-  // 1. The existing message has meaningful length (>= 6 chars after normalization)
-  // 2. AND the candidate is meaningfully longer (ratio >= 1.2)
-  // This handles cases like status prefixes (e.g., "Tavily...\n\n" + original message)
-  const MIN_CONTENT_LENGTH = 6;
-  const MIN_LENGTH_RATIO = 1.2;
-  if (
-    existingText.length >= MIN_CONTENT_LENGTH
-    && candidateText.length >= existingText.length * MIN_LENGTH_RATIO
-    && candidateText.includes(existingText)
-  ) {
-    return 'candidate-contains-existing';
-  }
-  if (
-    candidateText.length >= MIN_CONTENT_LENGTH
-    && existingText.length >= candidateText.length * MIN_LENGTH_RATIO
-    && existingText.includes(candidateText)
-  ) {
-    return 'existing-contains-candidate';
-  }
-
-  return null;
-}
-
-function dedupeAssistantMessagesWithinTurns(messages: RawMessage[]): RawMessage[] {
-  let changed = false;
-  let currentTurnAssistants: RawMessage[] = [];
-  const deduped: RawMessage[] = [];
-
-  for (const message of messages) {
-    if (message.role === 'user') {
-      currentTurnAssistants = [];
-      deduped.push(message);
-      continue;
-    }
-
-    if (message.role === 'assistant') {
-      const existingIndex = currentTurnAssistants.findIndex((assistant) => (
-        messageExistsByIdentityOrText([assistant], message)
-        || getContainedAssistantDuplicateDirection(assistant, message) != null
-      ));
-
-      if (existingIndex >= 0) {
-        const existing = currentTurnAssistants[existingIndex];
-        const direction = getContainedAssistantDuplicateDirection(existing, message);
-        const shouldPreferCandidate = direction === 'candidate-contains-existing';
-        const replacement = shouldPreferCandidate
-          ? mergeAttachedFilesForDuplicate(message, existing)
-          : mergeAttachedFilesForDuplicate(existing, message);
-        const dedupedIndex = deduped.indexOf(existing);
-        if (dedupedIndex >= 0) {
-          deduped[dedupedIndex] = replacement;
-        }
-        currentTurnAssistants[existingIndex] = replacement;
-        changed = true;
-        continue;
-      }
-    }
-
-    deduped.push(message);
-    if (message.role === 'assistant') {
-      currentTurnAssistants.push(message);
-    }
-  }
-
-  return changed ? deduped : messages;
-}
-
-function normalizeStopReason(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase().replace(/[-_\s]/g, '') : '';
-}
-
-function isToolUseStopReason(value: unknown): boolean {
-  return normalizeStopReason(value) === 'tooluse';
-}
-
-function hasToolInteractionContent(message: RawMessage): boolean {
-  const content = message.content;
-  if (Array.isArray(content)) {
-    for (const block of content as ContentBlock[]) {
-      if (
-        block.type === 'tool_use'
-        || block.type === 'toolCall'
-        || block.type === 'tool_result'
-        || block.type === 'toolResult'
-      ) {
-        return true;
-      }
-    }
-  }
-
-  const msg = message as unknown as Record<string, unknown>;
-  const toolCalls = msg.tool_calls ?? msg.toolCalls;
-  return Array.isArray(toolCalls) && toolCalls.length > 0;
-}
-
 function hasRenderableAssistantPayload(message: RawMessage): boolean {
   return hasNonToolAssistantContent(message)
     || isToolOnlyMessage(message)
     || hasToolInteractionContent(message);
-}
-
-function isSettledFinalAssistantMessage(message: RawMessage | undefined): boolean {
-  if (!message || message.role !== 'assistant') return false;
-  if (isAssistantDeltaSnapshotMessage(message)) return false;
-  if (isInternalAssistantControlMessage(message)) return false;
-  if (isToolOnlyMessage(message)) return false;
-  if (!hasNonToolAssistantContent(message)) return false;
-  if (isToolUseStopReason(message.stopReason)) return false;
-
-  // Text-bearing tool-use turns are process messages, not final replies.  A
-  // final assistant message can still contain process blocks when the provider
-  // sends a stop reason, so only classify missing-stop tool turns as process.
-  if (!message.stopReason && hasToolInteractionContent(message)) {
-    return false;
-  }
-
-  return true;
 }
 
 function getMessageTimestampMs(message: RawMessage | undefined): number | null {
@@ -1346,44 +1177,10 @@ function saveImageCache(cache: Map<string, AttachedFileMeta>): void {
 
 const _imageCache = loadImageCache();
 
-function isPreCompactionMemoryFlushPrompt(text: string): boolean {
-  const normalized = text.trim();
-  return /^Pre-compaction memory flush\./i.test(normalized)
-    && /Store durable memories only in memory\//i.test(normalized)
-    && /reply with NO_REPLY\./i.test(normalized);
-}
-
-/** Extract plain text from message content (string or content blocks) */
-function getMessageText(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return (content as Array<{ type?: string; text?: string }>)
-      .filter(b => b.type === 'text' && b.text)
-      .map(b => b.text!)
-      .join('\n');
-  }
-  return '';
-}
-
-function cleanUserMessageText(text: string): string {
-  const cleaned = sanitizeInboundUserText(text);
-
-  return isPreCompactionMemoryFlushPrompt(cleaned) ? '' : cleaned;
-}
-
 function getSessionLabelText(content: unknown): string {
-  return cleanUserMessageText(getMessageText(content));
-}
-
-function getComparableMessageText(
-  message: Pick<RawMessage, 'role' | 'content'> | null | undefined,
-): string {
-  if (!message) return '';
-  const rawText = getMessageText(message.content);
-  const comparableText = message.role === 'user'
-    ? cleanUserMessageText(rawText)
-    : rawText;
-  return comparableText.trim();
+  const rawText = getMessageText(content);
+  const cleaned = sanitizeInboundUserText(rawText);
+  return isPreCompactionMemoryFlushPrompt(cleaned) ? '' : cleaned;
 }
 
 function translateChat(key: string, defaultValue: string, options?: Record<string, unknown>): string {
@@ -1727,172 +1524,6 @@ function getToolCallFilePath(msg: RawMessage, toolCallId: string): string | unde
   }
 
   return undefined;
-}
-
-/**
- * Collect all tool call file paths from a message into a Map<toolCallId, filePath>.
- */
-function collectToolCallPaths(msg: RawMessage, paths: Map<string, string>): void {
-  const content = msg.content;
-  if (Array.isArray(content)) {
-    for (const block of content as ContentBlock[]) {
-      if ((block.type === 'tool_use' || block.type === 'toolCall') && block.id) {
-        const args = (block.input ?? block.arguments) as Record<string, unknown> | undefined;
-        if (args) {
-          const fp = args.file_path ?? args.filePath ?? args.path ?? args.file;
-          if (typeof fp === 'string') paths.set(block.id, fp);
-        }
-      }
-    }
-  }
-  const msgAny = msg as unknown as Record<string, unknown>;
-  const toolCalls = msgAny.tool_calls ?? msgAny.toolCalls;
-  if (Array.isArray(toolCalls)) {
-    for (const tc of toolCalls as Array<Record<string, unknown>>) {
-      const id = typeof tc.id === 'string' ? tc.id : '';
-      if (!id) continue;
-      const fn = (tc.function ?? tc) as Record<string, unknown>;
-      let args: Record<string, unknown> | undefined;
-      try {
-        args = typeof fn.arguments === 'string' ? JSON.parse(fn.arguments) : (fn.arguments ?? fn.input) as Record<string, unknown>;
-      } catch { /* ignore */ }
-      if (args) {
-        const fp = args.file_path ?? args.filePath ?? args.path ?? args.file;
-        if (typeof fp === 'string') paths.set(id, fp);
-      }
-    }
-  }
-}
-
-/**
- * Before filtering tool_result messages from history, scan them for any file/image
- * content and attach those to the immediately following assistant message.
- * This mirrors channel push message behavior where tool outputs surface files to the UI.
- * Handles:
- *   - Image content blocks (base64 / url)
- *   - [media attached: path (mime) | path] text patterns in tool result output
- *   - Raw file paths in tool result text
- */
-function enrichWithToolResultFiles(messages: RawMessage[]): RawMessage[] {
-  const pending: AttachedFileMeta[] = [];
-  const toolCallPaths = new Map<string, string>();
-
-  return messages.map((msg) => {
-    // Track file paths from assistant tool call arguments for later matching
-    if (msg.role === 'assistant') {
-      collectToolCallPaths(msg, toolCallPaths);
-    }
-
-    if (isToolResultRole(msg.role)) {
-      // Resolve file path from the matching tool call
-      const matchedPath = msg.toolCallId ? toolCallPaths.get(msg.toolCallId) : undefined;
-
-      // 1. Image/file content blocks in the structured content array
-      const imageFiles = extractImagesAsAttachedFiles(msg.content);
-      if (matchedPath) {
-        for (const f of imageFiles) {
-          if (!f.filePath) {
-            f.filePath = matchedPath;
-            f.fileName = matchedPath.split(/[\\/]/).pop() || 'image';
-          }
-        }
-      }
-      pending.push(...imageFiles);
-
-      // 2. [media attached: ...] patterns in tool result text output
-      const text = getMessageText(msg.content);
-      if (text) {
-        const mediaRefs = extractMediaRefs(text);
-        const mediaRefPaths = new Set(mediaRefs.map(r => r.filePath));
-        for (const ref of mediaRefs) {
-          pending.push(makeAttachedFile(ref));
-        }
-        // 3. Raw file paths in tool result text (documents, audio, video, etc.)
-        for (const ref of extractRawFilePaths(text)) {
-          if (!mediaRefPaths.has(ref.filePath)) {
-            pending.push(makeAttachedFile(ref));
-          }
-        }
-      }
-
-      return msg; // will be filtered later
-    }
-
-    if (msg.role === 'assistant' && pending.length > 0) {
-      const toAttach = pending.splice(0);
-      // Deduplicate against files already on the assistant message
-      const existingPaths = new Set(
-        (msg._attachedFiles || []).map(f => f.filePath).filter(Boolean),
-      );
-      const newFiles = toAttach.filter(f => !f.filePath || !existingPaths.has(f.filePath));
-      if (newFiles.length === 0) return msg;
-      return {
-        ...msg,
-        _attachedFiles: [...(msg._attachedFiles || []), ...newFiles],
-      };
-    }
-
-    return msg;
-  });
-}
-
-/**
- * Restore _attachedFiles for messages loaded from history.
- * Handles:
- *   1. [media attached: path (mime) | path] patterns (attachment-button flow)
- *   2. Raw image file paths typed in message text (e.g. /Users/.../image.png)
- * Uses local cache for previews when available; missing previews are loaded async.
- */
-function enrichWithCachedImages(messages: RawMessage[]): RawMessage[] {
-  return messages.map((msg, idx) => {
-    // Only process user and assistant messages; skip if already enriched
-    if ((msg.role !== 'user' && msg.role !== 'assistant') || msg._attachedFiles) return msg;
-    const text = getMessageText(msg.content);
-
-    // Path 1: [media attached: path (mime) | path] — guaranteed format from attachment button
-    const mediaRefs = extractMediaRefs(text);
-    const mediaRefPaths = new Set(mediaRefs.map(r => r.filePath));
-
-    // Path 2: Raw file paths.
-    // For assistant messages: scan own text AND the nearest preceding user message text,
-    // but only for non-tool-only assistant messages (i.e. the final answer turn).
-    // Tool-only messages (thinking + tool calls) should not show file previews — those
-    // belong to the final answer message that comes after the tool results.
-    // User messages never get raw-path previews so the image is not shown twice.
-    let rawRefs: Array<{ filePath: string; mimeType: string }> = [];
-    if (msg.role === 'assistant' && !isToolOnlyMessage(msg)) {
-      // Own text
-      rawRefs = extractRawFilePaths(text).filter(r => !mediaRefPaths.has(r.filePath));
-
-      // Nearest preceding user message text (look back up to 5 messages)
-      const seenPaths = new Set(rawRefs.map(r => r.filePath));
-      for (let i = idx - 1; i >= Math.max(0, idx - 5); i--) {
-        const prev = messages[i];
-        if (!prev) break;
-        if (prev.role === 'user') {
-          const prevText = getMessageText(prev.content);
-          for (const ref of extractRawFilePaths(prevText)) {
-            if (!mediaRefPaths.has(ref.filePath) && !seenPaths.has(ref.filePath)) {
-              seenPaths.add(ref.filePath);
-              rawRefs.push(ref);
-            }
-          }
-          break; // only use the nearest user message
-        }
-      }
-    }
-
-    const allRefs = [...mediaRefs, ...rawRefs];
-    if (allRefs.length === 0) return msg;
-
-    const files: AttachedFileMeta[] = allRefs.map(ref => {
-      const cached = _imageCache.get(ref.filePath);
-      if (cached) return { ...cached, filePath: ref.filePath };
-      const fileName = ref.filePath.split(/[\\/]/).pop() || 'file';
-      return { fileName, mimeType: ref.mimeType, fileSize: 0, preview: null, filePath: ref.filePath };
-    });
-    return { ...msg, _attachedFiles: files };
-  });
 }
 
 async function materializeAssistantOutputs(
@@ -2583,94 +2214,6 @@ function getCanonicalPrefixFromSessionKey(sessionKey: string): string | null {
   return `${parts[0]}:${parts[1]}`;
 }
 
-function isToolOnlyMessage(message: RawMessage | undefined): boolean {
-  if (!message) return false;
-  if (isToolResultRole(message.role)) return true;
-
-  const msg = message as unknown as Record<string, unknown>;
-  const content = message.content;
-
-  // Check OpenAI-format tool_calls field (real-time streaming from OpenAI-compatible models)
-  const toolCalls = msg.tool_calls ?? msg.toolCalls;
-  const hasOpenAITools = Array.isArray(toolCalls) && toolCalls.length > 0;
-
-  if (!Array.isArray(content)) {
-    // Content is not an array — check if there's OpenAI-format tool_calls
-    if (hasOpenAITools) {
-      // Has tool calls but content might be empty/string — treat as tool-only
-      // if there's no meaningful text content
-      const textContent = typeof content === 'string' ? content.trim() : '';
-      return textContent.length === 0;
-    }
-    return false;
-  }
-
-  let hasTool = hasOpenAITools;
-  let hasText = false;
-  let hasNonToolContent = false;
-
-  for (const block of content as ContentBlock[]) {
-    if (block.type === 'tool_use' || block.type === 'tool_result' || block.type === 'toolCall' || block.type === 'toolResult') {
-      hasTool = true;
-      continue;
-    }
-    if (block.type === 'text' && block.text && block.text.trim()) {
-      hasText = true;
-      continue;
-    }
-    // Only actual image output disqualifies a tool-only message.
-    // Thinking blocks are internal reasoning that can accompany tool_use — they
-    // should NOT prevent the message from being treated as an intermediate tool step.
-    if (block.type === 'image') {
-      hasNonToolContent = true;
-    }
-  }
-
-  return hasTool && !hasText && !hasNonToolContent;
-}
-
-function isToolResultRole(role: unknown): boolean {
-  if (!role) return false;
-  const normalized = String(role).toLowerCase();
-  return normalized === 'toolresult' || normalized === 'tool_result';
-}
-
-/** True for internal plumbing messages that should never be shown in the UI. */
-function isInternalMessage(msg: { role?: unknown; content?: unknown }): boolean {
-  if (msg.role === 'system') return true;
-  if (msg.role === 'user') {
-    const text = getMessageText(msg.content);
-    if (isPreCompactionMemoryFlushPrompt(text)) return true;
-  }
-  if (msg.role === 'assistant') {
-    const text = getMessageText(msg.content);
-    if (/^(HEARTBEAT_OK|NO_REPLY)\s*$/.test(text)) return true;
-  }
-  return false;
-}
-
-function isInternalAssistantControlMessage(message: RawMessage | null | undefined): boolean {
-  if (!message) return false;
-  const role = message.role ?? 'assistant';
-  if (role !== 'assistant') return false;
-  return isInternalMessage({
-    ...message,
-    role,
-  });
-}
-
-function extractTextFromContent(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  const parts: string[] = [];
-  for (const block of content as ContentBlock[]) {
-    if (block.type === 'text' && block.text) {
-      parts.push(block.text);
-    }
-  }
-  return parts.join('\n');
-}
-
 function summarizeToolOutput(text: string): string | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
@@ -2684,28 +2227,10 @@ function summarizeToolOutput(text: string): string | undefined {
   return summary;
 }
 
-function normalizeToolStatus(rawStatus: unknown, fallback: 'running' | 'completed' | 'error'): ToolStatus['status'] {
-  const status = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : '';
-  if (status.includes('retry')) return 'retrying';
-  if (status === 'error' || status === 'failed') return 'error';
-  if (status === 'completed' || status === 'success' || status === 'done') return 'completed';
-  return fallback;
-}
-
-function normalizeToolName(name: string | undefined): string {
-  return (name || 'tool').trim() || 'tool';
-}
-
 function normalizeToolFailureMessage(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const normalized = value.trim().replace(/^Error:\s*/i, '');
   return normalized || undefined;
-}
-
-function parseDurationMs(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  const parsed = typeof value === 'string' ? Number(value) : NaN;
-  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function extractToolUseUpdates(message: unknown): ToolStatus[] {
@@ -2821,54 +2346,6 @@ function mergeToolStatus(existing: ToolStatus['status'], incoming: ToolStatus['s
   return order[incoming] >= order[existing] ? incoming : existing;
 }
 
-function createToolResultProcessMessage(message: RawMessage): RawMessage | null {
-  if (!isToolResultRole(message.role)) return null;
-
-  const msg = message as RawMessage & {
-    name?: string;
-    status?: string;
-    error?: string;
-  };
-  const details = (msg.details && typeof msg.details === 'object')
-    ? msg.details as Record<string, unknown>
-    : undefined;
-  const toolName = normalizeToolName(
-    typeof msg.toolName === 'string'
-      ? msg.toolName
-      : (typeof msg.name === 'string' ? msg.name : undefined),
-  );
-  const toolCallId = typeof msg.toolCallId === 'string' ? msg.toolCallId : undefined;
-  const outputText = (details && typeof details.aggregated === 'string')
-    ? details.aggregated
-    : extractTextFromContent(msg.content);
-  const errorText = typeof details?.error === 'string'
-    ? details.error
-    : (typeof msg.error === 'string' ? msg.error : '');
-  const detailText = outputText.trim() || errorText.trim() || toolName;
-  const status = errorText.trim()
-    ? 'error'
-    : normalizeToolStatus(msg.status ?? details?.status, 'completed');
-  const durationMs = parseDurationMs(details?.durationMs ?? details?.duration ?? ((msg as unknown as Record<string, unknown>).durationMs));
-
-  return {
-    ...message,
-    role: 'assistant',
-    id: message.id ? `${message.id}-tool-result` : `${toolCallId || toolName}-tool-result`,
-    content: [
-      {
-        type: 'tool_result',
-        id: toolCallId || message.id || toolName,
-        name: toolName,
-        status,
-        durationMs,
-        text: detailText,
-        content: detailText,
-      },
-    ],
-    _attachedFiles: cloneAttachedFiles(message._attachedFiles),
-  };
-}
-
 function upsertToolStatuses(current: ToolStatus[], updates: ToolStatus[]): ToolStatus[] {
   if (updates.length === 0) return current;
   const next = [...current];
@@ -2924,26 +2401,6 @@ function collectToolUpdates(message: unknown, eventState: string): ToolStatus[] 
   const toolResultUpdate = extractToolResultUpdate(message, eventState);
   if (toolResultUpdate) updates.push(toolResultUpdate);
   return updates;
-}
-
-function hasNonToolAssistantContent(message: RawMessage | undefined): boolean {
-  if (!message) return false;
-  if (Array.isArray(message._attachedFiles) && message._attachedFiles.length > 0) return true;
-  if (typeof message.content === 'string' && message.content.trim()) return true;
-
-  const content = message.content;
-  if (Array.isArray(content)) {
-    for (const block of content as ContentBlock[]) {
-      if (block.type === 'text' && block.text && block.text.trim()) return true;
-      if (block.type === 'thinking' && block.thinking && block.thinking.trim()) return true;
-      if (block.type === 'image') return true;
-    }
-  }
-
-  const msg = message as unknown as Record<string, unknown>;
-  if (typeof msg.text === 'string' && msg.text.trim()) return true;
-
-  return false;
 }
 
 function isEmptyAssistantResponse(message: RawMessage | undefined): boolean {
@@ -4235,221 +3692,208 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         });
       };
 
-      const applyLoadedMessages = (rawMessages: RawMessage[], thinkingLevel: string | null) => {
-      // Guard: if the user switched sessions while this async load was in
-      // flight, discard the result to prevent overwriting the new session's
-      // messages with stale data from the old session.
-      if (!isCurrentSession()) return;
+      const observeHistoryState = (filteredMsgs: RawMessage[], userMs: number) => {
+        const hasSettledAssistant = [...filteredMsgs].some((message) => {
+          if (message.role !== 'assistant') return false;
+          if (userMs && message.timestamp && toMs(message.timestamp) < userMs) return false;
+          return hasAssistantFinalTextContent(message) || isEmptyAssistantResponse(message);
+        });
+        const orderedAssistantAfterUser = (() => {
+          const userIndex = findLastUserMessageIndex(filteredMsgs);
+          if (userIndex < 0) return undefined;
+          return [...filteredMsgs.slice(userIndex + 1)].reverse().find((message) => (
+            message.role === 'assistant'
+            && (hasAssistantFinalTextContent(message) || isEmptyAssistantResponse(message))
+          ));
+        })();
+        return {
+          loadedHistoryHasSettledAssistant: hasSettledAssistant,
+          loadedHistoryOrderedAssistantAfterUser: orderedAssistantAfterUser,
+          loadedHistoryHasOrderedAssistantAfterUser: orderedAssistantAfterUser != null,
+        };
+      };
 
-      // Before filtering: attach images/files from tool_result messages to the next assistant message
-      const messagesWithToolImages = enrichWithToolResultFiles(rawMessages);
-      const normalizedMessages = messagesWithToolImages.map((msg) => createToolResultProcessMessage(msg) ?? msg);
-      const filteredMessages = normalizedMessages.filter((msg) => !isToolResultRole(msg.role) && !isInternalMessage(msg));
-      // Restore file attachments for user/assistant messages (from cache + text patterns)
-      const enrichedMessages = enrichWithCachedImages(filteredMessages);
-
-      // Preserve the optimistic user message during an active send.
-      // The Gateway may not include the user's message in chat.history
-      // until the run completes, causing it to flash out of the UI.
-      let finalMessages = enrichedMessages;
-      const userMsgAt = get().lastUserMessageAt;
-      const historyUserMsForPreserve = userMsgAt ? toMs(userMsgAt) : 0;
-      const loadedHistoryHasSettledAssistant = [...filteredMessages].some((message) => {
-        if (message.role !== 'assistant') return false;
-        if (historyUserMsForPreserve && message.timestamp && toMs(message.timestamp) < historyUserMsForPreserve) {
-          return false;
-        }
-        return hasAssistantFinalTextContent(message) || isEmptyAssistantResponse(message);
-      });
-      const loadedHistoryOrderedAssistantAfterUser = (() => {
-        const userIndex = findLastUserMessageIndex(filteredMessages);
-        if (userIndex < 0) return undefined;
-        return [...filteredMessages.slice(userIndex + 1)].reverse().find((message) => (
-          message.role === 'assistant'
-          && (hasAssistantFinalTextContent(message) || isEmptyAssistantResponse(message))
-        ));
-      })();
-      const loadedHistoryHasOrderedAssistantAfterUser = loadedHistoryOrderedAssistantAfterUser != null;
-      if (get().sending && userMsgAt) {
-        const userMsMs = toMs(userMsgAt);
-        const currentMsgs = get().messages;
+      const preserveOptimisticUser = (
+        currentMsgs: RawMessage[],
+        enrichedMsgs: RawMessage[],
+        userMsgAtMs: number,
+      ): RawMessage[] => {
         const optimisticUser = [...currentMsgs].reverse().find(
-          (m) => m.role === 'user' && m.timestamp && Math.abs(toMs(m.timestamp) - userMsMs) < 5000,
+          (m) => m.role === 'user' && m.timestamp && Math.abs(toMs(m.timestamp) - userMsgAtMs) < 5000,
         );
         const optimisticUserText = getComparableMessageText(optimisticUser);
-        const hasRecentUser = enrichedMessages.some((m) => {
+        const hasRecentUser = enrichedMsgs.some((m) => {
           if (m.role !== 'user') return false;
-          if (m.timestamp && Math.abs(toMs(m.timestamp) - userMsMs) < 5000) {
-            return true;
-          }
+          if (m.timestamp && Math.abs(toMs(m.timestamp) - userMsgAtMs) < 5000) return true;
           if (!optimisticUser || !optimisticUserText) return false;
           const loadedText = getComparableMessageText(m);
           if (!loadedText || loadedText !== optimisticUserText) return false;
           if (!m.timestamp) return true;
-          return Math.abs(toMs(m.timestamp) - userMsMs) < 60_000;
+          return Math.abs(toMs(m.timestamp) - userMsgAtMs) < 60_000;
         });
-        if (!hasRecentUser) {
-          if (optimisticUser) {
-            finalMessages = [...enrichedMessages, optimisticUser];
-          }
+        if (!hasRecentUser && optimisticUser) {
+          return [...enrichedMsgs, optimisticUser];
         }
-      }
-      if (get().sending && !loadedHistoryHasSettledAssistant) {
-        finalMessages = preservePendingAssistantMessages(get().messages, finalMessages, userMsgAt);
-      } else if (quiet && userMsgAt && !loadedHistoryHasSettledAssistant) {
-        finalMessages = preservePendingAssistantMessages(get().messages, finalMessages, userMsgAt);
-      }
-      finalMessages = preserveLocalUnpersistedTurnSuffix(get().messages, finalMessages);
-      let recoveredSessionView = restoreSessionView(currentSessionKey);
-      if (!hasRecoverableSessionView(recoveredSessionView)) {
-        recoveredSessionView = readMatchingPersistedSessionView(finalMessages) ?? recoveredSessionView;
-      }
-      const recoveredMerge = mergeRecoverableSessionView(finalMessages, recoveredSessionView);
-      const restoredViewStillWaiting = recoveredMerge.recovered
-        && (
-          recoveredSessionView.sending
-          || recoveredSessionView.pendingFinal
-          || recoveredSessionView.streamingMessage != null
-          || (typeof recoveredSessionView.streamingText === 'string' && recoveredSessionView.streamingText.trim().length > 0)
-        )
-        && !loadedHistoryHasSettledAssistant
-        && !loadedHistoryHasOrderedAssistantAfterUser;
-      if (recoveredMerge.recovered) {
-        finalMessages = recoveredMerge.messages;
-      }
-
-      const currentHistoryState = get();
-      const {
-        pendingFinal: historyPendingFinal,
-        lastUserMessageAt: historyLastUserMessageAt,
-        sending: historyIsSendingNow,
-      } = currentHistoryState;
-      const effectiveHistoryIsSendingNow = historyIsSendingNow || restoredViewStillWaiting;
-      const effectiveHistoryLastUserMessageAt = historyLastUserMessageAt ?? recoveredSessionView.lastUserMessageAt;
-      const liveTurnSignal = hasLiveTurnSignal(currentHistoryState);
-      const hasBlockingLiveTurnSignal = liveTurnSignal
-        && Date.now() - _lastChatEventAt < HISTORY_POLL_SILENCE_WINDOW_MS;
-      const trailingUserIndex = findLastUserMessageIndex(finalMessages);
-      const trailingUser = trailingUserIndex >= 0 ? finalMessages[trailingUserIndex] : undefined;
-
-      const historyReferenceUserMs = effectiveHistoryLastUserMessageAt
-        ? toMs(effectiveHistoryLastUserMessageAt)
-        : (typeof trailingUser?.timestamp === 'number' ? toMs(trailingUser.timestamp) : 0);
-      const isAfterCurrentTurnUserMsg = (msg: RawMessage): boolean => {
-        if (!historyReferenceUserMs || !msg.timestamp) return true;
-        return isTimestampAtOrAfter(historyReferenceUserMs, msg.timestamp);
+        return enrichedMsgs;
       };
 
-      const shouldEnterHistoryPendingFinal = effectiveHistoryIsSendingNow && !historyPendingFinal && !hasBlockingLiveTurnSignal && [...filteredMessages].reverse().some((msg) => {
-        if (msg.role !== 'assistant') return false;
-        return isAfterCurrentTurnUserMsg(msg);
-      });
+      const computeHistoryStateMachine = (
+        filteredMsgs: RawMessage[],
+        finalMsgs: RawMessage[],
+        observations: ReturnType<typeof observeHistoryState>,
+        restoredViewStillWaiting: boolean,
+        recoveredSessionView: SessionViewSnapshot,
+      ) => {
+        const currentHistoryState = get();
+        const {
+          pendingFinal: historyPendingFinal,
+          lastUserMessageAt: historyLastUserMessageAt,
+          sending: historyIsSendingNow,
+        } = currentHistoryState;
+        const effectiveHistoryIsSendingNow = historyIsSendingNow || restoredViewStillWaiting;
+        const effectiveHistoryLastUserMessageAt = historyLastUserMessageAt ?? recoveredSessionView.lastUserMessageAt;
+        const liveTurnSignal = hasLiveTurnSignal(currentHistoryState);
+        const hasBlockingLiveTurnSignal = liveTurnSignal
+          && Date.now() - _lastChatEventAt < HISTORY_POLL_SILENCE_WINDOW_MS;
+        const trailingUserIndex = findLastUserMessageIndex(finalMsgs);
+        const trailingUser = trailingUserIndex >= 0 ? finalMsgs[trailingUserIndex] : undefined;
 
-      const observedHistoryRecentAssistant = [...filteredMessages].reverse().find((msg) => {
-        if (msg.role !== 'assistant') return false;
-        if (!hasAssistantFinalTextContent(msg)) return false;
-        return isAfterCurrentTurnUserMsg(msg) || msg === loadedHistoryOrderedAssistantAfterUser;
-      });
-      const observedHistoryEmptyAssistant = [...filteredMessages].reverse().find((msg) => (
-        msg.role === 'assistant'
-        && (isAfterCurrentTurnUserMsg(msg) || msg === loadedHistoryOrderedAssistantAfterUser)
-        && isEmptyAssistantResponse(msg)
-      ));
-      const shouldDeferSettledHistoryFinal = effectiveHistoryIsSendingNow
-        && !historyPendingFinal
-        && hasBlockingLiveTurnSignal
-        && !!(observedHistoryRecentAssistant || observedHistoryEmptyAssistant);
-      const historyRecentAssistant = (historyPendingFinal || shouldEnterHistoryPendingFinal)
-        ? observedHistoryRecentAssistant
-        : undefined;
-      const historyEmptyAssistant = (historyPendingFinal || shouldEnterHistoryPendingFinal)
-        ? observedHistoryEmptyAssistant
-        : undefined;
-      const historyRecentAssistantError = historyRecentAssistant
-        ? getAssistantRuntimeErrorNotice(historyRecentAssistant)
-        : null;
-      const staleStreamingReferenceTs = (() => {
-        const currentStreamingMessage = get().streamingMessage;
-        if (currentStreamingMessage && typeof currentStreamingMessage === 'object') {
-          const streamingTimestamp = (currentStreamingMessage as RawMessage).timestamp;
-          if (typeof streamingTimestamp === 'number') {
-            return toMs(streamingTimestamp);
+        const historyReferenceUserMs = effectiveHistoryLastUserMessageAt
+          ? toMs(effectiveHistoryLastUserMessageAt)
+          : (typeof trailingUser?.timestamp === 'number' ? toMs(trailingUser.timestamp) : 0);
+        const isAfterCurrentTurnUserMsg = (msg: RawMessage): boolean => {
+          if (!historyReferenceUserMs || !msg.timestamp) return true;
+          return isTimestampAtOrAfter(historyReferenceUserMs, msg.timestamp);
+        };
+
+        const shouldEnterHistoryPendingFinal = effectiveHistoryIsSendingNow && !historyPendingFinal && !hasBlockingLiveTurnSignal && [...filteredMsgs].reverse().some((msg) => {
+          if (msg.role !== 'assistant') return false;
+          return isAfterCurrentTurnUserMsg(msg);
+        });
+
+        const observedHistoryRecentAssistant = [...filteredMsgs].reverse().find((msg) => {
+          if (msg.role !== 'assistant') return false;
+          if (!hasAssistantFinalTextContent(msg)) return false;
+          return isAfterCurrentTurnUserMsg(msg) || msg === observations.loadedHistoryOrderedAssistantAfterUser;
+        });
+        const observedHistoryEmptyAssistant = [...filteredMsgs].reverse().find((msg) => (
+          msg.role === 'assistant'
+          && (isAfterCurrentTurnUserMsg(msg) || msg === observations.loadedHistoryOrderedAssistantAfterUser)
+          && isEmptyAssistantResponse(msg)
+        ));
+        const shouldDeferSettledHistoryFinal = effectiveHistoryIsSendingNow
+          && !historyPendingFinal
+          && hasBlockingLiveTurnSignal
+          && !!(observedHistoryRecentAssistant || observedHistoryEmptyAssistant);
+        const historyRecentAssistant = (historyPendingFinal || shouldEnterHistoryPendingFinal)
+          ? observedHistoryRecentAssistant
+          : undefined;
+        const historyEmptyAssistant = (historyPendingFinal || shouldEnterHistoryPendingFinal)
+          ? observedHistoryEmptyAssistant
+          : undefined;
+        const historyRecentAssistantError = historyRecentAssistant
+          ? getAssistantRuntimeErrorNotice(historyRecentAssistant)
+          : null;
+        const staleStreamingReferenceTs = (() => {
+          const currentStreamingMessage = get().streamingMessage;
+          if (currentStreamingMessage && typeof currentStreamingMessage === 'object') {
+            const streamingTimestamp = (currentStreamingMessage as RawMessage).timestamp;
+            if (typeof streamingTimestamp === 'number') {
+              return toMs(streamingTimestamp);
+            }
           }
-        }
-        return effectiveHistoryLastUserMessageAt ? toMs(effectiveHistoryLastUserMessageAt) : 0;
-      })();
-      const historySettledAssistant = !effectiveHistoryIsSendingNow
-        ? [...filteredMessages].reverse().find((msg) => {
-            if (msg.role !== 'assistant') return false;
-            if (!hasAssistantFinalTextContent(msg)) return false;
-            if (!isAfterCurrentTurnUserMsg(msg)) return false;
-            if (!staleStreamingReferenceTs || typeof msg.timestamp !== 'number') return true;
-            return toMs(msg.timestamp) >= staleStreamingReferenceTs;
-          })
-        : undefined;
-      const historySettledAssistantError = historySettledAssistant
-        ? getAssistantRuntimeErrorNotice(historySettledAssistant)
-        : null;
-      const shouldClearSettledStreamingState = !effectiveHistoryIsSendingNow
-        && !!historySettledAssistant
-        && (
-          currentHistoryState.streamingMessage != null
-          || (typeof currentHistoryState.streamingText === 'string' && currentHistoryState.streamingText.trim().length > 0)
-          || currentHistoryState.streamingTools.length > 0
-          || currentHistoryState.pendingToolImages.length > 0
-        );
-      const shouldSyncSettledHistoryResult = !effectiveHistoryIsSendingNow
-        && !!historySettledAssistant
-        && !shouldClearSettledStreamingState
-        && (
-          currentHistoryState.error != null
-          || currentHistoryState.sessionNotice != null
-          || currentHistoryState.pendingFinal
-          || currentHistoryState.activeRunId != null
-          || currentHistoryState.sendStage != null
-          || currentHistoryState.lastUserMessageAt != null
-        );
-      const shouldRetryIncompleteHistory = !effectiveHistoryIsSendingNow
-        && !historyPendingFinal
-        && !!trailingUser
-        && typeof trailingUser.timestamp === 'number'
-        && Date.now() - toMs(trailingUser.timestamp) <= HISTORY_INCOMPLETE_RETRY_WINDOW_MS
-        && !finalMessages.slice(trailingUserIndex + 1).some((message) => message.role === 'assistant');
+          return effectiveHistoryLastUserMessageAt ? toMs(effectiveHistoryLastUserMessageAt) : 0;
+        })();
+        const historySettledAssistant = !effectiveHistoryIsSendingNow
+          ? [...filteredMsgs].reverse().find((msg) => {
+              if (msg.role !== 'assistant') return false;
+              if (!hasAssistantFinalTextContent(msg)) return false;
+              if (!isAfterCurrentTurnUserMsg(msg)) return false;
+              if (!staleStreamingReferenceTs || typeof msg.timestamp !== 'number') return true;
+              return toMs(msg.timestamp) >= staleStreamingReferenceTs;
+            })
+          : undefined;
+        const historySettledAssistantError = historySettledAssistant
+          ? getAssistantRuntimeErrorNotice(historySettledAssistant)
+          : null;
+        const shouldClearSettledStreamingState = !effectiveHistoryIsSendingNow
+          && !!historySettledAssistant
+          && (
+            currentHistoryState.streamingMessage != null
+            || (typeof currentHistoryState.streamingText === 'string' && currentHistoryState.streamingText.trim().length > 0)
+            || currentHistoryState.streamingTools.length > 0
+            || currentHistoryState.pendingToolImages.length > 0
+          );
+        const shouldSyncSettledHistoryResult = !effectiveHistoryIsSendingNow
+          && !!historySettledAssistant
+          && !shouldClearSettledStreamingState
+          && (
+            currentHistoryState.error != null
+            || currentHistoryState.sessionNotice != null
+            || currentHistoryState.pendingFinal
+            || currentHistoryState.activeRunId != null
+            || currentHistoryState.sendStage != null
+            || currentHistoryState.lastUserMessageAt != null
+          );
+        const shouldRetryIncompleteHistory = !effectiveHistoryIsSendingNow
+          && !historyPendingFinal
+          && !!trailingUser
+          && typeof trailingUser.timestamp === 'number'
+          && Date.now() - toMs(trailingUser.timestamp) <= HISTORY_INCOMPLETE_RETRY_WINDOW_MS
+          && !finalMsgs.slice(trailingUserIndex + 1).some((message) => message.role === 'assistant');
 
-      const shouldDeferHistoryCurrentTurn = effectiveHistoryIsSendingNow && !historyPendingFinal && hasBlockingLiveTurnSignal;
-      const deferredMergeResult = shouldDeferHistoryCurrentTurn
-        ? mergeDeferredCurrentTurnMessages(get().messages, finalMessages, effectiveHistoryLastUserMessageAt)
-        : { messages: finalMessages, appendedProcessCount: 0 };
-      const mergedMessagesForActiveSend = dedupeAssistantMessagesWithinTurns(deferredMergeResult.messages);
-
-      if (historyRecentAssistant || historyEmptyAssistant || historySettledAssistant || loadedHistoryHasOrderedAssistantAfterUser || shouldDeferSettledHistoryFinal) {
-        clearHistoryPoll();
-      }
-      if (historyRecentAssistant || historyEmptyAssistant || historySettledAssistant || loadedHistoryHasOrderedAssistantAfterUser) {
-        clearNoResponseRecovery(currentSessionKey);
-      }
-      if (shouldRetryIncompleteHistory) {
-        scheduleHistoryIncompleteRetry(get, currentSessionKey);
-      } else {
-        clearHistoryIncompleteRetry(currentSessionKey);
-      }
-
-      set((state) => {
-        const shouldFinalizeFromHistory = historyRecentAssistant && !shouldDeferHistoryCurrentTurn;
-        const shouldFinalizeEmptyAssistant = historyEmptyAssistant && !shouldDeferHistoryCurrentTurn;
-        const nextIsRunning = shouldFinalizeFromHistory || shouldFinalizeEmptyAssistant
-          ? false
-          : effectiveHistoryIsSendingNow;
+        const shouldDeferHistoryCurrentTurn = effectiveHistoryIsSendingNow && !historyPendingFinal && hasBlockingLiveTurnSignal;
 
         return {
-          messages: mergedMessagesForActiveSend,
+          effectiveHistoryIsSendingNow,
+          effectiveHistoryLastUserMessageAt,
+          shouldEnterHistoryPendingFinal,
+          shouldDeferSettledHistoryFinal,
+          shouldDeferHistoryCurrentTurn,
+          shouldClearSettledStreamingState,
+          shouldSyncSettledHistoryResult,
+          shouldRetryIncompleteHistory,
+          historyRecentAssistant,
+          historyEmptyAssistant,
+          historyRecentAssistantError,
+          historySettledAssistant,
+          historySettledAssistantError,
+        };
+      };
+
+      const buildHistorySetState = (
+        sm: ReturnType<typeof computeHistoryStateMachine>,
+        messages: RawMessage[],
+        thinkingLevel: string | null,
+        restoredViewStillWaiting: boolean,
+        recoveredSessionView: SessionViewSnapshot,
+        deferredMergeResult: { messages: RawMessage[]; appendedProcessCount: number },
+      ): Partial<ChatState> => {
+        const shouldFinalizeFromHistory = sm.historyRecentAssistant && !sm.shouldDeferHistoryCurrentTurn;
+        const shouldFinalizeEmptyAssistant = sm.historyEmptyAssistant && !sm.shouldDeferHistoryCurrentTurn;
+        const nextIsRunning = shouldFinalizeFromHistory || shouldFinalizeEmptyAssistant
+          ? false
+          : sm.effectiveHistoryIsSendingNow;
+
+        const baseState: Partial<ChatState> = {
+          messages,
           thinkingLevel,
           loading: false,
-          sessionRunningState: updateSessionRunningState(
+        };
+
+        let sessionRunningState: ChatState['sessionRunningState'] | undefined;
+        set((state) => {
+          sessionRunningState = updateSessionRunningState(
             state.sessionRunningState,
             currentSessionKey,
             nextIsRunning,
-          ),
+          );
+          return {};
+        });
+
+        return {
+          ...baseState,
+          sessionRunningState,
           ...(shouldFinalizeFromHistory
             ? {
                 sending: false,
@@ -4461,7 +3905,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                 streamingTools: [],
                 pendingToolImages: [],
                 sessionNotice: null,
-                error: historyRecentAssistantError,
+                error: sm.historyRecentAssistantError,
               }
             : shouldFinalizeEmptyAssistant
               ? {
@@ -4477,127 +3921,178 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
                   sessionNotice: null,
                   error: EMPTY_ASSISTANT_RESPONSE_ERROR,
                 }
-            : restoredViewStillWaiting
-              ? {
-                  sending: true,
-                  activeRunId: recoveredSessionView.activeRunId,
-                  sendStage: recoveredSessionView.sendStage ?? 'running',
-                  pendingFinal: true,
-                  lastUserMessageAt: recoveredSessionView.lastUserMessageAt,
-                  streamingText: '',
-                  streamingMessage: null,
-                  streamingTools: recoveredSessionView.streamingTools,
-                  pendingToolImages: recoveredSessionView.pendingToolImages,
-                  sessionNotice: recoveredSessionView.sessionNotice,
-                  error: recoveredSessionView.error,
-                }
-            : shouldEnterHistoryPendingFinal
-              || shouldDeferSettledHistoryFinal
-              || (shouldDeferHistoryCurrentTurn && deferredMergeResult.appendedProcessCount > 0)
-                ? { pendingFinal: true, sendStage: 'finalizing' }
-                : shouldClearSettledStreamingState || shouldSyncSettledHistoryResult
-                  ? {
-                      sending: false,
-                      activeRunId: null,
-                      sendStage: null,
-                      pendingFinal: false,
-                      lastUserMessageAt: null,
-                      streamingText: '',
-                      streamingMessage: null,
-                      streamingTools: [],
-                      pendingToolImages: [],
-                      error: historySettledAssistantError,
-                      sessionNotice: null,
-                    }
-                : {}),
+              : restoredViewStillWaiting
+                ? {
+                    sending: true,
+                    activeRunId: recoveredSessionView.activeRunId,
+                    sendStage: recoveredSessionView.sendStage ?? 'running',
+                    pendingFinal: true,
+                    lastUserMessageAt: recoveredSessionView.lastUserMessageAt,
+                    streamingText: '',
+                    streamingMessage: null,
+                    streamingTools: recoveredSessionView.streamingTools,
+                    pendingToolImages: recoveredSessionView.pendingToolImages,
+                    sessionNotice: recoveredSessionView.sessionNotice,
+                    error: recoveredSessionView.error,
+                  }
+              : sm.shouldEnterHistoryPendingFinal
+                || sm.shouldDeferSettledHistoryFinal
+                || (sm.shouldDeferHistoryCurrentTurn && deferredMergeResult.appendedProcessCount > 0)
+                  ? { pendingFinal: true, sendStage: 'finalizing' }
+                  : sm.shouldClearSettledStreamingState || sm.shouldSyncSettledHistoryResult
+                    ? {
+                        sending: false,
+                        activeRunId: null,
+                        sendStage: null,
+                        pendingFinal: false,
+                        lastUserMessageAt: null,
+                        streamingText: '',
+                        streamingMessage: null,
+                        streamingTools: [],
+                        pendingToolImages: [],
+                        error: sm.historySettledAssistantError,
+                        sessionNotice: null,
+                      }
+                    : {}),
         };
-      });
+      };
 
-      if (loadedHistoryHasOrderedAssistantAfterUser) {
-        set((state) => (
-          state.currentSessionKey === currentSessionKey && state.sessionNotice
-            ? { sessionNotice: null }
-            : {}
-        ));
-      }
-
-      if (restoredViewStillWaiting) {
-        startHistoryPoll(get, currentSessionKey);
-        scheduleNoResponseRecovery(set, get, currentSessionKey);
-      }
-
-      if (shouldDeferSettledHistoryFinal) {
-        const lastChatEventAgeMs = _lastChatEventAt > 0
-          ? Math.max(0, Date.now() - _lastChatEventAt)
-          : HISTORY_POLL_SILENCE_WINDOW_MS;
-        const followupDelayMs = Math.max(200, HISTORY_POLL_SILENCE_WINDOW_MS - lastChatEventAgeMs + 80);
-        schedulePendingFinalRecovery(set, get, { delayMs: followupDelayMs });
-      }
-
-      let recoveredAutoLabel = '';
-      let shouldPersistRecoveredAutoLabel = false;
-      if (!currentSessionKey.endsWith(':main')) {
-        const firstUserMsg = mergedMessagesForActiveSend.find((m) => m.role === 'user');
-        if (firstUserMsg) {
-          recoveredAutoLabel = truncateAutoSessionLabel(getSessionLabelText(firstUserMsg.content));
-          set((s) => {
-            const hasStoredLabel = hasStoredSessionLabel(s.sessions, currentSessionKey);
-            if (!recoveredAutoLabel || hasStoredLabel) {
-              return {};
-            }
-            shouldPersistRecoveredAutoLabel = true;
-            if (s.sessionLabels[currentSessionKey] === recoveredAutoLabel) {
-              return {};
-            }
-            return {
-              sessionLabels: { ...s.sessionLabels, [currentSessionKey]: recoveredAutoLabel },
-            };
-          });
+      const handlePostLoadSideEffects = (
+        sm: ReturnType<typeof computeHistoryStateMachine>,
+        observations: ReturnType<typeof observeHistoryState>,
+        messages: RawMessage[],
+        restoredViewStillWaiting: boolean,
+      ) => {
+        if (sm.historyRecentAssistant || sm.historyEmptyAssistant || sm.historySettledAssistant || observations.loadedHistoryHasOrderedAssistantAfterUser || sm.shouldDeferSettledHistoryFinal) {
+          clearHistoryPoll();
         }
-      }
-      if (shouldPersistRecoveredAutoLabel && recoveredAutoLabel) {
-        queueAutoSessionLabelPersistence(set, currentSessionKey, recoveredAutoLabel);
-      }
-
-      // Extract first user message text as a session label for display in the toolbar.
-      // Skip main sessions (key ends with ":main") — they rely on the Gateway-provided
-      // displayName (e.g. the configured agent name "ClawX") instead.
-      const isMainSession = currentSessionKey.endsWith(':main');
-      if (!isMainSession) {
-        const firstUserMsg = mergedMessagesForActiveSend.find((m) => m.role === 'user');
-        if (firstUserMsg) {
-          const labelText = getSessionLabelText(firstUserMsg.content);
-          set((s) => {
-            const hasStoredLabel = hasStoredSessionLabel(s.sessions, currentSessionKey);
-            if (!labelText || s.sessionLabels[currentSessionKey] || hasStoredLabel) {
-              return {};
-            }
-            const truncated = labelText.length > 50 ? `${labelText.slice(0, 50)}…` : labelText;
-            return {
-              sessionLabels: { ...s.sessionLabels, [currentSessionKey]: truncated },
-            };
-          });
+        if (sm.historyRecentAssistant || sm.historyEmptyAssistant || sm.historySettledAssistant || observations.loadedHistoryHasOrderedAssistantAfterUser) {
+          clearNoResponseRecovery(currentSessionKey);
         }
-      }
+        if (sm.shouldRetryIncompleteHistory) {
+          scheduleHistoryIncompleteRetry(get, currentSessionKey);
+        } else {
+          clearHistoryIncompleteRetry(currentSessionKey);
+        }
 
-      // Record last activity time from the last message in history
-      const lastMsg = mergedMessagesForActiveSend[mergedMessagesForActiveSend.length - 1];
-      if (lastMsg?.timestamp) {
-        const lastAt = toMs(lastMsg.timestamp);
-        set((s) => ({
-          sessionLastActivity: { ...s.sessionLastActivity, [currentSessionKey]: lastAt },
-        }));
-      }
+        if (observations.loadedHistoryHasOrderedAssistantAfterUser) {
+          set((state) => (
+            state.currentSessionKey === currentSessionKey && state.sessionNotice
+              ? { sessionNotice: null }
+              : {}
+          ));
+        }
 
-      // Async: load missing image previews from disk (updates in background)
-      loadMissingPreviews(mergedMessagesForActiveSend, currentSessionKey).then((updated) => {
-        if (!isCurrentSession()) return;
-        if (updated) {
-          set((state) => ({
-            messages: mergeHydratedMessages(state.messages, mergedMessagesForActiveSend),
+        if (restoredViewStillWaiting) {
+          startHistoryPoll(get, currentSessionKey);
+          scheduleNoResponseRecovery(set, get, currentSessionKey);
+        }
+
+        if (sm.shouldDeferSettledHistoryFinal) {
+          const lastChatEventAgeMs = _lastChatEventAt > 0
+            ? Math.max(0, Date.now() - _lastChatEventAt)
+            : HISTORY_POLL_SILENCE_WINDOW_MS;
+          const followupDelayMs = Math.max(200, HISTORY_POLL_SILENCE_WINDOW_MS - lastChatEventAgeMs + 80);
+          schedulePendingFinalRecovery(set, get, { delayMs: followupDelayMs });
+        }
+
+        // Auto-label extraction and persistence
+        if (!currentSessionKey.endsWith(':main')) {
+          const firstUserMsg = messages.find((m) => m.role === 'user');
+          if (firstUserMsg) {
+            const labelText = getSessionLabelText(firstUserMsg.content);
+            const truncated = truncateAutoSessionLabel(labelText);
+            set((s) => {
+              const hasStoredLabel = hasStoredSessionLabel(s.sessions, currentSessionKey);
+              if (!truncated || hasStoredLabel || s.sessionLabels[currentSessionKey]) return {};
+              return { sessionLabels: { ...s.sessionLabels, [currentSessionKey]: truncated } };
+            });
+            if (truncated) {
+              queueAutoSessionLabelPersistence(set, currentSessionKey, truncated);
+            }
+          }
+        }
+
+        // Record last activity time
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg?.timestamp) {
+          const lastAt = toMs(lastMsg.timestamp);
+          set((s) => ({
+            sessionLastActivity: { ...s.sessionLastActivity, [currentSessionKey]: lastAt },
           }));
         }
-      });
+
+        // Async: load missing image previews from disk (updates in background)
+        loadMissingPreviews(messages, currentSessionKey).then((updated) => {
+          if (!isCurrentSession()) return;
+          if (updated) {
+            set((state) => ({
+              messages: mergeHydratedMessages(state.messages, messages),
+            }));
+          }
+        });
+      };
+
+      const applyLoadedMessages = (rawMessages: RawMessage[], thinkingLevel: string | null) => {
+      if (!isCurrentSession()) return;
+
+      // 1. Validate
+      const validated = validateMessageArray(rawMessages);
+
+      // 2. Normalize & enrich
+      const normalizedMessages = normalizeMessagePipeline(validated);
+      const filteredMessages = filterMessagePipeline(normalizedMessages);
+      const enrichedMessages = enrichCachedAttachments(filteredMessages, _imageCache);
+
+      // 3. Observe history state
+      const userMsgAt = get().lastUserMessageAt;
+      const historyUserMs = userMsgAt ? toMs(userMsgAt) : 0;
+      const observations = observeHistoryState(filteredMessages, historyUserMs);
+
+      // 4. Merge with local state
+      let finalMessages = enrichedMessages;
+      if (get().sending && userMsgAt) {
+        finalMessages = preserveOptimisticUser(get().messages, enrichedMessages, toMs(userMsgAt));
+      }
+      if ((get().sending || quiet) && userMsgAt && !observations.loadedHistoryHasSettledAssistant) {
+        finalMessages = preservePendingAssistantMessages(get().messages, finalMessages, userMsgAt);
+      }
+      finalMessages = preserveLocalUnpersistedTurnSuffix(get().messages, finalMessages);
+
+      // 5. Recover session view
+      let recoveredSessionView = restoreSessionView(currentSessionKey);
+      if (!hasRecoverableSessionView(recoveredSessionView)) {
+        recoveredSessionView = readMatchingPersistedSessionView(finalMessages) ?? recoveredSessionView;
+      }
+      const recoveredMerge = mergeRecoverableSessionView(finalMessages, recoveredSessionView);
+      const restoredViewStillWaiting = recoveredMerge.recovered
+        && (
+          recoveredSessionView.sending
+          || recoveredSessionView.pendingFinal
+          || recoveredSessionView.streamingMessage != null
+          || (typeof recoveredSessionView.streamingText === 'string' && recoveredSessionView.streamingText.trim().length > 0)
+        )
+        && !observations.loadedHistoryHasSettledAssistant
+        && !observations.loadedHistoryHasOrderedAssistantAfterUser;
+      if (recoveredMerge.recovered) {
+        finalMessages = recoveredMerge.messages;
+      }
+
+      // 6. Compute state machine
+      const sm = computeHistoryStateMachine(filteredMessages, finalMessages, observations, restoredViewStillWaiting, recoveredSessionView);
+
+      // 7. Deduplicate
+      const deferredMergeResult = sm.shouldDeferHistoryCurrentTurn
+        ? mergeDeferredCurrentTurnMessages(get().messages, finalMessages, sm.effectiveHistoryLastUserMessageAt)
+        : { messages: finalMessages, appendedProcessCount: 0 };
+      const mergedMessages = dedupeMessagePipeline(deferredMergeResult.messages);
+
+      // 8. Set state
+      const stateUpdate = buildHistorySetState(sm, mergedMessages, thinkingLevel, restoredViewStillWaiting, recoveredSessionView, deferredMergeResult);
+      set(stateUpdate);
+
+      // 9. Side effects
+      handlePostLoadSideEffects(sm, observations, mergedMessages, restoredViewStillWaiting);
       };
 
       let localHistoryFallback: Awaited<ReturnType<typeof loadLocalSessionHistory>> | null = null;
