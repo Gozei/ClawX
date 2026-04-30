@@ -800,6 +800,21 @@ const MessageMetaBar = memo(function MessageMetaBar({
 function createMarkdownComponentOverrides(
   getAnchorProps?: (blockType: string, children: ReactNode) => ChatScrollBlockAnchorProps,
 ): MarkdownComponents {
+  const flattenReactNodeText = (node: ReactNode): string => {
+    if (node == null || typeof node === 'boolean') return '';
+    if (typeof node === 'string' || typeof node === 'number' || typeof node === 'bigint') return String(node);
+    if (Array.isArray(node)) return node.map((child) => flattenReactNodeText(child)).join('');
+    if (isValidElement<{ children?: ReactNode }>(node)) return flattenReactNodeText(node.props.children);
+    return '';
+  };
+
+  const normalizeInlineCodeDisplay = (node: ReactNode): ReactNode => {
+    const text = flattenReactNodeText(node);
+    const trimmed = text.trim();
+    const matched = trimmed.match(/^`+([\s\S]*?)`+$/);
+    return matched ? matched[1] : text;
+  };
+
   const buildAnchor = (blockType: string, children: ReactNode) => (
     getAnchorProps ? getAnchorProps(blockType, children) : {}
   );
@@ -813,24 +828,28 @@ function createMarkdownComponentOverrides(
       if (isInline) {
         return (
           <code
-            className="rounded bg-background/50 px-1.5 py-0.5 text-sm font-mono break-words [overflow-wrap:anywhere]"
+            className="rounded bg-slate-200/80 px-1.5 py-0.5 text-sm font-[var(--font-ui)] text-slate-800 break-words [overflow-wrap:anywhere] dark:bg-slate-700/40 dark:text-slate-100"
             {...props}
           >
-            {children}
+            {normalizeInlineCodeDisplay(children)}
           </code>
         );
       }
 
       return (
         <pre
-          className="max-w-full overflow-x-auto rounded-lg bg-background/50 p-4"
+          className="max-w-full overflow-x-auto rounded-lg border border-slate-300/70 bg-slate-200/85 p-4 text-slate-800 shadow-sm dark:border-slate-600/60 dark:bg-slate-800/45 dark:text-slate-100"
           {...buildAnchor('code', children)}
         >
-          <code className={cn('text-sm font-mono', className)} {...props}>
+          <code className={cn('text-sm font-[var(--font-ui)] text-inherit', className)} {...props}>
             {children}
           </code>
         </pre>
       );
+    },
+    pre({ children }) {
+      // react-markdown 默认会再包一层 <pre>，这里透传避免双层背景
+      return <>{children}</>;
     },
     blockquote({ children, node: _node, ...props }) {
       return (
