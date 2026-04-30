@@ -65,8 +65,6 @@ type ModelOption = {
   label: string;
 };
 
-type ProviderListItemForModelOption = ReturnType<typeof buildProviderListItems>[number];
-
 const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
 const GOOGLE_OAUTH_RUNTIME_PROVIDER = 'google-gemini-cli';
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = {
@@ -94,23 +92,6 @@ function getRuntimeProviderKey(account: ProviderAccount): string {
     return 'minimax-portal';
   }
   return account.vendorId;
-}
-
-function getPreferredModelValue(
-  providerItems: ProviderListItemForModelOption[],
-  providerDefaultAccountId: string | null,
-): string {
-  if (!providerDefaultAccountId) return '';
-  for (const item of providerItems) {
-    if (item.account.id !== providerDefaultAccountId) continue;
-    const runtimeProviderKey = getRuntimeProviderKey(item.account);
-    const configuredModels = item.models.filter((model) => model.source !== 'recommended');
-    const preferredModel = configuredModels.find((model) => model.isDefault) || configuredModels[0];
-    if (runtimeProviderKey && preferredModel?.id) {
-      return `${runtimeProviderKey}/${preferredModel.id}`;
-    }
-  }
-  return '';
 }
 
 function resolveComposerSessionKey(
@@ -214,7 +195,6 @@ export function ChatInput({
   const [modelMenuStyle, setModelMenuStyle] = useState<{ left: number; bottom: number; width: number } | null>(null);
   const agents = useAgentsStore((s) => s.agents);
   const defaultModelRef = useAgentsStore((s) => s.defaultModelRef);
-  const fetchAgents = useAgentsStore((s) => s.fetchAgents);
   const providerAccounts = useProviderStore((s) => s.accounts);
   const providerStatuses = useProviderStore((s) => s.statuses);
   const providerVendors = useProviderStore((s) => s.vendors);
@@ -237,10 +217,6 @@ export function ChatInput({
   const currentAgent = useMemo(
     () => (agents ?? []).find((agent) => agent.id === currentAgentId) ?? null,
     [agents, currentAgentId],
-  );
-  const currentSession = useMemo(
-    () => (sessions ?? []).find((session) => session.key === currentSessionKey) ?? null,
-    [currentSessionKey, sessions],
   );
   const previousSessionKeyRef = useRef(currentSessionKey);
   const currentAgentName = useMemo(
@@ -293,20 +269,13 @@ export function ChatInput({
     || defaultModelRef
     || ''
   ).trim();
-  const preferredModelValue = useMemo(
-    () => getPreferredModelValue(providerItems, providerDefaultAccountId),
-    [providerDefaultAccountId, providerItems],
-  );
   const selectedModelValue = useMemo(() => {
     // 会话已选模型优先反显，并与发送参数保持同源一致
     if (sessionBackedModelRef) {
       return sessionBackedModelRef;
     }
-    if (effectiveModelRef && modelOptions.some((option) => option.value === effectiveModelRef)) {
-      return effectiveModelRef;
-    }
-    return preferredModelValue;
-  }, [effectiveModelRef, modelOptions, preferredModelValue, sessionBackedModelRef]);
+    return effectiveModelRef;
+  }, [effectiveModelRef, sessionBackedModelRef]);
   const activeModelValue = selectedModelValue;
   const activeModelRef = activeModelValue || effectiveModelRef;
   const selectedModelLabel = useMemo(
@@ -318,16 +287,15 @@ export function ChatInput({
     const normalized = (modelRef || '').trim();
     return !!normalized && modelOptions.some((option) => option.value === normalized);
   }, [modelOptions]);
-  const resolveFallbackModelRef = useCallback(() => {
-    const normalizedDefaultModelRef = (defaultModelRef || '').trim();
-    if (isModelInOptions(normalizedDefaultModelRef)) return normalizedDefaultModelRef;
-    if (isModelInOptions(preferredModelValue)) return preferredModelValue;
-    return '';
-  }, [defaultModelRef, isModelInOptions, preferredModelValue]);
   const getModelValidationErrorMessage = useCallback(() => (
     isZh
-      ? '当前会话模型不可用，且未找到可用默认模型，请先在模型设置中配置模型'
-      : 'Current session model is unavailable and no default model can be used. Please configure a model first.'
+      ? '当前会话模型不可用，请在模型选择器中选择一个可用模型'
+      : 'Current session model is unavailable. Select an available model before sending.'
+  ), [isZh]);
+  const getMissingModelErrorMessage = useCallback(() => (
+    isZh
+      ? '当前会话未选择模型，请先选择一个可用模型'
+      : 'No model is selected for this session. Select an available model before sending.'
   ), [isZh]);
   const queueActionLabel = isZh ? '加入队列' : 'Queue to send';
   const canEditDraft = !disabled || !!onQueueOfflineMessage;
@@ -513,57 +481,6 @@ export function ChatInput({
   useEffect(() => {
     setModelMenuOpen(false);
   }, [currentAgentId]);
-
-  useEffect(() => {
-    if (currentSession) return;
-    if (sessionModels[currentSessionKey]) return;
-    if (defaultModelRef?.trim()) {
-      useChatStore.setState((state) => {
-        if (state.sessionModels[currentSessionKey]) {
-          return {};
-        }
-        return {
-          sessionModels: {
-            ...state.sessionModels,
-            [currentSessionKey]: defaultModelRef.trim(),
-          },
-        };
-      });
-      return;
-    }
-
-    let cancelled = false;
-    void fetchAgents()
-      .then(() => {
-        if (cancelled) return;
-        const latestDefaultModelRef = (useAgentsStore.getState().defaultModelRef || '').trim();
-        if (!latestDefaultModelRef) return;
-        useChatStore.setState((state) => {
-          if (state.currentSessionKey !== currentSessionKey) {
-            return {};
-          }
-          if (state.sessionModels[currentSessionKey]) {
-            return {};
-          }
-          const storedModel = state.sessions.find((session) => session.key === currentSessionKey)?.model;
-          if (storedModel) {
-            return {};
-          }
-          return {
-            sessionModels: {
-              ...state.sessionModels,
-              [currentSessionKey]: latestDefaultModelRef,
-            },
-          };
-        });
-      })
-      .catch(() => {
-        // Ignore background refresh failures here; sendMessage performs its own guard before dispatch.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [currentSession, currentSessionKey, defaultModelRef, fetchAgents, sessionModels]);
 
   // ── File staging via native dialog ─────────────────────────────
 
@@ -865,38 +782,16 @@ export function ChatInput({
     }
   }, [activeComposerSessionKey, allowLocalOnlyModelPersistence, modelOptions, selectedModelLabel, selectedModelValue, setSessionModel, t]);
 
-  useEffect(() => {
-    if (!sessionBackedModelRef || modelSwitchPending || modelOptions.length === 0) return;
-    if (isModelInOptions(sessionBackedModelRef)) return;
-    const fallbackModelRef = resolveFallbackModelRef();
-    if (!fallbackModelRef) {
-      toast.error(getModelValidationErrorMessage());
-      return;
-    }
-    if (fallbackModelRef === sessionBackedModelRef) return;
-    void handleModelChange(fallbackModelRef);
-  }, [
-    getModelValidationErrorMessage,
-    handleModelChange,
-    isModelInOptions,
-    modelOptions.length,
-    modelSwitchPending,
-    resolveFallbackModelRef,
-    sessionBackedModelRef,
-  ]);
-
   const handleSubmitDraft = useCallback(async () => {
     if (!canSend && !canQueueDraft) return;
-    let modelRefForDispatch = activeModelRef || null;
-    const normalizedSessionModelRef = sessionBackedModelRef.trim();
-    if (normalizedSessionModelRef && !isModelInOptions(normalizedSessionModelRef)) {
-      const fallbackModelRef = resolveFallbackModelRef();
-      if (!fallbackModelRef) {
-        toast.error(getModelValidationErrorMessage());
-        return;
-      }
-      await handleModelChange(fallbackModelRef);
-      modelRefForDispatch = fallbackModelRef;
+    const modelRefForDispatch = (activeModelRef || '').trim();
+    if (!modelRefForDispatch) {
+      toast.error(getMissingModelErrorMessage());
+      return;
+    }
+    if (!isModelInOptions(modelRefForDispatch)) {
+      toast.error(getModelValidationErrorMessage());
+      return;
     }
     const readyAttachments = attachments.filter(a => a.status === 'ready');
     // Capture values before clearing — clear input immediately for snappy UX,
@@ -935,15 +830,13 @@ export function ChatInput({
     canSend,
     clearComposerDraft,
     currentSessionKey,
+    getMissingModelErrorMessage,
     getModelValidationErrorMessage,
-    handleModelChange,
     input,
     isModelInOptions,
     isZh,
     onQueueOfflineMessage,
     onSend,
-    resolveFallbackModelRef,
-    sessionBackedModelRef,
     targetAgentId,
   ]);
 

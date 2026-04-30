@@ -214,4 +214,75 @@ test.describe('Chat composer actions', () => {
     await expect(page.getByTestId('chat-queued-message-preview')).toContainText('offline model switch queue test');
     await expect(modelSwitch).toContainText('OpenAI / gpt-5.4-mini');
   });
+
+  test('blocks sending when the displayed model is no longer available', async ({ electronApp, page }) => {
+    await completeSetup(page);
+    await installIpcMocks(electronApp, {
+      gatewayStatus: { state: 'running', port: 18789, pid: 12345 },
+      hostApi: {
+        '["/api/agents","GET"]': hostJson({
+          agents: [
+            {
+              id: 'main',
+              name: 'Main',
+              isDefault: true,
+              modelDisplay: 'Stale / missing-model',
+              modelRef: 'stale/missing-model',
+              inheritedModel: false,
+              workspace: '',
+              agentDir: '',
+              mainSessionKey: 'agent:main:main',
+              channelTypes: [],
+              skillIds: [],
+              workflowSteps: [],
+              triggerModes: [],
+            },
+          ],
+          defaultAgentId: 'main',
+          defaultModelRef: 'stale/missing-model',
+          configuredChannelTypes: [],
+          channelOwners: {},
+          channelAccountOwners: {},
+        }),
+        '["/api/gateway/status","GET"]': hostJson({ state: 'running', port: 18789, pid: 12345 }),
+        '["/api/provider-accounts","GET"]': hostJson([SEEDED_ACCOUNT]),
+        '["/api/provider-account-statuses","GET"]': hostJson([
+          {
+            id: SEEDED_ACCOUNT_ID,
+            type: 'openai',
+            name: 'OpenAI E2E',
+            model: 'gpt-5.4',
+            enabled: true,
+            hasKey: true,
+            createdAt: SEEDED_ACCOUNT.createdAt,
+            updatedAt: SEEDED_ACCOUNT.updatedAt,
+          },
+        ]),
+        '["/api/provider-vendors","GET"]': hostJson([]),
+        '["/api/provider-accounts/default","GET"]': hostJson({ accountId: SEEDED_ACCOUNT_ID }),
+        '["/api/sessions/catalog","GET"]': hostJson({ success: true, sessions: [], previews: {} }),
+        '["/api/sessions/history","POST"]': hostJson({
+          success: true,
+          resolved: true,
+          messages: [],
+          thinkingLevel: null,
+        }),
+        '["/api/sessions/model","POST"]': hostJson({ success: true }),
+      },
+    });
+    await page.reload();
+    await expect(page.getByTestId('main-layout')).toBeVisible();
+
+    const composer = page.getByTestId('chat-composer');
+    const modelSwitch = composer.getByTestId('chat-model-switch');
+    await expect(modelSwitch).toContainText('stale/missing-model', { timeout: 20_000 });
+
+    await composer.getByRole('textbox').fill('do not auto switch');
+    await composer.getByTestId('chat-send-button').click({ force: true });
+
+    await expect(page.getByText(
+      /Current session model is unavailable\. Select an available model before sending\.|当前会话模型不可用，请在模型选择器中选择一个可用模型/,
+    )).toBeVisible();
+    await expect(modelSwitch).toContainText('stale/missing-model');
+  });
 });
