@@ -207,6 +207,10 @@ export function Setup() {
   const step = steps[safeStepIndex] ?? steps[STEP.WELCOME];
   const isFirstStep = safeStepIndex === STEP.WELCOME;
   const isLastStep = safeStepIndex === steps.length - 1;
+  const canSkipSetup = !isLastStep
+    && safeStepIndex > STEP.PROVIDER
+    && safeStepIndex !== STEP.INSTALLING
+    && providerConfigured;
 
   const markSetupComplete = useSettingsStore((state) => state.markSetupComplete);
 
@@ -376,7 +380,7 @@ export function Setup() {
                   )}
                 </div>
                 <div className="flex gap-2">
-                  {!isLastStep && safeStepIndex !== STEP.RUNTIME && (
+                  {canSkipSetup && (
                     <Button data-testid="setup-skip-button" variant="ghost" onClick={handleSkip}>
                       {t('nav.skipSetup')}
                     </Button>
@@ -1013,7 +1017,8 @@ function ProviderContent({
           setSelectedAccountId(preferred.id);
           const typeInfo = providers.find((p) => p.id === preferred.vendorId);
           const requiresKey = typeInfo?.requiresApiKey ?? false;
-          onConfiguredChange(!requiresKey || hasConfiguredCredentials(preferred, statusMap.get(preferred.id)));
+          const hasCredentials = !requiresKey || hasConfiguredCredentials(preferred, statusMap.get(preferred.id));
+          onConfiguredChange(Boolean(snapshot.defaultAccountId && preferred.id === snapshot.defaultAccountId && hasCredentials));
           const storedKey = (await hostApiFetch<{ apiKey: string | null }>(
             `/api/provider-accounts/${encodeURIComponent(preferred.id)}/api-key`,
           )).apiKey;

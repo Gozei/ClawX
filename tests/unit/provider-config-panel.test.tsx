@@ -613,4 +613,50 @@ describe('ProviderConfigPanel', () => {
     expect(screen.getByText('gpt-5.4')).toBeInTheDocument();
     expect(toastSuccessMock).not.toHaveBeenCalledWith('已删除配置');
   });
+
+  it('does not allow deleting the global default model row', async () => {
+    providerStore.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI 主账号',
+        authMode: 'api_key',
+        baseUrl: 'https://api.openai.com/v1',
+        apiProtocol: 'openai-completions',
+        model: 'gpt-5.4',
+        metadata: { customModels: ['gpt-5.4-mini'] },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerStore.statuses = [
+      {
+        id: 'openai',
+        type: 'openai',
+        name: 'OpenAI 主账号',
+        hasKey: true,
+        keyMasked: 'sk-***',
+        enabled: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+        model: 'gpt-5.4',
+      },
+    ];
+    providerStore.defaultAccountId = 'openai';
+
+    render(<ProviderConfigPanel />);
+
+    const defaultDeleteButton = screen.getByTestId('models-config-delete-openai:gpt-5.4');
+    const nonDefaultDeleteButton = screen.getByTestId('models-config-delete-openai:gpt-5.4-mini');
+
+    expect(defaultDeleteButton).toBeDisabled();
+    expect(nonDefaultDeleteButton).not.toBeDisabled();
+
+    fireEvent.click(defaultDeleteButton);
+
+    expect(providerStore.updateAccount).not.toHaveBeenCalled();
+    expect(providerStore.removeAccount).not.toHaveBeenCalled();
+  });
 });

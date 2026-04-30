@@ -890,6 +890,7 @@ export function ProviderConfigPanel() {
                 {rows.map((row) => {
                   const result = resultsByRow[row.key];
                   const isDeleting = deletingRowKeys.includes(row.key);
+                  const deleteDisabled = isDeleting || row.isGlobalDefault;
                   return (
                     <tr key={row.key} data-testid="models-config-row" className="align-top">
                       <td className="px-5 py-4">
@@ -1001,12 +1002,16 @@ export function ProviderConfigPanel() {
                                 className="h-8 w-8 rounded-full text-red-500 hover:text-red-600"
                                 aria-label={t('aiProviders.modelsConfig.actions.deleteConfig')}
                                 onClick={() => void handleDeleteRow(row)}
-                                disabled={isDeleting}
+                                disabled={deleteDisabled}
                               >
                                 {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent side="top">{t('aiProviders.modelsConfig.actions.delete')}</TooltipContent>
+                            <TooltipContent side="top">
+                              {row.isGlobalDefault
+                                ? t('aiProviders.modelsConfig.tooltips.currentGlobalDefault')
+                                : t('aiProviders.modelsConfig.actions.delete')}
+                            </TooltipContent>
                           </Tooltip>
                         </div>
                       </td>

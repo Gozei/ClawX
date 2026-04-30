@@ -230,10 +230,10 @@ export const test = base.extend<ElectronFixtures>({
 
 export async function completeSetup(page: Page): Promise<void> {
   await expect(page.getByTestId('setup-page')).toBeVisible();
-  const skipButton = page.getByTestId('setup-skip-button');
-  await expect(skipButton).toBeVisible();
-  await expect(skipButton).toBeEnabled();
-  await skipButton.click({ force: true });
+  await page.evaluate(() => {
+    return window.electron.ipcRenderer.invoke('settings:set', 'setupComplete', true);
+  });
+  await page.goto(page.url().replace(/#\/setup(?:\?.*)?$/, '#/'));
   await expect(page.getByTestId('main-layout')).toBeVisible();
 }
 
