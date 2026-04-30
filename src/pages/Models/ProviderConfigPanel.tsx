@@ -23,6 +23,7 @@ import {
 import { buildConfiguredModelEntries, buildProviderAccountId } from '@/lib/provider-accounts';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useChatStore } from '@/stores/chat';
 
 type ProviderConnectionTestResult = {
   valid: boolean;
@@ -536,6 +537,7 @@ export function ProviderConfigPanel() {
     setDefaultAccount,
   } = useProviderStore();
   const fetchAgents = useAgentsStore((state) => state.fetchAgents);
+  const loadSessions = useChatStore((state) => state.loadSessions);
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [draft, setDraft] = useState<DraftState | null>(null);
@@ -672,6 +674,8 @@ export function ProviderConfigPanel() {
       }
       removeCachedRowResult(getRowCacheKey(row));
       await refreshProviderSnapshot();
+      await fetchAgents();
+      await loadSessions();
       toast.success(t('aiProviders.modelsConfig.toast.deleted'));
     } catch (error) {
       toast.error(t('aiProviders.modelsConfig.toast.deleteFailed', { error: String(error) }));
@@ -821,6 +825,8 @@ export function ProviderConfigPanel() {
       }
       setSheetOpen(false);
       setDraft(null);
+      await fetchAgents();
+      await loadSessions();
       toast.success(t('aiProviders.modelsConfig.toast.applied'));
     } catch (error) {
       toast.error(t('aiProviders.modelsConfig.toast.applyFailed', { error: String(error) }));

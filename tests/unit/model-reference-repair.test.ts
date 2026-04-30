@@ -144,4 +144,62 @@ describe('repairInvalidModelReferences', () => {
       modelOverride: 'gpt-5.4-mini',
     });
   });
+
+  it('does not treat provider registry defaults as available after the configured model is removed', async () => {
+    await writeOpenClawJson({
+      agents: {
+        defaults: {
+          model: {
+            primary: 'openai/gpt-5.4',
+          },
+        },
+        list: [
+          { id: 'main', name: 'Main', model: { primary: 'openai/gpt-5.4' } },
+        ],
+      },
+    });
+
+    const mainSessionsDir = join(testHome, '.openclaw', 'agents', 'main', 'sessions');
+    await mkdir(mainSessionsDir, { recursive: true });
+    await writeFile(join(mainSessionsDir, 'sessions.json'), JSON.stringify({
+      'agent:main:main': {
+        modelProvider: 'openai',
+        model: 'gpt-5.4',
+        providerOverride: 'openai',
+        modelOverride: 'gpt-5.4',
+      },
+    }, null, 2), 'utf8');
+
+    const { repairInvalidModelReferences } = await import('@electron/utils/model-reference-repair');
+    const result = await repairInvalidModelReferences([
+      makeAccount({
+        id: 'openai',
+        model: 'gpt-5.4-mini',
+      }),
+    ], 'openai');
+
+    expect(result).toMatchObject({
+      changed: true,
+      globalModelChanged: true,
+      agentModelFixes: 1,
+      sessionModelFixes: 1,
+    });
+
+    const config = await readOpenClawJson() as {
+      agents?: {
+        defaults?: { model?: { primary?: string } };
+        list?: Array<{ id: string; model?: { primary?: string } }>;
+      };
+    };
+    expect(config.agents?.defaults?.model?.primary).toBe('openai/gpt-5.4-mini');
+    expect(config.agents?.list?.find((agent) => agent.id === 'main')?.model).toBeUndefined();
+
+    const mainSessions = JSON.parse(await readFile(join(mainSessionsDir, 'sessions.json'), 'utf8')) as Record<string, Record<string, string>>;
+    expect(mainSessions['agent:main:main']).toMatchObject({
+      modelProvider: 'openai',
+      model: 'gpt-5.4-mini',
+      providerOverride: 'openai',
+      modelOverride: 'gpt-5.4-mini',
+    });
+  });
 });
