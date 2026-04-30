@@ -18,6 +18,10 @@ import {
   type AppLogLevel,
   type AuditMode,
 } from '../../shared/logging';
+import {
+  DEFAULT_DREAM_MEMORY_PROMOTION_SPEED,
+  type DreamMemoryPromotionSpeed,
+} from '../../shared/dream-memory';
 
 type ChatProcessDisplayMode = 'all' | 'files' | 'hidden';
 type AssistantMessageStyle = 'bubble' | 'stream';
@@ -56,6 +60,7 @@ export interface AppSettings {
   chatFontScale: number;
   fileStorageBaseDir: string;
   dreamModeEnabled: boolean;
+  dreamMemoryPromotionSpeed: DreamMemoryPromotionSpeed;
   userUploadBaseDir: string;
   assistantOutputBaseDir: string;
   machineId: string;
@@ -122,6 +127,7 @@ function createDefaultSettings(): AppSettings {
     chatFontScale: 100,
     fileStorageBaseDir: '',
     dreamModeEnabled: false,
+    dreamMemoryPromotionSpeed: DEFAULT_DREAM_MEMORY_PROMOTION_SPEED,
     userUploadBaseDir: '',
     assistantOutputBaseDir: '',
     machineId: '',

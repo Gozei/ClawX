@@ -532,6 +532,25 @@
     "gatewayStoppedDesc": "启动 OpenClaw Gateway 后可查看梦境状态。",
     "startGateway": "启动网关",
     "actionDone": "{{action}}已完成（{{count}}）",
+    "promotion": {
+      "title": "记忆沉淀速度",
+      "selectLabel": "沉淀档位",
+      "saved": "记忆沉淀速度已更新",
+      "options": {
+        "conservative": {
+          "label": "保守",
+          "description": "更严格、更慢。只有重复出现且置信度高的长期信息会被提升。"
+        },
+        "balanced": {
+          "label": "平衡",
+          "description": "默认平衡策略。稳定偏好和事实会在足够信号后沉淀。"
+        },
+        "aggressive": {
+          "label": "积极",
+          "description": "更容易、更快。近期偏好和有用的项目习惯会用更少信号进入 MEMORY.md。"
+        }
+      }
+    },
     "metrics": {
       "shortTerm": "短期记忆",
       "signals": "信号",

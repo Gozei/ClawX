@@ -23,6 +23,7 @@ describe('Settings Store', () => {
       launchAtStartup: false,
       telemetryEnabled: true,
       dreamModeEnabled: false,
+      dreamMemoryPromotionSpeed: 'balanced',
       logLevel: 'debug',
       auditEnabled: true,
       auditMode: 'minimal',
@@ -39,6 +40,7 @@ describe('Settings Store', () => {
     expect(state.sidebarCollapsed).toBe(false);
     expect(state.gatewayAutoStart).toBe(true);
     expect(state.dreamModeEnabled).toBe(false);
+    expect(state.dreamMemoryPromotionSpeed).toBe('balanced');
     expect(state.logLevel).toBe('debug');
     expect(state.auditEnabled).toBe(true);
     expect(state.appLogRetentionDays).toBe(14);
@@ -118,7 +120,7 @@ describe('Settings Store', () => {
     );
   });
 
-  it('should persist dream mode setting through host api', () => {
+  it('should persist dream mode setting through host api', async () => {
     const invoke = vi.mocked(window.electron.ipcRenderer.invoke);
     invoke.mockResolvedValueOnce({
       ok: true,
@@ -130,7 +132,7 @@ describe('Settings Store', () => {
     });
 
     const { setDreamModeEnabled } = useSettingsStore.getState();
-    setDreamModeEnabled(true);
+    await setDreamModeEnabled(true);
 
     expect(useSettingsStore.getState().dreamModeEnabled).toBe(true);
     expect(invoke).toHaveBeenCalledWith(
@@ -138,6 +140,31 @@ describe('Settings Store', () => {
       expect.objectContaining({
         path: '/api/settings/dreamModeEnabled',
         method: 'PUT',
+      }),
+    );
+  });
+
+  it('should persist dream memory promotion speed through host api', async () => {
+    const invoke = vi.mocked(window.electron.ipcRenderer.invoke);
+    invoke.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 200,
+        ok: true,
+        json: { success: true },
+      },
+    });
+
+    const { setDreamMemoryPromotionSpeed } = useSettingsStore.getState();
+    await setDreamMemoryPromotionSpeed('aggressive');
+
+    expect(useSettingsStore.getState().dreamMemoryPromotionSpeed).toBe('aggressive');
+    expect(invoke).toHaveBeenCalledWith(
+      'hostapi:fetch',
+      expect.objectContaining({
+        path: '/api/settings/dreamMemoryPromotionSpeed',
+        method: 'PUT',
+        body: JSON.stringify({ value: 'aggressive' }),
       }),
     );
   });

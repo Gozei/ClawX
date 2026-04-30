@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BookOpen, RefreshCw, Sparkles, Wand2 } from 'lucide-react';
+import { BookOpen, Gauge, RefreshCw, Sparkles, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Select } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { useGatewayStore } from '@/stores/gateway';
+import { useSettingsStore } from '@/stores/settings';
 import { useBranding } from '@/lib/branding';
 import { cn } from '@/lib/utils';
+import {
+  DREAM_MEMORY_PROMOTION_SPEEDS,
+  normalizeDreamMemoryPromotionSpeed,
+  type DreamMemoryPromotionSpeed,
+} from '../../../shared/dream-memory';
 
 type DreamingPhase = {
   enabled?: boolean;
@@ -71,6 +79,8 @@ type DreamActionResult = {
   warnings?: string[];
 };
 
+const PROMOTION_SPEED_OPTIONS = [...DREAM_MEMORY_PROMOTION_SPEEDS];
+
 function formatNumber(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value)
     ? String(value)
@@ -107,12 +117,16 @@ export function Dream() {
   const gatewayStatus = useGatewayStore((state) => state.status);
   const startGateway = useGatewayStore((state) => state.start);
   const rpc = useGatewayStore((state) => state.rpc);
+  const dreamMemoryPromotionSpeed = useSettingsStore((state) => state.dreamMemoryPromotionSpeed);
+  const setDreamMemoryPromotionSpeed = useSettingsStore((state) => state.setDreamMemoryPromotionSpeed);
   const [status, setStatus] = useState<DreamStatus | null>(null);
   const [diary, setDiary] = useState<DreamDiary | null>(null);
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<string | null>(null);
+  const [savingPromotionSpeed, setSavingPromotionSpeed] = useState(false);
 
   const dream = status?.dreaming;
+  const promotionSpeed = normalizeDreamMemoryPromotionSpeed(dreamMemoryPromotionSpeed);
   const diaryLines = useMemo(() => summarizeDiary(diary?.content), [diary?.content]);
 
   const refresh = useCallback(async () => {
@@ -152,6 +166,22 @@ export function Dream() {
     }
   };
 
+  const changePromotionSpeed = async (nextValue: string) => {
+    const nextSpeed = normalizeDreamMemoryPromotionSpeed(nextValue);
+    if (nextSpeed === promotionSpeed || savingPromotionSpeed) return;
+    setSavingPromotionSpeed(true);
+    try {
+      const changed = await setDreamMemoryPromotionSpeed(nextSpeed);
+      if (changed) {
+        toast.success(t('dream.promotion.saved'));
+      }
+    } catch (error) {
+      toast.error(String(error));
+    } finally {
+      setSavingPromotionSpeed(false);
+    }
+  };
+
   return (
     <div data-testid="dream-page" className="-m-6 h-[calc(100vh-2.5rem)] overflow-hidden bg-background">
       <div className="mx-auto flex h-full w-full max-w-6xl flex-col px-8 py-10">
@@ -162,7 +192,41 @@ export function Dream() {
         />
 
         <div className="min-h-0 flex-1 overflow-y-auto pb-10 pr-2">
-          {gatewayStatus.state !== 'running' ? (
+          <div className="space-y-8">
+            <section className="rounded-lg border border-black/8 bg-black/[0.02] p-5 dark:border-white/10 dark:bg-white/[0.02]">
+              <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Gauge className="h-4 w-4 text-muted-foreground" />
+                    <h2 className="text-[18px] font-semibold text-foreground">{t('dream.promotion.title')}</h2>
+                  </div>
+                  <p className="mt-2 text-[13px] leading-6 text-foreground/78" data-testid="dream-promotion-speed-summary">
+                    {t(`dream.promotion.options.${promotionSpeed}.description`)}
+                  </p>
+                </div>
+                <div className="w-full md:w-64">
+                  <Label htmlFor="dream-promotion-speed-select" className="text-[13px] text-muted-foreground">
+                    {t('dream.promotion.selectLabel')}
+                  </Label>
+                  <Select
+                    id="dream-promotion-speed-select"
+                    value={promotionSpeed}
+                    onChange={(event) => void changePromotionSpeed(event.target.value)}
+                    disabled={savingPromotionSpeed}
+                    data-testid="dream-promotion-speed-select"
+                    className="mt-2"
+                  >
+                    {PROMOTION_SPEED_OPTIONS.map((speed: DreamMemoryPromotionSpeed) => (
+                      <option key={speed} value={speed}>
+                        {t(`dream.promotion.options.${speed}.label`)}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </div>
+            </section>
+
+            {gatewayStatus.state !== 'running' ? (
             <section className="rounded-lg border border-black/8 bg-black/[0.02] p-5 dark:border-white/10 dark:bg-white/[0.02]">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
@@ -175,7 +239,7 @@ export function Dream() {
                 </Button>
               </div>
             </section>
-          ) : (
+            ) : (
             <div className="space-y-8">
               <section className="grid gap-4 md:grid-cols-4">
                 {[
@@ -315,7 +379,8 @@ export function Dream() {
                 ))}
               </section>
             </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -115,7 +115,7 @@ Schedule AI tasks to run automatically. Define triggers, set intervals, and let 
 The Cron workspace now includes gateway status, paginated task management, run history, detail drawers, and advanced task configuration. You can configure `at`, `every`, and cron schedules with timezone/stagger options, bind agents and session targets, choose payload behavior, inspect run errors and delivery status, and keep using external delivery directly from the task form with separate sender-account and recipient-target settings.
 
 ### 🌙 Dream Mode
-Enable **Dream Mode** from **Settings → General** to surface OpenClaw memory dreaming in the client. When enabled, Deep AI Worker syncs `memory-core` dreaming into OpenClaw, shows the Dreams workspace, and exposes diary/status maintenance controls; when disabled, the Dreams UI and runtime dreaming configuration are turned off.
+Enable **Dream Mode** from **Settings → General** to surface OpenClaw memory dreaming in the client. When enabled, Deep AI Worker syncs `memory-core` dreaming into OpenClaw, shows the Dreams workspace, and exposes diary/status maintenance controls; when disabled, the Dreams UI and runtime dreaming configuration are turned off. The Dreams workspace also includes a single **Memory Promotion Speed** setting that tunes how easily information is promoted into `MEMORY.md` while keeping the lower-level thresholds and schedules hidden.
 
 ### 🧩 Extensible Skill System
 Extend your AI agents with pre-built skills. Browse, install, and manage skills through the integrated skill panel—no package managers required.
