@@ -355,6 +355,54 @@ describe('handleSessionRoutes', () => {
     });
   });
 
+  it('upserts a missing session model override for a new session key', async () => {
+    const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'sessions.json'),
+      JSON.stringify({ sessions: [] }, null, 2),
+      'utf8',
+    );
+
+    parseJsonBodyMock.mockResolvedValueOnce({
+      sessionKey: 'agent:main:session-new',
+      modelRef: 'custom-custombc/gpt-5.4',
+    });
+
+    const { handleSessionRoutes } = await import('@electron/api/routes/sessions');
+    const handled = await handleSessionRoutes(
+      { method: 'POST' } as IncomingMessage,
+      {} as ServerResponse,
+      new URL('http://127.0.0.1:13210/api/sessions/model'),
+      {} as never,
+    );
+
+    expect(handled).toBe(true);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), 200, {
+      success: true,
+      modelRef: 'custom-custombc/gpt-5.4',
+    });
+
+    const stored = JSON.parse(await readFile(join(sessionsDir, 'sessions.json'), 'utf8')) as {
+      sessions: Array<{
+        key: string;
+        model?: string;
+        modelProvider?: string;
+        modelOverride?: string;
+        providerOverride?: string;
+      }>;
+    };
+    expect(stored.sessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'agent:main:session-new',
+        model: 'gpt-5.4',
+        modelProvider: 'custom-custombc',
+        modelOverride: 'gpt-5.4',
+        providerOverride: 'custom-custombc',
+      }),
+    ]));
+  });
+
   it('returns first-user previews without reading full chat history through the gateway', async () => {
     const sessionsDir = join(tempRoot, 'agents', 'main', 'sessions');
     await mkdir(sessionsDir, { recursive: true });

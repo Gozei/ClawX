@@ -65,8 +65,6 @@ type ModelOption = {
   label: string;
 };
 
-type ProviderListItemForModelOption = ReturnType<typeof buildProviderListItems>[number];
-
 const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
 const GOOGLE_OAUTH_RUNTIME_PROVIDER = 'google-gemini-cli';
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = {
@@ -94,23 +92,6 @@ function getRuntimeProviderKey(account: ProviderAccount): string {
     return 'minimax-portal';
   }
   return account.vendorId;
-}
-
-function getPreferredModelValue(
-  providerItems: ProviderListItemForModelOption[],
-  providerDefaultAccountId: string | null,
-): string {
-  if (!providerDefaultAccountId) return '';
-  for (const item of providerItems) {
-    if (item.account.id !== providerDefaultAccountId) continue;
-    const runtimeProviderKey = getRuntimeProviderKey(item.account);
-    const configuredModels = item.models.filter((model) => model.source !== 'recommended');
-    const preferredModel = configuredModels.find((model) => model.isDefault) || configuredModels[0];
-    if (runtimeProviderKey && preferredModel?.id) {
-      return `${runtimeProviderKey}/${preferredModel.id}`;
-    }
-  }
-  return '';
 }
 
 function resolveComposerSessionKey(
@@ -214,7 +195,6 @@ export function ChatInput({
   const [modelMenuStyle, setModelMenuStyle] = useState<{ left: number; bottom: number; width: number } | null>(null);
   const agents = useAgentsStore((s) => s.agents);
   const defaultModelRef = useAgentsStore((s) => s.defaultModelRef);
-  const fetchAgents = useAgentsStore((s) => s.fetchAgents);
   const providerAccounts = useProviderStore((s) => s.accounts);
   const providerStatuses = useProviderStore((s) => s.statuses);
   const providerVendors = useProviderStore((s) => s.vendors);
@@ -237,10 +217,6 @@ export function ChatInput({
   const currentAgent = useMemo(
     () => (agents ?? []).find((agent) => agent.id === currentAgentId) ?? null,
     [agents, currentAgentId],
-  );
-  const currentSession = useMemo(
-    () => (sessions ?? []).find((session) => session.key === currentSessionKey) ?? null,
-    [currentSessionKey, sessions],
   );
   const previousSessionKeyRef = useRef(currentSessionKey);
   const currentAgentName = useMemo(
@@ -283,29 +259,44 @@ export function ChatInput({
         }));
     })
   ), [providerItems]);
-  const effectiveModelRef = (
+  const sessionBackedModelRef = (
     sessionModels[activeComposerSessionKey]
     || activeComposerSession?.model
+    || ''
+  ).trim();
+  const effectiveModelRef = (
+    sessionBackedModelRef
     || defaultModelRef
     || ''
   ).trim();
-  const preferredModelValue = useMemo(
-    () => getPreferredModelValue(providerItems, providerDefaultAccountId),
-    [providerDefaultAccountId, providerItems],
-  );
   const selectedModelValue = useMemo(() => {
-    if (effectiveModelRef && modelOptions.some((option) => option.value === effectiveModelRef)) {
-      return effectiveModelRef;
+    // 会话已选模型优先反显，并与发送参数保持同源一致
+    if (sessionBackedModelRef) {
+      return sessionBackedModelRef;
     }
-    return preferredModelValue;
-  }, [effectiveModelRef, modelOptions, preferredModelValue]);
+    return effectiveModelRef;
+  }, [effectiveModelRef, sessionBackedModelRef]);
   const activeModelValue = selectedModelValue;
   const activeModelRef = activeModelValue || effectiveModelRef;
   const selectedModelLabel = useMemo(
-    () => modelOptions.find((option) => option.value === selectedModelValue)?.label || t('composer.selectModel'),
+    () => modelOptions.find((option) => option.value === selectedModelValue)?.label || selectedModelValue || t('composer.selectModel'),
     [modelOptions, selectedModelValue, t],
   );
   const isZh = (i18n?.resolvedLanguage || i18n?.language || '').startsWith('zh');
+  const isModelInOptions = useCallback((modelRef: string | null | undefined) => {
+    const normalized = (modelRef || '').trim();
+    return !!normalized && modelOptions.some((option) => option.value === normalized);
+  }, [modelOptions]);
+  const getModelValidationErrorMessage = useCallback(() => (
+    isZh
+      ? '当前会话模型不可用，请在模型选择器中选择一个可用模型'
+      : 'Current session model is unavailable. Select an available model before sending.'
+  ), [isZh]);
+  const getMissingModelErrorMessage = useCallback(() => (
+    isZh
+      ? '当前会话未选择模型，请先选择一个可用模型'
+      : 'No model is selected for this session. Select an available model before sending.'
+  ), [isZh]);
   const queueActionLabel = isZh ? '加入队列' : 'Queue to send';
   const canEditDraft = !disabled || !!onQueueOfflineMessage;
   const hasModelOptions = modelOptions.length > 0;
@@ -490,57 +481,6 @@ export function ChatInput({
   useEffect(() => {
     setModelMenuOpen(false);
   }, [currentAgentId]);
-
-  useEffect(() => {
-    if (currentSession) return;
-    if (sessionModels[currentSessionKey]) return;
-    if (defaultModelRef?.trim()) {
-      useChatStore.setState((state) => {
-        if (state.sessionModels[currentSessionKey]) {
-          return {};
-        }
-        return {
-          sessionModels: {
-            ...state.sessionModels,
-            [currentSessionKey]: defaultModelRef.trim(),
-          },
-        };
-      });
-      return;
-    }
-
-    let cancelled = false;
-    void fetchAgents()
-      .then(() => {
-        if (cancelled) return;
-        const latestDefaultModelRef = (useAgentsStore.getState().defaultModelRef || '').trim();
-        if (!latestDefaultModelRef) return;
-        useChatStore.setState((state) => {
-          if (state.currentSessionKey !== currentSessionKey) {
-            return {};
-          }
-          if (state.sessionModels[currentSessionKey]) {
-            return {};
-          }
-          const storedModel = state.sessions.find((session) => session.key === currentSessionKey)?.model;
-          if (storedModel) {
-            return {};
-          }
-          return {
-            sessionModels: {
-              ...state.sessionModels,
-              [currentSessionKey]: latestDefaultModelRef,
-            },
-          };
-        });
-      })
-      .catch(() => {
-        // Ignore background refresh failures here; sendMessage performs its own guard before dispatch.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [currentSession, currentSessionKey, defaultModelRef, fetchAgents, sessionModels]);
 
   // ── File staging via native dialog ─────────────────────────────
 
@@ -762,130 +702,6 @@ export function ChatInput({
     });
   }, [prefillNonce, prefillText, updateCurrentComposerDraft]);
 
-  const handleSubmitDraft = useCallback(() => {
-    if (!canSend && !canQueueDraft) return;
-    const readyAttachments = attachments.filter(a => a.status === 'ready');
-    // Capture values before clearing — clear input immediately for snappy UX,
-    // but keep attachments available for the async send
-    const textToSend = input.trim();
-    const attachmentsToSend = readyAttachments.length > 0 ? readyAttachments : undefined;
-    console.log(`[handleSend] text="${textToSend.substring(0, 50)}", attachments=${attachments.length}, ready=${readyAttachments.length}, sending=${!!attachmentsToSend}`);
-    if (attachmentsToSend) {
-      console.log('[handleSend] Attachment details:', attachmentsToSend.map(a => ({
-        id: a.id, fileName: a.fileName, mimeType: a.mimeType, fileSize: a.fileSize,
-        stagedPath: a.stagedPath, status: a.status, hasPreview: !!a.preview,
-      })));
-    }
-    clearComposerDraft(currentSessionKey);
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
-    if (canQueueDraft) {
-      onQueueOfflineMessage?.(textToSend, attachmentsToSend, targetAgentId, {
-        sessionKey: activeComposerSessionKey,
-        modelRef: activeModelRef || null,
-      });
-      toast.success(isZh ? '已加入待发送队列' : 'Added to the send queue');
-    } else {
-      onSend(textToSend, attachmentsToSend, targetAgentId, {
-        sessionKey: activeComposerSessionKey,
-        modelRef: activeModelRef || null,
-      });
-    }
-    setPickerOpen(false);
-  }, [
-    activeComposerSessionKey,
-    activeModelRef,
-    attachments,
-    canQueueDraft,
-    canSend,
-    clearComposerDraft,
-    currentSessionKey,
-    input,
-    isZh,
-    onQueueOfflineMessage,
-    onSend,
-    targetAgentId,
-  ]);
-
-  const handleStop = useCallback(() => {
-    if (!canStop) return;
-    onStop?.();
-  }, [canStop, onStop]);
-
-  const handlePrimaryAction = useCallback(() => {
-    if (canQueueDraft || !sending) {
-      handleSubmitDraft();
-      return;
-    }
-    handleStop();
-  }, [canQueueDraft, handleStop, handleSubmitDraft, sending]);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Backspace' && !input && targetAgentId) {
-        updateCurrentTargetAgentId(null);
-        return;
-      }
-      if (e.key === 'Enter' && !e.shiftKey) {
-        const nativeEvent = e.nativeEvent as KeyboardEvent;
-        if (isComposingRef.current || nativeEvent.isComposing || nativeEvent.keyCode === 229) {
-          return;
-        }
-        e.preventDefault();
-        handleSubmitDraft();
-      }
-    },
-    [handleSubmitDraft, input, targetAgentId, updateCurrentTargetAgentId],
-  );
-
-  // Handle paste (Ctrl/Cmd+V with files)
-  const handlePaste = useCallback(
-    (e: React.ClipboardEvent) => {
-      if (!canEditDraft) return;
-      const items = e.clipboardData?.items;
-      if (!items) return;
-
-      const pastedFiles: globalThis.File[] = [];
-      for (const item of Array.from(items)) {
-        if (item.kind === 'file') {
-          const file = item.getAsFile();
-          if (file) pastedFiles.push(file);
-        }
-      }
-      if (pastedFiles.length > 0) {
-        e.preventDefault();
-        stageBufferFiles(pastedFiles);
-      }
-    },
-    [canEditDraft, stageBufferFiles],
-  );
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(false);
-  }, []);
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      if (!canEditDraft) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setDragOver(false);
-      if (e.dataTransfer?.files?.length) {
-        stageBufferFiles(Array.from(e.dataTransfer.files));
-      }
-    },
-    [canEditDraft, stageBufferFiles],
-  );
-
   const setSessionModel = useCallback((modelRef: string | null) => {
     useChatStore.setState((state) => {
       const nextSessionModels = { ...state.sessionModels };
@@ -965,6 +781,142 @@ export function ChatInput({
       setModelSwitchPending(false);
     }
   }, [activeComposerSessionKey, allowLocalOnlyModelPersistence, modelOptions, selectedModelLabel, selectedModelValue, setSessionModel, t]);
+
+  const handleSubmitDraft = useCallback(async () => {
+    if (!canSend && !canQueueDraft) return;
+    const modelRefForDispatch = (activeModelRef || '').trim();
+    if (!modelRefForDispatch) {
+      toast.error(getMissingModelErrorMessage());
+      return;
+    }
+    if (!isModelInOptions(modelRefForDispatch)) {
+      toast.error(getModelValidationErrorMessage());
+      return;
+    }
+    const readyAttachments = attachments.filter(a => a.status === 'ready');
+    // Capture values before clearing — clear input immediately for snappy UX,
+    // but keep attachments available for the async send
+    const textToSend = input.trim();
+    const attachmentsToSend = readyAttachments.length > 0 ? readyAttachments : undefined;
+    console.log(`[handleSend] text="${textToSend.substring(0, 50)}", attachments=${attachments.length}, ready=${readyAttachments.length}, sending=${!!attachmentsToSend}`);
+    if (attachmentsToSend) {
+      console.log('[handleSend] Attachment details:', attachmentsToSend.map(a => ({
+        id: a.id, fileName: a.fileName, mimeType: a.mimeType, fileSize: a.fileSize,
+        stagedPath: a.stagedPath, status: a.status, hasPreview: !!a.preview,
+      })));
+    }
+    clearComposerDraft(currentSessionKey);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+    if (canQueueDraft) {
+      onQueueOfflineMessage?.(textToSend, attachmentsToSend, targetAgentId, {
+        sessionKey: activeComposerSessionKey,
+        modelRef: modelRefForDispatch,
+      });
+      toast.success(isZh ? '已加入待发送队列' : 'Added to the send queue');
+    } else {
+      onSend(textToSend, attachmentsToSend, targetAgentId, {
+        sessionKey: activeComposerSessionKey,
+        modelRef: modelRefForDispatch,
+      });
+    }
+    setPickerOpen(false);
+  }, [
+    activeComposerSessionKey,
+    activeModelRef,
+    attachments,
+    canQueueDraft,
+    canSend,
+    clearComposerDraft,
+    currentSessionKey,
+    getMissingModelErrorMessage,
+    getModelValidationErrorMessage,
+    input,
+    isModelInOptions,
+    isZh,
+    onQueueOfflineMessage,
+    onSend,
+    targetAgentId,
+  ]);
+
+  const handleStop = useCallback(() => {
+    if (!canStop) return;
+    onStop?.();
+  }, [canStop, onStop]);
+
+  const handlePrimaryAction = useCallback(() => {
+    if (canQueueDraft || !sending) {
+      void handleSubmitDraft();
+      return;
+    }
+    handleStop();
+  }, [canQueueDraft, handleStop, handleSubmitDraft, sending]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Backspace' && !input && targetAgentId) {
+        updateCurrentTargetAgentId(null);
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        const nativeEvent = e.nativeEvent as KeyboardEvent;
+        if (isComposingRef.current || nativeEvent.isComposing || nativeEvent.keyCode === 229) {
+          return;
+        }
+        e.preventDefault();
+        void handleSubmitDraft();
+      }
+    },
+    [handleSubmitDraft, input, targetAgentId, updateCurrentTargetAgentId],
+  );
+
+  // Handle paste (Ctrl/Cmd+V with files)
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (!canEditDraft) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const pastedFiles: globalThis.File[] = [];
+      for (const item of Array.from(items)) {
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file) pastedFiles.push(file);
+        }
+      }
+      if (pastedFiles.length > 0) {
+        e.preventDefault();
+        stageBufferFiles(pastedFiles);
+      }
+    },
+    [canEditDraft, stageBufferFiles],
+  );
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (!canEditDraft) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOver(false);
+      if (e.dataTransfer?.files?.length) {
+        stageBufferFiles(Array.from(e.dataTransfer.files));
+      }
+    },
+    [canEditDraft, stageBufferFiles],
+  );
 
   return (
       <div

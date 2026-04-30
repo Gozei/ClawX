@@ -387,6 +387,25 @@ describe('ChatMessage', () => {
     expect(bubble).toHaveTextContent('Gray + blue (#0b7fff)');
   });
 
+  it('renders fenced code blocks without language as block code (<pre>)', async () => {
+    const message: RawMessage = {
+      id: 'assistant-codeblock-1',
+      role: 'assistant',
+      content: [
+        '```',
+        'const a = 1;',
+        '```',
+      ].join('\n'),
+    };
+
+    renderWithTooltip(<ChatMessage message={message} showThinking={false} />);
+
+    const codeText = await screen.findByText('const a = 1;');
+    const pre = codeText.closest('pre');
+    expect(pre).not.toBeNull();
+    expect(pre?.textContent).toContain('const a = 1;');
+  });
+
   it('renders assistant file attachments with the richer file card treatment', () => {
     const message: RawMessage = {
       id: 'assistant-file-1',

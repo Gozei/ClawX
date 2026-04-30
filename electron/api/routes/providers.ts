@@ -24,6 +24,7 @@ import type { ProviderAccount } from '../../shared/providers/types';
 import { logger } from '../../utils/logger';
 import { getApiKey } from '../../utils/secure-storage';
 import { emitMutationAudit } from '../audit-utils';
+import { repairInvalidModelReferences } from '../../utils/model-reference-repair';
 
 const legacyProviderRoutesWarned = new Set<string>();
 
@@ -279,6 +280,10 @@ export async function handleProviderRoutes(
       }
       const previousConfig = providerAccountToConfig(existing);
       const nextAccount = await providerService.updateAccount(accountId, body.updates, body.apiKey);
+      await repairInvalidModelReferences(
+        await providerService.listAccounts(),
+        await providerService.getDefaultAccountId() ?? null,
+      );
       await syncUpdatedProviderToRuntime(
         providerAccountToConfig(nextAccount),
         body.apiKey,

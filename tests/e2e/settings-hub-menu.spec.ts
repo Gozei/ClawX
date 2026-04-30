@@ -74,6 +74,8 @@ test.describe('Settings hub menu', () => {
       await expect(page.getByTestId('settings-hub-sheet-container')).toHaveCount(0);
       await expect(page.getByTestId('settings-page')).toBeVisible();
       await expect(page.getByTestId('settings-updates-section')).toBeVisible();
+      await expect(page.getByTestId('settings-about-section')).not.toContainText(/版本\s+1\.0\.0|Version\s+1\.0\.0/);
+      await expect(page.getByTestId('settings-about-section')).not.toContainText('首次正式发布版本');
 
       await openSettingsHub(page);
       await expectMenuItemSelectedState(page, 'settings');

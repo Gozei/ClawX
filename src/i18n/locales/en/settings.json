@@ -102,6 +102,112 @@
       "multiAccountReady": "Multi-account ready",
       "singletonVendor": "Single-account vendor"
     },
+    "modelsConfig": {
+      "title": "Model Configurations",
+      "description": "Manage vendors, models, and test results in one table. Configurations can be applied to OpenClaw only after a successful test.",
+      "listSeparator": ", ",
+      "columns": {
+        "config": "Model configuration",
+        "capability": "Capability",
+        "testResult": "Test result",
+        "summary": "Summary",
+        "actions": "Actions"
+      },
+      "empty": {
+        "title": "No model configurations yet",
+        "description": "Add a configuration first, then apply it to OpenClaw after the test passes.",
+        "cta": "Add first configuration"
+      },
+      "actions": {
+        "add": "Add configuration",
+        "apply": "Apply to OpenClaw",
+        "cancel": "Cancel",
+        "delete": "Delete",
+        "deleteConfig": "Delete model configuration",
+        "edit": "Edit",
+        "editConfig": "Edit model configuration",
+        "setGlobalDefault": "Set as global default",
+        "test": "Test",
+        "testConnection": "Test connection"
+      },
+      "badges": {
+        "globalDefault": "Global default"
+      },
+      "fields": {
+        "apiKey": "API Key",
+        "accountName": "Account name",
+        "baseUrl": "Base URL",
+        "modelId": "Model ID",
+        "protocol": "Protocol",
+        "vendor": "Model vendor"
+      },
+      "help": {
+        "accountName": "Only used for local identification. It follows the model vendor by default and can be customized.",
+        "apiKeyCustom": "Get an API Key from the provider console{{savedKeyText}}",
+        "apiKeySavedSuffix": "; leave blank to keep the saved key",
+        "apiKeyVendor": "Get an API Key from the {{vendor}} console{{savedKeyText}}",
+        "baseUrlCustom": "Enter the model service endpoint, for example https://api.example.com/v1",
+        "baseUrlLocal": "The local model service address is filled automatically. Change it in the corresponding service if needed.",
+        "baseUrlVendor": "The default {{vendor}} API URL is filled automatically and usually does not need changes.",
+        "model": "Enter the model ID from the vendor, for example gpt-5.4, claude-sonnet-4.5, or qwen3.5-plus.",
+        "modelRecommended": "Enter a model ID directly or choose a recommendation: {{models}}",
+        "protocolCustom": "Choose the compatible service API format. Custom services usually use OpenAI Completions.",
+        "protocolVendor": "Selected automatically for {{vendor}} to avoid a protocol/vendor mismatch.",
+        "vendor": "Choose the model service provider first. Protocol, endpoint, and recommended models will update with the vendor."
+      },
+      "placeholders": {
+        "apiKey": "Enter {{vendor}} API Key",
+        "keepSavedKey": "Leave blank to keep the saved key"
+      },
+      "protocolOptions": {
+        "openaiCompletions": "OpenAI Completions compatible"
+      },
+      "resultTypes": {
+        "chat": "Chat",
+        "code": "Code",
+        "general": "General",
+        "reasoning": "Reasoning",
+        "vision": "Vision"
+      },
+      "sheet": {
+        "createTitle": "Add model configuration",
+        "description": "Test first, then apply. OpenClaw can only be updated when the latest test passed and the configuration has not changed.",
+        "editTitle": "Edit model configuration"
+      },
+      "status": {
+        "connectionSuccess": "Connection succeeded",
+        "connectionSuccessModel": "Connection succeeded, model: {{model}}",
+        "failed": "Failed",
+        "noLatency": "No latency data",
+        "noOutput": "No output yet",
+        "notTested": "Not tested",
+        "success": "Success",
+        "successApplied": "Success and applied",
+        "testing": "Testing"
+      },
+      "testCard": {
+        "description": "Send a short probe request to {{vendor}} to verify that the API Key, endpoint, and model ID work.",
+        "lastTest": "Last test: {{value}}",
+        "latency": "Response latency: {{value}}",
+        "title": "Automated test result"
+      },
+      "toast": {
+        "applied": "Applied to OpenClaw",
+        "applyFailed": "Failed to apply: {{error}}",
+        "configMissing": "Configuration not found",
+        "defaultFailed": "Failed to set default: {{error}}",
+        "defaultUpdated": "Set as global default model",
+        "deleted": "Configuration deleted",
+        "deleteFailed": "Failed to delete: {{error}}",
+        "duplicateModel": "Model configuration already exists: {{target}}",
+        "modelRequired": "Model ID is required",
+        "testFailed": "Test failed",
+        "testSuccess": "Test passed · {{latency}}ms"
+      },
+      "tooltips": {
+        "currentGlobalDefault": "Current global default model"
+      }
+    },
     "authModes": {
       "apiKey": "API Key",
       "oauthDevice": "OAuth Device",

@@ -846,7 +846,6 @@ function AgentSettingsModal({
   const safeModelDisplay = useMemo(() => toSafeText(agent.modelDisplay, t('none')), [agent.modelDisplay, t]);
   const safeChannelTypes = useMemo(() => toSafeStringArray(agent.channelTypes), [agent.channelTypes]);
   const safeSkillIds = useMemo(() => toSafeStringArray(agent.skillIds), [agent.skillIds]);
-  const safeWorkflowSteps = useMemo(() => toSafeStringArray(agent.workflowSteps), [agent.workflowSteps]);
   const safeWorkflowNodes = useMemo(() => normalizeWorkflowNodesFromAgent(agent), [agent]);
   const safeTriggerModes = useMemo(() => toSafeStringArray(agent.triggerModes), [agent.triggerModes]);
   const safeDescription = useMemo(() => toSafeText(agent.description), [agent.description]);
@@ -858,8 +857,13 @@ function AgentSettingsModal({
     return 'specialist';
   }, [agent.profileType]);
   const safeSkillIdsKey = useMemo(() => safeSkillIds.join('|'), [safeSkillIds]);
-  const safeWorkflowStepsKey = useMemo(() => safeWorkflowSteps.join('|'), [safeWorkflowSteps]);
-  const safeTriggerModesKey = useMemo(() => safeTriggerModes.join('|'), [safeTriggerModes]);
+  const safeWorkflowStepsKey = useMemo(() => {
+    return safeWorkflowNodes
+      .filter((node) => node.title.trim())
+      .map((node) => (node.target ? `${node.title.trim()} · ${node.target.trim()}` : node.title.trim()))
+      .join('|');
+  }, [safeWorkflowNodes]);
+  const safeTriggerModesKey = useMemo(() => (safeTriggerModes.length > 0 ? safeTriggerModes : ['manual']).join('|'), [safeTriggerModes]);
   const [name, setName] = useState(safeAgentName);
   const [profileType, setProfileType] = useState<AgentProfileType>(safeProfileType);
   const [description, setDescription] = useState(safeDescription);

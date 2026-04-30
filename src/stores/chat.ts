@@ -1863,11 +1863,6 @@ function buildFallbackMainSessionKey(agentId: string): string {
   return `agent:${normalizeAgentId(agentId)}:main`;
 }
 
-function resolveSessionModelSnapshot(): string {
-  const { defaultModelRef } = useAgentsStore.getState();
-  return (defaultModelRef || '').trim();
-}
-
 function resolveSessionPreferredModel(sessionKey: string, modelRefOverride?: string | null): string | null {
   const explicitModelRef = (modelRefOverride || '').trim();
   if (explicitModelRef) {
@@ -1877,98 +1872,27 @@ function resolveSessionPreferredModel(sessionKey: string, modelRefOverride?: str
   const chatState = useChatStore.getState();
   const sessionModel = chatState.sessionModels[sessionKey]
     || chatState.sessions.find((session) => session.key === sessionKey)?.model;
-  const { defaultModelRef } = useAgentsStore.getState();
-  const preferredModel = (sessionModel || defaultModelRef || '').trim();
+  const preferredModel = (sessionModel || '').trim();
   return preferredModel || null;
-}
-
-function resolveAgentConfiguredModel(agentId: string): string | null {
-  const normalizedAgentId = normalizeAgentId(agentId);
-  const { agents, defaultModelRef } = useAgentsStore.getState();
-  const agentModelRef = agents.find((agent) => agent.id === normalizedAgentId)?.modelRef;
-  const resolvedModel = (agentModelRef || defaultModelRef || '').trim();
-  return resolvedModel || null;
-}
-
-async function ensureSessionPreferredModelLoaded(
-  sessionKey: string,
-  set: ChatStoreSet,
-): Promise<void> {
-  const state = useChatStore.getState();
-  const storedSessionModel = state.sessionModels[sessionKey]
-    || state.sessions.find((session) => session.key === sessionKey)?.model;
-  if (storedSessionModel) {
-    return;
-  }
-
-  const existingDefaultModelRef = (useAgentsStore.getState().defaultModelRef || '').trim();
-  if (existingDefaultModelRef) {
-    set((currentState) => {
-      const latestSessionModel = currentState.sessionModels[sessionKey]
-        || currentState.sessions.find((session) => session.key === sessionKey)?.model;
-      if (latestSessionModel) {
-        return {};
-      }
-      return {
-        sessionModels: {
-          ...currentState.sessionModels,
-          [sessionKey]: existingDefaultModelRef,
-        },
-        sessions: currentState.sessions.map((session) => (
-          session.key === sessionKey
-            ? { ...session, model: existingDefaultModelRef }
-            : session
-        )),
-      };
-    });
-    return;
-  }
-
-  const fetchAgents = useAgentsStore.getState().fetchAgents;
-  if (typeof fetchAgents !== 'function') {
-    return;
-  }
-
-  await fetchAgents();
-  const refreshedDefaultModelRef = (useAgentsStore.getState().defaultModelRef || '').trim();
-  if (!refreshedDefaultModelRef) {
-    return;
-  }
-
-  set((currentState) => {
-    const latestSessionModel = currentState.sessionModels[sessionKey]
-      || currentState.sessions.find((session) => session.key === sessionKey)?.model;
-    if (latestSessionModel) {
-      return {};
-    }
-    return {
-      sessionModels: {
-        ...currentState.sessionModels,
-        [sessionKey]: refreshedDefaultModelRef,
-      },
-      sessions: currentState.sessions.map((session) => (
-        session.key === sessionKey
-          ? { ...session, model: refreshedDefaultModelRef }
-          : session
-      )),
-    };
-  });
 }
 
 async function syncSessionPreferredModelToRuntime(
   sessionKey: string,
-  modelRefOverride?: string | null,
+  modelRef: string,
 ): Promise<void> {
   const agentId = getAgentIdFromSessionKey(sessionKey);
-  const preferredModel = resolveSessionPreferredModel(sessionKey, modelRefOverride);
+  const preferredModel = modelRef.trim();
   if (!agentId || !preferredModel) {
-    return;
+    throw new Error('No model selected for this session');
   }
 
-  const expectedRuntimeModel = _runtimePatchedAgentModels.has(agentId)
+  // Do not assume runtime already matches agent config on first send.
+  // Gateway runtime can drift from stored config; force one sync per agent.
+  const hasSyncedRuntimeModel = _runtimePatchedAgentModels.has(agentId);
+  const expectedRuntimeModel = hasSyncedRuntimeModel
     ? (_runtimePatchedAgentModels.get(agentId) || null)
-    : resolveAgentConfiguredModel(agentId);
-  if (expectedRuntimeModel === preferredModel) {
+    : null;
+  if (hasSyncedRuntimeModel && expectedRuntimeModel === preferredModel) {
     return;
   }
 
@@ -1977,7 +1901,7 @@ async function syncSessionPreferredModelToRuntime(
     await existingRequest;
     const latestRuntimeModel = _runtimePatchedAgentModels.has(agentId)
       ? (_runtimePatchedAgentModels.get(agentId) || null)
-      : resolveAgentConfiguredModel(agentId);
+      : null;
     if (latestRuntimeModel === preferredModel) {
       return;
     }
@@ -3256,7 +3180,6 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       || DEFAULT_CANONICAL_PREFIX;
     const newKey = `${prefix}:session-${Date.now()}`;
     const newAgentId = getAgentIdFromSessionKey(newKey);
-    const defaultSessionModel = resolveSessionModelSnapshot();
     clearHistoryIncompleteRetry(currentSessionKey);
     clearNoResponseRecovery(currentSessionKey);
     if (leavingEmpty) {
@@ -3278,7 +3201,6 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         ...(leavingEmpty
           ? Object.fromEntries(Object.entries(s.sessionModels).filter(([k]) => k !== currentSessionKey))
           : s.sessionModels),
-        ...(defaultSessionModel ? { [newKey]: defaultSessionModel } : {}),
       },
       composerDrafts: leavingEmpty
         ? clearSessionEntryFromMap(s.composerDrafts, currentSessionKey)
@@ -4206,8 +4128,11 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
 
     const currentSessionKey = targetSessionKey;
     clearHistoryIncompleteRetry(currentSessionKey);
-    if (!explicitModelRef) {
-      await ensureSessionPreferredModelLoaded(currentSessionKey, set);
+    const dispatchModelRef = explicitModelRef || resolveSessionPreferredModel(currentSessionKey);
+    if (!dispatchModelRef) {
+      const errorMessage = 'No model selected for this session';
+      set({ error: localizeChatErrorDetail(errorMessage) || errorMessage });
+      throw new Error(errorMessage);
     }
     const existingMessages = get().messages;
     const existingSessions = get().sessions;
@@ -4218,7 +4143,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
       baseMessage,
       currentSessionKey,
       isFirstUserMessage,
-      explicitModelRef,
+      dispatchModelRef,
     );
     const visibleUserContent = trimmed || (attachments?.length ? '(file attached)' : '');
     const autoSessionLabel = !currentSessionKey.endsWith(':main')
@@ -4328,7 +4253,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         console.log('[sendMessage] Media paths:', attachments!.map(a => a.stagedPath));
       }
 
-      await syncSessionPreferredModelToRuntime(currentSessionKey, explicitModelRef);
+      await syncSessionPreferredModelToRuntime(currentSessionKey, dispatchModelRef);
 
       // Cache image attachments BEFORE the IPC call to avoid race condition:
       // history may reload (via Gateway event) before the RPC returns.
@@ -4416,17 +4341,19 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             sessionRunningState: updateSessionRunningState(s.sessionRunningState, currentSessionKey, false),
           }));
         }
-      } else if (autoSessionLabel) {
-        queueAutoSessionLabelPersistence(set, currentSessionKey, autoSessionLabel);
-        if (result.result?.runId) {
+      } else {
+        if (autoSessionLabel) {
+          queueAutoSessionLabelPersistence(set, currentSessionKey, autoSessionLabel);
+          if (result.result?.runId) {
+            set({ activeRunId: result.result.runId, sendStage: 'awaiting_runtime' });
+          } else {
+            set({ sendStage: 'awaiting_runtime' });
+          }
+        } else if (result.result?.runId) {
           set({ activeRunId: result.result.runId, sendStage: 'awaiting_runtime' });
         } else {
           set({ sendStage: 'awaiting_runtime' });
         }
-      } else if (result.result?.runId) {
-        set({ activeRunId: result.result.runId, sendStage: 'awaiting_runtime' });
-      } else {
-        set({ sendStage: 'awaiting_runtime' });
       }
     } catch (err) {
       const errStr = String(err);

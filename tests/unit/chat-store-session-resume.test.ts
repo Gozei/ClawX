@@ -980,7 +980,12 @@ describe('chat store session resume', () => {
       historySettled = true;
     }, 92_000);
 
-    void useChatStore.getState().sendMessage('Question');
+    void useChatStore.getState().sendMessage(
+      'Question',
+      undefined,
+      undefined,
+      { modelRef: 'custom-custombc/gpt-5.4' },
+    );
 
     await vi.advanceTimersByTimeAsync(91_000);
     await Promise.resolve();
@@ -1208,7 +1213,12 @@ describe('chat store session resume', () => {
       sendStage: null,
     });
 
-    void useChatStore.getState().sendMessage('Question');
+    void useChatStore.getState().sendMessage(
+      'Question',
+      undefined,
+      undefined,
+      { modelRef: 'custom-custombc/gpt-5.4' },
+    );
     await Promise.resolve();
     await Promise.resolve();
 
@@ -1935,7 +1945,12 @@ describe('chat store session resume', () => {
       sendStage: null,
     });
 
-    void useChatStore.getState().sendMessage('Question');
+    void useChatStore.getState().sendMessage(
+      'Question',
+      undefined,
+      undefined,
+      { modelRef: 'custom-custombc/gpt-5.4' },
+    );
     await Promise.resolve();
     await Promise.resolve();
 

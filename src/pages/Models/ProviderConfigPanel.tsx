@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { TFunction } from 'i18next';
+import { useTranslation } from 'react-i18next';
 import { AlertCircle, CheckCircle2, Clock3, Loader2, Pencil, Plus, Star, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -153,33 +155,33 @@ function getModelPlaceholder(
   return recommendedModels[0]?.value || staticInfo?.modelIdPlaceholder || 'gpt-5.4 / glm-5 / qwen3.5-plus';
 }
 
-function formatRecommendedModels(recommendedModels: Array<{ value: string; label: string }>): string {
-  return recommendedModels.slice(0, 3).map((model) => model.label || model.value).join('、');
+function formatRecommendedModels(recommendedModels: Array<{ value: string; label: string }>, separator: string): string {
+  return recommendedModels.slice(0, 3).map((model) => model.label || model.value).join(separator);
 }
 
-function getProtocolHelp(draft: DraftState, vendorName: string): string {
+function getProtocolHelp(t: TFunction<'settings'>, draft: DraftState, vendorName: string): string {
   if (draft.vendorId === 'custom') {
-    return '选择服务接口兼容格式，自定义服务通常使用 OpenAI Completions';
+    return t('aiProviders.modelsConfig.help.protocolCustom');
   }
-  return `已根据 ${vendorName} 自动选择，避免协议和厂商不匹配`;
+  return t('aiProviders.modelsConfig.help.protocolVendor', { vendor: vendorName });
 }
 
-function getBaseUrlHelp(draft: DraftState, vendorName: string): string {
+function getBaseUrlHelp(t: TFunction<'settings'>, draft: DraftState, vendorName: string): string {
   if (draft.vendorId === 'custom') {
-    return '填写模型服务接口地址，例如 https://api.example.com/v1';
+    return t('aiProviders.modelsConfig.help.baseUrlCustom');
   }
   if (draft.authMode === 'local') {
-    return '本地模型服务地址已自动填写，如需变更请在对应服务中配置';
+    return t('aiProviders.modelsConfig.help.baseUrlLocal');
   }
-  return `${vendorName} 默认 API 地址已自动填写，通常无需修改`;
+  return t('aiProviders.modelsConfig.help.baseUrlVendor', { vendor: vendorName });
 }
 
-function getApiKeyHelp(draft: DraftState, vendorName: string): string {
-  const savedKeyText = draft.mode === 'edit' ? '；留空会沿用已保存密钥' : '';
+function getApiKeyHelp(t: TFunction<'settings'>, draft: DraftState, vendorName: string): string {
+  const savedKeyText = draft.mode === 'edit' ? t('aiProviders.modelsConfig.help.apiKeySavedSuffix') : '';
   if (draft.vendorId === 'custom') {
-    return `从对应服务商控制台获取 API Key${savedKeyText}`;
+    return t('aiProviders.modelsConfig.help.apiKeyCustom', { savedKeyText });
   }
-  return `从 ${vendorName} 控制台获取 API Key${savedKeyText}`;
+  return t('aiProviders.modelsConfig.help.apiKeyVendor', { vendor: vendorName, savedKeyText });
 }
 
 function normalizeConfiguredModelIds(account: ProviderAccount): string[] {
@@ -268,8 +270,10 @@ function findDuplicateDraftModel(rows: ModelRow[], draft: DraftState): ModelRow 
   }) ?? null;
 }
 
-function duplicateModelMessage(row: ModelRow): string {
-  return `Duplicate model configuration: ${row.account.baseUrl || getVendorDefaultBaseUrl(row.vendorId) || row.vendorLabel} / ${row.modelId}`;
+function duplicateModelMessage(t: TFunction<'settings'>, row: ModelRow): string {
+  return t('aiProviders.modelsConfig.toast.duplicateModel', {
+    target: `${row.account.baseUrl || getVendorDefaultBaseUrl(row.vendorId) || row.vendorLabel} / ${row.modelId}`,
+  });
 }
 
 function inferResultType(modelId: string): ResultType {
@@ -282,20 +286,20 @@ function inferResultType(modelId: string): ResultType {
   return 'general';
 }
 
-function resultTypeLabel(type: ResultType): string {
+function resultTypeLabel(t: TFunction<'settings'>, type: ResultType): string {
   switch (type) {
     case 'embedding':
       return 'Embedding';
     case 'vision':
-      return '图像';
+      return t('aiProviders.modelsConfig.resultTypes.vision');
     case 'reasoning':
-      return '推理';
+      return t('aiProviders.modelsConfig.resultTypes.reasoning');
     case 'code':
-      return '代码';
+      return t('aiProviders.modelsConfig.resultTypes.code');
     case 'chat':
-      return '聊天';
+      return t('aiProviders.modelsConfig.resultTypes.chat');
     default:
-      return '通用';
+      return t('aiProviders.modelsConfig.resultTypes.general');
   }
 }
 
@@ -310,8 +314,8 @@ function protocolLabel(protocol: NonNullable<ProviderAccount['apiProtocol']>): s
   }
 }
 
-function formatTimestamp(value?: string): string {
-  if (!value) return '未测试';
+function formatTimestamp(t: TFunction<'settings'>, value?: string): string {
+  if (!value) return t('aiProviders.modelsConfig.status.notTested');
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat(undefined, {
@@ -406,24 +410,28 @@ function getRowCacheKey(row: ModelRow): string {
   return `${row.account.id}:${row.modelId.trim()}`;
 }
 
-function formatTestSummary(test?: TestStatus): string {
-  if (!test || test.state === 'idle') return '未测试';
-  if (test.state === 'running') return '测试中';
-  if (test.state === 'error') return '失败';
-  return test.applied ? '成功并已应用' : '成功';
+function formatTestSummary(t: TFunction<'settings'>, test?: TestStatus): string {
+  if (!test || test.state === 'idle') return t('aiProviders.modelsConfig.status.notTested');
+  if (test.state === 'running') return t('aiProviders.modelsConfig.status.testing');
+  if (test.state === 'error') return t('aiProviders.modelsConfig.status.failed');
+  return test.applied ? t('aiProviders.modelsConfig.status.successApplied') : t('aiProviders.modelsConfig.status.success');
 }
 
 function formatConnectionTestOutput(
+  t: TFunction<'settings'>,
   test: TestStatus | undefined,
   fallbackModelId?: string,
-  emptyLabel = '尚未返回',
+  emptyLabel?: string,
 ): string {
-  if (!test) return emptyLabel;
+  const empty = emptyLabel ?? t('aiProviders.modelsConfig.status.noOutput');
+  if (!test) return empty;
   if (test.state === 'success') {
     const testedModel = test.model?.trim() || fallbackModelId?.trim();
-    return testedModel ? `连接成功，模型：${testedModel}` : test.output || '连接成功';
+    return testedModel
+      ? t('aiProviders.modelsConfig.status.connectionSuccessModel', { model: testedModel })
+      : test.output || t('aiProviders.modelsConfig.status.connectionSuccess');
   }
-  return test.error || test.output || emptyLabel;
+  return test.error || test.output || empty;
 }
 
 function getStatusTone(test?: TestStatus): string {
@@ -514,6 +522,7 @@ function removeModelFromAccount(account: ProviderAccount, modelId: string): Part
 }
 
 export function ProviderConfigPanel() {
+  const { t } = useTranslation('settings');
   const {
     accounts,
     statuses,
@@ -639,9 +648,9 @@ export function ProviderConfigPanel() {
       const result = await runDraftTest(buildRowDraft(row));
       setCachedRowResult(getRowCacheKey(row), result);
       if (result.state === 'success') {
-        toast.success(`测试成功 · ${result.latencyMs ?? '—'}ms`);
+        toast.success(t('aiProviders.modelsConfig.toast.testSuccess', { latency: result.latencyMs ?? '-' }));
       } else {
-        toast.error(result.error || '测试失败');
+        toast.error(result.error || t('aiProviders.modelsConfig.toast.testFailed'));
       }
     } catch (error) {
       toast.error(String(error));
@@ -663,9 +672,9 @@ export function ProviderConfigPanel() {
       }
       removeCachedRowResult(getRowCacheKey(row));
       await refreshProviderSnapshot();
-      toast.success('已删除配置');
+      toast.success(t('aiProviders.modelsConfig.toast.deleted'));
     } catch (error) {
-      toast.error(`删除失败: ${error}`);
+      toast.error(t('aiProviders.modelsConfig.toast.deleteFailed', { error: String(error) }));
     } finally {
       setDeletingRowKeys((current) => current.filter((key) => key !== row.key));
     }
@@ -713,21 +722,21 @@ export function ProviderConfigPanel() {
 
       await refreshProviderSnapshot();
       await fetchAgents();
-      toast.success('已设为全局默认模型');
+      toast.success(t('aiProviders.modelsConfig.toast.defaultUpdated'));
     } catch (error) {
-      toast.error(`设置失败: ${error}`);
+      toast.error(t('aiProviders.modelsConfig.toast.defaultFailed', { error: String(error) }));
     }
   };
 
   const handleDraftTest = async () => {
     if (!draft) return;
     if (!draft.modelId.trim()) {
-      toast.error('需要模型 ID');
+      toast.error(t('aiProviders.modelsConfig.toast.modelRequired'));
       return;
     }
     const duplicate = findDuplicateDraftModel(rows, draft);
     if (duplicate) {
-      toast.error(duplicateModelMessage(duplicate));
+      toast.error(duplicateModelMessage(t, duplicate));
       return;
     }
     setDraftTest({ state: 'running' });
@@ -735,9 +744,9 @@ export function ProviderConfigPanel() {
       const result = await runDraftTest(draft);
       setDraftTest(result);
       if (result.state === 'success') {
-        toast.success(`测试成功 · ${result.latencyMs ?? '—'}ms`);
+        toast.success(t('aiProviders.modelsConfig.toast.testSuccess', { latency: result.latencyMs ?? '-' }));
       } else {
-        toast.error(result.error || '测试失败');
+        toast.error(result.error || t('aiProviders.modelsConfig.toast.testFailed'));
       }
     } catch (error) {
       const failed: TestStatus = {
@@ -756,7 +765,7 @@ export function ProviderConfigPanel() {
     if (!draft || !canApplyDraft) return;
     const duplicate = findDuplicateDraftModel(rows, draft);
     if (duplicate) {
-      toast.error(duplicateModelMessage(duplicate));
+      toast.error(duplicateModelMessage(t, duplicate));
       return;
     }
     setSaving(true);
@@ -793,7 +802,7 @@ export function ProviderConfigPanel() {
         appliedRowKey = `${accountId}:${draft.modelId.trim()}`;
       } else if (draft.accountId) {
         const account = accounts.find((entry) => entry.id === draft.accountId);
-        if (!account) throw new Error('配置不存在');
+        if (!account) throw new Error(t('aiProviders.modelsConfig.toast.configMissing'));
         const updates = applyModelChangeToAccount(account, draft);
         const updated = await updateAccount(draft.accountId, updates, trimmedKey || undefined);
         if (!updated) return;
@@ -812,9 +821,9 @@ export function ProviderConfigPanel() {
       }
       setSheetOpen(false);
       setDraft(null);
-      toast.success('已应用到 OpenClaw');
+      toast.success(t('aiProviders.modelsConfig.toast.applied'));
     } catch (error) {
-      toast.error(`应用失败: ${error}`);
+      toast.error(t('aiProviders.modelsConfig.toast.applyFailed', { error: String(error) }));
     } finally {
       setSaving(false);
     }
@@ -841,14 +850,14 @@ export function ProviderConfigPanel() {
       <section data-testid="models-config-panel" className="space-y-4">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h2 className="text-[28px] font-semibold tracking-[-0.02em] text-foreground">模型配置</h2>
+          <h2 className="text-[28px] font-semibold tracking-[-0.02em] text-foreground">{t('aiProviders.modelsConfig.title')}</h2>
           <p className="mt-1 text-[14px] text-muted-foreground">
-            用表格管理厂商、模型、测试结果。测试通过后，才允许应用到 OpenClaw。
+            {t('aiProviders.modelsConfig.description')}
           </p>
         </div>
         <Button data-testid="models-config-add-button" className="rounded-full px-4" onClick={handleOpenCreate}>
           <Plus className="mr-2 h-4 w-4" />
-          新增配置
+          {t('aiProviders.modelsConfig.actions.add')}
         </Button>
       </div>
 
@@ -858,9 +867,9 @@ export function ProviderConfigPanel() {
         </div>
       ) : rows.length === 0 ? (
         <div data-testid="models-config-empty-state" className="rounded-2xl border border-dashed border-black/10 px-6 py-14 text-center dark:border-white/10">
-          <p className="text-[15px] font-medium text-foreground">还没有模型配置</p>
-          <p className="mt-2 text-[13px] text-muted-foreground">先新增一个配置，测试成功后再应用到 OpenClaw。</p>
-          <Button className="mt-5 rounded-full px-5" onClick={handleOpenCreate}>新增首个配置</Button>
+          <p className="text-[15px] font-medium text-foreground">{t('aiProviders.modelsConfig.empty.title')}</p>
+          <p className="mt-2 text-[13px] text-muted-foreground">{t('aiProviders.modelsConfig.empty.description')}</p>
+          <Button className="mt-5 rounded-full px-5" onClick={handleOpenCreate}>{t('aiProviders.modelsConfig.empty.cta')}</Button>
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-black/10 dark:border-white/10">
@@ -868,12 +877,12 @@ export function ProviderConfigPanel() {
             <table className="min-w-full border-collapse text-left">
               <thead className="bg-black/[0.025] text-[12px] uppercase tracking-[0.08em] text-foreground/45 dark:bg-white/[0.025]">
                 <tr>
-                  <th className="px-5 py-3 font-medium">模型配置</th>
-                  <th className="px-4 py-3 font-medium">能力</th>
-                  <th className="px-4 py-3 font-medium">测试结果</th>
-                  <th className="px-4 py-3 font-medium">摘要</th>
+                  <th className="px-5 py-3 font-medium">{t('aiProviders.modelsConfig.columns.config')}</th>
+                  <th className="px-4 py-3 font-medium">{t('aiProviders.modelsConfig.columns.capability')}</th>
+                  <th className="px-4 py-3 font-medium">{t('aiProviders.modelsConfig.columns.testResult')}</th>
+                  <th className="px-4 py-3 font-medium">{t('aiProviders.modelsConfig.columns.summary')}</th>
                   <th className="sticky right-0 z-10 w-[170px] border-l border-black/5 bg-black/[0.025] px-4 py-3 font-medium text-right backdrop-blur-sm dark:border-white/8 dark:bg-white/[0.025]">
-                    操作
+                    {t('aiProviders.modelsConfig.columns.actions')}
                   </th>
                 </tr>
               </thead>
@@ -881,6 +890,7 @@ export function ProviderConfigPanel() {
                 {rows.map((row) => {
                   const result = resultsByRow[row.key];
                   const isDeleting = deletingRowKeys.includes(row.key);
+                  const deleteDisabled = isDeleting || row.isGlobalDefault;
                   return (
                     <tr key={row.key} data-testid="models-config-row" className="align-top">
                       <td className="px-5 py-4">
@@ -893,7 +903,7 @@ export function ProviderConfigPanel() {
                                 className="inline-flex items-center gap-1 rounded-full bg-amber-500/12 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400"
                               >
                                 <Star className="h-3 w-3 fill-current" />
-                                全局默认
+                                {t('aiProviders.modelsConfig.badges.globalDefault')}
                               </span>
                             ) : null}
                           </div>
@@ -905,7 +915,7 @@ export function ProviderConfigPanel() {
                       <td className="px-4 py-4">
                         <div className="flex min-w-[150px] flex-wrap gap-2">
                           <span className="rounded-full bg-black/5 px-2.5 py-1 text-[12px] font-medium text-foreground/70 dark:bg-white/6">
-                            {resultTypeLabel(row.resultType)}
+                            {resultTypeLabel(t, row.resultType)}
                           </span>
                           <span className="rounded-full bg-black/5 px-2.5 py-1 text-[12px] font-medium text-foreground/70 dark:bg-white/6">
                             {protocolLabel(row.protocol)}
@@ -916,20 +926,20 @@ export function ProviderConfigPanel() {
                         <div className="min-w-[150px] space-y-1.5">
                           <div className={cn('flex items-center gap-1.5 text-[13px] font-medium', getStatusTone(result))}>
                             {result?.state === 'success' ? <CheckCircle2 className="h-3.5 w-3.5" /> : result?.state === 'error' ? <AlertCircle className="h-3.5 w-3.5" /> : <Clock3 className="h-3.5 w-3.5" />}
-                            <span>{formatTestSummary(result)}</span>
+                            <span>{formatTestSummary(t, result)}</span>
                           </div>
                           <div className="text-[12px] text-foreground/56">
-                            {formatTimestamp(result?.testedAt)}
+                            {formatTimestamp(t, result?.testedAt)}
                           </div>
                           <div className="text-[12px] text-foreground/56">
-                            {typeof result?.latencyMs === 'number' ? `${result.latencyMs} ms` : '无延迟数据'}
+                            {typeof result?.latencyMs === 'number' ? `${result.latencyMs} ms` : t('aiProviders.modelsConfig.status.noLatency')}
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-4">
                         <div className="min-w-[220px] max-w-[320px]">
                           <div className="line-clamp-2 text-[13px] leading-6 text-foreground/68">
-                            {formatConnectionTestOutput(result, row.modelId)}
+                            {formatConnectionTestOutput(t, result, row.modelId)}
                           </div>
                         </div>
                       </td>
@@ -945,7 +955,7 @@ export function ProviderConfigPanel() {
                                   <Star className="h-4 w-4 fill-current" />
                                 </span>
                               </TooltipTrigger>
-                              <TooltipContent side="top">当前全局默认模型</TooltipContent>
+                              <TooltipContent side="top">{t('aiProviders.modelsConfig.tooltips.currentGlobalDefault')}</TooltipContent>
                             </Tooltip>
                           ) : (
                             <Tooltip>
@@ -955,13 +965,13 @@ export function ProviderConfigPanel() {
                                   variant="ghost"
                                   size="icon"
                                   className="h-8 w-8 rounded-full text-foreground/55 hover:text-amber-600 dark:hover:text-amber-400"
-                                  aria-label="设为全局默认"
+                                  aria-label={t('aiProviders.modelsConfig.actions.setGlobalDefault')}
                                   onClick={() => void handleSetDefaultModel(row)}
                                 >
                                   <Star className="h-4 w-4" />
                                 </Button>
                               </TooltipTrigger>
-                              <TooltipContent side="top">设为全局默认</TooltipContent>
+                              <TooltipContent side="top">{t('aiProviders.modelsConfig.actions.setGlobalDefault')}</TooltipContent>
                             </Tooltip>
                           )}
                           <Button
@@ -973,15 +983,15 @@ export function ProviderConfigPanel() {
                             data-testid={`models-config-test-${row.key}`}
                           >
                             {testingRowKey === row.key ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-                            测试
+                            {t('aiProviders.modelsConfig.actions.test')}
                           </Button>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <Button data-testid={`models-config-edit-${row.key}`} variant="ghost" size="icon" className="h-8 w-8 rounded-full text-foreground/72" aria-label="编辑模型配置" onClick={() => handleOpenEdit(row)}>
+                              <Button data-testid={`models-config-edit-${row.key}`} variant="ghost" size="icon" className="h-8 w-8 rounded-full text-foreground/72" aria-label={t('aiProviders.modelsConfig.actions.editConfig')} onClick={() => handleOpenEdit(row)}>
                                 <Pencil className="h-4 w-4" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent side="top">编辑</TooltipContent>
+                            <TooltipContent side="top">{t('aiProviders.modelsConfig.actions.edit')}</TooltipContent>
                           </Tooltip>
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -990,14 +1000,18 @@ export function ProviderConfigPanel() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 rounded-full text-red-500 hover:text-red-600"
-                                aria-label="删除模型配置"
+                                aria-label={t('aiProviders.modelsConfig.actions.deleteConfig')}
                                 onClick={() => void handleDeleteRow(row)}
-                                disabled={isDeleting}
+                                disabled={deleteDisabled}
                               >
                                 {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent side="top">删除</TooltipContent>
+                            <TooltipContent side="top">
+                              {row.isGlobalDefault
+                                ? t('aiProviders.modelsConfig.tooltips.currentGlobalDefault')
+                                : t('aiProviders.modelsConfig.actions.delete')}
+                            </TooltipContent>
                           </Tooltip>
                         </div>
                       </td>
@@ -1013,14 +1027,14 @@ export function ProviderConfigPanel() {
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent data-testid="models-config-sheet" side="right" className="w-[540px] max-w-[540px] overflow-y-auto border-l border-black/10 px-5 py-5 dark:border-white/10">
           <SheetHeader>
-            <SheetTitle>{draft?.mode === 'create' ? '新增模型配置' : '编辑模型配置'}</SheetTitle>
-            <SheetDescription>先测试，再应用。只有最近一次测试成功且配置未变，才允许回写到 OpenClaw。</SheetDescription>
+            <SheetTitle>{draft?.mode === 'create' ? t('aiProviders.modelsConfig.sheet.createTitle') : t('aiProviders.modelsConfig.sheet.editTitle')}</SheetTitle>
+            <SheetDescription>{t('aiProviders.modelsConfig.sheet.description')}</SheetDescription>
           </SheetHeader>
 
           {draft && (
             <div className="mt-6 space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="draft-vendor">模型厂商</Label>
+                <Label htmlFor="draft-vendor">{t('aiProviders.modelsConfig.fields.vendor')}</Label>
                 <Select
                   id="draft-vendor"
                   data-testid="models-config-sheet-vendor-select"
@@ -1032,23 +1046,23 @@ export function ProviderConfigPanel() {
                     <option key={vendor.id} value={vendor.id}>{getVendorDisplayName(vendor.id, vendorOptions)}</option>
                   ))}
                 </Select>
-                <p className="text-[12px] leading-5 text-muted-foreground">先选择模型服务提供商，协议、接口地址和推荐模型会随厂商自动联动。</p>
+                <p className="text-[12px] leading-5 text-muted-foreground">{t('aiProviders.modelsConfig.help.vendor')}</p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="draft-label">账户名称</Label>
+                <Label htmlFor="draft-label">{t('aiProviders.modelsConfig.fields.accountName')}</Label>
                 <Input
                   id="draft-label"
                   data-testid="models-config-sheet-label-input"
                   value={draft.label}
                   onChange={(event) => updateDraft('label', event.target.value)}
                 />
-                <p className="text-[12px] leading-5 text-muted-foreground">仅用于本地识别，默认跟随模型厂商，可自定义。</p>
+                <p className="text-[12px] leading-5 text-muted-foreground">{t('aiProviders.modelsConfig.help.accountName')}</p>
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="draft-model">模型 ID</Label>
+                  <Label htmlFor="draft-model">{t('aiProviders.modelsConfig.fields.modelId')}</Label>
                   <Input
                     id="draft-model"
                     data-testid="models-config-sheet-model-input"
@@ -1066,12 +1080,12 @@ export function ProviderConfigPanel() {
                   ) : null}
                   <p className="text-[12px] leading-5 text-muted-foreground">
                     {draftRecommendedModels.length > 0
-                      ? `可直接输入模型 ID，也可选择推荐：${formatRecommendedModels(draftRecommendedModels)}`
-                      : '填写厂商提供的模型 ID，例如 gpt-5.4、claude-sonnet-4.5 或 qwen3.5-plus。'}
+                      ? t('aiProviders.modelsConfig.help.modelRecommended', { models: formatRecommendedModels(draftRecommendedModels, t('aiProviders.modelsConfig.listSeparator')) })
+                      : t('aiProviders.modelsConfig.help.model')}
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="draft-protocol">协议（接口格式）</Label>
+                  <Label htmlFor="draft-protocol">{t('aiProviders.modelsConfig.fields.protocol')}</Label>
                   <Select
                     id="draft-protocol"
                     data-testid="models-config-sheet-protocol-select"
@@ -1079,16 +1093,16 @@ export function ProviderConfigPanel() {
                     onChange={(event) => updateDraft('apiProtocol', event.target.value as DraftState['apiProtocol'])}
                     disabled={draft.vendorId !== 'custom'}
                   >
-                    <option value="openai-completions">OpenAI Completions（兼容）</option>
+                    <option value="openai-completions">{t('aiProviders.modelsConfig.protocolOptions.openaiCompletions')}</option>
                     <option value="openai-responses">OpenAI Responses</option>
                     <option value="anthropic-messages">Anthropic Messages</option>
                   </Select>
-                  <p className="text-[12px] leading-5 text-muted-foreground">{getProtocolHelp(draft, draftVendorName)}</p>
+                  <p className="text-[12px] leading-5 text-muted-foreground">{getProtocolHelp(t, draft, draftVendorName)}</p>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="draft-base-url">Base URL（接口地址）</Label>
+                <Label htmlFor="draft-base-url">{t('aiProviders.modelsConfig.fields.baseUrl')}</Label>
                 <Input
                   id="draft-base-url"
                   data-testid="models-config-sheet-base-url-input"
@@ -1097,22 +1111,22 @@ export function ProviderConfigPanel() {
                   placeholder="https://api.example.com/v1"
                   readOnly={draft.vendorId !== 'custom'}
                 />
-                <p className="text-[12px] leading-5 text-muted-foreground">{getBaseUrlHelp(draft, draftVendorName)}</p>
+                <p className="text-[12px] leading-5 text-muted-foreground">{getBaseUrlHelp(t, draft, draftVendorName)}</p>
               </div>
 
               {draft.authMode !== 'local' && (
                 <div className="space-y-2">
-                  <Label htmlFor="draft-api-key">API Key（密钥）</Label>
-                  <Input id="draft-api-key" type="password" value={draft.apiKey} onChange={(event) => updateDraft('apiKey', event.target.value)} placeholder={draft.mode === 'edit' ? '留空表示沿用已保存密钥' : `输入 ${draftVendorName} API Key`} />
-                  <p className="text-[12px] leading-5 text-muted-foreground">{getApiKeyHelp(draft, draftVendorName)}</p>
+                  <Label htmlFor="draft-api-key">{t('aiProviders.modelsConfig.fields.apiKey')}</Label>
+                  <Input id="draft-api-key" type="password" value={draft.apiKey} onChange={(event) => updateDraft('apiKey', event.target.value)} placeholder={draft.mode === 'edit' ? t('aiProviders.modelsConfig.placeholders.keepSavedKey') : t('aiProviders.modelsConfig.placeholders.apiKey', { vendor: draftVendorName })} />
+                  <p className="text-[12px] leading-5 text-muted-foreground">{getApiKeyHelp(t, draft, draftVendorName)}</p>
                 </div>
               )}
 
               <div className="rounded-2xl border border-black/10 bg-black/[0.02] p-4 dark:border-white/10 dark:bg-white/[0.03]">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-[13px] font-semibold text-foreground">自动化测试结果</p>
-                    <p className="mt-1 text-[12px] text-muted-foreground">向 {draftVendorName} 发送一次简短探测请求，确认 API Key、接口地址和模型 ID 是否可用。</p>
+                    <p className="text-[13px] font-semibold text-foreground">{t('aiProviders.modelsConfig.testCard.title')}</p>
+                    <p className="mt-1 text-[12px] text-muted-foreground">{t('aiProviders.modelsConfig.testCard.description', { vendor: draftVendorName })}</p>
                   </div>
                   <span className={cn(
                     'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-medium',
@@ -1122,14 +1136,14 @@ export function ProviderConfigPanel() {
                         ? 'bg-red-500/10 text-red-600 dark:text-red-400'
                         : 'bg-black/5 text-foreground/55 dark:bg-white/6',
                   )}>
-                    {formatTestSummary(draftTest)}
+                    {formatTestSummary(t, draftTest)}
                   </span>
                 </div>
                 <div className="mt-3 grid grid-cols-1 gap-3 text-[13px] text-foreground/72">
-                  <div>最近测试：{formatTimestamp(draftTest.testedAt)}</div>
-                  <div>回复延迟：{typeof draftTest.latencyMs === 'number' ? `${draftTest.latencyMs} ms` : '—'}</div>
+                  <div>{t('aiProviders.modelsConfig.testCard.lastTest', { value: formatTimestamp(t, draftTest.testedAt) })}</div>
+                  <div>{t('aiProviders.modelsConfig.testCard.latency', { value: typeof draftTest.latencyMs === 'number' ? `${draftTest.latencyMs} ms` : '-' })}</div>
                   <div className="rounded-xl border border-black/6 bg-background px-3 py-2 dark:border-white/8">
-                    {formatConnectionTestOutput(draftTest, draft.modelId, '尚未测试')}
+                    {formatConnectionTestOutput(t, draftTest, draft.modelId, t('aiProviders.modelsConfig.status.notTested'))}
                   </div>
                 </div>
               </div>
@@ -1137,7 +1151,7 @@ export function ProviderConfigPanel() {
           )}
 
           <SheetFooter className="mt-6 gap-2 border-t border-black/10 pt-4 dark:border-white/10">
-            <Button variant="outline" onClick={() => setSheetOpen(false)}>取消</Button>
+            <Button variant="outline" onClick={() => setSheetOpen(false)}>{t('aiProviders.modelsConfig.actions.cancel')}</Button>
             <Button
               data-testid="models-config-sheet-test-button"
               variant="outline"
@@ -1145,10 +1159,10 @@ export function ProviderConfigPanel() {
               disabled={!draft || draftTest.state === 'running'}
             >
               {draftTest.state === 'running' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              测试连接
+              {t('aiProviders.modelsConfig.actions.testConnection')}
             </Button>
             <Button data-testid="models-config-apply-button" onClick={() => void handleApplyDraft()} disabled={!canApplyDraft}>
-              应用到 OpenClaw
+              {t('aiProviders.modelsConfig.actions.apply')}
             </Button>
           </SheetFooter>
         </SheetContent>
