@@ -329,7 +329,7 @@ export async function syncGatewayConfigBeforeLaunch(
   appSettings: Awaited<ReturnType<typeof getAllSettings>>,
 ): Promise<void> {
   await syncProxyConfigToOpenClaw(appSettings, { preserveExistingWhenDisabled: true });
-  await syncDreamModeToOpenClawConfig(appSettings.dreamModeEnabled);
+  await syncDreamModeToOpenClawConfig(appSettings.dreamModeEnabled, appSettings.dreamMemoryPromotionSpeed);
 
   try {
     await sanitizeOpenClawConfig();

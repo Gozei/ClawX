@@ -21,6 +21,11 @@ import {
 } from '../../shared/logging';
 import { confirmGatewayImpact } from '@/lib/gateway-impact-confirm';
 import { guardGatewayTransitioning } from './gateway';
+import {
+  DEFAULT_DREAM_MEMORY_PROMOTION_SPEED,
+  normalizeDreamMemoryPromotionSpeed,
+  type DreamMemoryPromotionSpeed,
+} from '../../shared/dream-memory';
 
 type Theme = 'light' | 'dark' | 'system';
 type UpdateChannel = 'stable' | 'beta' | 'dev';
@@ -47,6 +52,7 @@ interface SettingsState {
   assistantMessageStyle: AssistantMessageStyle;
   chatFontScale: number;
   dreamModeEnabled: boolean;
+  dreamMemoryPromotionSpeed: DreamMemoryPromotionSpeed;
   fileStorageBaseDir: string;
 
   // Gateway
@@ -93,6 +99,7 @@ interface SettingsState {
   setAssistantMessageStyle: (value: AssistantMessageStyle) => void;
   setChatFontScale: (value: number) => void;
   setDreamModeEnabled: (value: boolean) => Promise<boolean>;
+  setDreamMemoryPromotionSpeed: (value: DreamMemoryPromotionSpeed) => Promise<boolean>;
   setFileStorageBaseDir: (value: string) => void;
   setGatewayAutoStart: (value: boolean) => void;
   setGatewayPort: (port: number) => void;
@@ -131,6 +138,7 @@ const defaultSettings = {
   assistantMessageStyle: 'bubble' as AssistantMessageStyle,
   chatFontScale: 100,
   dreamModeEnabled: false,
+  dreamMemoryPromotionSpeed: DEFAULT_DREAM_MEMORY_PROMOTION_SPEED,
   fileStorageBaseDir: '',
   gatewayAutoStart: true,
   gatewayPort: 18789,
@@ -176,6 +184,7 @@ export const useSettingsStore = create<SettingsState>()(
           set((state) => ({
             ...state,
             ...settings,
+            dreamMemoryPromotionSpeed: normalizeDreamMemoryPromotionSpeed(settings.dreamMemoryPromotionSpeed),
             fileStorageBaseDir: resolvedFileStorageBaseDir || legacyUploadBaseDir || legacyOutputBaseDir,
             ...(resolvedLanguage ? { language: resolvedLanguage } : {}),
           }));
@@ -306,6 +315,23 @@ export const useSettingsStore = create<SettingsState>()(
           body: JSON.stringify({ value: dreamModeEnabled }),
         });
         set({ dreamModeEnabled });
+        return true;
+      },
+      setDreamMemoryPromotionSpeed: async (value) => {
+        if (guardGatewayTransitioning()) return false;
+        const dreamMemoryPromotionSpeed = normalizeDreamMemoryPromotionSpeed(value);
+        const confirmed = await confirmGatewayImpact({
+          mode: 'restart',
+          willApplyChanges: true,
+        });
+        if (!confirmed) {
+          return false;
+        }
+        await hostApiFetch('/api/settings/dreamMemoryPromotionSpeed', {
+          method: 'PUT',
+          body: JSON.stringify({ value: dreamMemoryPromotionSpeed }),
+        });
+        set({ dreamMemoryPromotionSpeed });
         return true;
       },
       setFileStorageBaseDir: (fileStorageBaseDir) => {

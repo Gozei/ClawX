@@ -549,6 +549,25 @@
     "gatewayStoppedDesc": "Dream status is available after the OpenClaw Gateway starts.",
     "startGateway": "Start Gateway",
     "actionDone": "{{action}} complete ({{count}})",
+    "promotion": {
+      "title": "Memory Promotion Speed",
+      "selectLabel": "Promotion level",
+      "saved": "Memory promotion speed updated",
+      "options": {
+        "conservative": {
+          "label": "Conservative",
+          "description": "More strict and slower. Only repeated, high-confidence patterns are promoted."
+        },
+        "balanced": {
+          "label": "Balanced",
+          "description": "Default balance. Stable preferences and facts promote after enough supporting signals."
+        },
+        "aggressive": {
+          "label": "Aggressive",
+          "description": "Easier and faster. Recent preferences and useful project habits can promote with fewer signals."
+        }
+      }
+    },
     "metrics": {
       "shortTerm": "Short-term",
       "signals": "Signals",

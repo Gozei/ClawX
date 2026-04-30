@@ -6,6 +6,7 @@ import { refreshTray } from '../../main/tray';
 import { syncProxyConfigToOpenClaw } from '../../utils/openclaw-proxy';
 import { getAllSettings, getSetting, resetSettings, setSetting, type AppSettings } from '../../utils/store';
 import { syncDreamModeToOpenClawConfig } from '../../utils/dream-mode';
+import { normalizeDreamMemoryPromotionSpeed } from '../../../shared/dream-memory';
 import { applyRuntimeLoggingSettings, patchTouchesLoggingSettings } from '../../utils/logging-config';
 import type { HostApiContext } from '../context';
 import { emitMutationAudit } from '../audit-utils';
@@ -41,7 +42,8 @@ function patchTouchesNativeMenus(patch: Partial<AppSettings>): boolean {
 }
 
 function patchTouchesDreamMode(patch: Partial<AppSettings>): boolean {
-  return Object.prototype.hasOwnProperty.call(patch, 'dreamModeEnabled');
+  return Object.prototype.hasOwnProperty.call(patch, 'dreamModeEnabled')
+    || Object.prototype.hasOwnProperty.call(patch, 'dreamMemoryPromotionSpeed');
 }
 
 function patchTouchesGatewayConfig(patch: Partial<AppSettings>): boolean {
@@ -50,6 +52,7 @@ function patchTouchesGatewayConfig(patch: Partial<AppSettings>): boolean {
 
 function settingTouchesGatewayConfig(key: keyof AppSettings): boolean {
   return key === 'dreamModeEnabled'
+    || key === 'dreamMemoryPromotionSpeed'
     || key === 'proxyEnabled'
     || key === 'proxyServer'
     || key === 'proxyHttpServer'
@@ -63,8 +66,12 @@ async function refreshNativeMenus(ctx: HostApiContext): Promise<void> {
   await refreshTray(ctx.mainWindow);
 }
 
-async function syncDreamModeAndRestartIfNeeded(ctx: HostApiContext, enabled: boolean): Promise<void> {
-  await syncDreamModeToOpenClawConfig(enabled);
+async function syncDreamModeAndRestartIfNeeded(
+  ctx: HostApiContext,
+  enabled: boolean,
+  promotionSpeed: AppSettings['dreamMemoryPromotionSpeed'],
+): Promise<void> {
+  await syncDreamModeToOpenClawConfig(enabled, normalizeDreamMemoryPromotionSpeed(promotionSpeed));
   if (ctx.gatewayManager.getStatus().state === 'running') {
     await ctx.gatewayManager.restart();
   }
@@ -106,7 +113,8 @@ export async function handleSettingsRoutes(
         await refreshNativeMenus(ctx);
       }
       if (patchTouchesDreamMode(patch)) {
-        await syncDreamModeAndRestartIfNeeded(ctx, Boolean(patch.dreamModeEnabled));
+        const settings = await getAllSettings();
+        await syncDreamModeAndRestartIfNeeded(ctx, settings.dreamModeEnabled, settings.dreamMemoryPromotionSpeed);
       }
       emitMutationAudit(req, ctx, {
         startedAt,
@@ -182,8 +190,9 @@ export async function handleSettingsRoutes(
       if (key === 'language' || key === 'brandingOverrides') {
         await refreshNativeMenus(ctx);
       }
-      if (key === 'dreamModeEnabled') {
-        await syncDreamModeAndRestartIfNeeded(ctx, Boolean(body.value));
+      if (key === 'dreamModeEnabled' || key === 'dreamMemoryPromotionSpeed') {
+        const settings = await getAllSettings();
+        await syncDreamModeAndRestartIfNeeded(ctx, settings.dreamModeEnabled, settings.dreamMemoryPromotionSpeed);
       }
       emitMutationAudit(req, ctx, {
         startedAt,
@@ -238,7 +247,7 @@ export async function handleSettingsRoutes(
       await handleProxySettingsChange(ctx);
       await syncLaunchAtStartupSettingFromStore();
       await refreshNativeMenus(ctx);
-      await syncDreamModeAndRestartIfNeeded(ctx, settings.dreamModeEnabled);
+      await syncDreamModeAndRestartIfNeeded(ctx, settings.dreamModeEnabled, settings.dreamMemoryPromotionSpeed);
       emitMutationAudit(req, ctx, {
         startedAt,
         action: 'settings.reset',

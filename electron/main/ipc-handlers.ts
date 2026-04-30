@@ -26,6 +26,7 @@ import {
 } from '../utils/openclaw-auth';
 import { syncProxyConfigToOpenClaw } from '../utils/openclaw-proxy';
 import { syncDreamModeToOpenClawConfig } from '../utils/dream-mode';
+import { normalizeDreamMemoryPromotionSpeed } from '../../shared/dream-memory';
 import { buildOpenClawControlUiUrl } from '../utils/openclaw-control-ui';
 import { logger } from '../utils/logger';
 import {
@@ -2251,8 +2252,11 @@ function registerSettingsHandlers(gatewayManager: GatewayManager): void {
     }
   };
 
-  const handleDreamModeChange = async (enabled: boolean) => {
-    await syncDreamModeToOpenClawConfig(enabled);
+  const handleDreamModeChange = async (
+    enabled: boolean,
+    promotionSpeed: AppSettings['dreamMemoryPromotionSpeed'],
+  ) => {
+    await syncDreamModeToOpenClawConfig(enabled, normalizeDreamMemoryPromotionSpeed(promotionSpeed));
     if (gatewayManager.getStatus().state === 'running') {
       await gatewayManager.restart();
     }
@@ -2282,8 +2286,9 @@ function registerSettingsHandlers(gatewayManager: GatewayManager): void {
     if (key === 'launchAtStartup') {
       await syncLaunchAtStartupSettingFromStore();
     }
-    if (key === 'dreamModeEnabled') {
-      await handleDreamModeChange(Boolean(value));
+    if (key === 'dreamModeEnabled' || key === 'dreamMemoryPromotionSpeed') {
+      const settings = await getAllSettings();
+      await handleDreamModeChange(settings.dreamModeEnabled, settings.dreamMemoryPromotionSpeed);
     }
 
     return { success: true };
@@ -2308,8 +2313,9 @@ function registerSettingsHandlers(gatewayManager: GatewayManager): void {
     if (entries.some(([key]) => key === 'launchAtStartup')) {
       await syncLaunchAtStartupSettingFromStore();
     }
-    if (entries.some(([key]) => key === 'dreamModeEnabled')) {
-      await handleDreamModeChange(Boolean(patch.dreamModeEnabled));
+    if (entries.some(([key]) => key === 'dreamModeEnabled' || key === 'dreamMemoryPromotionSpeed')) {
+      const settings = await getAllSettings();
+      await handleDreamModeChange(settings.dreamModeEnabled, settings.dreamMemoryPromotionSpeed);
     }
 
     return { success: true };
@@ -2320,7 +2326,7 @@ function registerSettingsHandlers(gatewayManager: GatewayManager): void {
     const settings = await getAllSettings();
     await handleProxySettingsChange();
     await syncLaunchAtStartupSettingFromStore();
-    await handleDreamModeChange(settings.dreamModeEnabled);
+    await handleDreamModeChange(settings.dreamModeEnabled, settings.dreamMemoryPromotionSpeed);
     return { success: true, settings };
   });
 }

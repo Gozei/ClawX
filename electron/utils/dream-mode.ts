@@ -4,6 +4,11 @@ import {
   writeOpenClawRuntimeConfig,
   type OpenClawConfigRecord,
 } from './openclaw-config-assembler';
+import {
+  DREAM_MEMORY_PROMOTION_PRESETS,
+  normalizeDreamMemoryPromotionSpeed,
+  type DreamMemoryPromotionSpeed,
+} from '../../shared/dream-memory';
 
 const DREAMING_PLUGIN_ID = 'memory-core';
 
@@ -18,6 +23,7 @@ function sameJson(left: unknown, right: unknown): boolean {
 export function applyDreamModeToOpenClawConfig(
   runtimeConfig: OpenClawConfigRecord,
   enabled: boolean,
+  promotionSpeed: DreamMemoryPromotionSpeed = 'balanced',
 ): OpenClawConfigRecord {
   const plugins = isRecord(runtimeConfig.plugins)
     ? { ...runtimeConfig.plugins }
@@ -43,6 +49,38 @@ export function applyDreamModeToOpenClawConfig(
     : {};
 
   dreaming.enabled = enabled;
+  if (enabled) {
+    const phases = isRecord(dreaming.phases)
+      ? { ...dreaming.phases }
+      : {};
+    const light = isRecord(phases.light)
+      ? { ...phases.light }
+      : {};
+    const deep = isRecord(phases.deep)
+      ? { ...phases.deep }
+      : {};
+    const rem = isRecord(phases.rem)
+      ? { ...phases.rem }
+      : {};
+    const preset = DREAM_MEMORY_PROMOTION_PRESETS[normalizeDreamMemoryPromotionSpeed(promotionSpeed)];
+
+    dreaming.frequency = preset.frequency;
+    light.lookbackDays = preset.light.lookbackDays;
+    light.limit = preset.light.limit;
+    deep.limit = preset.deep.limit;
+    deep.minScore = preset.deep.minScore;
+    deep.minRecallCount = preset.deep.minRecallCount;
+    deep.minUniqueQueries = preset.deep.minUniqueQueries;
+    deep.recencyHalfLifeDays = preset.deep.recencyHalfLifeDays;
+    deep.maxAgeDays = preset.deep.maxAgeDays;
+    rem.lookbackDays = preset.rem.lookbackDays;
+    rem.limit = preset.rem.limit;
+    rem.minPatternStrength = preset.rem.minPatternStrength;
+    phases.light = light;
+    phases.deep = deep;
+    phases.rem = rem;
+    dreaming.phases = phases;
+  }
   pluginConfig.dreaming = dreaming;
   memoryCore.config = pluginConfig;
 
@@ -61,10 +99,13 @@ export function applyDreamModeToOpenClawConfig(
   return sameJson(nextConfig, runtimeConfig) ? runtimeConfig : nextConfig;
 }
 
-export async function syncDreamModeToOpenClawConfig(enabled: boolean): Promise<boolean> {
+export async function syncDreamModeToOpenClawConfig(
+  enabled: boolean,
+  promotionSpeed: DreamMemoryPromotionSpeed = 'balanced',
+): Promise<boolean> {
   return await withConfigLock(async () => {
     const runtimeConfig = await readOpenClawRuntimeConfig();
-    const nextConfig = applyDreamModeToOpenClawConfig(runtimeConfig, enabled);
+    const nextConfig = applyDreamModeToOpenClawConfig(runtimeConfig, enabled, promotionSpeed);
     if (nextConfig === runtimeConfig || sameJson(nextConfig, runtimeConfig)) {
       return false;
     }
