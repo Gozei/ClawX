@@ -14,7 +14,8 @@
             "sharp"
         ],
         "overrides": {
-            "libsignal": "2.0.1",
+            "libsignal": "file:vendor/libsignal-node-direct.tar.gz",
+            "@whiskeysockets/libsignal-node": "file:vendor/libsignal-node-direct.tar.gz",
             "isbinaryfile": "^5.0.0",
             "https-proxy-agent": "7.0.6",
             "fast-xml-parser": ">=4.5.5",
@@ -98,6 +99,7 @@
         "@jvmr/pptx-to-html": "^1.0.1",
         "@sinclair/typebox": "^0.34.48",
         "@whiskeysockets/baileys": "7.0.0-rc.9",
+        "@whiskeysockets/libsignal-node": "file:vendor/libsignal-node-direct.tar.gz",
         "@xmldom/xmldom": "^0.9.10",
         "clawhub": "^0.9.0",
         "core-util-is": "1.0.3",
@@ -125,7 +127,7 @@
         "string_decoder": "1.1.1",
         "util-deprecate": "1.0.2",
         "ws": "^8.19.0",
-        "xlsx": "0.18.5"
+        "xlsx": "file:vendor/xlsx-0.20.3.tgz"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
