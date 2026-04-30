@@ -535,6 +535,26 @@ describe('ChatInput agent targeting', () => {
 
   it('lets the user select an agent target and sends it with the message', async () => {
     const onSend = vi.fn();
+    providerState.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI',
+        authMode: 'api_key',
+        model: 'gpt-5.4',
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [
+      { id: 'openai', hasKey: true, model: 'gpt-5.4' },
+    ];
+    providerState.vendors = [
+      { id: 'openai', name: 'OpenAI' },
+    ];
+    providerState.defaultAccountId = 'openai';
     agentsState.agents = [
       {
         id: 'main',
@@ -632,7 +652,7 @@ describe('ChatInput agent targeting', () => {
     });
   });
 
-  it('falls back to the current global default account when the saved default model ref is stale', async () => {
+  it('keeps a stale global default displayed and blocks sending instead of falling back', async () => {
     const onSend = vi.fn();
     agentsState.defaultModelRef = 'custom-customd6/glm-5';
     providerState.accounts = [
@@ -659,22 +679,17 @@ describe('ChatInput agent targeting', () => {
 
     render(<ChatInput onSend={onSend} />);
 
-    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Jingdong / qwen3.5-plus');
+    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('custom-customd6/glm-5');
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '使用默认模型' } });
     fireEvent.click(screen.getByTestId('chat-send-button'));
 
     await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith(
-        '使用默认模型',
-        undefined,
-        null,
-        {
-          sessionKey: 'agent:main:main',
-          modelRef: 'custom-custombc/qwen3.5-plus',
-        },
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Current session model is unavailable. Select an available model before sending.',
       );
     });
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it('applies model switches to the targeted agent session when a role is selected', async () => {
@@ -982,7 +997,7 @@ describe('ChatInput agent targeting', () => {
     expect(getModelSwitch()).toHaveClass('opacity-50');
     expect(screen.getByTestId('chat-model-switch-spinner')).toBeInTheDocument();
     expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('OpenAI / gpt-5.4');
-    expect(chatState.sessionModels['agent:main:main']).toBe('openai/gpt-5.4');
+    expect(chatState.sessionModels['agent:main:main']).toBeUndefined();
 
     await act(async () => {
       resolvePersist?.({ success: true });
@@ -1164,7 +1179,7 @@ describe('ChatInput agent targeting', () => {
     expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Switch model');
   });
 
-  it('does not show a model when the models page has no configured models, even if a stale default model exists', () => {
+  it('shows a stale default model as unavailable when the models page has no configured models', () => {
     agentsState.agents = [
       {
         id: 'main',
@@ -1193,7 +1208,7 @@ describe('ChatInput agent targeting', () => {
 
     render(<ChatInput onSend={vi.fn()} />);
 
-    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Switch model');
+    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('openai/gpt-5.4');
   });
 
   it('prefers the current session model over the global default model', () => {
@@ -1258,7 +1273,7 @@ describe('ChatInput agent targeting', () => {
     expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('Moonshot / kimi-k2.5');
   });
 
-  it('keeps a session-saved model as the displayed and sent value even when it is absent from model options', async () => {
+  it('keeps an unavailable session model displayed and blocks sending instead of auto-switching', async () => {
     const onSend = vi.fn();
     providerState.accounts = [
       {
@@ -1293,19 +1308,16 @@ describe('ChatInput agent targeting', () => {
     fireEvent.click(screen.getByTestId('chat-send-button'));
 
     await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith(
-        '保持会话模型',
-        undefined,
-        null,
-        {
-          sessionKey: 'agent:main:main',
-          modelRef: 'moonshot/kimi-k2.5',
-        },
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Current session model is unavailable. Select an available model before sending.',
       );
     });
+    expect(hostApiFetchMock).not.toHaveBeenCalledWith('/api/sessions/model', expect.anything());
+    expect(chatState.sessionModels['agent:main:main']).toBe('moonshot/kimi-k2.5');
+    expect(onSend).not.toHaveBeenCalled();
   });
 
-  it('falls back to default model and persists it when the session model is unavailable', async () => {
+  it('does not fall back to the default model when the session model is unavailable', async () => {
     const onSend = vi.fn();
     providerState.accounts = [
       {
@@ -1335,35 +1347,22 @@ describe('ChatInput agent targeting', () => {
 
     render(<ChatInput onSend={onSend} />);
 
-    await waitFor(() => {
-      expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/model', {
-        method: 'POST',
-        body: JSON.stringify({
-          sessionKey: 'agent:main:main',
-          modelRef: 'openai/gpt-5.4',
-        }),
-      });
-      expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('OpenAI / gpt-5.4');
-      expect(chatState.sessionModels['agent:main:main']).toBe('openai/gpt-5.4');
-    });
+    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('moonshot/kimi-k2.5');
+    expect(chatState.sessionModels['agent:main:main']).toBe('moonshot/kimi-k2.5');
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '继续会话' } });
     fireEvent.click(screen.getByTestId('chat-send-button'));
 
     await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith(
-        '继续会话',
-        undefined,
-        null,
-        {
-          sessionKey: 'agent:main:main',
-          modelRef: 'openai/gpt-5.4',
-        },
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Current session model is unavailable. Select an available model before sending.',
       );
     });
+    expect(hostApiFetchMock).not.toHaveBeenCalledWith('/api/sessions/model', expect.anything());
+    expect(onSend).not.toHaveBeenCalled();
   });
 
-  it('blocks send with error when session model is unavailable and no fallback default exists', async () => {
+  it('blocks send with error when session model is unavailable', async () => {
     const onSend = vi.fn();
     providerState.accounts = [];
     providerState.statuses = [];
@@ -1380,7 +1379,7 @@ describe('ChatInput agent targeting', () => {
 
     await waitFor(() => {
       expect(toastErrorMock).toHaveBeenCalledWith(
-        'Current session model is unavailable and no default model can be used. Please configure a model first.',
+        'Current session model is unavailable. Select an available model before sending.',
       );
     });
     expect(onSend).not.toHaveBeenCalled();

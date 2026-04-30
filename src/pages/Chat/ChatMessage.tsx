@@ -805,11 +805,10 @@ function createMarkdownComponentOverrides(
   );
 
   return {
-    code({ inline, className, children, ...props }) {
-      // 优先使用 react-markdown 的 inline 标记，避免无 language 的 fenced code 被误判成行内代码
+    code({ className, children, ...props }) {
       const inferredLanguage = /language-(\w+)/.exec(className || '');
-      const inferredInlineFallback = !inferredLanguage && !className;
-      const isInline = typeof inline === 'boolean' ? inline : inferredInlineFallback;
+      const textContent = Array.isArray(children) ? children.join('') : String(children ?? '');
+      const isInline = !inferredLanguage && !textContent.includes('\n');
 
       if (isInline) {
         return (

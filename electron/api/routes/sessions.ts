@@ -1250,11 +1250,6 @@ export async function handleSessionRoutes(
         },
       );
 
-      if (!found) {
-        sendJson(res, 404, { success: false, error: `Session not found: ${sessionKey}` });
-        return true;
-      }
-
       await writeSessionStoreDocument(resolved.sessionsJsonPath, sessionsJson);
       sendJson(res, 200, { success: true, pinned, pinOrder: pinned ? pinOrder ?? 1 : undefined });
     } catch (error) {
@@ -1329,7 +1324,7 @@ export async function handleSessionRoutes(
 
       const sessionsIndex = await loadMutableSessionStoreDocument(resolved.sessionsJsonPath);
       const sessionsJson = sessionsIndex.document;
-      const found = updateSessionEntry(
+      upsertSessionEntry(
         sessionsJson,
         sessionKey,
         (session) => {

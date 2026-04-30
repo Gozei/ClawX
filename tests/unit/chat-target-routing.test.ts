@@ -129,7 +129,12 @@ describe('chat target routing', () => {
       showThinking: true,
     });
 
-    await useChatStore.getState().sendMessage('Hello direct agent', undefined, 'research');
+    await useChatStore.getState().sendMessage(
+      'Hello direct agent',
+      undefined,
+      'research',
+      { modelRef: 'claude/sonnet' },
+    );
     await Promise.resolve();
     await Promise.resolve();
 
@@ -207,6 +212,7 @@ describe('chat target routing', () => {
         },
       ],
       'research',
+      { modelRef: 'claude/sonnet' },
     );
 
     expect(useChatStore.getState().currentSessionKey).toBe('agent:research:desk');
@@ -444,7 +450,7 @@ describe('chat target routing', () => {
     expect(state.queuedMessages['agent:main:main']).toBeUndefined();
   });
 
-  it('refreshes agents and falls back to the default model before sending when no session model is stored', async () => {
+  it('returns an error instead of falling back when no session model is stored', async () => {
     const { useChatStore } = await import('@/stores/chat');
 
     agentsState.defaultModelRef = null;
@@ -504,17 +510,15 @@ describe('chat target routing', () => {
       showThinking: true,
     });
 
-    await useChatStore.getState().sendMessage('你现在是什么模型');
+    await expect(useChatStore.getState().sendMessage('你现在是什么模型')).rejects.toThrow(
+      'No model selected for this session',
+    );
 
-    expect(agentsState.fetchAgents).toHaveBeenCalledTimes(1);
-    expect(useChatStore.getState().sessionModels['agent:main:session-123']).toBe('custom-custombc/gpt-5.4');
-
-    const sendCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.send');
-    const sendMessagePayload = String((sendCall?.[1] as { message?: unknown })?.message);
-    expect(sendMessagePayload).toContain('"preferredModel": "custom-custombc/gpt-5.4"');
-    expect(sendMessagePayload).toContain('你现在是什么模型');
+    expect(agentsState.fetchAgents).not.toHaveBeenCalled();
+    expect(useChatStore.getState().sessionModels['agent:main:session-123']).toBeUndefined();
+    expect(gatewayRpcMock.mock.calls.some(([method]) => method === 'chat.send')).toBe(false);
   });
-  it('leaves preferredModel empty when neither the session nor the global default has a model', async () => {
+  it('returns an error when neither the session nor the caller has a model', async () => {
     const { useChatStore } = await import('@/stores/chat');
 
     agentsState.defaultModelRef = null;
@@ -561,14 +565,12 @@ describe('chat target routing', () => {
       showThinking: true,
     });
 
-    await useChatStore.getState().sendMessage('现在是什么模型');
+    await expect(useChatStore.getState().sendMessage('现在是什么模型')).rejects.toThrow(
+      'No model selected for this session',
+    );
 
-    expect(agentsState.fetchAgents).toHaveBeenCalledTimes(1);
+    expect(agentsState.fetchAgents).not.toHaveBeenCalled();
     expect(useChatStore.getState().sessionModels['agent:main:session-empty-model']).toBeUndefined();
-
-    const sendCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.send');
-    const sendMessagePayload = String((sendCall?.[1] as { message?: unknown })?.message);
-    expect(sendMessagePayload).not.toContain('"preferredModel":');
-    expect(sendMessagePayload).toContain('现在是什么模型');
+    expect(gatewayRpcMock.mock.calls.some(([method]) => method === 'chat.send')).toBe(false);
   }, 15000);
 });
