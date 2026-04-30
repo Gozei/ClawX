@@ -863,7 +863,7 @@ function AgentSettingsModal({
       .map((node) => (node.target ? `${node.title.trim()} · ${node.target.trim()}` : node.title.trim()))
       .join('|');
   }, [safeWorkflowNodes]);
-  const safeTriggerModesKey = useMemo(() => safeTriggerModes.join('|'), [safeTriggerModes]);
+  const safeTriggerModesKey = useMemo(() => (safeTriggerModes.length > 0 ? safeTriggerModes : ['manual']).join('|'), [safeTriggerModes]);
   const [name, setName] = useState(safeAgentName);
   const [profileType, setProfileType] = useState<AgentProfileType>(safeProfileType);
   const [description, setDescription] = useState(safeDescription);
