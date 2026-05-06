@@ -215,74 +215,173 @@ test.describe('Chat composer actions', () => {
     await expect(modelSwitch).toContainText('OpenAI / gpt-5.4-mini');
   });
 
-  test('blocks sending when the displayed model is no longer available', async ({ electronApp, page }) => {
-    await completeSetup(page);
+  test('repairs a stale session model before sending', async ({ launchElectronApp }) => {
+    const electronApp = await launchElectronApp({ skipSetup: true });
+    try {
+      const page = await getStableWindow(electronApp);
+
     await installIpcMocks(electronApp, {
       gatewayStatus: { state: 'running', port: 18789, pid: 12345 },
-      hostApi: {
-        '["/api/agents","GET"]': hostJson({
-          agents: [
-            {
-              id: 'main',
-              name: 'Main',
-              isDefault: true,
-              modelDisplay: 'Stale / missing-model',
-              modelRef: 'stale/missing-model',
-              inheritedModel: false,
-              workspace: '',
-              agentDir: '',
-              mainSessionKey: 'agent:main:main',
-              channelTypes: [],
-              skillIds: [],
-              workflowSteps: [],
-              triggerModes: [],
-            },
-          ],
-          defaultAgentId: 'main',
-          defaultModelRef: 'stale/missing-model',
-          configuredChannelTypes: [],
-          channelOwners: {},
-          channelAccountOwners: {},
-        }),
-        '["/api/gateway/status","GET"]': hostJson({ state: 'running', port: 18789, pid: 12345 }),
-        '["/api/provider-accounts","GET"]': hostJson([SEEDED_ACCOUNT]),
-        '["/api/provider-account-statuses","GET"]': hostJson([
-          {
-            id: SEEDED_ACCOUNT_ID,
-            type: 'openai',
-            name: 'OpenAI E2E',
-            model: 'gpt-5.4',
-            enabled: true,
-            hasKey: true,
-            createdAt: SEEDED_ACCOUNT.createdAt,
-            updatedAt: SEEDED_ACCOUNT.updatedAt,
-          },
-        ]),
-        '["/api/provider-vendors","GET"]': hostJson([]),
-        '["/api/provider-accounts/default","GET"]': hostJson({ accountId: SEEDED_ACCOUNT_ID }),
-        '["/api/sessions/catalog","GET"]': hostJson({ success: true, sessions: [], previews: {} }),
-        '["/api/sessions/history","POST"]': hostJson({
-          success: true,
-          resolved: true,
-          messages: [],
-          thinkingLevel: null,
-        }),
-        '["/api/sessions/model","POST"]': hostJson({ success: true }),
-      },
     });
+
+    await electronApp.evaluate(({ ipcMain }, account) => {
+      type HostRequest = { path?: string; method?: string; body?: string | null };
+      type E2EState = typeof globalThis & {
+        __clawxE2eHostRequests?: Array<{ path: string; method: string; body: string | null }>;
+        __clawxE2eGatewayRpcCalls?: Array<{ method: string; params: unknown; timeoutMs: number | null }>;
+      };
+      const state = globalThis as E2EState;
+      state.__clawxE2eHostRequests = [];
+      state.__clawxE2eGatewayRpcCalls = [];
+      const okJson = (json: unknown) => ({
+        ok: true,
+        data: {
+          status: 200,
+          ok: true,
+          json,
+        },
+      });
+      const sessionCatalog = {
+        success: true,
+        sessions: [
+          {
+            key: 'agent:main:main',
+            label: 'Main',
+            modelProvider: 'moonshot',
+            model: 'kimi-k2.5',
+            updatedAt: Date.now(),
+          },
+        ],
+        previews: {},
+      };
+
+      ipcMain.removeHandler('hostapi:fetch');
+      ipcMain.handle('hostapi:fetch', async (_event, request: HostRequest) => {
+        const method = request?.method ?? 'GET';
+        const path = request?.path ?? '';
+        const body = request?.body ?? null;
+        state.__clawxE2eHostRequests?.push({ path, method, body });
+
+        if (method === 'GET' && path === '/api/agents') {
+          return okJson({
+            agents: [
+              {
+                id: 'main',
+                name: 'Main',
+                isDefault: true,
+                modelDisplay: 'Stale / missing-model',
+                modelRef: 'moonshot/kimi-k2.5',
+                inheritedModel: false,
+                workspace: '',
+                agentDir: '',
+                mainSessionKey: 'agent:main:main',
+                channelTypes: [],
+                skillIds: [],
+                workflowSteps: [],
+                triggerModes: [],
+              },
+            ],
+            defaultAgentId: 'main',
+            defaultModelRef: 'openai/gpt-5.4',
+            configuredChannelTypes: [],
+            channelOwners: {},
+            channelAccountOwners: {},
+          });
+        }
+        if (method === 'GET' && path === '/api/gateway/status') {
+          return okJson({ state: 'running', port: 18789, pid: 12345 });
+        }
+        if (method === 'GET' && path === '/api/provider-accounts') {
+          return okJson([account]);
+        }
+        if (method === 'GET' && path === '/api/provider-account-statuses') {
+          return okJson([
+            {
+              id: account.id,
+              type: 'openai',
+              name: 'OpenAI E2E',
+              model: 'gpt-5.4',
+              enabled: true,
+              hasKey: true,
+              createdAt: account.createdAt,
+              updatedAt: account.updatedAt,
+            },
+          ]);
+        }
+        if (method === 'GET' && path === '/api/provider-vendors') {
+          return okJson([]);
+        }
+        if (method === 'GET' && path === '/api/provider-accounts/default') {
+          return okJson({ accountId: account.id });
+        }
+        if (method === 'GET' && path === '/api/sessions/catalog') {
+          return okJson(sessionCatalog);
+        }
+        if (method === 'POST' && path === '/api/sessions/history') {
+          return okJson({
+            success: true,
+            resolved: true,
+            messages: [],
+            thinkingLevel: null,
+          });
+        }
+        if (method === 'POST' && path === '/api/sessions/model') {
+          return okJson({ success: true });
+        }
+        if (method === 'PUT' && path === '/api/agents/main/model/runtime') {
+          return okJson({ success: true });
+        }
+
+        return {
+          ok: false,
+          error: {
+            message: `Unexpected hostapi:fetch request: ${method} ${path}`,
+          },
+        };
+      });
+
+      ipcMain.removeHandler('gateway:rpc');
+      ipcMain.handle('gateway:rpc', async (_event, method: string, params: unknown, timeoutMs?: number) => {
+        state.__clawxE2eGatewayRpcCalls?.push({ method, params, timeoutMs: timeoutMs ?? null });
+        return { runId: 'stale-model-repair-e2e' };
+      });
+    }, SEEDED_ACCOUNT);
+
     await page.reload();
     await expect(page.getByTestId('main-layout')).toBeVisible();
+    await page.getByTestId('sidebar-session-agent:main:main').click({ force: true });
 
     const composer = page.getByTestId('chat-composer');
     const modelSwitch = composer.getByTestId('chat-model-switch');
-    await expect(modelSwitch).toContainText('stale/missing-model', { timeout: 20_000 });
+    await expect(modelSwitch).toContainText('OpenAI / gpt-5.4', { timeout: 20_000 });
 
-    await composer.getByRole('textbox').fill('do not auto switch');
+    await expect.poll(async () => {
+      const requests = await electronApp.evaluate(() => {
+        type E2EState = typeof globalThis & {
+          __clawxE2eHostRequests?: Array<{ path: string; method: string; body: string | null }>;
+        };
+        return (globalThis as E2EState).__clawxE2eHostRequests ?? [];
+      });
+      return requests.find((request) => request.path === '/api/sessions/model' && request.method === 'POST')?.body ?? '';
+    }).toBe(JSON.stringify({
+      sessionKey: 'agent:main:main',
+      modelRef: 'openai/gpt-5.4',
+    }));
+
+    await composer.getByRole('textbox').fill('send with repaired model');
     await composer.getByTestId('chat-send-button').click({ force: true });
 
-    await expect(page.getByText(
-      /Current session model is unavailable\. Select an available model before sending\.|当前会话模型不可用，请在模型选择器中选择一个可用模型/,
-    )).toBeVisible();
-    await expect(modelSwitch).toContainText('stale/missing-model');
+    await expect.poll(async () => {
+      const calls = await electronApp.evaluate(() => {
+        type E2EState = typeof globalThis & {
+          __clawxE2eGatewayRpcCalls?: Array<{ method: string; params: { message?: string } }>;
+        };
+        return (globalThis as E2EState).__clawxE2eGatewayRpcCalls ?? [];
+      });
+      return calls.find((call) => call.method === 'chat.send')?.params.message ?? '';
+    }).toContain('"preferredModel": "openai/gpt-5.4"');
+    } finally {
+      await closeElectronApp(electronApp);
+    }
   });
 });

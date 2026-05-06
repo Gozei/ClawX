@@ -385,6 +385,10 @@ export async function handleProviderRoutes(
         return true;
       }
       await providerService.deleteAccount(accountId);
+      await repairInvalidModelReferences(
+        await providerService.listAccounts(),
+        await providerService.getDefaultAccountId() ?? null,
+      );
       await syncDeletedProviderToRuntime(
         existing ? providerAccountToConfig(existing) : null,
         accountId,
