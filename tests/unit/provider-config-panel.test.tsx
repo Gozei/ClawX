@@ -136,6 +136,7 @@ vi.mock('react-i18next', () => {
   };
 
   return {
+    initReactI18next: { type: '3rdParty', init: () => {} },
     useTranslation: () => ({ t }),
   };
 });
@@ -344,7 +345,14 @@ describe('ProviderConfigPanel', () => {
       expect(providerStore.createAccount).toHaveBeenCalledTimes(1);
     });
     const createdAccount = providerStore.createAccount.mock.calls[0]?.[0] as { id: string };
-    expect(providerStore.setDefaultAccount).toHaveBeenCalledWith(createdAccount.id, { skipImpactConfirm: true });
+    expect(providerStore.createAccount.mock.calls[0]?.[2]).toEqual({
+      skipImpactConfirm: true,
+      skipGatewayRefresh: true,
+    });
+    expect(providerStore.setDefaultAccount).toHaveBeenCalledWith(createdAccount.id, {
+      skipImpactConfirm: true,
+      skipGatewayRefresh: true,
+    });
     const cached = JSON.parse(window.localStorage.getItem('clawx.models.testResults.v1') || '{}') as Record<string, unknown>;
 
     expect(cached[`${createdAccount.id}:qwen3.5-plus`]).toMatchObject({
@@ -571,17 +579,17 @@ describe('ProviderConfigPanel', () => {
 
     fireEvent.click(globalDefaultButtons[0]!);
 
-    await waitFor(() => {
-      expect(confirmGatewayImpactMock).toHaveBeenCalledTimes(1);
-    });
+    expect(confirmGatewayImpactMock).not.toHaveBeenCalled();
     expect(hostApiFetchMock).toHaveBeenCalledTimes(1);
     expect(hostApiFetchMock).toHaveBeenNthCalledWith(1, '/api/provider-accounts/openai', expect.objectContaining({
       method: 'PUT',
     }));
     expect(providerStore.updateAccount).not.toHaveBeenCalled();
     expect(providerStore.setDefaultAccount).not.toHaveBeenCalled();
-    expect(providerStore.refreshProviderSnapshot).toHaveBeenCalledTimes(2);
-    expect(agentsStore.fetchAgents).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(providerStore.refreshProviderSnapshot).toHaveBeenCalled();
+      expect(agentsStore.fetchAgents).toHaveBeenCalled();
+    });
     expect(toastSuccessMock).toHaveBeenCalledWith('已设为全局默认模型');
   });
 
@@ -624,7 +632,10 @@ describe('ProviderConfigPanel', () => {
     fireEvent.click(deleteButton);
 
     await waitFor(() => {
-      expect(providerStore.removeAccount).toHaveBeenCalledWith('openai');
+      expect(providerStore.removeAccount).toHaveBeenCalledWith('openai', {
+        skipImpactConfirm: true,
+        skipGatewayRefresh: true,
+      });
     });
     await waitFor(() => {
       expect(deleteButton).not.toBeDisabled();

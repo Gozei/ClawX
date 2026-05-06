@@ -158,12 +158,34 @@ describe('provider-runtime-sync refresh strategy', () => {
     expect(gateway.debouncedRestart).not.toHaveBeenCalled();
   });
 
+  it('skips gateway reload after saving provider config when requested', async () => {
+    const gateway = createGateway('running');
+    await syncSavedProviderToRuntime(createProvider(), undefined, gateway as GatewayManager, {
+      skipGatewayRefresh: true,
+    });
+    await flushGatewayRefreshDebounce();
+
+    expect(gateway.debouncedReload).not.toHaveBeenCalled();
+    expect(gateway.debouncedRestart).not.toHaveBeenCalled();
+  });
+
   it('uses debouncedRestart after deleting provider config', async () => {
     const gateway = createGateway('running');
     await syncDeletedProviderToRuntime(createProvider(), 'moonshot', gateway as GatewayManager);
     await flushGatewayRefreshDebounce();
 
     expect(gateway.debouncedRestart).toHaveBeenCalledTimes(1);
+    expect(gateway.debouncedReload).not.toHaveBeenCalled();
+  });
+
+  it('skips gateway restart after deleting provider config when requested', async () => {
+    const gateway = createGateway('running');
+    await syncDeletedProviderToRuntime(createProvider(), 'moonshot', gateway as GatewayManager, undefined, {
+      skipGatewayRefresh: true,
+    });
+    await flushGatewayRefreshDebounce();
+
+    expect(gateway.debouncedRestart).not.toHaveBeenCalled();
     expect(gateway.debouncedReload).not.toHaveBeenCalled();
   });
 
@@ -219,6 +241,30 @@ describe('provider-runtime-sync refresh strategy', () => {
 
     expect(gateway.debouncedReload).toHaveBeenCalledTimes(1);
     expect(gateway.debouncedRestart).not.toHaveBeenCalled();
+  });
+
+  it('hot patches the gateway instead of reloading when switching default provider with refresh suppression', async () => {
+    const gateway = createGateway('running');
+    vi.mocked(gateway.rpc)
+      .mockResolvedValueOnce({ hash: 'cfg-1', config: {} })
+      .mockResolvedValueOnce(undefined);
+
+    await syncDefaultProviderToRuntime('moonshot', gateway as GatewayManager, {
+      skipGatewayRefresh: true,
+    });
+    await flushGatewayRefreshDebounce();
+
+    expect(gateway.debouncedReload).not.toHaveBeenCalled();
+    expect(gateway.debouncedRestart).not.toHaveBeenCalled();
+    expect(gateway.rpc).toHaveBeenNthCalledWith(1, 'config.get', {}, 15000);
+    expect(gateway.rpc).toHaveBeenNthCalledWith(
+      2,
+      'config.patch',
+      expect.objectContaining({
+        baseHash: 'cfg-1',
+      }),
+      15000,
+    );
   });
 
   it('hot patches the gateway when only the default model changes on the current default provider', async () => {

@@ -10,7 +10,6 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAgentsStore } from '@/stores/agents';
 import { useProviderStore, type ProviderAccount } from '@/stores/providers';
-import { confirmGatewayImpact } from '@/lib/gateway-impact-confirm';
 import { hostApiFetch } from '@/lib/host-api';
 import {
   PROVIDER_TYPE_INFO,
@@ -78,6 +77,10 @@ type TestStatus = {
 
 const DEFAULT_PROTOCOL: NonNullable<ProviderAccount['apiProtocol']> = 'openai-completions';
 const TEST_RESULT_CACHE_STORAGE_KEY = 'clawx.models.testResults.v1';
+const MODEL_CONFIG_MUTATION_OPTIONS = {
+  skipImpactConfirm: true,
+  skipGatewayRefresh: true,
+} as const;
 
 const VENDOR_DISPLAY_NAMES: Partial<Record<ProviderType, string>> = {
   google: 'Google Gemini',
@@ -667,10 +670,10 @@ export function ProviderConfigPanel() {
     try {
       const accountUpdate = removeModelFromAccount(row.account, row.modelId);
       if (accountUpdate) {
-        const updated = await updateAccount(row.account.id, accountUpdate);
+        const updated = await updateAccount(row.account.id, accountUpdate, undefined, MODEL_CONFIG_MUTATION_OPTIONS);
         if (!updated) return;
       } else {
-        const removed = await removeAccount(row.account.id);
+        const removed = await removeAccount(row.account.id, MODEL_CONFIG_MUTATION_OPTIONS);
         if (!removed) return;
       }
       removeCachedRowResult(getRowCacheKey(row));
@@ -687,12 +690,6 @@ export function ProviderConfigPanel() {
 
   const handleSetDefaultModel = async (row: ModelRow) => {
     try {
-      const confirmed = await confirmGatewayImpact({
-        mode: 'refresh',
-        willApplyChanges: true,
-      });
-      if (!confirmed) return;
-
       const currentModelIds = normalizeConfiguredModelIds(row.account);
       const nextModelIds = [row.modelId, ...currentModelIds.filter((modelId) => modelId !== row.modelId)];
       const nextMetadata = { ...(row.account.metadata ?? {}) };
@@ -709,6 +706,7 @@ export function ProviderConfigPanel() {
             model: nextModelIds[0],
             metadata: nextMetadata,
           },
+          skipGatewayRefresh: true,
         }),
       });
       if (!updateResult.success) {
@@ -718,7 +716,10 @@ export function ProviderConfigPanel() {
       if (defaultAccountId !== row.account.id) {
         const defaultResult = await hostApiFetch<{ success: boolean; error?: string }>('/api/provider-accounts/default', {
           method: 'PUT',
-          body: JSON.stringify({ accountId: row.account.id }),
+          body: JSON.stringify({
+            accountId: row.account.id,
+            skipGatewayRefresh: true,
+          }),
         });
         if (!defaultResult.success) {
           throw new Error(defaultResult.error || 'Failed to set default provider account');
@@ -798,10 +799,10 @@ export function ProviderConfigPanel() {
               [draft.modelId.trim()]: draft.apiProtocol,
             },
           },
-        }, effectiveKey);
+        }, effectiveKey, MODEL_CONFIG_MUTATION_OPTIONS);
         if (!created) return;
         if (!defaultAccountId) {
-          const setDefault = await setDefaultAccount(accountId, { skipImpactConfirm: true });
+          const setDefault = await setDefaultAccount(accountId, MODEL_CONFIG_MUTATION_OPTIONS);
           if (!setDefault) return;
         }
         appliedRowKey = `${accountId}:${draft.modelId.trim()}`;
@@ -809,7 +810,12 @@ export function ProviderConfigPanel() {
         const account = accounts.find((entry) => entry.id === draft.accountId);
         if (!account) throw new Error(t('aiProviders.modelsConfig.toast.configMissing'));
         const updates = applyModelChangeToAccount(account, draft);
-        const updated = await updateAccount(draft.accountId, updates, trimmedKey || undefined);
+        const updated = await updateAccount(
+          draft.accountId,
+          updates,
+          trimmedKey || undefined,
+          MODEL_CONFIG_MUTATION_OPTIONS,
+        );
         if (!updated) return;
         if (draft.originalModelId && draft.originalModelId !== draft.modelId.trim()) {
           removeCachedRowResult(`${draft.accountId}:${draft.originalModelId}`);
