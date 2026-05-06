@@ -187,6 +187,15 @@
   font-family: var(--font-ui) !important;
 }
 
+/*
+ * 覆盖 @tailwindcss/typography：其在 prose 下用 code::before/after 装饰反引号；
+ * 聊天区仅关闭伪元素即可，勿再在 JS 里剥字符串反引号。
+ */
+.chat-markdown :not(pre) > code::before,
+.chat-markdown :not(pre) > code::after {
+  content: none !important;
+}
+
 .chat-markdown pre {
   max-width: 100%;
 }
