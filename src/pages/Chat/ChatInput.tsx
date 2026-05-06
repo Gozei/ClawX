@@ -747,7 +747,7 @@ export function ChatInput({
       return;
     }
 
-    setSessionModel(effectiveModelRef);
+    let cancelled = false;
     void hostApiFetch<{ success?: boolean; error?: string }>(
       '/api/sessions/model',
       {
@@ -757,12 +757,22 @@ export function ChatInput({
           modelRef: effectiveModelRef,
         }),
       },
-    ).catch((error) => {
+    ).then((result) => {
+      if (cancelled) return;
+      if (!result?.success) {
+        throw new Error(result?.error || 'Failed to persist repaired session model');
+      }
+      setSessionModel(effectiveModelRef);
+    }).catch((error) => {
       console.warn(
         `[ChatInput] Failed to persist repaired session model for ${activeComposerSessionKey}:`,
         error,
       );
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     activeComposerSessionKey,
     effectiveModelRef,

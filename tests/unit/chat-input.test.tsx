@@ -1343,6 +1343,50 @@ describe('ChatInput agent targeting', () => {
     );
   });
 
+  it('does not mask a stale session model locally when repair persistence fails', async () => {
+    providerState.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI',
+        authMode: 'api_key',
+        model: 'gpt-5.4',
+        metadata: { customModels: ['gpt-5.4-mini'] },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [
+      { id: 'openai', hasKey: true, model: 'gpt-5.4' },
+    ];
+    providerState.vendors = [
+      { id: 'openai', name: 'OpenAI' },
+    ];
+    providerState.defaultAccountId = 'openai';
+    chatState.sessions = [{ key: 'agent:main:main', model: 'moonshot/kimi-k2.5' }];
+    chatState.sessionModels = { 'agent:main:main': 'moonshot/kimi-k2.5' };
+    agentsState.defaultModelRef = 'openai/gpt-5.4';
+
+    hostApiFetchMock.mockRejectedValue(new Error('session store unavailable'));
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('OpenAI / gpt-5.4');
+      expect(hostApiFetchMock).toHaveBeenCalledWith('/api/sessions/model', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionKey: 'agent:main:main',
+          modelRef: 'openai/gpt-5.4',
+        }),
+      });
+    });
+
+    expect(chatState.sessionModels['agent:main:main']).toBe('moonshot/kimi-k2.5');
+  });
+
   it('falls back to the first configured model when both session and default models are unavailable', async () => {
     const onSend = vi.fn();
     providerState.accounts = [
