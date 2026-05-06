@@ -236,7 +236,7 @@ test.describe('Models config table', () => {
     }
   });
 
-  test('prefills the selected vendor base url and only lets custom edit it', async ({ launchElectronApp }) => {
+  test('prefills the selected vendor base url and lets it be edited', async ({ launchElectronApp }) => {
     const app = await launchElectronApp({ skipSetup: true });
     let page: Awaited<ReturnType<typeof getStableWindow>> | null = null;
     try {
@@ -254,12 +254,14 @@ test.describe('Models config table', () => {
       await vendorSelect.selectOption('openai');
       await expect(labelInput).toHaveValue('OpenAI');
       await expect(baseUrlInput).toHaveValue('https://api.openai.com/v1');
-      await expect(baseUrlInput).toHaveAttribute('readonly', '');
+      await expect(baseUrlInput).not.toHaveAttribute('readonly', '');
+      await baseUrlInput.fill('https://proxy.example.com/openai/v1');
+      await expect(baseUrlInput).toHaveValue('https://proxy.example.com/openai/v1');
 
       await vendorSelect.selectOption('deepseek');
       await expect(labelInput).toHaveValue('DeepSeek');
       await expect(baseUrlInput).toHaveValue('https://api.deepseek.com');
-      await expect(baseUrlInput).toHaveAttribute('readonly', '');
+      await expect(baseUrlInput).not.toHaveAttribute('readonly', '');
 
       await vendorSelect.selectOption('custom');
       await expect(labelInput).toHaveValue('自定义');
