@@ -259,14 +259,28 @@ export function ChatInput({
         }));
     })
   ), [providerItems]);
-  const sessionBackedModelRef = (
+  const modelOptionValues = useMemo(
+    () => new Set(modelOptions.map((option) => option.value)),
+    [modelOptions],
+  );
+  const hasModelOptions = modelOptions.length > 0;
+  const sessionBackedModelRefRaw = (
     sessionModels[activeComposerSessionKey]
     || activeComposerSession?.model
     || ''
   ).trim();
+  const defaultModelRefRaw = (defaultModelRef || '').trim();
+  const firstAvailableModelRef = modelOptions[0]?.value || '';
+  const sessionBackedModelRef = hasModelOptions && sessionBackedModelRefRaw && !modelOptionValues.has(sessionBackedModelRefRaw)
+    ? ''
+    : sessionBackedModelRefRaw;
+  const staleSessionBackedModelRef = hasModelOptions && sessionBackedModelRefRaw && !modelOptionValues.has(sessionBackedModelRefRaw)
+    ? sessionBackedModelRefRaw
+    : '';
   const effectiveModelRef = (
     sessionBackedModelRef
-    || defaultModelRef
+    || (hasModelOptions && defaultModelRefRaw && !modelOptionValues.has(defaultModelRefRaw) ? '' : defaultModelRefRaw)
+    || (hasModelOptions ? firstAvailableModelRef : '')
     || ''
   ).trim();
   const selectedModelValue = useMemo(() => {
@@ -285,8 +299,8 @@ export function ChatInput({
   const isZh = (i18n?.resolvedLanguage || i18n?.language || '').startsWith('zh');
   const isModelInOptions = useCallback((modelRef: string | null | undefined) => {
     const normalized = (modelRef || '').trim();
-    return !!normalized && modelOptions.some((option) => option.value === normalized);
-  }, [modelOptions]);
+    return !!normalized && modelOptionValues.has(normalized);
+  }, [modelOptionValues]);
   const getModelValidationErrorMessage = useCallback(() => (
     isZh
       ? '当前会话模型不可用，请在模型选择器中选择一个可用模型'
@@ -299,7 +313,6 @@ export function ChatInput({
   ), [isZh]);
   const queueActionLabel = isZh ? '加入队列' : 'Queue to send';
   const canEditDraft = !disabled || !!onQueueOfflineMessage;
-  const hasModelOptions = modelOptions.length > 0;
   const isModelSwitchUnavailable = !hasModelOptions;
   const isModelSwitchDisabled = isModelSwitchUnavailable || modelSwitchPending;
   const attachmentKeys = useMemo(
@@ -728,6 +741,45 @@ export function ChatInput({
       };
     });
   }, [activeComposerSessionKey]);
+
+  useEffect(() => {
+    if (!staleSessionBackedModelRef || !effectiveModelRef || !isModelInOptions(effectiveModelRef)) {
+      return;
+    }
+
+    let cancelled = false;
+    void hostApiFetch<{ success?: boolean; error?: string }>(
+      '/api/sessions/model',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionKey: activeComposerSessionKey,
+          modelRef: effectiveModelRef,
+        }),
+      },
+    ).then((result) => {
+      if (cancelled) return;
+      if (!result?.success) {
+        throw new Error(result?.error || 'Failed to persist repaired session model');
+      }
+      setSessionModel(effectiveModelRef);
+    }).catch((error) => {
+      console.warn(
+        `[ChatInput] Failed to persist repaired session model for ${activeComposerSessionKey}:`,
+        error,
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeComposerSessionKey,
+    effectiveModelRef,
+    isModelInOptions,
+    setSessionModel,
+    staleSessionBackedModelRef,
+  ]);
 
   const handleModelChange = useCallback(async (nextModelRef: string) => {
     const normalizedNextModelRef = (nextModelRef || '').trim();

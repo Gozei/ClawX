@@ -1,7 +1,6 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ProviderAccount } from '../shared/providers/types';
-import { getProviderDefaultModel } from './provider-registry';
 import { getOpenClawProviderKeyForType } from './provider-keys';
 import { readOpenClawConfig, writeOpenClawConfig } from './channel-config';
 import { withConfigLock } from './config-mutex';
@@ -31,7 +30,6 @@ function getConfiguredModelIds(account: ProviderAccount): string[] {
   return Array.from(new Set([
     (account.model || '').trim(),
     ...(account.metadata?.customModels ?? []).map((modelId) => modelId.trim()),
-    getProviderDefaultModel(account.vendorId) || '',
   ].filter(Boolean)));
 }
 
