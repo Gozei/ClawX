@@ -5,6 +5,12 @@ import type { ProviderConfig } from '../../utils/secure-storage';
 import { getAllProviders, getApiKey, getDefaultProvider, getProvider } from '../../utils/secure-storage';
 import { getProviderConfig, getProviderDefaultModel } from '../../utils/provider-registry';
 import {
+  GOOGLE_OAUTH_RUNTIME_PROVIDER,
+  OPENAI_OAUTH_RUNTIME_PROVIDER,
+  resolveRuntimeProviderKeyForConfig,
+  stripOwnProviderPrefix,
+} from '../../../shared/providers/runtime-key';
+import {
   getOpenClawProvidersConfig,
   removeProviderFromOpenClaw,
   removeProviderKeyFromOpenClaw,
@@ -20,9 +26,7 @@ import { getOpenClawProviderKeyForType } from '../../utils/provider-keys';
 import { logger } from '../../utils/logger';
 import { listAgentsSnapshot } from '../../utils/agent-config';
 
-const GOOGLE_OAUTH_RUNTIME_PROVIDER = 'google-gemini-cli';
 const GOOGLE_OAUTH_DEFAULT_MODEL_REF = `${GOOGLE_OAUTH_RUNTIME_PROVIDER}/gemini-3-pro-preview`;
-const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
 const OPENAI_OAUTH_DEFAULT_MODEL_REF = `${OPENAI_OAUTH_RUNTIME_PROVIDER}/gpt-5.4`;
 
 function getProviderDeletionAliases(config: ProviderConfig): string[] {
@@ -76,18 +80,20 @@ function resolveProviderApiProtocol(
   return getConfiguredModelProtocol(config, modelId) || fallbackApi;
 }
 
-function getConfiguredProviderModelIds(config: ProviderConfig): string[] {
+function getConfiguredProviderModelIds(config: ProviderConfig, providerKey?: string): string[] {
   return Array.from(new Set([
     (config.model || '').trim(),
-    ...((config.metadata?.customModels ?? []).map((modelId) => modelId.trim())),
-  ].filter(Boolean)));
+    ...((config.metadata?.customModels ?? [])
+      .map((modelId) => (typeof modelId === 'string' ? modelId.trim() : ''))),
+  ].filter(Boolean).map((modelId) => providerKey ? stripOwnProviderPrefix(modelId, providerKey) : modelId)));
 }
 
 function buildRuntimeProviderModelEntries(
   config: ProviderConfig,
   fallbackApi: string | undefined,
+  providerKey: string,
 ): RuntimeProviderModelEntry[] {
-  return getConfiguredProviderModelIds(config).map((modelId) => {
+  return getConfiguredProviderModelIds(config, providerKey).map((modelId) => {
     const entry: RuntimeProviderModelEntry = {
       id: modelId,
       name: modelId,
@@ -139,15 +145,7 @@ export const getOpenClawProviderKey = getOpenClawProviderKeyForType;
 
 async function resolveRuntimeProviderKey(config: ProviderConfig): Promise<string> {
   const account = await getProviderAccount(config.id);
-  if (account?.authMode === 'oauth_browser') {
-    if (config.type === 'google') {
-      return GOOGLE_OAUTH_RUNTIME_PROVIDER;
-    }
-    if (config.type === 'openai') {
-      return OPENAI_OAUTH_RUNTIME_PROVIDER;
-    }
-  }
-  return getOpenClawProviderKey(config.type, config.id);
+  return resolveRuntimeProviderKeyForConfig(config, account);
 }
 
 async function getBrowserOAuthRuntimeProvider(config: ProviderConfig): Promise<string | null> {
@@ -171,12 +169,10 @@ async function getBrowserOAuthRuntimeProvider(config: ProviderConfig): Promise<s
 }
 
 export function getProviderModelRef(config: ProviderConfig): string | undefined {
-  const providerKey = getOpenClawProviderKey(config.type, config.id);
+  const providerKey = resolveRuntimeProviderKeyForConfig(config);
 
   if (config.model) {
-    return config.model.startsWith(`${providerKey}/`)
-      ? config.model
-      : `${providerKey}/${config.model}`;
+    return `${providerKey}/${stripOwnProviderPrefix(config.model, providerKey)}`;
   }
 
   const defaultModel = getProviderDefaultModel(config.type);
@@ -184,9 +180,7 @@ export function getProviderModelRef(config: ProviderConfig): string | undefined 
     return undefined;
   }
 
-  return defaultModel.startsWith(`${providerKey}/`)
-    ? defaultModel
-    : `${providerKey}/${defaultModel}`;
+  return `${providerKey}/${stripOwnProviderPrefix(defaultModel, providerKey)}`;
 }
 
 export async function getProviderFallbackModelRefs(config: ProviderConfig): Promise<string[]> {
@@ -194,15 +188,13 @@ export async function getProviderFallbackModelRefs(config: ProviderConfig): Prom
   const providerMap = new Map(allProviders.map((provider) => [provider.id, provider]));
   const seen = new Set<string>();
   const results: string[] = [];
-  const providerKey = getOpenClawProviderKey(config.type, config.id);
+  const providerKey = resolveRuntimeProviderKeyForConfig(config);
 
   for (const fallbackModel of config.fallbackModels ?? []) {
     const normalizedModel = fallbackModel.trim();
     if (!normalizedModel) continue;
 
-    const modelRef = normalizedModel.startsWith(`${providerKey}/`)
-      ? normalizedModel
-      : `${providerKey}/${normalizedModel}`;
+    const modelRef = `${providerKey}/${stripOwnProviderPrefix(normalizedModel, providerKey)}`;
 
     if (seen.has(modelRef)) continue;
     seen.add(modelRef);
@@ -304,7 +296,9 @@ function scheduleGatewayRefresh(
 }
 
 function normalizeStringArray(values: string[] | undefined): string[] {
-  return (values ?? []).map((value) => value.trim()).filter(Boolean);
+  return (values ?? [])
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean);
 }
 
 function normalizeModelIdSet(config: ProviderConfig): string[] {
@@ -467,7 +461,7 @@ async function syncRuntimeProviderConfig(
   context: RuntimeProviderSyncContext,
 ): Promise<void> {
   const fallbackApi = isUnregisteredProviderType(config.type) ? 'openai-completions' : context.meta?.api;
-  const configuredModels = buildRuntimeProviderModelEntries(config, fallbackApi);
+  const configuredModels = buildRuntimeProviderModelEntries(config, fallbackApi, context.runtimeProviderKey);
   const override = {
     baseUrl: normalizeProviderBaseUrl(config, config.baseUrl || context.meta?.baseUrl, context.api),
     api: context.api,
@@ -491,8 +485,8 @@ async function syncCustomProviderAgentModel(
     return;
   }
 
-  const configuredModels = buildRuntimeProviderModelEntries(config, 'openai-completions');
-  const modelId = config.model;
+  const configuredModels = buildRuntimeProviderModelEntries(config, 'openai-completions', runtimeProviderKey);
+  const modelId = config.model ? stripOwnProviderPrefix(config.model, runtimeProviderKey) : undefined;
   const api = resolveProviderApiProtocol(config, 'openai-completions', modelId) || 'openai-completions';
   await updateAgentModelProvider(runtimeProviderKey, {
     baseUrl: normalizeProviderBaseUrl(config, config.baseUrl, api),
@@ -717,7 +711,7 @@ export async function syncUpdatedProviderToRuntime(
 
   const defaultProviderId = await getDefaultProvider();
   if (defaultProviderId === config.id) {
-    const modelOverride = config.model ? `${ock}/${config.model}` : undefined;
+    const modelOverride = config.model ? `${ock}/${stripOwnProviderPrefix(config.model, ock)}` : undefined;
     if (!isUnregisteredProviderType(config.type)) {
       if (shouldUseExplicitDefaultOverride(config, ock)) {
         await setOpenClawDefaultModelWithOverride(ock, modelOverride, {
@@ -745,7 +739,7 @@ export async function syncUpdatedProviderToRuntime(
     logger.warn('[provider-runtime] Failed to sync per-agent model registries after provider update:', err);
   }
 
-  const modelOverride = config.model ? `${ock}/${config.model}` : undefined;
+  const modelOverride = config.model ? `${ock}/${stripOwnProviderPrefix(config.model, ock)}` : undefined;
   if (
     defaultProviderId === config.id
     && apiKey === undefined
@@ -827,7 +821,7 @@ export async function syncDefaultProviderToRuntime(
 
   if (!isOAuthProvider) {
     const modelOverride = provider.model
-      ? (provider.model.startsWith(`${ock}/`) ? provider.model : `${ock}/${provider.model}`)
+      ? `${ock}/${stripOwnProviderPrefix(provider.model, ock)}`
       : undefined;
 
     if (isUnregisteredProviderType(provider.type)) {
@@ -877,9 +871,7 @@ export async function syncDefaultProviderToRuntime(
         ? GOOGLE_OAUTH_DEFAULT_MODEL_REF
         : OPENAI_OAUTH_DEFAULT_MODEL_REF;
       const modelOverride = provider.model
-        ? (provider.model.startsWith(`${browserOAuthRuntimeProvider}/`)
-          ? provider.model
-          : `${browserOAuthRuntimeProvider}/${provider.model}`)
+        ? `${browserOAuthRuntimeProvider}/${stripOwnProviderPrefix(provider.model, browserOAuthRuntimeProvider)}`
         : defaultModelRef;
 
       await setOpenClawDefaultModel(browserOAuthRuntimeProvider, modelOverride, fallbackModels);
@@ -936,7 +928,7 @@ export async function syncDefaultProviderToRuntime(
     providerKey &&
     provider.baseUrl
   ) {
-    const configuredModels = buildRuntimeProviderModelEntries(provider, 'openai-completions');
+    const configuredModels = buildRuntimeProviderModelEntries(provider, 'openai-completions', ock);
     const api = resolveProviderApiProtocol(provider, 'openai-completions', provider.model) || 'openai-completions';
     await updateAgentModelProvider(ock, {
       baseUrl: normalizeProviderBaseUrl(provider, provider.baseUrl, api),

@@ -2,11 +2,11 @@ import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ProviderAccount } from '../shared/providers/types';
 import { getProviderDefaultModel } from './provider-registry';
-import { getOpenClawProviderKeyForType } from './provider-keys';
 import { readOpenClawConfig, writeOpenClawConfig } from './channel-config';
 import { withConfigLock } from './config-mutex';
 import { getOpenClawConfigDir } from './paths';
 import { logger } from './logger';
+import { resolveRuntimeProviderKeyForAccount, stripOwnProviderPrefix } from '../../shared/providers/runtime-key';
 
 type AgentsModelConfig = {
   primary?: unknown;
@@ -36,11 +36,7 @@ function getConfiguredModelIds(account: ProviderAccount): string[] {
 }
 
 function getRuntimeProviderKey(account: ProviderAccount): string {
-  if (account.authMode === 'oauth_browser') {
-    if (account.vendorId === 'google') return 'google-gemini-cli';
-    if (account.vendorId === 'openai') return 'openai-codex';
-  }
-  return getOpenClawProviderKeyForType(account.vendorId, account.id);
+  return resolveRuntimeProviderKeyForAccount(account);
 }
 
 function buildAvailableModelRefs(
@@ -53,7 +49,7 @@ function buildAvailableModelRefs(
     if (account.enabled === false) continue;
     const providerKey = getRuntimeProviderKey(account);
     const accountRefs = getConfiguredModelIds(account).map((modelId) =>
-      modelId.startsWith(`${providerKey}/`) ? modelId : `${providerKey}/${modelId}`);
+      `${providerKey}/${stripOwnProviderPrefix(modelId, providerKey)}`);
     refsByAccountId.set(account.id, accountRefs);
     refs.push(...accountRefs);
   }

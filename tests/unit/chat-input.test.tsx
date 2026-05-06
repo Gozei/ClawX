@@ -652,6 +652,62 @@ describe('ChatInput agent targeting', () => {
     });
   });
 
+  it('ignores invalid configured model entries when a new session uses a non-default model', async () => {
+    const onSend = vi.fn();
+    agentsState.defaultModelRef = 'openai/gpt-5.4';
+    providerState.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI',
+        authMode: 'api_key',
+        model: 'gpt-5.4',
+        metadata: {
+          customModels: ['gpt-5.4-mini', undefined, null, ' '],
+          modelUsageTags: {
+            'gpt-5.4-mini': ['fast', undefined],
+          },
+        },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [
+      { id: 'openai', hasKey: true, model: 'gpt-5.4' },
+    ];
+    providerState.vendors = [
+      { id: 'openai', name: 'OpenAI' },
+    ];
+    providerState.defaultAccountId = 'openai';
+    chatState.currentSessionKey = 'agent:main:session-2';
+    chatState.sessions = [{ key: 'agent:main:session-2', model: 'openai/gpt-5.4-mini' }];
+    chatState.sessionModels = {
+      'agent:main:session-2': 'openai/gpt-5.4-mini',
+    };
+
+    render(<ChatInput onSend={onSend} />);
+
+    expect(screen.getByTestId('chat-model-switch')).toHaveTextContent('OpenAI / gpt-5.4-mini');
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'hello' } });
+    fireEvent.click(screen.getByTestId('chat-send-button'));
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(
+        'hello',
+        undefined,
+        null,
+        {
+          sessionKey: 'agent:main:session-2',
+          modelRef: 'openai/gpt-5.4-mini',
+        },
+      );
+    });
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
   it('keeps a stale global default displayed and blocks sending instead of falling back', async () => {
     const onSend = vi.fn();
     agentsState.defaultModelRef = 'custom-customd6/glm-5';

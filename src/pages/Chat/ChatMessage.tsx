@@ -16,8 +16,7 @@ import { hostApiFetch } from '@/lib/host-api';
 import { useChatStore, type RawMessage, type AttachedFileMeta } from '@/stores/chat';
 import { useProviderStore } from '@/stores/providers';
 import { useSettingsStore, type AssistantMessageStyle } from '@/stores/settings';
-import type { ProviderAccount } from '@/lib/providers';
-import { buildProviderListItems } from '@/lib/provider-accounts';
+import { buildProviderListItems, getProviderRuntimeKey } from '@/lib/provider-accounts';
 import { extractText, extractThinking, extractImages, extractToolUse, formatTimestamp, extractAssistantRuntimeErrorText } from './message-utils';
 import { StreamingMarkdownPreview } from './StreamingMarkdownPreview';
 import type { MarkdownComponents } from './MarkdownRenderer';
@@ -47,30 +46,7 @@ interface ChatMessageProps {
 
 interface ExtractedImage { url?: string; data?: string; mimeType: string; }
 
-const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
-const GOOGLE_OAUTH_RUNTIME_PROVIDER = 'google-gemini-cli';
 const MarkdownRenderer = lazy(() => import('./MarkdownRenderer').then((module) => ({ default: module.MarkdownRenderer })));
-
-function getRuntimeProviderKey(account: ProviderAccount): string {
-  if (account.authMode === 'oauth_browser') {
-    if (account.vendorId === 'openai') return OPENAI_OAUTH_RUNTIME_PROVIDER;
-    if (account.vendorId === 'google') return GOOGLE_OAUTH_RUNTIME_PROVIDER;
-  }
-  if (account.vendorId === 'custom' || account.vendorId === 'ollama') {
-    const prefix = `${account.vendorId}-`;
-    if (account.id.startsWith(prefix)) {
-      const suffix = account.id.slice(prefix.length);
-      if (suffix.length === 8 && !suffix.includes('-')) {
-        return account.id;
-      }
-    }
-    return `${account.vendorId}-${account.id.replace(/-/g, '').slice(0, 8)}`;
-  }
-  if (account.vendorId === 'minimax-portal-cn') {
-    return 'minimax-portal';
-  }
-  return account.vendorId;
-}
 
 const messageSignatureCache = new WeakMap<RawMessage, string>();
 const generatedMessageAnchorCache = new WeakMap<RawMessage, string>();
@@ -289,7 +265,7 @@ export const ChatMessage = memo(function ChatMessage({
   );
   const modelOptions = useMemo(() => (
     providerItems.flatMap((item) => {
-      const runtimeProviderKey = getRuntimeProviderKey(item.account);
+      const runtimeProviderKey = getProviderRuntimeKey(item.account);
       return item.models
         .filter((model) => model.source !== 'recommended')
         .slice()

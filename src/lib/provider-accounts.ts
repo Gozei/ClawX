@@ -6,6 +6,7 @@ import type {
   ProviderWithKeyInfo,
 } from '@/lib/providers';
 import { getRecommendedModelOptions } from '@/lib/providers';
+import { resolveRuntimeProviderKeyForAccount } from '../../shared/providers/runtime-key';
 
 export interface ProviderSnapshot {
   accounts: ProviderAccount[];
@@ -49,6 +50,10 @@ export interface ConfiguredModelEntry {
 }
 
 const DEFAULT_PROVIDER_PROTOCOL: NonNullable<ProviderAccount['apiProtocol']> = 'openai-completions';
+
+export function getProviderRuntimeKey(account: ProviderAccount): string {
+  return resolveRuntimeProviderKeyForAccount(account);
+}
 
 function normalizeBaseUrl(baseUrl?: string): string {
   return (baseUrl || '').trim().replace(/\/+$/, '').toLowerCase();
@@ -162,8 +167,10 @@ function prettifyModelLabel(modelId: string): string {
   return stripped.replace(/[-_]/g, ' ');
 }
 
-function normalizeConfiguredModelIds(models?: string[]): string[] {
-  return Array.from(new Set((models ?? []).map((model) => model.trim()).filter(Boolean)));
+function normalizeConfiguredModelIds(models?: unknown[]): string[] {
+  return Array.from(new Set((models ?? [])
+    .map((model) => (typeof model === 'string' ? model.trim() : ''))
+    .filter(Boolean)));
 }
 
 function getConfiguredModelIds(account: ProviderAccount): string[] {
@@ -203,7 +210,9 @@ function getManualUsageTags(
   for (const source of sources) {
     const tags = source.metadata?.modelUsageTags?.[modelId];
     if (Array.isArray(tags) && tags.length > 0) {
-      return [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))];
+      return [...new Set(tags
+        .map((tag) => (typeof tag === 'string' ? tag.trim() : ''))
+        .filter(Boolean))];
     }
   }
   return [];

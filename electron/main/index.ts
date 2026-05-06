@@ -50,6 +50,7 @@ import { migrateLegacyUserDataIfNeeded } from '../utils/user-data-migration';
 import { auditAndRepairOpenClawRuntimeConfig } from '../utils/openclaw-runtime-audit';
 import { syncRuntimeLoggingSettingsFromStore } from '../utils/logging-config';
 import type { FilePreviewWindowRequest } from '../../shared/file-preview';
+import { runStartupSelfChecks } from '../startup-self-check';
 
 const WINDOWS_APP_USER_MODEL_ID = 'app.clawx.desktop';
 const isE2EMode = process.env.CLAWX_E2E === '1';
@@ -445,6 +446,15 @@ async function initialize(): Promise<void> {
     );
   }
   logStartupStage('logger-ready');
+
+  if (!isE2EMode) {
+    try {
+      await runStartupSelfChecks();
+      logStartupStage('startup-self-check-ready');
+    } catch (error) {
+      logger.warn('Startup self-check failed:', error);
+    }
+  }
 
   if (!isE2EMode) {
     // Warm up network optimization (non-blocking)

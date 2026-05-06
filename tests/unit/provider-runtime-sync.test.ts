@@ -328,6 +328,47 @@ describe('provider-runtime-sync refresh strategy', () => {
     );
   });
 
+  it('keeps seeded custom runtime provider keys and strips duplicated model prefixes', async () => {
+    const bigmodelProvider = createProvider({
+      id: 'bigmodel',
+      name: 'BigModel Compatible',
+      type: 'custom',
+      model: 'bigmodel/glm-5.1',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      apiProtocol: 'openai-completions',
+      metadata: {
+        runtimeProviderKey: 'bigmodel',
+        customModels: ['bigmodel/glm-5.1'],
+      },
+    });
+    mocks.getProvider.mockResolvedValue(bigmodelProvider);
+    mocks.getProviderConfig.mockReturnValue(undefined);
+    mocks.getApiKey.mockResolvedValue('sk-bigmodel');
+
+    const gateway = createGateway('running');
+    await syncDefaultProviderToRuntime(bigmodelProvider.id, gateway as GatewayManager);
+    await flushGatewayRefreshDebounce();
+
+    expect(mocks.syncProviderConfigToOpenClaw).toHaveBeenCalledWith(
+      'bigmodel',
+      [{ id: 'glm-5.1', name: 'glm-5.1', api: 'openai-completions' }],
+      expect.objectContaining({
+        baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      }),
+    );
+    expect(mocks.setOpenClawDefaultModelWithOverride).toHaveBeenCalledWith(
+      'bigmodel',
+      'bigmodel/glm-5.1',
+      expect.any(Object),
+      [],
+    );
+    expect(mocks.syncProviderConfigToOpenClaw).not.toHaveBeenCalledWith(
+      'custom-bigmodel',
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it('skips refresh after switching default provider when gateway is stopped', async () => {
     const gateway = createGateway('stopped');
     await syncDefaultProviderToRuntime('moonshot', gateway as GatewayManager);

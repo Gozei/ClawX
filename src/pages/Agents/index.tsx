@@ -19,7 +19,7 @@ import { useProviderStore } from '@/stores/providers';
 import { useSkillsStore } from '@/stores/skills';
 import { hostApiFetch } from '@/lib/host-api';
 import { useBranding } from '@/lib/branding';
-import { buildProviderListItems } from '@/lib/provider-accounts';
+import { buildProviderListItems, getProviderRuntimeKey } from '@/lib/provider-accounts';
 import { subscribeHostEvent } from '@/lib/host-events';
 import { CHANNEL_ICONS, CHANNEL_NAMES, type ChannelType } from '@/types/channel';
 import type { AgentProfileType, AgentSummary, AgentWorkflowNode } from '@/types/agent';
@@ -199,24 +199,6 @@ function normalizeWorkflowNodesFromAgent(agent: AgentSummary): AgentWorkflowNode
   return fallbackSteps.map((step, index) => createWorkflowNode({ title: step, type: 'instruction' }, index));
 }
 
-function resolveRuntimeProviderKey(account: ProviderAccount): string {
-  if (account.authMode === 'oauth_browser') {
-    if (account.vendorId === 'google') return 'google-gemini-cli';
-    if (account.vendorId === 'openai') return 'openai-codex';
-  }
-
-  if (account.vendorId === 'custom' || account.vendorId === 'ollama') {
-    const suffix = account.id.replace(/-/g, '').slice(0, 8);
-    return `${account.vendorId}-${suffix}`;
-  }
-
-  if (account.vendorId === 'minimax-portal-cn') {
-    return 'minimax-portal';
-  }
-
-  return account.vendorId;
-}
-
 function splitModelRef(modelRef: string | null | undefined): { providerKey: string; modelId: string } | null {
   const value = (modelRef || '').trim();
   if (!value) return null;
@@ -262,7 +244,7 @@ function buildRuntimeProviderOptions(
 
   const deduped = new Map<string, RuntimeProviderOption>();
   for (const account of entries) {
-    const runtimeProviderKey = resolveRuntimeProviderKey(account);
+    const runtimeProviderKey = getProviderRuntimeKey(account);
     if (!runtimeProviderKey || deduped.has(runtimeProviderKey)) continue;
     const vendor = vendorMap.get(account.vendorId);
     const label = `${account.label} (${vendor?.name || account.vendorId})`;

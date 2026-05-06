@@ -26,8 +26,7 @@ import {
 import { useProviderStore } from '@/stores/providers';
 import { useSettingsStore } from '@/stores/settings';
 import type { AgentSummary } from '@/types/agent';
-import type { ProviderAccount } from '@/lib/providers';
-import { buildProviderListItems } from '@/lib/provider-accounts';
+import { buildProviderListItems, getProviderRuntimeKey } from '@/lib/provider-accounts';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { CHAT_CONTENT_COLUMN_MAX_WIDTH_CLASS } from './layout';
@@ -65,34 +64,11 @@ type ModelOption = {
   label: string;
 };
 
-const OPENAI_OAUTH_RUNTIME_PROVIDER = 'openai-codex';
-const GOOGLE_OAUTH_RUNTIME_PROVIDER = 'google-gemini-cli';
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = {
   text: '',
   attachments: [],
   targetAgentId: null,
 };
-
-function getRuntimeProviderKey(account: ProviderAccount): string {
-  if (account.authMode === 'oauth_browser') {
-    if (account.vendorId === 'openai') return OPENAI_OAUTH_RUNTIME_PROVIDER;
-    if (account.vendorId === 'google') return GOOGLE_OAUTH_RUNTIME_PROVIDER;
-  }
-  if (account.vendorId === 'custom' || account.vendorId === 'ollama') {
-    const prefix = `${account.vendorId}-`;
-    if (account.id.startsWith(prefix)) {
-      const suffix = account.id.slice(prefix.length);
-      if (suffix.length === 8 && !suffix.includes('-')) {
-        return account.id;
-      }
-    }
-    return `${account.vendorId}-${account.id.replace(/-/g, '').slice(0, 8)}`;
-  }
-  if (account.vendorId === 'minimax-portal-cn') {
-    return 'minimax-portal';
-  }
-  return account.vendorId;
-}
 
 function resolveComposerSessionKey(
   agents: AgentSummary[],
@@ -248,7 +224,7 @@ export function ChatInput({
   );
   const modelOptions = useMemo<ModelOption[]>(() => (
     providerItems.flatMap((item) => {
-      const runtimeProviderKey = getRuntimeProviderKey(item.account);
+      const runtimeProviderKey = getProviderRuntimeKey(item.account);
       return item.models
         .filter((model) => model.source !== 'recommended')
         .slice()

@@ -132,6 +132,7 @@ export interface ProviderAccount {
     region?: string;
     email?: string;
     resourceUrl?: string;
+    runtimeProviderKey?: string;
     customModels?: string[];
     modelProtocols?: Record<string, ProviderProtocol>;
     modelUsageTags?: Record<string, string[]>;

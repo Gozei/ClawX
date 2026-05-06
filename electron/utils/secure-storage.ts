@@ -40,6 +40,7 @@ export interface ProviderConfig {
     region?: string;
     email?: string;
     resourceUrl?: string;
+    runtimeProviderKey?: string;
     customModels?: string[];
     modelProtocols?: Record<string, 'openai-completions' | 'openai-responses' | 'anthropic-messages'>;
     modelUsageTags?: Record<string, string[]>;
