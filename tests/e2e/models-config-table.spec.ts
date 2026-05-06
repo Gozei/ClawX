@@ -256,6 +256,11 @@ test.describe('Models config table', () => {
       await expect(baseUrlInput).toHaveValue('https://api.openai.com/v1');
       await expect(baseUrlInput).toHaveAttribute('readonly', '');
 
+      await vendorSelect.selectOption('deepseek');
+      await expect(labelInput).toHaveValue('DeepSeek');
+      await expect(baseUrlInput).toHaveValue('https://api.deepseek.com');
+      await expect(baseUrlInput).toHaveAttribute('readonly', '');
+
       await vendorSelect.selectOption('custom');
       await expect(labelInput).toHaveValue('自定义');
       await expect(baseUrlInput).toHaveValue('');

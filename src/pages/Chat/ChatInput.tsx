@@ -239,7 +239,7 @@ export function ChatInput({
     () => (sessions ?? []).find((session) => session.key === activeComposerSessionKey) ?? null,
     [activeComposerSessionKey, sessions],
   );
-  const allowLocalOnlyModelPersistence = !activeComposerSession;
+  const allowLocalOnlyModelPersistence = !activeComposerSession && !activeComposerSessionKey.endsWith(':main');
   const showAgentPicker = mentionableAgents.length > 0;
   const inputFontSize = `${Math.round(15 * (chatFontScale / 100) * 10) / 10}px`;
   const providerItems = useMemo(
@@ -743,6 +743,11 @@ export function ChatInput({
     };
 
     if (normalizedNextModelRef === previousModelValue) {
+      return;
+    }
+
+    if (allowLocalOnlyModelPersistence) {
+      applyLocalModelSelection();
       return;
     }
 

@@ -84,6 +84,7 @@ const VENDOR_DISPLAY_NAMES: Partial<Record<ProviderType, string>> = {
   ark: '火山方舟',
   moonshot: '月之暗面 Kimi',
   siliconflow: '硅基流动',
+  deepseek: 'DeepSeek',
   'minimax-portal': 'MiniMax（国际）',
   'minimax-portal-cn': 'MiniMax（中国）',
   modelstudio: '通义千问 / 阿里云百炼',

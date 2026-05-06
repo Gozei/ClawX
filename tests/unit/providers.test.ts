@@ -5,6 +5,7 @@ import {
   type ProviderAccount,
   type ProviderVendorInfo,
   getProviderDocsUrl,
+  getRecommendedModelOptions,
   resolveProviderApiKeyForSave,
   resolveProviderModelForSave,
   shouldShowProviderModelId,
@@ -62,9 +63,37 @@ describe('provider metadata', () => {
     );
   });
 
+  it('includes deepseek in the frontend and backend provider registries', () => {
+    expect(PROVIDER_TYPES).toContain('deepseek');
+    expect(BUILTIN_PROVIDER_TYPES).toContain('deepseek');
+
+    expect(PROVIDER_TYPE_INFO).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'deepseek',
+          name: 'DeepSeek',
+          requiresApiKey: true,
+          defaultBaseUrl: 'https://api.deepseek.com',
+          showBaseUrl: true,
+          showModelId: true,
+          defaultModelId: 'deepseek-v4-pro',
+          docsUrlZh: 'https://api-docs.deepseek.com/zh-cn/',
+        }),
+      ])
+    );
+    expect(getProviderEnvVar('deepseek')).toBe('DEEPSEEK_API_KEY');
+    expect(getProviderConfig('deepseek')).toEqual(
+      expect.objectContaining({
+        baseUrl: 'https://api.deepseek.com',
+        api: 'openai-completions',
+        apiKeyEnv: 'DEEPSEEK_API_KEY',
+      })
+    );
+  });
+
   it('keeps builtin provider sources in sync', () => {
     expect(BUILTIN_PROVIDER_TYPES).toEqual(
-      expect.arrayContaining(['anthropic', 'openai', 'google', 'openrouter', 'ark', 'moonshot', 'siliconflow', 'minimax-portal', 'minimax-portal-cn', 'modelstudio', 'ollama'])
+      expect.arrayContaining(['anthropic', 'openai', 'google', 'openrouter', 'ark', 'moonshot', 'siliconflow', 'deepseek', 'minimax-portal', 'minimax-portal-cn', 'modelstudio', 'ollama'])
     );
   });
 
@@ -87,6 +116,7 @@ describe('provider metadata', () => {
     const openrouter = PROVIDER_TYPE_INFO.find((provider) => provider.id === 'openrouter');
     const moonshot = PROVIDER_TYPE_INFO.find((provider) => provider.id === 'moonshot');
     const siliconflow = PROVIDER_TYPE_INFO.find((provider) => provider.id === 'siliconflow');
+    const deepseek = PROVIDER_TYPE_INFO.find((provider) => provider.id === 'deepseek');
     const ark = PROVIDER_TYPE_INFO.find((provider) => provider.id === 'ark');
     const custom = PROVIDER_TYPE_INFO.find((provider) => provider.id === 'custom');
 
@@ -97,6 +127,8 @@ describe('provider metadata', () => {
     expect(getProviderDocsUrl(openrouter, 'en')).toBe('https://openrouter.ai/models');
     expect(getProviderDocsUrl(moonshot, 'en')).toBe('https://platform.moonshot.cn/');
     expect(getProviderDocsUrl(siliconflow, 'en')).toBe('https://docs.siliconflow.cn/cn/userguide/introduction');
+    expect(getProviderDocsUrl(deepseek, 'en')).toBe('https://api-docs.deepseek.com/');
+    expect(getProviderDocsUrl(deepseek, 'zh-CN')).toBe('https://api-docs.deepseek.com/zh-cn/');
     expect(getProviderDocsUrl(ark, 'en')).toBe('https://www.volcengine.com/');
     expect(getProviderDocsUrl(custom, 'en')).toBe(
       'https://docs.qq.com/aio/p/scchzbdpjgz9ho4?p=5mPH8jZ09MQrPfAQhQhzUD'
@@ -188,6 +220,13 @@ describe('provider metadata', () => {
     expect(resolveProviderApiKeyForSave('ollama', 'real-key')).toBe('real-key');
     expect(resolveProviderApiKeyForSave('openai', '')).toBeUndefined();
     expect(resolveProviderApiKeyForSave('openai', ' sk-test ')).toBe('sk-test');
+  });
+
+  it('recommends DeepSeek model ids for the DeepSeek provider', () => {
+    expect(getRecommendedModelOptions('deepseek').map((option) => option.value)).toEqual([
+      'deepseek-v4-pro',
+      'deepseek-v4-flash',
+    ]);
   });
 
   it('falls back to the vendor default model when a configured account is missing an explicit model', () => {
