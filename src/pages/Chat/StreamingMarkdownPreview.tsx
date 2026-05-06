@@ -213,6 +213,12 @@ function groupRenderBlocks(lines: ParsedLine[]): RenderBlock[] {
 
 function renderInlineContent(text: string, trailingCursor = false): ReactNode[] {
   const tokens = tokenizeInlineMarkdown(text);
+  const normalizeInlineCodeDisplay = (value: string): string => {
+    const flattened = String(value);
+    const trimmed = flattened.trim();
+    const matched = trimmed.match(/^`+([\s\S]*?)`+$/);
+    return matched ? matched[1] : flattened;
+  };
 
   return tokens.map((token, index) => {
     const key = `${token.kind}-${index}`;
@@ -242,8 +248,8 @@ function renderInlineContent(text: string, trailingCursor = false): ReactNode[] 
     if (token.kind === 'code') {
       return (
         <Fragment key={key}>
-          <code className="rounded-md bg-black/[0.05] px-1.5 py-0.5 font-mono text-[0.92em] text-foreground/92 [overflow-wrap:anywhere] dark:bg-white/[0.07]">
-            {token.value}
+          <code className="rounded bg-slate-200/80 px-1.5 py-0.5 text-[0.92em] font-[var(--font-ui)] text-slate-800 [overflow-wrap:anywhere] dark:bg-slate-700/40 dark:text-slate-100">
+            {normalizeInlineCodeDisplay(token.value)}
           </code>
           {cursor}
         </Fragment>
@@ -314,7 +320,7 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
           return (
             <pre
               key={block.key}
-              className="max-w-full overflow-x-auto rounded-2xl border border-black/5 bg-black/[0.025] px-3.5 py-3 text-[12px] leading-6 text-foreground/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] dark:border-white/7 dark:bg-white/[0.025]"
+              className="max-w-full overflow-x-auto rounded-lg border border-slate-300/70 bg-slate-200/85 px-3.5 py-3 text-[12px] leading-6 text-slate-800 shadow-sm dark:border-slate-600/60 dark:bg-slate-800/45 dark:text-slate-100"
               {...buildBlockAnchorProps(anchorPrefix, block.key, 'code')}
             >
               {block.text}
