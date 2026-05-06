@@ -598,6 +598,7 @@ describe('ChatInput agent targeting', () => {
         {
           sessionKey: 'agent:research:desk',
           modelRef: 'openai/gpt-5.4',
+          persistModelRefBeforeSend: true,
         },
       );
     });
@@ -834,6 +835,57 @@ describe('ChatInput agent targeting', () => {
       expect(chatState.sessionModels['agent:main:session-123']).toBe('openai/gpt-5.4-mini');
       expect(toastSuccessMock).toHaveBeenCalledWith('Switched to OpenAI / gpt-5.4-mini');
       expect(toastErrorMock).not.toHaveBeenCalled();
+    });
+    expect(hostApiFetchMock).not.toHaveBeenCalledWith('/api/sessions/model', expect.anything());
+  });
+
+  it('marks a new draft session model for persistence before first send', async () => {
+    const onSend = vi.fn();
+    providerState.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI',
+        authMode: 'api_key',
+        model: 'gpt-5.4',
+        metadata: { customModels: ['gpt-5.4-mini'] },
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-04-13T00:00:00.000Z',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+      },
+    ];
+    providerState.statuses = [
+      { id: 'openai', hasKey: true, model: 'gpt-5.4' },
+    ];
+    providerState.vendors = [
+      { id: 'openai', name: 'OpenAI' },
+    ];
+    providerState.defaultAccountId = 'openai';
+    chatState.currentSessionKey = 'agent:main:session-123';
+    chatState.sessions = [];
+    chatState.sessionModels = {
+      'agent:main:session-123': 'openai/gpt-5.4',
+    };
+
+    render(<ChatInput onSend={onSend} />);
+
+    fireEvent.click(getModelSwitch());
+    fireEvent.click(screen.getByRole('button', { name: 'OpenAI / gpt-5.4-mini' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Use the selected model' } });
+    fireEvent.click(screen.getByTestId('chat-send-button'));
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(
+        'Use the selected model',
+        undefined,
+        null,
+        {
+          sessionKey: 'agent:main:session-123',
+          modelRef: 'openai/gpt-5.4-mini',
+          persistModelRefBeforeSend: true,
+        },
+      );
     });
     expect(hostApiFetchMock).not.toHaveBeenCalledWith('/api/sessions/model', expect.anything());
   });

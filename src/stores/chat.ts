@@ -1928,6 +1928,30 @@ async function syncSessionPreferredModelToRuntime(
   await request;
 }
 
+async function persistSessionPreferredModelBeforeSend(
+  sessionKey: string,
+  modelRef: string,
+): Promise<void> {
+  const preferredModel = modelRef.trim();
+  if (!sessionKey || !preferredModel || sessionKey.endsWith(':main')) {
+    return;
+  }
+
+  const result = await hostApiFetch<{ success?: boolean; error?: string }>(
+    '/api/sessions/model',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionKey,
+        modelRef: preferredModel,
+      }),
+    },
+  );
+  if (!result?.success) {
+    throw new Error(result?.error || 'Failed to persist session model');
+  }
+}
+
 function resolveMainSessionKeyForAgent(agentId: string | undefined | null): string | null {
   if (!agentId) return null;
   const normalizedAgentId = normalizeAgentId(agentId);
@@ -4253,6 +4277,10 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         console.log('[sendMessage] Media paths:', attachments!.map(a => a.stagedPath));
       }
 
+      if (options?.persistModelRefBeforeSend) {
+        await persistSessionPreferredModelBeforeSend(currentSessionKey, dispatchModelRef);
+      }
+
       await syncSessionPreferredModelToRuntime(currentSessionKey, dispatchModelRef);
 
       // Cache image attachments BEFORE the IPC call to avoid race condition:
@@ -4959,6 +4987,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
             targetAgentId,
             sessionKey: targetSessionKey,
             modelRef: explicitModelRef,
+            persistModelRefBeforeSend: options?.persistModelRefBeforeSend === true,
             queuedAt: nowMs,
           },
         ],
@@ -5016,6 +5045,7 @@ export const useChatStore = create<ChatState>((baseSet, get) => {
         {
           sessionKey: queued.sessionKey || targetSessionKey,
           modelRef: queued.modelRef ?? null,
+          persistModelRefBeforeSend: queued.persistModelRefBeforeSend === true,
         },
       );
     } catch (error) {
