@@ -6,6 +6,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { app, shell } from 'electron';
+import JSZip from 'jszip';
 import {
     invalidateMarketplaceCacheForSource,
     invalidateMarketplaceCacheKey,
@@ -88,6 +89,111 @@ interface PublicSkillsFileTextResponse {
     size?: number;
     text?: string;
 }
+
+interface PublicSkillsReadmeResponse {
+    path?: string;
+    text?: string;
+}
+
+interface ClawHubRestStats {
+    downloads?: number;
+    stars?: number;
+}
+
+interface ClawHubCliExploreItem {
+    slug?: string;
+    name?: string;
+    version?: string;
+    description?: string;
+    author?: string;
+}
+
+interface ClawHubRestSkillSummary {
+    slug?: string;
+    displayName?: string;
+    summary?: string | null;
+    stats?: ClawHubRestStats;
+    tags?: Record<string, string | undefined>;
+    latestVersion?: {
+        version?: string;
+        createdAt?: number;
+        changelog?: string;
+        license?: string | null;
+    } | null;
+    updatedAt?: number;
+}
+
+interface ClawHubRestSearchResponse {
+    results?: Array<{
+        slug?: string;
+        displayName?: string;
+        summary?: string | null;
+        version?: string | null;
+        score?: number;
+        updatedAt?: number;
+    }>;
+}
+
+interface ClawHubRestListResponse {
+    items?: ClawHubRestSkillSummary[];
+    nextCursor?: string | null;
+}
+
+interface ClawHubRestSkillDetailResponse {
+    skill?: ClawHubRestSkillSummary | null;
+    latestVersion?: ClawHubRestSkillSummary['latestVersion'];
+    owner?: {
+        handle?: string | null;
+        displayName?: string | null;
+        image?: string | null;
+    } | null;
+    moderation?: {
+        isSuspicious?: boolean;
+        isMalwareBlocked?: boolean;
+        verdict?: string;
+        reasonCodes?: string[];
+        updatedAt?: number | null;
+        engineVersion?: string | null;
+        summary?: string | null;
+    } | null;
+}
+
+interface ClawHubRestVersionResponse {
+    version?: {
+        version?: string;
+        createdAt?: number;
+        changelog?: string;
+        changelogSource?: string | null;
+        license?: string | null;
+        files?: Array<{ path?: string; size?: number; sha256?: string; contentType?: string }>;
+        security?: {
+            status?: string;
+            checkedAt?: number;
+            scanners?: {
+                static?: {
+                    status?: string;
+                    summary?: string;
+                    engineVersion?: string;
+                    checkedAt?: number;
+                    reasonCodes?: unknown[];
+                };
+            };
+        };
+    } | null;
+}
+
+type ClawHubRestMarketplaceLatestVersion = NonNullable<ClawHubRestSkillSummary['latestVersion']> & {
+    files?: Array<{ path?: string; size?: number; sha256?: string; contentType?: string }>;
+    parsed?: { license?: string | null };
+    rawMarkdown?: string;
+    staticScan?: {
+        status?: string;
+        summary?: string;
+        engineVersion?: string;
+        checkedAt?: number;
+        reasonCodes?: unknown[];
+    };
+};
 
 export interface ClawHubInstalledSkillResult {
     slug: string;
@@ -368,6 +474,211 @@ export class ClawHubService {
         return await response.json() as PublicSkillsQueryResponse<T>;
     }
 
+    private resolveClawHubRestBase(source: SkillSourceConfig): string | null {
+        const candidate = source.registry || source.site;
+        if (!candidate) {
+            return null;
+        }
+
+        try {
+            const url = new URL(candidate);
+            return url.hostname === 'clawhub.ai' ? url.origin : null;
+        } catch {
+            return null;
+        }
+    }
+
+    private async fetchClawHubRestJson<T>(source: SkillSourceConfig, route: string, params?: Record<string, string | number | undefined>): Promise<T> {
+        const base = this.resolveClawHubRestBase(source);
+        if (!base) {
+            throw new Error(`Source ${source.id} is not a ClawHub REST source`);
+        }
+
+        const url = new URL(route, base);
+        for (const [key, value] of Object.entries(params || {})) {
+            if (value !== undefined && value !== '') {
+                url.searchParams.set(key, String(value));
+            }
+        }
+
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+        } as RequestInit);
+
+        if (!response.ok) {
+            throw new Error(`Failed to query ClawHub REST API from ${source.id}: ${response.status} ${response.statusText}`);
+        }
+
+        return await response.json() as T;
+    }
+
+    private mapClawHubRestSkill(source: SkillSourceConfig, item: ClawHubRestSkillSummary): ClawHubSkillResult | null {
+        const slug = item.slug?.trim();
+        if (!slug) {
+            return null;
+        }
+
+        return {
+            slug,
+            name: item.displayName || slug,
+            version: item.latestVersion?.version || item.tags?.latest || 'latest',
+            description: item.summary || '',
+            downloads: item.stats?.downloads,
+            stars: item.stats?.stars,
+            sourceId: source.id,
+            sourceLabel: source.label,
+        };
+    }
+
+    private async fetchClawHubRestSearch(source: SkillSourceConfig, query: string, limit: number): Promise<ClawHubSearchResponse> {
+        const data = await this.fetchClawHubRestJson<ClawHubRestSearchResponse>(source, '/api/v1/search', {
+            q: query,
+            limit,
+        });
+
+        const results = (data.results || []).map((item) => ({
+            slug: item.slug || '',
+            name: item.displayName || item.slug || '',
+            version: item.version || 'latest',
+            description: item.summary || '',
+            sourceId: source.id,
+            sourceLabel: source.label,
+        })).filter((item) => item.slug);
+
+        return { results };
+    }
+
+    private async fetchClawHubRestSkills(source: SkillSourceConfig, limit: number, cursor?: string): Promise<ClawHubSearchResponse> {
+        const data = await this.fetchClawHubRestJson<ClawHubRestListResponse>(source, '/api/v1/skills', {
+            limit,
+            sort: 'downloads',
+            cursor,
+        });
+
+        return {
+            results: (data.items || [])
+                .map((item) => this.mapClawHubRestSkill(source, item))
+                .filter((item): item is ClawHubSkillResult => item !== null),
+            nextCursor: data.nextCursor || undefined,
+        };
+    }
+
+    private async fetchClawHubRestMarkdown(source: SkillSourceConfig, slug: string, version: string, files?: Array<{ path?: string }>): Promise<string | undefined> {
+        const markdownPath = this.resolveMarketplaceMarkdownPath(files);
+        if (!markdownPath) {
+            return undefined;
+        }
+
+        const base = this.resolveClawHubRestBase(source);
+        if (!base) {
+            return undefined;
+        }
+
+        const url = new URL('/api/v1/download', base);
+        url.searchParams.set('slug', slug);
+        url.searchParams.set('version', version);
+
+        const response = await fetch(url, { method: 'GET' } as RequestInit);
+        if (!response.ok) {
+            throw new Error(`Failed to download ${slug}@${version} from ${source.id}: ${response.status} ${response.statusText}`);
+        }
+
+        const zip = await JSZip.loadAsync(await response.arrayBuffer());
+        const entry = zip.file(markdownPath);
+        return await entry?.async('string');
+    }
+
+    private async fetchPublicSkillReadmeByVersionId(source: SkillSourceConfig, versionId?: string): Promise<string | undefined> {
+        if (!versionId) {
+            return undefined;
+        }
+
+        const readme = await this.queryPublicSkills<PublicSkillsReadmeResponse>(
+            source,
+            'skills:getReadme',
+            [{ versionId }],
+            'action',
+        );
+        return typeof readme?.value?.text === 'string' ? readme.value.text : undefined;
+    }
+
+    private async fetchClawHubRestSkillDetail(source: SkillSourceConfig, slug: string): Promise<unknown> {
+        const detail = await this.fetchClawHubRestJson<ClawHubRestSkillDetailResponse>(
+            source,
+            `/api/v1/skills/${encodeURIComponent(slug)}`,
+        );
+        const resolvedSlug = detail.skill?.slug || slug;
+        const version = detail.latestVersion?.version || detail.skill?.tags?.latest || 'latest';
+        let latestVersion: ClawHubRestMarketplaceLatestVersion | null = detail.latestVersion
+            ? { ...detail.latestVersion }
+            : null;
+
+        if (version && version !== 'latest') {
+            try {
+                const versionDetail = await this.fetchClawHubRestJson<ClawHubRestVersionResponse>(
+                    source,
+                    `/api/v1/skills/${encodeURIComponent(resolvedSlug)}/versions/${encodeURIComponent(version)}`,
+                );
+                if (versionDetail.version) {
+                    latestVersion = {
+                        ...latestVersion,
+                        ...versionDetail.version,
+                        files: versionDetail.version.files,
+                        parsed: { license: versionDetail.version.license || null },
+                        staticScan: versionDetail.version.security?.scanners?.static || (
+                            versionDetail.version.security?.status
+                                ? { status: versionDetail.version.security.status, checkedAt: versionDetail.version.security.checkedAt }
+                                : undefined
+                        ),
+                    };
+
+                    try {
+                        let rawMarkdown: string | undefined;
+                        if (source.apiQueryEndpoint) {
+                            try {
+                                const legacyResponse = await this.queryPublicSkills<{ latestVersion?: { _id?: string } }>(
+                                source,
+                                'skills:getBySlug',
+                                [{ slug: resolvedSlug }],
+                            );
+                            rawMarkdown = await this.fetchPublicSkillReadmeByVersionId(
+                                source,
+                                legacyResponse?.value?.latestVersion?._id,
+                            );
+                            } catch (readmeError) {
+                                console.warn(`Failed to load ClawHub readme action for ${resolvedSlug} from ${source.id}:`, readmeError);
+                            }
+                        }
+                        rawMarkdown ||= await this.fetchClawHubRestMarkdown(
+                            source,
+                            resolvedSlug,
+                            version,
+                            versionDetail.version.files,
+                        );
+                        if (rawMarkdown !== undefined) {
+                            latestVersion = { ...latestVersion, rawMarkdown };
+                        }
+                    } catch (error) {
+                        console.warn(`Failed to load ClawHub REST markdown for ${resolvedSlug} from ${source.id}:`, error);
+                    }
+                }
+            } catch (error) {
+                console.warn(`Failed to load ClawHub REST version detail for ${resolvedSlug} from ${source.id}:`, error);
+            }
+        }
+
+        return {
+            skill: detail.skill,
+            latestVersion,
+            owner: detail.owner,
+            moderationInfo: detail.moderation,
+            requestedSlug: slug,
+            resolvedSlug,
+            pendingReview: false,
+        };
+    }
+
     private resolveMarketplaceMarkdownPath(files?: Array<{ path?: string }>): string | null {
         if (!Array.isArray(files) || files.length === 0) {
             return null;
@@ -546,6 +857,19 @@ export class ClawHubService {
                 return cached;
             }
 
+            if (this.resolveClawHubRestBase(source)) {
+                try {
+                    const response = await this.fetchClawHubRestSearch(source, normalizedQuery, params.limit || 25);
+                    await writeMarketplaceCache(cacheKey, response, {
+                        ttlMs: MARKETPLACE_SEARCH_CACHE_TTL_MS,
+                        sourceId: source.id,
+                    });
+                    return response;
+                } catch (httpError) {
+                    console.warn(`ClawHub REST search failed for ${source.id}, falling back to CLI:`, httpError);
+                }
+            }
+
             const args = ['search', normalizedQuery];
             if (params.limit) {
                 args.push('--limit', String(params.limit));
@@ -632,6 +956,19 @@ export class ClawHubService {
                 return cached;
             }
 
+            if (this.resolveClawHubRestBase(source)) {
+                try {
+                    const response = await this.fetchClawHubRestSkills(source, limit, params.cursor);
+                    await writeMarketplaceCache(cacheKey, response, {
+                        ttlMs: MARKETPLACE_EXPLORE_CACHE_TTL_MS,
+                        sourceId: source.id,
+                    });
+                    return response;
+                } catch (httpError) {
+                    console.warn(`ClawHub REST explore failed for ${source.id}, falling back to legacy API/CLI:`, httpError);
+                }
+            }
+
             if (source.apiQueryEndpoint) {
                 try {
                     const response = await this.fetchPublicSkills(source, limit, params.cursor);
@@ -656,17 +993,25 @@ export class ClawHubService {
             const jsonPart = output.substring(output.indexOf('{'));
             const data = JSON.parse(jsonPart);
 
-            const items = Array.isArray(data.items) ? data.items : [];
-            const response = {
-                results: items.map((item: any) => ({
-                    slug: item.slug,
-                    name: item.name || item.slug,
-                    version: item.version,
-                    description: item.description,
+            const items = Array.isArray(data.items) ? data.items as ClawHubCliExploreItem[] : [];
+            const results = items.map((item): ClawHubSkillResult | null => {
+                const slug = item.slug?.trim();
+                if (!slug) {
+                    return null;
+                }
+
+                return {
+                    slug,
+                    name: item.name || slug,
+                    version: item.version || 'latest',
+                    description: item.description || '',
                     author: item.author,
                     sourceId: source.id,
                     sourceLabel: source.label,
-                })),
+                };
+            }).filter((item): item is ClawHubSkillResult => item !== null);
+            const response: ClawHubSearchResponse = {
+                results,
             };
             await writeMarketplaceCache(cacheKey, response, {
                 ttlMs: MARKETPLACE_EXPLORE_CACHE_TTL_MS,
@@ -685,6 +1030,19 @@ export class ClawHubService {
         const cached = await readMarketplaceCache<unknown>(cacheKey);
         if (cached) {
             return cached;
+        }
+
+        if (this.resolveClawHubRestBase(source)) {
+            try {
+                const detail = await this.fetchClawHubRestSkillDetail(source, params.slug);
+                await writeMarketplaceCache(cacheKey, detail, {
+                    ttlMs: MARKETPLACE_DETAIL_CACHE_TTL_MS,
+                    sourceId: source.id,
+                });
+                return detail;
+            } catch (error) {
+                console.warn(`ClawHub REST detail failed for ${params.slug} from ${source.id}, falling back to legacy API:`, error);
+            }
         }
 
         const data = await this.queryPublicSkills<unknown>(source, 'skills:getBySlug', [{ slug: params.slug }]);

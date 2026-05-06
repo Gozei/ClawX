@@ -15,6 +15,7 @@ const inferSourceFromBaseDirMock = vi.fn();
 const uninstallMock = vi.fn();
 
 vi.mock('@electron/api/route-utils', () => ({
+  isGatewayTransitioning: () => false,
   parseJsonBody: (...args: unknown[]) => parseJsonBodyMock(...args),
   sendJson: (...args: unknown[]) => sendJsonMock(...args),
 }));
