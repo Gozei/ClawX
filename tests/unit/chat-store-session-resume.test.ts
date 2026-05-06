@@ -2250,6 +2250,85 @@ describe('chat store session resume', () => {
     expect(sendPayload).toContain('现在使用哪个模型？');
   });
 
+  it('persists a draft session model before the first send', async () => {
+    gatewayRpcMock.mockReset();
+    gatewayRpcMock.mockImplementation((method: string) => {
+      if (method === 'chat.send') return Promise.resolve({ runId: 'run-live' });
+      if (method === 'chat.history') return Promise.resolve({ messages: [] });
+      throw new Error(`Unexpected gateway RPC: ${method}`);
+    });
+
+    hostApiFetchMock.mockReset();
+    hostApiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/sessions/model') {
+        return Promise.resolve({ success: true, modelRef: 'deepseek/deepseek-v4-pro' });
+      }
+      if (path === '/api/agents/main/model/runtime') {
+        return Promise.resolve({ success: true });
+      }
+      throw new Error(`Unexpected host route: ${path}`);
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:session-123',
+      currentAgentId: 'main',
+      sessions: [],
+      sessionModels: { 'agent:main:session-123': 'deepseek/deepseek-v4-pro' },
+      messages: [],
+      sessionLabels: {},
+      sessionLastActivity: {},
+      sessionRunningState: {},
+      sending: false,
+      activeRunId: null,
+      streamingText: '',
+      streamingMessage: null,
+      streamingTools: [],
+      pendingFinal: false,
+      lastUserMessageAt: null,
+      pendingToolImages: [],
+      error: null,
+      loading: false,
+      thinkingLevel: null,
+      showThinking: true,
+    });
+
+    await useChatStore.getState().sendMessage(
+      'Which model?',
+      undefined,
+      null,
+      {
+        sessionKey: 'agent:main:session-123',
+        modelRef: 'deepseek/deepseek-v4-pro',
+        persistModelRefBeforeSend: true,
+      },
+    );
+
+    expect(hostApiFetchMock).toHaveBeenCalledWith(
+      '/api/sessions/model',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionKey: 'agent:main:session-123',
+          modelRef: 'deepseek/deepseek-v4-pro',
+        }),
+      },
+    );
+
+    const sendCall = gatewayRpcMock.mock.calls.find(([method]) => method === 'chat.send');
+    const sendPayload = String((sendCall?.[1] as { message?: unknown } | undefined)?.message ?? '');
+    expect(sendPayload).toContain('"preferredModel": "deepseek/deepseek-v4-pro"');
+
+    const modelPersistOrder = hostApiFetchMock.mock.calls
+      .map(([path], index) => ({ path, order: hostApiFetchMock.mock.invocationCallOrder[index] ?? Number.POSITIVE_INFINITY }))
+      .find((entry) => entry.path === '/api/sessions/model')?.order ?? Number.POSITIVE_INFINITY;
+    const sendOrder = gatewayRpcMock.mock.calls
+      .map(([method], index) => ({ method, order: gatewayRpcMock.mock.invocationCallOrder[index] ?? Number.NEGATIVE_INFINITY }))
+      .find((entry) => entry.method === 'chat.send')?.order ?? Number.NEGATIVE_INFINITY;
+    expect(modelPersistOrder).toBeLessThan(sendOrder);
+  });
+
   it('loads sessions from the host session list route before falling back to gateway enumeration', async () => {
     gatewayRpcMock.mockReset();
     gatewayRpcMock.mockImplementation((method: string) => {

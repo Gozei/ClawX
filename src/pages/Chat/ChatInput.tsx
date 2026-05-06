@@ -818,18 +818,21 @@ export function ChatInput({
       onQueueOfflineMessage?.(textToSend, attachmentsToSend, targetAgentId, {
         sessionKey: activeComposerSessionKey,
         modelRef: modelRefForDispatch,
+        ...(allowLocalOnlyModelPersistence ? { persistModelRefBeforeSend: true } : {}),
       });
       toast.success(isZh ? '已加入待发送队列' : 'Added to the send queue');
     } else {
       onSend(textToSend, attachmentsToSend, targetAgentId, {
         sessionKey: activeComposerSessionKey,
         modelRef: modelRefForDispatch,
+        ...(allowLocalOnlyModelPersistence ? { persistModelRefBeforeSend: true } : {}),
       });
     }
     setPickerOpen(false);
   }, [
     activeComposerSessionKey,
     activeModelRef,
+    allowLocalOnlyModelPersistence,
     attachments,
     canQueueDraft,
     canSend,

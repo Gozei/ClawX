@@ -64,6 +64,7 @@ export interface ChatSession {
 export interface ChatMessageDispatchOptions {
   sessionKey?: string;
   modelRef?: string | null;
+  persistModelRefBeforeSend?: boolean;
 }
 
 export interface ToolStatus {
@@ -91,6 +92,7 @@ export interface QueuedChatMessage {
   targetAgentId?: string | null;
   sessionKey: string;
   modelRef?: string | null;
+  persistModelRefBeforeSend?: boolean;
   queuedAt: number;
 }
 

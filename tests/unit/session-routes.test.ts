@@ -341,6 +341,8 @@ describe('handleSessionRoutes', () => {
     const stored = JSON.parse(await readFile(join(sessionsDir, 'sessions.json'), 'utf8')) as {
       sessions: Array<{
         key: string;
+        sessionId?: string;
+        updatedAt?: number;
         model?: string;
         modelProvider?: string;
         modelOverride?: string;
@@ -395,6 +397,8 @@ describe('handleSessionRoutes', () => {
     expect(stored.sessions).toEqual(expect.arrayContaining([
       expect.objectContaining({
         key: 'agent:main:session-new',
+        sessionId: expect.any(String),
+        updatedAt: expect.any(Number),
         model: 'gpt-5.4',
         modelProvider: 'custom-custombc',
         modelOverride: 'gpt-5.4',

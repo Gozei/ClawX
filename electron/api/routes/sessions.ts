@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import {
   sanitizeInboundUserText,
@@ -1087,6 +1088,20 @@ function upsertSessionEntry(
   );
 }
 
+function ensureSessionStoreIdentity(
+  session: Record<string, unknown>,
+): Record<string, unknown> {
+  const now = Date.now();
+  const updatedAt = normalizeSessionUpdatedAt(session.updatedAt);
+  return {
+    ...session,
+    sessionId: typeof session.sessionId === 'string' && session.sessionId.trim()
+      ? session.sessionId
+      : randomUUID(),
+    updatedAt: Math.max(updatedAt ?? 0, now),
+  };
+}
+
 function parseSessionModelRef(modelRef: unknown): { modelProvider: string; model: string } | null {
   const normalizedModelRef = typeof modelRef === 'string' ? modelRef.trim() : '';
   if (!normalizedModelRef) {
@@ -1328,7 +1343,7 @@ export async function handleSessionRoutes(
         sessionsJson,
         sessionKey,
         (session) => {
-          const nextSession = { ...session };
+          const nextSession = ensureSessionStoreIdentity(session);
           if (parsedModel) {
             nextSession.modelProvider = parsedModel.modelProvider;
             nextSession.model = parsedModel.model;
