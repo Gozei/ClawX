@@ -391,6 +391,11 @@ async function tryHotPatchDefaultProviderModel(
   return true;
 }
 
+type ProviderRuntimeMutationOptions = {
+  previousConfig?: ProviderConfig;
+  skipGatewayRefresh?: boolean;
+};
+
 export async function syncProviderApiKeyToRuntime(
   providerType: string,
   providerId: string,
@@ -681,6 +686,7 @@ export async function syncSavedProviderToRuntime(
   config: ProviderConfig,
   apiKey: string | undefined,
   gatewayManager?: GatewayManager,
+  options?: Pick<ProviderRuntimeMutationOptions, 'skipGatewayRefresh'>,
 ): Promise<void> {
   const context = await syncProviderToRuntime(config, apiKey);
   if (!context) {
@@ -693,6 +699,13 @@ export async function syncSavedProviderToRuntime(
     logger.warn('[provider-runtime] Failed to sync per-agent model registries after provider save:', err);
   }
 
+  if (options?.skipGatewayRefresh) {
+    logger.info(
+      `[provider-runtime] Skipping gateway reload after saving provider "${context.runtimeProviderKey}" config`,
+    );
+    return;
+  }
+
   scheduleGatewayRefresh(
     gatewayManager,
     `Scheduling Gateway reload after saving provider "${context.runtimeProviderKey}" config`,
@@ -703,9 +716,7 @@ export async function syncUpdatedProviderToRuntime(
   config: ProviderConfig,
   apiKey: string | undefined,
   gatewayManager?: GatewayManager,
-  options?: {
-    previousConfig?: ProviderConfig;
-  },
+  options?: ProviderRuntimeMutationOptions,
 ): Promise<void> {
   const context = await syncProviderToRuntime(config, apiKey);
   if (!context) {
@@ -770,6 +781,13 @@ export async function syncUpdatedProviderToRuntime(
     }
   }
 
+  if (options?.skipGatewayRefresh) {
+    logger.info(
+      `[provider-runtime] Skipping gateway reload after updating provider "${ock}" config`,
+    );
+    return;
+  }
+
   scheduleGatewayRefresh(
     gatewayManager,
     `Scheduling Gateway reload after updating provider "${ock}" config`,
@@ -781,6 +799,7 @@ export async function syncDeletedProviderToRuntime(
   providerId: string,
   gatewayManager?: GatewayManager,
   runtimeProviderKey?: string,
+  options?: Pick<ProviderRuntimeMutationOptions, 'skipGatewayRefresh'>,
 ): Promise<void> {
   if (!provider?.type) {
     return;
@@ -788,6 +807,11 @@ export async function syncDeletedProviderToRuntime(
 
   const ock = runtimeProviderKey ?? await resolveRuntimeProviderKey({ ...provider, id: providerId });
   await removeDeletedProviderFromOpenClaw(provider, providerId, ock);
+
+  if (options?.skipGatewayRefresh) {
+    logger.info(`[provider-runtime] Skipping gateway restart after deleting provider "${ock}"`);
+    return;
+  }
 
   scheduleGatewayRefresh(
     gatewayManager,
@@ -812,6 +836,7 @@ export async function syncDeletedProviderApiKeyToRuntime(
 export async function syncDefaultProviderToRuntime(
   providerId: string,
   gatewayManager?: GatewayManager,
+  options?: Pick<ProviderRuntimeMutationOptions, 'skipGatewayRefresh'>,
 ): Promise<void> {
   const provider = await getProvider(providerId);
   if (!provider) {
@@ -824,11 +849,14 @@ export async function syncDefaultProviderToRuntime(
   const oauthTypes = ['minimax-portal', 'minimax-portal-cn'];
   const browserOAuthRuntimeProvider = await getBrowserOAuthRuntimeProvider(provider);
   const isOAuthProvider = (oauthTypes.includes(provider.type) && !providerKey) || Boolean(browserOAuthRuntimeProvider);
+  let hotPatchProviderKey: string | null = ock;
+  let hotPatchModelRef: string | undefined;
 
   if (!isOAuthProvider) {
     const modelOverride = provider.model
       ? (provider.model.startsWith(`${ock}/`) ? provider.model : `${ock}/${provider.model}`)
       : undefined;
+    hotPatchModelRef = modelOverride;
 
     if (isUnregisteredProviderType(provider.type)) {
       const api = resolveProviderApiProtocol(provider, 'openai-completions', provider.model) || 'openai-completions';
@@ -881,53 +909,48 @@ export async function syncDefaultProviderToRuntime(
           ? provider.model
           : `${browserOAuthRuntimeProvider}/${provider.model}`)
         : defaultModelRef;
+      hotPatchProviderKey = browserOAuthRuntimeProvider;
+      hotPatchModelRef = modelOverride;
 
       await setOpenClawDefaultModel(browserOAuthRuntimeProvider, modelOverride, fallbackModels);
       logger.info(`Configured openclaw.json for browser OAuth provider "${provider.id}"`);
-      try {
-        await syncAgentModelsToRuntime();
-      } catch (err) {
-        logger.warn('[provider-runtime] Failed to sync per-agent model registries after browser OAuth switch:', err);
+    } else {
+      const defaultBaseUrl = provider.type === 'minimax-portal'
+        ? 'https://api.minimax.io/anthropic'
+        : 'https://api.minimaxi.com/anthropic';
+      const api = 'anthropic-messages' as const;
+
+      let baseUrl = provider.baseUrl || defaultBaseUrl;
+      if (baseUrl) {
+        baseUrl = baseUrl.replace(/\/v1$/, '').replace(/\/anthropic$/, '').replace(/\/$/, '') + '/anthropic';
       }
-      scheduleGatewayRefresh(
-        gatewayManager,
-        `Scheduling Gateway reload after provider switch to "${browserOAuthRuntimeProvider}"`,
-      );
-      return;
-    }
 
-    const defaultBaseUrl = provider.type === 'minimax-portal'
-      ? 'https://api.minimax.io/anthropic'
-      : 'https://api.minimaxi.com/anthropic';
-    const api = 'anthropic-messages' as const;
+      const targetProviderKey = 'minimax-portal';
+      const modelOverride = getProviderModelRef(provider);
+      hotPatchProviderKey = targetProviderKey;
+      hotPatchModelRef = modelOverride;
 
-    let baseUrl = provider.baseUrl || defaultBaseUrl;
-    if (baseUrl) {
-      baseUrl = baseUrl.replace(/\/v1$/, '').replace(/\/anthropic$/, '').replace(/\/$/, '') + '/anthropic';
-    }
-
-    const targetProviderKey = 'minimax-portal';
-
-    await setOpenClawDefaultModelWithOverride(targetProviderKey, getProviderModelRef(provider), {
-      baseUrl,
-      api,
-      authHeader: targetProviderKey === 'minimax-portal' ? true : undefined,
-      apiKeyEnv: targetProviderKey === 'minimax-portal' ? 'minimax-oauth' : 'qwen-oauth',
-    }, fallbackModels);
-
-    logger.info(`Configured openclaw.json for OAuth provider "${provider.type}"`);
-
-    try {
-      const defaultModelId = provider.model?.split('/').pop();
-      await updateAgentModelProvider(targetProviderKey, {
+      await setOpenClawDefaultModelWithOverride(targetProviderKey, modelOverride, {
         baseUrl,
         api,
         authHeader: targetProviderKey === 'minimax-portal' ? true : undefined,
-        apiKey: targetProviderKey === 'minimax-portal' ? 'minimax-oauth' : 'qwen-oauth',
-        models: defaultModelId ? [{ id: defaultModelId, name: defaultModelId }] : [],
-      });
-    } catch (err) {
-      logger.warn(`Failed to update models.json for OAuth provider "${targetProviderKey}":`, err);
+        apiKeyEnv: targetProviderKey === 'minimax-portal' ? 'minimax-oauth' : 'qwen-oauth',
+      }, fallbackModels);
+
+      logger.info(`Configured openclaw.json for OAuth provider "${provider.type}"`);
+
+      try {
+        const defaultModelId = provider.model?.split('/').pop();
+        await updateAgentModelProvider(targetProviderKey, {
+          baseUrl,
+          api,
+          authHeader: targetProviderKey === 'minimax-portal' ? true : undefined,
+          apiKey: targetProviderKey === 'minimax-portal' ? 'minimax-oauth' : 'qwen-oauth',
+          models: defaultModelId ? [{ id: defaultModelId, name: defaultModelId }] : [],
+        });
+      } catch (err) {
+        logger.warn(`Failed to update models.json for OAuth provider "${targetProviderKey}":`, err);
+      }
     }
   }
 
@@ -950,6 +973,30 @@ export async function syncDefaultProviderToRuntime(
     await syncAgentModelsToRuntime();
   } catch (err) {
     logger.warn('[provider-runtime] Failed to sync per-agent model registries after default provider switch:', err);
+  }
+
+  if (hotPatchProviderKey && hotPatchModelRef) {
+    try {
+      const hotPatched = await tryHotPatchDefaultProviderModel(
+        gatewayManager,
+        hotPatchProviderKey,
+        hotPatchModelRef,
+        fallbackModels,
+      );
+      if (hotPatched) {
+        logger.info(
+          `[provider-runtime] Hot patched default provider "${hotPatchProviderKey}" without gateway reload`,
+        );
+        return;
+      }
+    } catch (err) {
+      logger.warn('[provider-runtime] Failed to hot patch default provider switch, falling back to reload:', err);
+    }
+  }
+
+  if (options?.skipGatewayRefresh) {
+    logger.info(`[provider-runtime] Skipping gateway reload after provider switch to "${ock}"`);
+    return;
   }
 
   scheduleGatewayRefresh(

@@ -278,7 +278,7 @@ async function sendMessageAndExpectReply(
 }
 
 test.describe('Gateway runtime behavior', () => {
-  test('restarts the gateway after adding and editing model configs on Windows', async ({ page }) => {
+  test('keeps the gateway pid stable after adding and editing model configs', async ({ page }) => {
     test.setTimeout(420_000);
     const mockServer = await startMockOpenAiServer();
 
@@ -294,8 +294,7 @@ test.describe('Gateway runtime behavior', () => {
       await openModelsFromSettings(page);
       await expect(page.getByTestId('models-config-panel')).toBeVisible();
 
-      const gatewayPids: number[] = [];
-      gatewayPids.push((await readGatewayStatus(page)).pid || 0);
+      const stablePid = (await waitForGatewayStable(page)).pid;
 
       await page.getByTestId('models-config-add-button').click();
       const createSheet = page.getByTestId('models-config-sheet');
@@ -304,32 +303,28 @@ test.describe('Gateway runtime behavior', () => {
       await createSheet.getByTestId('models-config-sheet-model-input').fill('model-delta');
       await createSheet.getByTestId('models-config-sheet-base-url-input').fill(mockServer.baseUrl);
       await createSheet.locator('#draft-api-key').fill(DEFAULT_API_KEY);
-      const pidBeforeAdd = gatewayPids.at(-1) || 0;
       await applyModelDraft(page);
       await expect(page.locator('tbody tr', { hasText: 'model-delta' }).first()).toBeVisible();
-      gatewayPids.push((await waitForGatewayPidChange(page, pidBeforeAdd)).pid || 0);
+      await expect(page.getByText(/刷新 OpenClaw Gateway 配置|Gateway configuration/i)).toHaveCount(0);
+      expect((await readGatewayStatus(page)).pid).toBe(stablePid);
 
       await waitForGatewayStable(page);
       const deltaRow = page.locator('tbody tr', { hasText: 'model-delta' }).first();
       await deltaRow.locator('[data-testid^="models-config-edit-"]').click();
       const editSheet = page.getByTestId('models-config-sheet');
       await editSheet.getByTestId('models-config-sheet-model-input').fill('model-epsilon');
-      const pidBeforeEditOne = gatewayPids.at(-1) || 0;
       await applyModelDraft(page);
       await expect(page.locator('tbody tr', { hasText: 'model-epsilon' }).first()).toBeVisible();
-      gatewayPids.push((await waitForGatewayPidChange(page, pidBeforeEditOne)).pid || 0);
+      expect((await readGatewayStatus(page)).pid).toBe(stablePid);
 
       await waitForGatewayStable(page);
       const epsilonRow = page.locator('tbody tr', { hasText: 'model-epsilon' }).first();
       await epsilonRow.locator('[data-testid^="models-config-edit-"]').click();
       const secondEditSheet = page.getByTestId('models-config-sheet');
       await secondEditSheet.getByTestId('models-config-sheet-model-input').fill('model-zeta');
-      const pidBeforeEditTwo = gatewayPids.at(-1) || 0;
       await applyModelDraft(page);
       await expect(page.locator('tbody tr', { hasText: 'model-zeta' }).first()).toBeVisible();
-      gatewayPids.push((await waitForGatewayPidChange(page, pidBeforeEditTwo)).pid || 0);
-
-      expect(new Set(gatewayPids).size).toBe(gatewayPids.length);
+      expect((await readGatewayStatus(page)).pid).toBe(stablePid);
     } finally {
       await mockServer.close();
     }

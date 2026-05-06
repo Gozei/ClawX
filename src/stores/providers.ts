@@ -29,6 +29,7 @@ let refreshProviderSnapshotInFlight: Promise<void> | null = null;
 
 type ProviderMutationOptions = {
   skipImpactConfirm?: boolean;
+  skipGatewayRefresh?: boolean;
 };
 
 async function confirmProviderGatewayImpact(
@@ -204,7 +205,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     try {
       const result = await hostApiFetch<{ success: boolean; error?: string }>('/api/provider-accounts', {
         method: 'POST',
-        body: JSON.stringify({ account, apiKey }),
+        body: JSON.stringify({
+          account,
+          apiKey,
+          skipGatewayRefresh: options?.skipGatewayRefresh,
+        }),
       });
 
       if (!result.success) {
@@ -281,7 +286,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     try {
       const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/provider-accounts/${encodeURIComponent(accountId)}`, {
         method: 'PUT',
-        body: JSON.stringify({ updates, apiKey }),
+        body: JSON.stringify({
+          updates,
+          apiKey,
+          skipGatewayRefresh: options?.skipGatewayRefresh,
+        }),
       });
 
       if (!result.success) {
@@ -327,7 +336,8 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       return false;
     }
     try {
-      const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/provider-accounts/${encodeURIComponent(accountId)}`, {
+      const query = options?.skipGatewayRefresh ? '?skipGatewayRefresh=1' : '';
+      const result = await hostApiFetch<{ success: boolean; error?: string }>(`/api/provider-accounts/${encodeURIComponent(accountId)}${query}`, {
         method: 'DELETE',
       });
 
@@ -459,7 +469,10 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     try {
       const result = await hostApiFetch<{ success: boolean; error?: string }>('/api/provider-accounts/default', {
         method: 'PUT',
-        body: JSON.stringify({ accountId }),
+        body: JSON.stringify({
+          accountId,
+          skipGatewayRefresh: options?.skipGatewayRefresh,
+        }),
       });
 
       if (!result.success) {

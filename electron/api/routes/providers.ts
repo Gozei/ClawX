@@ -75,9 +75,15 @@ export async function handleProviderRoutes(
     }
     const startedAt = Date.now();
     try {
-      const body = await parseJsonBody<{ account: ProviderAccount; apiKey?: string }>(req);
+      const body = await parseJsonBody<{
+        account: ProviderAccount;
+        apiKey?: string;
+        skipGatewayRefresh?: boolean;
+      }>(req);
       const account = await providerService.createAccount(body.account, body.apiKey);
-      await syncSavedProviderToRuntime(providerAccountToConfig(account), body.apiKey, ctx.gatewayManager);
+      await syncSavedProviderToRuntime(providerAccountToConfig(account), body.apiKey, ctx.gatewayManager, {
+        skipGatewayRefresh: body.skipGatewayRefresh === true,
+      });
       emitMutationAudit(req, ctx, {
         startedAt,
         action: 'provider.account.create',
@@ -149,7 +155,7 @@ export async function handleProviderRoutes(
     }
     const startedAt = Date.now();
     try {
-      const body = await parseJsonBody<{ accountId: string }>(req);
+      const body = await parseJsonBody<{ accountId: string; skipGatewayRefresh?: boolean }>(req);
       const currentDefault = await providerService.getDefaultAccountId();
       if (currentDefault === body.accountId) {
         emitMutationAudit(req, ctx, {
@@ -164,7 +170,9 @@ export async function handleProviderRoutes(
         return true;
       }
       await providerService.setDefaultAccount(body.accountId);
-      await syncDefaultProviderToRuntime(body.accountId, ctx.gatewayManager);
+      await syncDefaultProviderToRuntime(body.accountId, ctx.gatewayManager, {
+        skipGatewayRefresh: body.skipGatewayRefresh === true,
+      });
       emitMutationAudit(req, ctx, {
         startedAt,
         action: 'provider.account.set-default',
@@ -259,7 +267,11 @@ export async function handleProviderRoutes(
     const accountId = decodeURIComponent(url.pathname.slice('/api/provider-accounts/'.length));
     const startedAt = Date.now();
     try {
-      const body = await parseJsonBody<{ updates: Partial<ProviderAccount>; apiKey?: string }>(req);
+      const body = await parseJsonBody<{
+        updates: Partial<ProviderAccount>;
+        apiKey?: string;
+        skipGatewayRefresh?: boolean;
+      }>(req);
       const existing = await providerService.getAccount(accountId);
       if (!existing) {
         sendJson(res, 404, { success: false, error: 'Provider account not found' });
@@ -288,7 +300,10 @@ export async function handleProviderRoutes(
         providerAccountToConfig(nextAccount),
         body.apiKey,
         ctx.gatewayManager,
-        { previousConfig },
+        {
+          previousConfig,
+          skipGatewayRefresh: body.skipGatewayRefresh === true,
+        },
       );
       emitMutationAudit(req, ctx, {
         startedAt,
@@ -394,6 +409,9 @@ export async function handleProviderRoutes(
         accountId,
         ctx.gatewayManager,
         runtimeProviderKey,
+        {
+          skipGatewayRefresh: url.searchParams.get('skipGatewayRefresh') === '1',
+        },
       );
       emitMutationAudit(req, ctx, {
         startedAt,
