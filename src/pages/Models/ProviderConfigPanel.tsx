@@ -1116,7 +1116,6 @@ export function ProviderConfigPanel() {
                   value={draft.baseUrl}
                   onChange={(event) => updateDraft('baseUrl', event.target.value)}
                   placeholder="https://api.example.com/v1"
-                  readOnly={draft.vendorId !== 'custom'}
                 />
                 <p className="text-[12px] leading-5 text-muted-foreground">{getBaseUrlHelp(t, draft, draftVendorName)}</p>
               </div>
