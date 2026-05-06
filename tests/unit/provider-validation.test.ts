@@ -50,6 +50,22 @@ describe('validateApiKeyWithProvider', () => {
     );
   });
 
+  it('validates DeepSeek keys against the official OpenAI-compatible API root', async () => {
+    const { validateApiKeyWithProvider } = await import('@electron/services/providers/provider-validation');
+
+    const result = await validateApiKeyWithProvider('deepseek', 'sk-deepseek-test');
+
+    expect(result).toMatchObject({ valid: true });
+    expect(proxyAwareFetch).toHaveBeenCalledWith(
+      'https://api.deepseek.com/models?limit=1',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer sk-deepseek-test',
+        }),
+      })
+    );
+  });
+
   it('falls back to /responses for openai-responses when /models is unavailable', async () => {
     proxyAwareFetch
       .mockResolvedValueOnce(

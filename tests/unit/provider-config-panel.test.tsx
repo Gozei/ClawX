@@ -204,6 +204,18 @@ describe('ProviderConfigPanel', () => {
         supportsMultipleAccounts: true,
         defaultAuthMode: 'api_key',
       },
+      {
+        id: 'deepseek',
+        name: 'DeepSeek',
+        hidden: false,
+        supportsMultipleAccounts: true,
+        providerConfig: {
+          baseUrl: 'https://api.deepseek.com',
+          api: 'openai-completions',
+        },
+        defaultModelId: 'deepseek-v4-pro',
+        defaultAuthMode: 'api_key',
+      },
     ];
 
     render(<ProviderConfigPanel />);
@@ -220,6 +232,14 @@ describe('ProviderConfigPanel', () => {
     expect(baseUrlInput).toHaveValue('https://api.openai.com/v1');
     expect(baseUrlInput).toHaveAttribute('readonly');
     expect(protocolSelect).toHaveValue('openai-responses');
+    expect(protocolSelect).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId('models-config-sheet-vendor-select'), { target: { value: 'deepseek' } });
+
+    expect(labelInput).toHaveValue('DeepSeek');
+    expect(baseUrlInput).toHaveValue('https://api.deepseek.com');
+    expect(baseUrlInput).toHaveAttribute('readonly');
+    expect(protocolSelect).toHaveValue('openai-completions');
     expect(protocolSelect).toBeDisabled();
 
     fireEvent.change(screen.getByTestId('models-config-sheet-vendor-select'), { target: { value: 'custom' } });
