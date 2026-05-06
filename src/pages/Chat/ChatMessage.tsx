@@ -800,29 +800,15 @@ const MessageMetaBar = memo(function MessageMetaBar({
 function createMarkdownComponentOverrides(
   getAnchorProps?: (blockType: string, children: ReactNode) => ChatScrollBlockAnchorProps,
 ): MarkdownComponents {
-  const flattenReactNodeText = (node: ReactNode): string => {
-    if (node == null || typeof node === 'boolean') return '';
-    if (typeof node === 'string' || typeof node === 'number' || typeof node === 'bigint') return String(node);
-    if (Array.isArray(node)) return node.map((child) => flattenReactNodeText(child)).join('');
-    if (isValidElement<{ children?: ReactNode }>(node)) return flattenReactNodeText(node.props.children);
-    return '';
-  };
-
-  const normalizeInlineCodeDisplay = (node: ReactNode): ReactNode => {
-    const text = flattenReactNodeText(node);
-    const trimmed = text.trim();
-    const matched = trimmed.match(/^`+([\s\S]*?)`+$/);
-    return matched ? matched[1] : text;
-  };
-
   const buildAnchor = (blockType: string, children: ReactNode) => (
     getAnchorProps ? getAnchorProps(blockType, children) : {}
   );
 
   return {
     code({ className, children, ...props }) {
+      // fenced：react-markdown 为带语言的块生成 className `language-*`；无语言时 inner text 通常含换行
       const inferredLanguage = /language-(\w+)/.exec(className || '');
-      const textContent = Array.isArray(children) ? children.join('') : String(children ?? '');
+      const textContent = getReactNodeText(children);
       const isInline = !inferredLanguage && !textContent.includes('\n');
 
       if (isInline) {
@@ -831,7 +817,7 @@ function createMarkdownComponentOverrides(
             className="rounded bg-slate-200/80 px-1.5 py-0.5 text-sm font-[var(--font-ui)] text-slate-800 break-words [overflow-wrap:anywhere] dark:bg-slate-700/40 dark:text-slate-100"
             {...props}
           >
-            {normalizeInlineCodeDisplay(children)}
+            {children}
           </code>
         );
       }

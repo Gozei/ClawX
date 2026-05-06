@@ -213,12 +213,6 @@ function groupRenderBlocks(lines: ParsedLine[]): RenderBlock[] {
 
 function renderInlineContent(text: string, trailingCursor = false): ReactNode[] {
   const tokens = tokenizeInlineMarkdown(text);
-  const normalizeInlineCodeDisplay = (value: string): string => {
-    const flattened = String(value);
-    const trimmed = flattened.trim();
-    const matched = trimmed.match(/^`+([\s\S]*?)`+$/);
-    return matched ? matched[1] : flattened;
-  };
 
   return tokens.map((token, index) => {
     const key = `${token.kind}-${index}`;
@@ -249,7 +243,7 @@ function renderInlineContent(text: string, trailingCursor = false): ReactNode[] 
       return (
         <Fragment key={key}>
           <code className="rounded bg-slate-200/80 px-1.5 py-0.5 text-[0.92em] font-[var(--font-ui)] text-slate-800 [overflow-wrap:anywhere] dark:bg-slate-700/40 dark:text-slate-100">
-            {normalizeInlineCodeDisplay(token.value)}
+            {token.value}
           </code>
           {cursor}
         </Fragment>
@@ -295,7 +289,6 @@ export const StreamingMarkdownPreview = memo(function StreamingMarkdownPreview({
     <div className={cn(
       'min-w-0 max-w-full space-y-2 whitespace-pre-wrap break-words [overflow-wrap:anywhere]',
       '[&_strong]:font-semibold [&_strong]:text-foreground',
-      '[&_code]:font-mono',
       className,
     )}>
       {blocks.map((block, index) => {
