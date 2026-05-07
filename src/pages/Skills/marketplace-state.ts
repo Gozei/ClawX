@@ -103,3 +103,13 @@ export function resolveMarketplaceAvailability(params: {
     blockedByNonMarketSource,
   };
 }
+
+export function isMarketplaceSkillVisible(params: {
+  slug: string;
+  sourceId?: string;
+  installedSkills: MarketplaceInstalledSkill[];
+  skills: SkillSnapshot[];
+  sources: SkillSource[];
+}): boolean {
+  return !resolveMarketplaceAvailability(params).occupiedByOtherSource;
+}
