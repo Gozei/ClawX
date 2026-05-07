@@ -1320,6 +1320,10 @@ function ProviderContent({
               href={effectiveProviderDocsUrl}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(event) => {
+                event.preventDefault();
+                void window.electron?.openExternal?.(effectiveProviderDocsUrl);
+              }}
               className="text-[13px] text-blue-500 hover:text-blue-600 font-medium inline-flex items-center gap-1"
             >
               {t('settings:aiProviders.dialog.customDoc')}
@@ -1424,6 +1428,10 @@ function ProviderContent({
                     href={selectedProviderData.codePlanDocsUrl}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      void window.electron?.openExternal?.(selectedProviderData.codePlanDocsUrl!);
+                    }}
                     className="text-[13px] text-blue-500 hover:text-blue-600 font-medium inline-flex items-center gap-1"
                   >
                     {t('provider.codePlanDoc')}

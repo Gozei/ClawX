@@ -316,6 +316,10 @@ export function SkillDetailContent({ detail, onDeleted, initialTab = 'docs' }: S
                   href={detail.identity.homepage}
                   target="_blank"
                   rel="noreferrer"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void window.electron?.openExternal?.(detail.identity.homepage!);
+                  }}
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                   {t('detail.openManual')}
