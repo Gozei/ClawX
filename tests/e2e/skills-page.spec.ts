@@ -433,12 +433,8 @@ test.describe('Skills page baseline', () => {
       await page.getByTestId('skills-discover-button').click();
       await expect(page.getByTestId('skills-marketplace-panel')).toBeVisible();
 
-      const marketplaceItem = page.getByTestId('skills-marketplace-item-deepaiworker-self-improving-agent');
-      await expect(marketplaceItem).toBeVisible();
-
-      const blockedButton = marketplaceItem.locator('button').first();
-      await expect(blockedButton).toBeDisabled();
-      await expect(marketplaceItem).toContainText(/Provided by another source|已由其他来源提供|他のソース/);
+      await expect(page.getByTestId('skills-marketplace-item-deepaiworker-self-improving-agent')).toHaveCount(0);
+      await expect(page.getByText(/Provided by another source|已由其他来源提供|他のソース/)).toHaveCount(0);
     } finally {
       await closeElectronApp(app);
     }

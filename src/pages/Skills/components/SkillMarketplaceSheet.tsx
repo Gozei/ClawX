@@ -10,7 +10,7 @@ import {
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { cn } from '@/lib/utils';
 import type { MarketplaceInstalledSkill, MarketplaceSkill, SkillSnapshot, SkillSource } from '@/types/skill';
-import { compareMarketplaceVersions, resolveMarketplaceAvailability } from '../marketplace-state';
+import { compareMarketplaceVersions, isMarketplaceSkillVisible, resolveMarketplaceAvailability } from '../marketplace-state';
 
 type SkillMarketplaceSheetProps = {
   open: boolean;
@@ -69,6 +69,16 @@ export function SkillMarketplaceSheet({
     });
   };
 
+  const visibleSearchResults = useMemo(() => {
+    return searchResults.filter((skill) => isMarketplaceSkillVisible({
+      slug: skill.slug,
+      sourceId: skill.sourceId,
+      installedSkills,
+      skills,
+      sources,
+    }));
+  }, [installedSkills, searchResults, skills, sources]);
+
   useEffect(() => {
     const target = loadMoreTriggerRef.current;
     if (!target || selectedMarketplaceSkill) return;
@@ -112,7 +122,7 @@ export function SkillMarketplaceSheet({
             className="grid gap-4"
             style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}
           >
-              {searchResults.map((skill) => {
+              {visibleSearchResults.map((skill) => {
                 const effectiveInstalledSkill = findEffectiveInstalledSkill(skill);
                 const { installedOnCurrentSource, occupiedByOtherSource } = resolveMarketplaceAvailability({
                   slug: skill.slug,
@@ -264,7 +274,7 @@ export function SkillMarketplaceSheet({
               })}
             </div>
 
-          {!searchError && searchResults.length === 0 && (
+          {!searchError && visibleSearchResults.length === 0 && (
             <div className="flex flex-col items-center justify-center py-24 text-center text-muted-foreground">
               <Package className="mb-4 h-10 w-10 opacity-50" />
               <p>{installQuery.trim() ? t('marketplace.noResults') : t('marketplace.emptyPrompt')}</p>

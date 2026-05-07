@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MarketplaceInstalledSkill, SkillSnapshot, SkillSource } from '../../src/types/skill';
-import { resolveInstalledSkillId, resolveMarketplaceAvailability } from '../../src/pages/Skills/marketplace-state';
+import { isMarketplaceSkillVisible, resolveInstalledSkillId, resolveMarketplaceAvailability } from '../../src/pages/Skills/marketplace-state';
 
 const sources: SkillSource[] = [
   {
@@ -36,6 +36,13 @@ describe('marketplace-state', () => {
     expect(availability.blockedByNonMarketSource).toBe(true);
     expect(availability.occupiedByOtherSource).toBe(true);
     expect(availability.installedOnCurrentSource).toBe(false);
+    expect(isMarketplaceSkillVisible({
+      slug: 'self-improving-agent',
+      sourceId: 'clawhub',
+      installedSkills: [],
+      skills,
+      sources,
+    })).toBe(false);
   });
 
   it('prefers the requested marketplace source when resolving the installed skill id', () => {
@@ -93,5 +100,12 @@ describe('marketplace-state', () => {
 
     expect(availability.installedOnCurrentSource).toBe(true);
     expect(availability.occupiedByOtherSource).toBe(false);
+    expect(isMarketplaceSkillVisible({
+      slug: 'nano-pdf',
+      sourceId: 'clawhub',
+      installedSkills,
+      skills,
+      sources,
+    })).toBe(true);
   });
 });

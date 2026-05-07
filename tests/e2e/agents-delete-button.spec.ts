@@ -61,7 +61,7 @@ test.describe('Agents delete interaction', () => {
     }
   });
 
-  test('shows agent skill assignment list with global disabled state', async ({ launchElectronApp }) => {
+  test('hides globally disabled skills from the agent skill assignment list', async ({ launchElectronApp }) => {
     const app = await launchElectronApp({ skipSetup: true });
 
     try {
@@ -140,17 +140,15 @@ test.describe('Agents delete interaction', () => {
       await dialog.getByRole('tab', { name: /技能|Skills/ }).click();
 
       await expect(page.getByTestId('agent-skill-search-input')).toBeVisible();
-      await expect(page.getByTestId('agent-skill-list-item-disabled-assigned')).toContainText(/全局禁用|Globally disabled/);
-      await expect(page.getByTestId('agent-skill-list-item-disabled-assigned')).toContainText(/已分配|Assigned/);
-      await expect(page.getByTestId('agent-skill-list-item-disabled-unassigned').getByRole('switch')).toBeDisabled();
+      await expect(page.getByTestId('agent-skill-list-item-enabled-skill')).toBeVisible();
+      await expect(page.getByTestId('agent-skill-list-item-disabled-assigned')).toHaveCount(0);
+      await expect(page.getByTestId('agent-skill-list-item-disabled-unassigned')).toHaveCount(0);
 
       const order = await page.locator('[data-testid^="agent-skill-list-item-"]').evaluateAll((items) =>
         items.map((item) => item.getAttribute('data-testid')),
       );
       expect(order).toEqual([
         'agent-skill-list-item-enabled-skill',
-        'agent-skill-list-item-disabled-assigned',
-        'agent-skill-list-item-disabled-unassigned',
       ]);
     } finally {
       await closeElectronApp(app);

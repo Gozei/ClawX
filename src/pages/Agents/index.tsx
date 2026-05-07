@@ -124,6 +124,10 @@ function compareAgentSkillsForInitialDisplay(
     || left.id.localeCompare(right.id);
 }
 
+function isAssignableAgentSkill(skill: SkillSnapshot): boolean {
+  return skill.enabled && !skill.isCore;
+}
+
 interface WorkflowTemplate {
   id: string;
   label: string;
@@ -919,7 +923,8 @@ function AgentSettingsModal({
   useEffect(() => {
     if (skillDisplayOrderIds.length > 0 || skills.length === 0) return;
     setSkillDisplayOrderIds(
-      [...skills]
+      skills
+        .filter(isAssignableAgentSkill)
         .sort((left, right) => compareAgentSkillsForInitialDisplay(left, right, safeSkillIds))
         .map((skill) => skill.id),
     );
@@ -1121,7 +1126,7 @@ function AgentSettingsModal({
   const assignedSkillDetails = selectedSkillIds
     .map((skillId) => skills.find((skill) => skill.id === skillId))
     .filter(Boolean) as SkillSnapshot[];
-  const assignableSkills = useMemo(() => skills.filter((skill) => !skill.isCore), [skills]);
+  const assignableSkills = useMemo(() => skills.filter(isAssignableAgentSkill), [skills]);
   const runtimeProviderOptions = useMemo(
     () => buildRuntimeProviderOptions(
       providerAccounts,
@@ -1132,7 +1137,7 @@ function AgentSettingsModal({
     [providerAccounts, providerDefaultAccountId, providerStatuses, providerVendors],
   );
   const visibleSkills = useMemo(() => {
-    const sourceSkills = assignableSkills.length > 0 ? assignableSkills : skills;
+    const sourceSkills = assignableSkills;
     const skillById = new Map(sourceSkills.map((skill) => [skill.id, skill]));
     const ordered = skillDisplayOrderIds
       .map((skillId) => skillById.get(skillId))
@@ -1142,7 +1147,7 @@ function AgentSettingsModal({
       .filter((skill) => !orderedIds.has(skill.id))
       .sort((left, right) => compareAgentSkillsForInitialDisplay(left, right, safeSkillIds));
     return [...ordered, ...newSkills];
-  }, [assignableSkills, safeSkillIds, skillDisplayOrderIds, skills]);
+  }, [assignableSkills, safeSkillIds, skillDisplayOrderIds]);
   const normalizedSkillQuery = skillQuery.trim().toLowerCase();
   const filteredSkills = visibleSkills
     .filter((skill) => {
