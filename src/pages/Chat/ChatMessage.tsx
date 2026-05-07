@@ -21,6 +21,7 @@ import { buildProviderListItems } from '@/lib/provider-accounts';
 import { extractText, extractThinking, extractImages, extractToolUse, formatTimestamp, extractAssistantRuntimeErrorText } from './message-utils';
 import { StreamingMarkdownPreview } from './StreamingMarkdownPreview';
 import type { MarkdownComponents } from './MarkdownRenderer';
+import { normalizeExternalHttpUrl } from './markdown-links';
 import { ClampedFileName } from './ClampedFileName';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
@@ -901,8 +902,21 @@ function createMarkdownComponentOverrides(
       );
     },
     a({ href, children }) {
+      const externalHref = normalizeExternalHttpUrl(href) ?? undefined;
+
       return (
-        <a href={href} target="_blank" rel="noopener noreferrer" className="break-words text-primary hover:underline [overflow-wrap:anywhere]">
+        <a
+          href={externalHref}
+          target={externalHref ? '_blank' : undefined}
+          rel={externalHref ? 'noopener noreferrer' : undefined}
+          className="break-words text-primary hover:underline [overflow-wrap:anywhere]"
+          onClick={(event) => {
+            event.preventDefault();
+            if (externalHref) {
+              void window.electron?.openExternal?.(externalHref);
+            }
+          }}
+        >
           {children}
         </a>
       );

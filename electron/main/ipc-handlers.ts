@@ -2086,6 +2086,11 @@ function registerProviderHandlers(gatewayManager: GatewayManager): void {
 function registerShellHandlers(): void {
   // Open external URL
   ipcMain.handle('shell:openExternal', async (_, url: string) => {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error(`Disallowed external URL protocol: ${parsed.protocol}`);
+    }
+
     await shell.openExternal(url);
   });
 

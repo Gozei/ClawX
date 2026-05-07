@@ -236,6 +236,43 @@ describe('SkillDetailContent', () => {
     expect(screen.getByText('No missing requirements.')).toBeInTheDocument();
   });
 
+  it('opens documentation links in the default browser instead of navigating inside the app', async () => {
+    const openExternal = vi.mocked(window.electron.openExternal);
+    openExternal.mockClear();
+
+    const detail = {
+      identity: {
+        id: 'openai',
+        name: 'OpenAI',
+        description: 'Uses OpenAI API.',
+      },
+      status: {
+        enabled: true,
+        ready: true,
+      },
+      requirements: {
+        rawMarkdown: '# OpenAI\n\nRead the [OpenAI docs](https://platform.openai.com/docs) or [local gateway](192.168.1.10:3000/health).',
+      },
+      config: {},
+      configuration: {
+        credentials: [],
+        optional: [],
+        config: [],
+        runtime: [],
+      },
+    } as SkillDetail;
+
+    render(<SkillDetailContent detail={detail} initialTab="docs" />);
+
+    const docsLink = await screen.findByRole('link', { name: 'OpenAI docs' });
+    fireEvent.click(docsLink);
+
+    expect(openExternal).toHaveBeenCalledWith('https://platform.openai.com/docs');
+
+    fireEvent.click(screen.getByRole('link', { name: 'local gateway' }));
+    expect(openExternal).toHaveBeenCalledWith('http://192.168.1.10:3000/health');
+  });
+
   it('allows revealing configured secret values', async () => {
     const detail: SkillDetail = {
       identity: {

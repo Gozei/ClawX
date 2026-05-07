@@ -1,13 +1,12 @@
 /* eslint-disable react-refresh/only-export-components */
 import { memo, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
 import type { ContentBlock, RawMessage, ToolStatus } from '@/stores/chat';
 import type { ChatProcessDisplayMode } from '@/stores/settings';
 import { cn } from '@/lib/utils';
 import { sanitizeToolOutputText } from '@/lib/tool-output-text';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import { StreamingMarkdownPreview } from './StreamingMarkdownPreview';
 
 type ProcessSurface = 'thinking' | 'terminal' | 'code' | 'read' | 'tool' | 'note';
@@ -722,9 +721,7 @@ function ProcessEventDetail({
     }
     return (
       <div className="chat-markdown prose prose-sm dark:prose-invert min-w-0 max-w-none break-words text-foreground [&>*]:my-2.5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-          {item.detail}
-        </ReactMarkdown>
+        <MarkdownRenderer content={item.detail} />
       </div>
     );
   }
